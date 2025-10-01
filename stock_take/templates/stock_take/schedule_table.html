@@ -1,0 +1,82 @@
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Scheduled Date</th>
+                <th>Assigned To</th>
+                <th>Stock Take Groups</th>
+                <th>Locations</th>
+                <th>Priority</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in schedules %}
+            <tr {% if schedule.is_overdue %}class="table-danger"{% elif schedule.auto_generated %}class="table-info"{% endif %}>
+                <td>
+                    <strong>{{ schedule.name }}</strong>
+                    {% if schedule.auto_generated %}
+                        <span class="badge bg-info ms-1">Auto</span>
+                    {% endif %}
+                    {% if schedule.description %}
+                        <br><small class="text-muted">{{ schedule.description|truncatewords:10 }}</small>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ schedule.scheduled_date|date:"M d, Y H:i" }}
+                    {% if schedule.is_overdue %}
+                        <br><small class="text-danger">Overdue</small>
+                    {% endif %}
+                </td>
+                <td>{{ schedule.assigned_to|default:"-" }}</td>
+                <td>
+                    {% for group in schedule.stock_take_groups.all %}
+                        <span class="badge me-1" style="background-color: {{ group.color }}; color: white;">
+                            {{ group.category.name }} - {{ group.name }}
+                        </span>
+                    {% empty %}
+                        <span class="text-muted">All groups</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% if schedule.locations %}
+                        <small>{{ schedule.locations|truncatewords:3 }}</small>
+                    {% else %}
+                        <span class="text-muted">All locations</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if schedule.priority_score %}
+                        <span class="badge bg-secondary">{{ schedule.priority_score }}</span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        {% if schedule.status == 'pending' %}
+                            <a href="{% url 'stock_take_detail' schedule.id %}" class="btn btn-outline-primary" title="Start Stock Take">
+                                <i class="bi bi-play"></i>
+                            </a>
+                        {% elif schedule.status == 'in_progress' %}
+                            <a href="{% url 'stock_take_detail' schedule.id %}" class="btn btn-outline-success" title="Continue Stock Take">
+                                <i class="bi bi-arrow-right"></i>
+                            </a>
+                        {% endif %}
+                        
+                        <a href="{% url 'export_stock_take_csv' schedule.id %}" class="btn btn-outline-secondary" title="Export CSV">
+                            <i class="bi bi-download"></i>
+                        </a>
+                        
+                        <button class="btn btn-outline-danger delete-schedule-btn" 
+                                data-id="{{ schedule.id }}" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

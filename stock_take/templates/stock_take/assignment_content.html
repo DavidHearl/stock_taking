@@ -1,0 +1,111 @@
+<form id="assignItemsForm">
+    {% csrf_token %}
+    <div class="mb-3">
+        <label for="assignGroup" class="form-label">Assign to Group</label>
+        <select class="form-select" id="assignGroup" name="group_id">
+            <option value="">Select a group...</option>
+            {% for group in category.stock_take_groups.all %}
+                <option value="{{ group.id }}">{{ group.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% if items %}
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="selectAll"></th>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th>Location</th>
+                        <th>Quantity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>
+                            <input type="checkbox" class="item-checkbox" value="{{ item.id }}">
+                        </td>
+                        <td class="fw-bold">{{ item.sku }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.location }}</td>
+                        <td>{{ item.quantity }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-3">
+            <button type="button" class="btn btn-success" id="assignSelectedItems">
+                <i class="bi bi-check-circle me-1"></i>Assign Selected Items
+            </button>
+            <span class="ms-2 text-muted" id="selectedCount">0 items selected</span>
+        </div>
+    {% else %}
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            No unassigned items in this category.
+        </div>
+    {% endif %}
+</form>
+
+<script>
+$(function() {
+    // Select all functionality
+    $('#selectAll').on('change', function() {
+        $('.item-checkbox').prop('checked', $(this).prop('checked'));
+        updateSelectedCount();
+    });
+
+    // Update selected count
+    $('.item-checkbox').on('change', updateSelectedCount);
+
+    function updateSelectedCount() {
+        const count = $('.item-checkbox:checked').length;
+        $('#selectedCount').text(count + ' items selected');
+        $('#assignSelectedItems').prop('disabled', count === 0);
+    }
+
+    // Assign selected items
+    $('#assignSelectedItems').on('click', function() {
+        const selectedItems = $('.item-checkbox:checked').map(function() {
+            return $(this).val();
+        }).get();
+
+        if (selectedItems.length === 0) {
+            alert('Please select items to assign.');
+            return;
+        }
+
+        const groupId = $('#assignGroup').val();
+        if (!groupId) {
+            alert('Please select a group.');
+            return;
+        }
+
+        let completed = 0;
+        selectedItems.forEach(itemId => {
+            $.post('{% url "assign_item_to_group" %}', {
+                'item_id': itemId,
+                'group_id': groupId,
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            })
+            .always(function() {
+                completed++;
+                if (completed === selectedItems.length) {
+                    // Reload assignment content to update count and list
+                    $.get('{% url "get_unassigned_items" %}', {
+                        'category_id': '{{ category.id }}'
+                    })
+                    .done(function(response) {
+                        $('#assignmentContent').html(response.html);
+                    });
+                }
+            });
+        });
+    });
+
+    updateSelectedCount();
+});
+</script>

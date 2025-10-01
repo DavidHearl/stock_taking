@@ -1,0 +1,207 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Stock Take: {{ schedule.name }} - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0">Stock Take: {{ schedule.name }}</h5>
+                    <small class="text-muted">{{ schedule.scheduled_date|date:"M d, Y H:i" }} | {{ total_items }} items</small>
+                </div>
+                <div class="btn-group">
+                    <a href="{% url 'export_stock_take_csv' schedule.id %}" class="btn btn-outline-primary">
+                        <i class="bi bi-download me-1"></i>Export CSV
+                    </a>
+                    <button class="btn btn-success" id="completeStockTake">
+                        <i class="bi bi-check-circle me-1"></i>Complete Stock Take
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <p><strong>Description:</strong> {{ schedule.description|default:"No description" }}</p>
+                <p><strong>Locations:</strong> {{ schedule.locations|default:"All locations" }}</p>
+                <p><strong>Assigned to:</strong> {{ schedule.assigned_to|default:"Unassigned" }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% for group, items in items_by_group.items %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header" style="background-color: {{ group.color }}; color: white;">
+                <h6 class="mb-0">
+                    <i class="bi bi-collection me-2"></i>
+                    {{ group.name }} ({{ items|length }} items)
+                </h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Location</th>
+                                <th>System Qty</th>
+                                <th>Counted Qty</th>
+                                <th>Variance</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            <tr id="item-row-{{ item.id }}">
+                                <td class="fw-bold">{{ item.sku }}</td>
+                                <td>{{ item.name|truncatechars:40 }}</td>
+                                <td>{{ item.location }}</td>
+                                <td class="text-center">
+                                    <span class="badge bg-secondary system-qty">{{ item.quantity }}</span>
+                                </td>
+                                <td class="text-center">
+                                    <input type="number" class="form-control form-control-sm counted-qty" 
+                                           data-item-id="{{ item.id }}" 
+                                           value="{{ item.quantity }}" 
+                                           style="width: 80px; display: inline-block;">
+                                </td>
+                                <td class="text-center">
+                                    <span class="variance-display badge bg-light text-dark">0</span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary update-count-btn" 
+                                            data-item-id="{{ item.id }}">
+                                        <i class="bi bi-check"></i> Update
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% if not items_by_group %}
+<div class="row">
+    <div class="col-12">
+        <div class="alert alert-info text-center">
+            <i class="bi bi-info-circle fs-3 mb-2"></i>
+            <h5>No Items Assigned</h5>
+            <p>This stock take schedule doesn't have any items assigned to it yet.</p>
+            <a href="{% url 'category_list' %}" class="btn btn-primary">Manage Stock Take Groups</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Calculate variance when counted quantity changes
+    $('.counted-qty').on('input', function() {
+        const row = $(this).closest('tr');
+        const systemQty = parseInt(row.find('.system-qty').text());
+        const countedQty = parseInt($(this).val()) || 0;
+        const variance = countedQty - systemQty;
+        
+        const varianceSpan = row.find('.variance-display');
+        varianceSpan.text(variance);
+        
+        // Color coding for variance
+        varianceSpan.removeClass('bg-light bg-success bg-danger text-dark text-white');
+        if (variance === 0) {
+            varianceSpan.addClass('bg-light text-dark');
+        } else if (variance > 0) {
+            varianceSpan.addClass('bg-success text-white');
+        } else {
+            varianceSpan.addClass('bg-danger text-white');
+        }
+    });
+    
+    // Update count button
+    $('.update-count-btn').on('click', function() {
+        const itemId = $(this).data('item-id');
+        const row = $(this).closest('tr');
+        const countedQty = row.find('.counted-qty').val();
+        const button = $(this);
+        
+        button.prop('disabled', true).html('<i class="spinner-border spinner-border-sm"></i>');
+        
+        $.post('{% url "update_stock_count" %}', {
+            'item_id': itemId,
+            'counted_quantity': countedQty,
+            'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+        })
+        .done(function(response) {
+            if (response.success) {
+                button.removeClass('btn-primary').addClass('btn-success')
+                      .html('<i class="bi bi-check"></i> Updated');
+                
+                // Show notification
+                showNotification(`Stock updated! Variance: ${response.variance}`, 'success');
+                
+                setTimeout(() => {
+                    button.prop('disabled', false)
+                          .removeClass('btn-success').addClass('btn-primary')
+                          .html('<i class="bi bi-check"></i> Update');
+                }, 2000);
+            } else {
+                showNotification('Error updating stock: ' + response.error, 'error');
+            }
+        })
+        .fail(function() {
+            showNotification('Error updating stock count.', 'error');
+        })
+        .always(function() {
+            button.prop('disabled', false);
+        });
+    });
+    
+    // Complete stock take
+    $('#completeStockTake').on('click', function() {
+        if (confirm('Mark this stock take as complete? This will update the schedule status.')) {
+            $.post('{% url "schedule_update_status" schedule.id %}', {
+                'status': 'completed',
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            })
+            .done(function() {
+                showNotification('Stock take completed successfully!', 'success');
+                setTimeout(() => {
+                    window.location.href = '{% url "schedule_list" %}';
+                }, 1500);
+            })
+            .fail(function() {
+                showNotification('Error completing stock take.', 'error');
+            });
+        }
+    });
+    
+    // Notification function
+    function showNotification(message, type) {
+        const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+        const notification = `
+            <div class="alert ${alertClass} alert-dismissible fade show position-fixed" 
+                 style="top: 20px; right: 20px; z-index: 9999; min-width: 300px;">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        
+        $('body').append(notification);
+        
+        setTimeout(() => {
+            $('.alert').alert('close');
+        }, 3000);
+    }
+});
+</script>
+{% endblock %}

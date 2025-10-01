@@ -71,33 +71,67 @@
 </div>
 
 <!-- Import/Export Section -->
-<div class="row mb-3">
+<div class="row mb-4">
     <div class="col-12">
         <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Data Management</h5>
+            </div>
             <div class="card-body">
                 <div class="row align-items-center">
                     <div class="col-md-8">
-                        {% if latest_import %}
-                            <h6 class="mb-1">Last Import</h6>
-                            <p class="text-muted mb-0">
-                                <i class="bi bi-file-earmark-text me-1"></i>
-                                {{ latest_import.filename }} - {{ latest_import.record_count }} records
-                                <small class="ms-2">{{ latest_import.created_at|timesince }} ago</small>
-                            </p>
+                        <h6 class="mb-2">Import History</h6>
+                        {% if import_history %}
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Filename</th>
+                                            <th>Records</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for import in import_history %}
+                                        <tr>
+                                            <td>{{ import.imported_at|date:"M d, Y H:i" }}</td>
+                                            <td>
+                                                <i class="bi bi-file-earmark-text me-1"></i>
+                                                {{ import.filename }}
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-secondary">{{ import.record_count }} items</span>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-outline-danger delete-import-btn" 
+                                                        data-id="{{ import.id }}" 
+                                                        data-filename="{{ import.filename }}"
+                                                        title="Delete Import Record">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
                         {% else %}
-                            <h6 class="mb-1">No imports yet</h6>
-                            <p class="text-muted mb-0">Upload a CSV file to get started</p>
+                            <p class="text-muted mb-0">
+                                <i class="bi bi-info-circle me-1"></i>
+                                No imports yet. Upload a CSV file to get started.
+                            </p>
                         {% endif %}
                     </div>
-                    <div class="col-md-4 text-end">
-                        <form method="post" action="{% url 'import_csv' %}" enctype="multipart/form-data" class="d-inline">
-                            {% csrf_token %}
-                            <div class="input-group">
-                                <input type="file" class="form-control" name="csv_file" accept=".csv" required>
-                                <button type="submit" class="btn btn-primary">Import CSV</button>
-                            </div>
-                        </form>
-                        <a href="{% url 'export_csv' %}" class="btn btn-outline-success ms-2">Export CSV</a>
+                    <div class="col-md-4">
+                        <div class="d-flex flex-column gap-2">
+                            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#importModal">
+                                <i class="bi bi-upload me-1"></i>Import CSV
+                            </button>
+                            <a href="{% url 'export_csv' %}" class="btn btn-outline-success">
+                                <i class="bi bi-download me-1"></i>Export CSV
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -106,12 +140,15 @@
 </div>
 
 <!-- Filters -->
-<div class="row mb-3">
+<div class="row mb-4">
     <div class="col-12">
         <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">Filters</h6>
+            </div>
             <div class="card-body">
                 <form method="get" class="row g-3">
-                    <div class="col-md-4">
+                    <div class="col-md-5">
                         <label for="search" class="form-label">Search</label>
                         <input type="text" class="form-control" id="search" name="search" 
                                value="{{ current_filters.search }}" placeholder="SKU, Name, Serial...">
@@ -127,14 +164,22 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <div class="col-md-3">
-                        <label for="location" class="form-label">Location</label>
-                        <input type="text" class="form-control" id="location" name="location" 
-                               value="{{ current_filters.location }}" placeholder="Location...">
+                    <div class="col-md-2">
+                        <label for="stock_take_group" class="form-label">Stock Take Group</label>
+                        <select class="form-select" id="stock_take_group" name="stock_take_group">
+                            <option value="">All Groups</option>
+                            {% for group in stock_take_groups %}
+                                <option value="{{ group.id }}" {% if current_filters.stock_take_group == group.id|stringformat:"s" %}selected{% endif %}>
+                                    {{ group.category.name }} - {{ group.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-2 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary me-2">Filter</button>
-                        <a href="{% url 'stock_list' %}" class="btn btn-outline-secondary">Clear</a>
+                        <div class="btn-group w-100">
+                            <button type="submit" class="btn btn-primary">Filter</button>
+                            <a href="{% url 'stock_list' %}" class="btn btn-outline-secondary">Clear</a>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -142,6 +187,7 @@
     </div>
 </div>
 
+<!-- Rest of the template remains the same... -->
 <!-- In Stock Items Table -->
 {% if in_stock_items %}
 <div class="row mb-4">
@@ -368,6 +414,39 @@
 </div>
 {% endif %}
 
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import CSV File</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'import_csv' %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <p class="text-warning mb-3">
+                        <strong>Warning:</strong> This will delete all existing stock data and replace it with the imported data.
+                    </p>
+                    <div class="mb-3">
+                        <label for="csv_file" class="form-label">Choose CSV File</label>
+                        <input type="file" class="form-control" id="csv_file" name="csv_file" accept=".csv" required>
+                    </div>
+                    <div class="alert alert-info">
+                        <small>
+                            <strong>CSV Format:</strong> Sku, Name, Cost, Category, Location, Quantity, SerialOrBatch
+                        </small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Import Data</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Restock Modal -->
 <div class="modal fade" id="restockModal" tabindex="-1">
     <div class="modal-dialog">
@@ -394,4 +473,25 @@
 
 {% block extra_js %}
 <script src="{% static 'js/script.js' %}"></script>
+<script>
+$(document).ready(function() {
+    // Delete import record
+    $('.delete-import-btn').on('click', function() {
+        const importId = $(this).data('id');
+        const filename = $(this).data('filename');
+        
+        if (confirm(`Are you sure you want to delete the import record for "${filename}"? This will not affect your current stock data.`)) {
+            $.post('{% url "delete_import" 0 %}'.replace('0', importId), {
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            })
+            .done(function() {
+                location.reload();
+            })
+            .fail(function() {
+                alert('Error deleting import record.');
+            });
+        }
+    });
+});
+</script>
 {% endblock %}

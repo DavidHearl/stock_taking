@@ -5,6 +5,45 @@
 
 {% block nav_schedules_active %}active{% endblock %}
 
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Start schedule
+    $('.start-schedule-btn').on('click', function() {
+        const scheduleId = $(this).data('id');
+        updateScheduleStatus(scheduleId, 'in_progress');
+    });
+    
+    // Complete schedule
+    $('.complete-schedule-btn').on('click', function() {
+        const scheduleId = $(this).data('id');
+        updateScheduleStatus(scheduleId, 'completed');
+    });
+    
+    // Delete schedule
+    $('.delete-schedule-btn').on('click', function() {
+        const scheduleId = $(this).data('id');
+        if (confirm('Are you sure you want to delete this schedule?')) {
+            // Add delete functionality here
+        }
+    });
+    
+    function updateScheduleStatus(scheduleId, status) {
+        $.post('{% url "schedule_update_status" 0 %}'.replace('0', scheduleId), {
+            'status': status,
+            'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+        })
+        .done(function() {
+            location.reload();
+        })
+        .fail(function() {
+            alert('Error updating schedule status.');
+        });
+    }
+});
+</script>
+{% endblock %}
+
 {% block content %}
 <div class="row">
     <div class="col-12">
@@ -167,13 +206,13 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label for="scheduleCategories" class="form-label">Categories</label>
-                        <select class="form-select" id="scheduleCategories" name="categories" multiple>
-                            {% for category in categories %}
-                                <option value="{{ category.id }}">{{ category.name }}</option>
+                        <label for="scheduleGroups" class="form-label">Stock Take Groups</label>
+                        <select class="form-select" id="scheduleGroups" name="stock_take_groups" multiple>
+                            {% for group in stock_take_groups %}
+                                <option value="{{ group.id }}">{{ group.category.name }} - {{ group.name }}</option>
                             {% endfor %}
                         </select>
-                        <div class="form-text">Hold Ctrl/Cmd to select multiple categories</div>
+                        <div class="form-text">Hold Ctrl/Cmd to select multiple groups</div>
                     </div>
                     <div class="mb-3">
                         <label for="scheduleNotes" class="form-label">Notes</label>
@@ -187,71 +226,5 @@
             </form>
         </div>
     </div>
-</div>
-
-<div class="table-responsive">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Scheduled Date</th>
-                <th>Assigned To</th>
-                <th>Categories</th>
-                <th>Locations</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for schedule in schedules %}
-            <tr>
-                <td>
-                    <strong>{{ schedule.name }}</strong>
-                    {% if schedule.description %}
-                        <br><small class="text-muted">{{ schedule.description|truncatewords:10 }}</small>
-                    {% endif %}
-                </td>
-                <td>{{ schedule.scheduled_date|date:"M d, Y H:i" }}</td>
-                <td>{{ schedule.assigned_to|default:"-" }}</td>
-                <td>
-                    {% for category in schedule.categories.all %}
-                        <span class="badge me-1" style="background-color: {{ category.color }};">{{ category.name }}</span>
-                    {% empty %}
-                        <span class="text-muted">All categories</span>
-                    {% endfor %}
-                </td>
-                <td>
-                    {% if schedule.locations %}
-                        <small>{{ schedule.locations|truncatewords:3 }}</small>
-                    {% else %}
-                        <span class="text-muted">All locations</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <div class="btn-group btn-group-sm">
-                        {% if schedule.status == 'pending' %}
-                            <button class="btn btn-outline-success start-schedule-btn" 
-                                    data-id="{{ schedule.id }}" title="Start">
-                                <i class="bi bi-play"></i>
-                            </button>
-                        {% elif schedule.status == 'in_progress' %}
-                            <button class="btn btn-outline-primary complete-schedule-btn" 
-                                    data-id="{{ schedule.id }}" title="Complete">
-                                <i class="bi bi-check"></i>
-                            </button>
-                        {% endif %}
-                        <button class="btn btn-outline-primary edit-schedule-btn" 
-                                data-id="{{ schedule.id }}" title="Edit">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-outline-danger delete-schedule-btn" 
-                                data-id="{{ schedule.id }}" title="Delete">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
 </div>
 {% endblock %}
