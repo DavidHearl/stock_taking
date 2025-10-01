@@ -11,41 +11,132 @@ from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup
 from django.template.loader import render_to_string
 
 
+def import_csv(request):
+    """Import CSV file and update/add items, keep categories/groups"""
+    if request.method == 'POST':
+        csv_file = request.FILES.get('csv_file')
+        if not csv_file or not csv_file.name.endswith('.csv'):
+            messages.error(request, 'Please upload a CSV file.')
+            return redirect('stock_list')
+
+        try:
+            # Read CSV file
+            data_set = csv_file.read().decode('UTF-8')
+            io_string = io.StringIO(data_set)
+            reader = csv.DictReader(io_string)
+
+            items_created = 0
+            items_updated = 0
+            for row in reader:
+                sku = row.get('Sku', '').strip()
+                name = row.get('Name', '').strip()
+                cost_str = row.get('Cost', '0')
+                location = row.get('Location', '').strip()
+                quantity_str = row.get('Quantity', '0')
+                serial_or_batch = row.get('SerialOrBatch', '').strip()
+                category_name = row.get('Category', '').strip()
+
+                try:
+                    quantity = int(float(quantity_str)) if quantity_str else 0
+                except (ValueError, TypeError):
+                    quantity = 0
+
+                try:
+                    cost = float(cost_str) if cost_str else 0
+                except (ValueError, TypeError):
+                    cost = 0
+
+                # Find or create category
+                category = None
+                if category_name:
+                    category, _ = Category.objects.get_or_create(
+                        name=category_name,
+                        defaults={'description': f'Auto-created from CSV import'}
+                    )
+
+                # Update existing item or create new
+                item, created = StockItem.objects.get_or_create(
+                    sku=sku,
+                    defaults={
+                        'name': name,
+                        'cost': cost,
+                        'category': category,
+                        'category_name': category_name,
+                        'location': location,
+                        'quantity': quantity,
+                        'serial_or_batch': serial_or_batch
+                    }
+                )
+                if not created:
+                    # Update fields
+                    item.name = name
+                    item.cost = cost
+                    item.category = category
+                    item.category_name = category_name
+                    item.location = location
+                    item.quantity = quantity
+                    item.serial_or_batch = serial_or_batch
+                    item.save()
+                    items_updated += 1
+                else:
+                    items_created += 1
+
+            # Record import history
+            ImportHistory.objects.create(
+                filename=csv_file.name,
+                record_count=items_created + items_updated
+            )
+
+            # Re-evaluate auto-generated schedules
+            auto_create_stock_take_schedules()
+
+            messages.success(request, f'Imported {items_created} new items, updated {items_updated} items from {csv_file.name}')
+        except Exception as e:
+            messages.error(request, f'Error importing CSV: {str(e)}')
+
+    return redirect('stock_list')
+
 def auto_create_stock_take_schedules():
-    """Auto-create schedules for stock take groups with items needing checking"""
-    created_schedules = []
-    
+    """Auto-create schedules for stock take groups with items needing checking, remove obsolete ones"""
     for group in StockTakeGroup.objects.all():
         items_needing_check = group.items_needing_check
-        
+
+        # Remove auto-generated pending schedules if no items need checking
+        Schedule.objects.filter(
+            stock_take_groups=group,
+            status='pending',
+            auto_generated=True
+        ).exclude(id__in=[
+            s.id for s in Schedule.objects.filter(
+                stock_take_groups=group,
+                status='pending',
+                auto_generated=True
+            ) if items_needing_check.exists()
+        ]).delete()
+
+        # Create new auto-generated schedule if needed and not already present
         if items_needing_check.exists():
-            # Check if there's already a pending schedule for this group
             existing_schedule = Schedule.objects.filter(
                 stock_take_groups=group,
                 status='pending',
                 auto_generated=True
             ).exists()
-            
+
             if not existing_schedule:
-                # Get items that need checking
                 items_list = list(items_needing_check.values_list('sku', 'name', 'quantity'))
                 items_summary = ', '.join([f"{item[0]} ({item[2]} left)" for item in items_list[:5]])
                 if len(items_list) > 5:
                     items_summary += f" and {len(items_list) - 5} more items"
-                
-                # Create new auto-generated schedule
+
                 schedule = Schedule.objects.create(
                     name=f"Auto: {group.name} Stock Take",
                     description=f"Auto-generated stock take for {group.name} - {items_needing_check.count()} items need checking",
-                    scheduled_date=timezone.now() + timezone.timedelta(days=max(1, 5-group.weighting)),  # Higher priority = sooner
+                    scheduled_date=timezone.now() + timezone.timedelta(days=max(1, 5-group.weighting)),
                     auto_generated=True,
                     notes=f"Priority: {group.priority_label} | Threshold: {group.auto_schedule_threshold}\nItems needing check: {items_summary}",
                     locations=', '.join(items_needing_check.values_list('location', flat=True).distinct())
                 )
                 schedule.stock_take_groups.add(group)
-                created_schedules.append(schedule)
-    
-    return created_schedules
 
 def stock_list(request):
     """Display all stock items in a table"""
@@ -165,6 +256,17 @@ def delete_import(request, import_id):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+def delete_schedule(request, schedule_id):
+    """Delete a stock take schedule"""
+    if request.method == 'POST':
+        try:
+            schedule = get_object_or_404(Schedule, id=schedule_id)
+            schedule.delete()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 def stock_take_group_create(request):
@@ -409,86 +511,14 @@ def assign_item_to_group(request):
     
     return redirect('category_list')
 
-def import_csv(request):
-    """Import CSV file and clear existing data"""
-    if request.method == 'POST':
-        csv_file = request.FILES.get('csv_file')
-        
-        if not csv_file:
-            messages.error(request, 'Please select a CSV file.')
-            return redirect('stock_list')
-        
-        if not csv_file.name.endswith('.csv'):
-            messages.error(request, 'Please upload a CSV file.')
-            return redirect('stock_list')
-        
-        try:
-            # Clear existing data
-            StockItem.objects.all().delete()
-            
-            # Read CSV file
-            data_set = csv_file.read().decode('UTF-8')
-            io_string = io.StringIO(data_set)
-            reader = csv.DictReader(io_string)
-            
-            items_created = 0
-            for row in reader:
-                # Handle quantity conversion from decimal to integer
-                quantity_str = row.get('Quantity', '0')
-                try:
-                    quantity = int(float(quantity_str)) if quantity_str else 0
-                except (ValueError, TypeError):
-                    quantity = 0
-                
-                # Handle cost conversion
-                cost_str = row.get('Cost', '0')
-                try:
-                    cost = float(cost_str) if cost_str else 0
-                except (ValueError, TypeError):
-                    cost = 0
-                
-                # Handle category
-                category_name = row.get('Category', '')
-                category = None
-                if category_name:
-                    category, created = Category.objects.get_or_create(
-                        name=category_name,
-                        defaults={'description': f'Auto-created from CSV import'}
-                    )
-                
-                StockItem.objects.create(
-                    sku=row.get('Sku', ''),
-                    name=row.get('Name', ''),
-                    cost=cost,
-                    category=category,
-                    category_name=category_name,
-                    location=row.get('Location', ''),
-                    quantity=quantity,
-                    serial_or_batch=row.get('SerialOrBatch', '')
-                )
-                items_created += 1
-            
-            # Record import history
-            ImportHistory.objects.create(
-                filename=csv_file.name,
-                record_count=items_created
-            )
-            
-            messages.success(request, f'Successfully imported {items_created} items from {csv_file.name}')
-            
-        except Exception as e:
-            messages.error(request, f'Error importing CSV: {str(e)}')
-    
-    return redirect('stock_list')
-
 def export_csv(request):
-    """Export current database as CSV"""
+    """Export current database as CSV with required columns only"""
     response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="stock_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
-    
+    response['Content-Disposition'] = f'attachment; filename="stock_export_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"'
+
     writer = csv.writer(response)
     writer.writerow(['Sku', 'Name', 'Cost', 'Category', 'Location', 'Quantity', 'SerialOrBatch'])
-    
+
     for item in StockItem.objects.all():
         writer.writerow([
             item.sku,
@@ -499,7 +529,7 @@ def export_csv(request):
             item.quantity,
             item.serial_or_batch or ''
         ])
-    
+
     return response
 
 def category_create(request):
@@ -618,38 +648,27 @@ def update_stock_count(request):
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 def export_stock_take_csv(request, schedule_id):
-    """Export CSV for specific stock take schedule"""
+    """Export CSV for specific stock take schedule with required columns only"""
     schedule = get_object_or_404(Schedule, id=schedule_id)
     
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="stock_take_{schedule.name}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
     
     writer = csv.writer(response)
-    writer.writerow([
-        'SKU', 'Name', 'Cost', 'Category', 'Stock Take Group', 'Location', 
-        'System Quantity', 'Counted Quantity', 'Variance', 'Last Checked', 'Serial/Batch'
-    ])
-    
+    writer.writerow(['Sku', 'Name', 'Cost', 'Category', 'Location', 'Quantity', 'SerialOrBatch'])
+
     items = StockItem.objects.filter(
         stock_take_group__in=schedule.stock_take_groups.all()
     ).select_related('category', 'stock_take_group')
-    
+
     for item in items:
-        # For now, counted quantity is the same as system quantity
-        # You could add a separate field for this later
-        variance = 0  # Will be calculated after counting
-        
         writer.writerow([
             item.sku,
             item.name,
             item.cost,
             item.category.name if item.category else item.category_name,
-            item.stock_take_group.name if item.stock_take_group else '',
             item.location,
-            item.quantity,  # System quantity
-            '',  # Counted quantity (to be filled during stock take)
-            variance,
-            item.last_checked.strftime('%Y-%m-%d %H:%M') if hasattr(item, 'last_checked') and item.last_checked else '',
+            item.quantity,
             item.serial_or_batch or ''
         ])
     

@@ -25,6 +25,7 @@ urlpatterns = [
     path('schedules/', views.schedule_list, name='schedule_list'),
     path('schedules/create/', views.schedule_create, name='schedule_create'),
     path('schedules/update-status/<int:schedule_id>/', views.schedule_update_status, name='schedule_update_status'),
+    path('schedules/delete/<int:schedule_id>/', views.delete_schedule, name='delete_schedule'),
     
     # Stock take functionality
     path('stock-take/<int:schedule_id>/', views.stock_take_detail, name='stock_take_detail'),
