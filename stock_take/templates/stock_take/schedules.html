@@ -1,0 +1,257 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Schedules - {{ block.super }}{% endblock %}
+
+{% block nav_schedules_active %}active{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <!-- Status Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title text-secondary">{{ pending_count }}</h5>
+                        <p class="card-text">Pending</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title text-warning">{{ in_progress_count }}</h5>
+                        <p class="card-text">In Progress</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title text-success">{{ completed_count }}</h5>
+                        <p class="card-text">Completed</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary">{{ schedules.count }}</h5>
+                        <p class="card-text">Total</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Schedules by Status -->
+        <div class="accordion" id="scheduleAccordion">
+            <!-- Pending Schedules -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button" type="button" 
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#pendingSchedules" 
+                            aria-expanded="true">
+                        <i class="bi bi-clock me-2"></i>
+                        Pending Schedules ({{ pending_schedules.count }})
+                    </button>
+                </h2>
+                <div id="pendingSchedules" class="accordion-collapse collapse show" 
+                     data-bs-parent="#scheduleAccordion">
+                    <div class="accordion-body">
+                        {% if pending_schedules %}
+                            {% include 'stock_take/schedule_table.html' with schedules=pending_schedules %}
+                        {% else %}
+                            <p class="text-muted text-center py-3">No pending schedules</p>
+                        {% endif %}
+                        <div class="mt-3">
+                            <button type="button" class="btn btn-primary btn-sm" 
+                                    data-bs-toggle="modal" data-bs-target="#scheduleModal">
+                                Add New Schedule
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- In Progress Schedules -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" 
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#inProgressSchedules">
+                        <i class="bi bi-play-circle me-2"></i>
+                        In Progress Schedules ({{ in_progress_schedules.count }})
+                    </button>
+                </h2>
+                <div id="inProgressSchedules" class="accordion-collapse collapse" 
+                     data-bs-parent="#scheduleAccordion">
+                    <div class="accordion-body">
+                        {% if in_progress_schedules %}
+                            {% include 'stock_take/schedule_table.html' with schedules=in_progress_schedules %}
+                        {% else %}
+                            <p class="text-muted text-center py-3">No schedules in progress</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Completed Schedules -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" 
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#completedSchedules">
+                        <i class="bi bi-check-circle me-2"></i>
+                        Completed Schedules ({{ completed_schedules.count }})
+                    </button>
+                </h2>
+                <div id="completedSchedules" class="accordion-collapse collapse" 
+                     data-bs-parent="#scheduleAccordion">
+                    <div class="accordion-body">
+                        {% if completed_schedules %}
+                            {% include 'stock_take/schedule_table.html' with schedules=completed_schedules %}
+                        {% else %}
+                            <p class="text-muted text-center py-3">No completed schedules</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Schedule Modal -->
+<div class="modal fade" id="scheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create New Schedule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'schedule_create' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scheduleName" class="form-label">Name</label>
+                                <input type="text" class="form-control" id="scheduleName" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scheduleDate" class="form-label">Scheduled Date</label>
+                                <input type="datetime-local" class="form-control" id="scheduleDate" name="scheduled_date" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="scheduleDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="scheduleDescription" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scheduleLocations" class="form-label">Locations</label>
+                                <textarea class="form-control" id="scheduleLocations" name="locations" rows="2" 
+                                          placeholder="Enter locations separated by commas"></textarea>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scheduleAssignee" class="form-label">Assigned To</label>
+                                <input type="text" class="form-control" id="scheduleAssignee" name="assigned_to">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="scheduleCategories" class="form-label">Categories</label>
+                        <select class="form-select" id="scheduleCategories" name="categories" multiple>
+                            {% for category in categories %}
+                                <option value="{{ category.id }}">{{ category.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Hold Ctrl/Cmd to select multiple categories</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="scheduleNotes" class="form-label">Notes</label>
+                        <textarea class="form-control" id="scheduleNotes" name="notes" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Schedule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Scheduled Date</th>
+                <th>Assigned To</th>
+                <th>Categories</th>
+                <th>Locations</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in schedules %}
+            <tr>
+                <td>
+                    <strong>{{ schedule.name }}</strong>
+                    {% if schedule.description %}
+                        <br><small class="text-muted">{{ schedule.description|truncatewords:10 }}</small>
+                    {% endif %}
+                </td>
+                <td>{{ schedule.scheduled_date|date:"M d, Y H:i" }}</td>
+                <td>{{ schedule.assigned_to|default:"-" }}</td>
+                <td>
+                    {% for category in schedule.categories.all %}
+                        <span class="badge me-1" style="background-color: {{ category.color }};">{{ category.name }}</span>
+                    {% empty %}
+                        <span class="text-muted">All categories</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% if schedule.locations %}
+                        <small>{{ schedule.locations|truncatewords:3 }}</small>
+                    {% else %}
+                        <span class="text-muted">All locations</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        {% if schedule.status == 'pending' %}
+                            <button class="btn btn-outline-success start-schedule-btn" 
+                                    data-id="{{ schedule.id }}" title="Start">
+                                <i class="bi bi-play"></i>
+                            </button>
+                        {% elif schedule.status == 'in_progress' %}
+                            <button class="btn btn-outline-primary complete-schedule-btn" 
+                                    data-id="{{ schedule.id }}" title="Complete">
+                                <i class="bi bi-check"></i>
+                            </button>
+                        {% endif %}
+                        <button class="btn btn-outline-primary edit-schedule-btn" 
+                                data-id="{{ schedule.id }}" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-outline-danger delete-schedule-btn" 
+                                data-id="{{ schedule.id }}" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
