@@ -6,8 +6,27 @@
 {% block nav_stock_active %}active{% endblock %}
 
 {% block content %}
+<!-- Recent Import Date Box -->
+{% if latest_import %}
+    <div class="row">
+        <div class="col-12">
+            <div class="alert alert-notification-custom d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>Most Recent Import:</strong>
+                    {{ latest_import.imported_at|date:"M d, Y H:i" }}
+                    <span class="text-muted">({{ latest_import.filename }})</span>
+                </div>
+                <span class="badge bg-secondary">{{ latest_import.record_count }} items</span>
+                <button type="button" class="btn btn-primary btn-sm ms-3" data-bs-toggle="modal" data-bs-target="#importModal">
+                    <i class="bi bi-upload me-1"></i>Import CSV
+                </button>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
 <!-- Statistics Cards -->
-<div class="row mb-4">
+<div class="row mb-3">
     <div class="col-md-3">
         <div class="card bg-success text-white">
             <div class="card-body">
@@ -70,80 +89,11 @@
     </div>
 </div>
 
-<!-- Import/Export Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">Data Management</h5>
-            </div>
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-md-8">
-                        <h6 class="mb-2">Import History</h6>
-                        {% if import_history %}
-                            <div class="table-responsive">
-                                <table class="table table-sm mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Filename</th>
-                                            <th>Records</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for import in import_history %}
-                                        <tr>
-                                            <td>{{ import.imported_at|date:"M d, Y H:i" }}</td>
-                                            <td>
-                                                <i class="bi bi-file-earmark-text me-1"></i>
-                                                {{ import.filename }}
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-secondary">{{ import.record_count }} items</span>
-                                            </td>
-                                            <td>
-                                                <button class="btn btn-sm btn-outline-danger delete-import-btn" 
-                                                        data-id="{{ import.id }}" 
-                                                        data-filename="{{ import.filename }}"
-                                                        title="Delete Import Record">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        {% else %}
-                            <p class="text-muted mb-0">
-                                <i class="bi bi-info-circle me-1"></i>
-                                No imports yet. Upload a CSV file to get started.
-                            </p>
-                        {% endif %}
-                    </div>
-                    <div class="col-md-4">
-                        <div class="d-flex flex-column gap-2">
-                            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#importModal">
-                                <i class="bi bi-upload me-1"></i>Import CSV
-                            </button>
-                            <a href="{% url 'export_csv' %}" class="btn btn-outline-success">
-                                <i class="bi bi-download me-1"></i>Export CSV
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Filters -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header bg-dark
                 <h6 class="mb-0">Filters</h6>
             </div>
             <div class="card-body">
@@ -187,7 +137,6 @@
     </div>
 </div>
 
-<!-- Rest of the template remains the same... -->
 <!-- In Stock Items Table -->
 {% if in_stock_items %}
 <div class="row mb-4">
@@ -215,19 +164,16 @@
                                     <th>Name</th>
                                     <th>Cost</th>
                                     <th>Category</th>
-                                    <th>Location</th>
                                     <th>Qty</th>
                                     <th>Value</th>
-                                    <th>Serial/Batch</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for item in in_stock_items %}
                                 <tr>
-                                    <td class="editable fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
-                                    <td class="editable" data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
-                                    <td class="editable text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
+                                    <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
+                                    <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
+                                    <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
                                     <td>
                                         {% if item.category %}
                                             <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
@@ -237,15 +183,8 @@
                                             <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
                                         {% endif %}
                                     </td>
-                                    <td class="editable" data-field="location" data-id="{{ item.id }}">{{ item.location }}</td>
-                                    <td class="editable text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
+                                    <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
                                     <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
-                                    <td class="editable" data-field="serial_or_batch" data-id="{{ item.id }}">{{ item.serial_or_batch|default_if_none:"" }}</td>
-                                    <td>
-                                        <button class="btn btn-outline-primary btn-sm edit-btn" data-id="{{ item.id }}" title="Edit">
-                                            <i class="bi bi-pencil"></i>
-                                        </button>
-                                    </td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -266,7 +205,7 @@
             <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
                     <i class="bi bi-exclamation-triangle me-2"></i>
-                    Low Stock Items (1-5 items)
+                    Low Stock Items (&lt; 10 in stock)
                 </h5>
                 <div class="d-flex align-items-center">
                     <span class="badge bg-dark text-warning me-2">{{ low_stock_items.count }} items</span>
@@ -285,19 +224,16 @@
                                     <th>Name</th>
                                     <th>Cost</th>
                                     <th>Category</th>
-                                    <th>Location</th>
                                     <th>Qty</th>
                                     <th>Value</th>
-                                    <th>Serial/Batch</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for item in low_stock_items %}
                                 <tr class="table-warning">
-                                    <td class="editable fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
-                                    <td class="editable" data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
-                                    <td class="editable text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
+                                    <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
+                                    <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
+                                    <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
                                     <td>
                                         {% if item.category %}
                                             <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
@@ -307,18 +243,8 @@
                                             <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
                                         {% endif %}
                                     </td>
-                                    <td class="editable" data-field="location" data-id="{{ item.id }}">{{ item.location }}</td>
-                                    <td class="editable text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
+                                    <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
                                     <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
-                                    <td class="editable" data-field="serial_or_batch" data-id="{{ item.id }}">{{ item.serial_or_batch|default_if_none:"" }}</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-outline-primary restock-btn" 
-                                                data-id="{{ item.id }}" 
-                                                data-name="{{ item.name }}"
-                                                title="Restock Item">
-                                            <i class="bi bi-plus-circle me-1"></i>Restock
-                                        </button>
-                                    </td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -358,9 +284,6 @@
                                     <th>Name</th>
                                     <th>Cost</th>
                                     <th>Category</th>
-                                    <th>Location</th>
-                                    <th>Serial/Batch</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -377,16 +300,6 @@
                                         {% else %}
                                             <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
                                         {% endif %}
-                                    </td>
-                                    <td>{{ item.location }}</td>
-                                    <td>{{ item.serial_or_batch|default_if_none:"" }}</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-primary restock-btn" 
-                                                data-id="{{ item.id }}" 
-                                                data-name="{{ item.name }}"
-                                                title="Restock Item">
-                                            <i class="bi bi-plus-circle me-1"></i>Restock
-                                        </button>
                                     </td>
                                 </tr>
                                 {% endfor %}

@@ -1,3 +1,20 @@
+def category_edit(request, category_id):
+    category = get_object_or_404(Category, id=category_id)
+    if request.method == 'POST':
+        category.name = request.POST.get('name', category.name)
+        category.description = request.POST.get('description', category.description)
+        category.color = request.POST.get('color', category.color)
+        category.save()
+        messages.success(request, 'Category updated successfully.')
+        return redirect('category_list')
+    # For GET, this view is only used by the modal form, so redirect
+    return redirect('category_list')
+def import_history(request):
+    """Display all import history records"""
+    imports = ImportHistory.objects.all().order_by('-imported_at')
+    return render(request, 'stock_take/import_history.html', {
+        'imports': imports
+    })
 import csv
 import io
 from decimal import Decimal
@@ -10,6 +27,12 @@ from django.db import models
 from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup
 from django.template.loader import render_to_string
 
+def completed_stock_takes(request):
+    """Display only completed stock takes"""
+    completed_schedules = Schedule.objects.filter(status='completed').order_by('-scheduled_date')
+    return render(request, 'stock_take/completed_stock_takes.html', {
+        'completed_schedules': completed_schedules
+    })
 
 def import_csv(request):
     """Import CSV file and update/add items, keep categories/groups"""
@@ -173,8 +196,8 @@ def stock_list(request):
     )['total'] or Decimal('0')
     
     # Separate items by stock status
-    in_stock_items = items.filter(quantity__gt=5).select_related('category', 'stock_take_group')
-    low_stock_items = items.filter(quantity__lte=5, quantity__gt=0).select_related('category', 'stock_take_group')
+    in_stock_items = items.filter(quantity__gte=10).select_related('category', 'stock_take_group')
+    low_stock_items = items.filter(quantity__gte=1, quantity__lt=10).select_related('category', 'stock_take_group')
     zero_quantity_items = items.filter(quantity=0).select_related('category', 'stock_take_group')
     
     # Items needing stock takes
@@ -188,7 +211,7 @@ def stock_list(request):
     # Get counts for all items (not just filtered)
     total_items_count = all_items.count()
     zero_quantity_count = all_items.filter(quantity=0).count()
-    low_stock_count = all_items.filter(quantity__lte=5, quantity__gt=0).count()
+    low_stock_count = all_items.filter(quantity__lt=10, quantity__gt=0).count()
     in_stock_count = all_items.filter(quantity__gt=5).count()
     
     # Get filter options

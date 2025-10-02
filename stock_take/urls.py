@@ -7,12 +7,15 @@ urlpatterns = [
     path('export/', views.export_csv, name='export_csv'),
     path('update/<int:item_id>/', views.update_item, name='update_item'),
     
+
     # Import management
+    path('import-history/', views.import_history, name='import_history'),
     path('import/delete/<int:import_id>/', views.delete_import, name='delete_import'),
     
     # Category management
     path('categories/', views.category_list, name='category_list'),
     path('categories/create/', views.category_create, name='category_create'),
+    path('categories/edit/<int:category_id>/', views.category_edit, name='category_edit'),
     path('categories/delete/<int:category_id>/', views.category_delete, name='category_delete'),
     
     # Stock take group management
@@ -21,8 +24,10 @@ urlpatterns = [
     path('delete-category/<int:category_id>/', views.delete_category, name='delete_category'),
     path('assign-item-to-group/', views.assign_item_to_group, name='assign_item_to_group'),
     
+
     # Schedule management
     path('schedules/', views.schedule_list, name='schedule_list'),
+    path('schedules/completed/', views.completed_stock_takes, name='completed_stock_takes'),
     path('schedules/create/', views.schedule_create, name='schedule_create'),
     path('schedules/update-status/<int:schedule_id>/', views.schedule_update_status, name='schedule_update_status'),
     path('schedules/delete/<int:schedule_id>/', views.delete_schedule, name='delete_schedule'),
