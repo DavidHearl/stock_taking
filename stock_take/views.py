@@ -537,7 +537,7 @@ def assign_item_to_group(request):
 def export_csv(request):
     """Export current database as CSV with required columns only"""
     response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="stock_export_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"'
+    response['Content-Disposition'] = f'attachment; filename="stock_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
     writer = csv.writer(response)
     writer.writerow(['Sku', 'Name', 'Cost', 'Category', 'Location', 'Quantity', 'SerialOrBatch'])
