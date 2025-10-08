@@ -1,20 +1,3 @@
-def category_edit(request, category_id):
-    category = get_object_or_404(Category, id=category_id)
-    if request.method == 'POST':
-        category.name = request.POST.get('name', category.name)
-        category.description = request.POST.get('description', category.description)
-        category.color = request.POST.get('color', category.color)
-        category.save()
-        messages.success(request, 'Category updated successfully.')
-        return redirect('category_list')
-    # For GET, this view is only used by the modal form, so redirect
-    return redirect('category_list')
-def import_history(request):
-    """Display all import history records"""
-    imports = ImportHistory.objects.all().order_by('-imported_at')
-    return render(request, 'stock_take/import_history.html', {
-        'imports': imports
-    })
 import csv
 import io
 from decimal import Decimal
@@ -26,6 +9,8 @@ from django.db.models import Sum, F, Count, Q
 from django.db import models
 from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup
 from django.template.loader import render_to_string
+import datetime
+from django.utils import timezone
 
 def completed_stock_takes(request):
     """Display only completed stock takes"""
@@ -110,8 +95,8 @@ def import_csv(request):
                 record_count=items_created + items_updated
             )
 
-            # Re-evaluate auto-generated schedules
-            auto_create_stock_take_schedules()
+            # Reset pending schedules and re-populate
+            reset_and_populate_schedules()
 
             messages.success(request, f'Imported {items_created} new items, updated {items_updated} items from {csv_file.name}')
         except Exception as e:
@@ -119,8 +104,73 @@ def import_csv(request):
 
     return redirect('stock_list')
 
+def category_edit(request, category_id):
+    category = get_object_or_404(Category, id=category_id)
+    if request.method == 'POST':
+        category.name = request.POST.get('name', category.name)
+        category.description = request.POST.get('description', category.description)
+        category.color = request.POST.get('color', category.color)
+        category.save()
+        messages.success(request, 'Category updated successfully.')
+        return redirect('category_list')
+    # For GET, this view is only used by the modal form, so redirect
+    return redirect('category_list')
+
+def import_history(request):
+    """Display all import history records"""
+    imports = ImportHistory.objects.all().order_by('-imported_at')
+    return render(request, 'stock_take/import_history.html', {
+        'imports': imports
+    })
+
+def reset_and_populate_schedules():
+    """Reset pending schedules, schedule high priority first, and remove completed jobs from pending if completed in last month."""
+    # Remove all pending auto-generated schedules
+    Schedule.objects.filter(status='pending', auto_generated=True).delete()
+
+    # Remove completed jobs from pending if completed in last month
+    one_month_ago = timezone.now() - datetime.timedelta(days=30)
+    recent_completed = Schedule.objects.filter(status='completed', scheduled_date__gte=one_month_ago)
+    # Remove any pending schedule for the same group as a recently completed one
+    for completed in recent_completed:
+        for group in completed.stock_take_groups.all():
+            Schedule.objects.filter(status='pending', stock_take_groups=group, auto_generated=True).delete()
+
+    # Schedule new auto jobs, high priority first
+    groups = list(StockTakeGroup.objects.all().order_by('-weighting', 'name'))
+    scheduled_date = timezone.now() + datetime.timedelta(days=2)
+    def next_weekday(dt):
+        while dt.weekday() >= 5:
+            dt += datetime.timedelta(days=1)
+        return dt
+    for group in groups:
+        items_needing_check = group.items_needing_check
+        if items_needing_check.exists():
+            items_list = list(items_needing_check.values_list('sku', 'name', 'quantity'))
+            items_summary = ', '.join([f"{item[0]} ({item[2]} left)" for item in items_list[:5]])
+            if len(items_list) > 5:
+                items_summary += f" and {len(items_list) - 5} more items"
+            scheduled_date = next_weekday(scheduled_date)
+            schedule = Schedule.objects.create(
+                name=f"Auto: {group.name} Stock Take",
+                description=f"Auto-generated stock take for {group.name} - {items_needing_check.count()} items need checking",
+                scheduled_date=scheduled_date,
+                auto_generated=True,
+                notes=f"Priority: {group.priority_label} | Threshold: {group.auto_schedule_threshold}\nItems needing check: {items_summary}",
+                locations=', '.join(items_needing_check.values_list('location', flat=True).distinct())
+            )
+            schedule.stock_take_groups.add(group)
+            scheduled_date += datetime.timedelta(days=1)
+
 def auto_create_stock_take_schedules():
     """Auto-create schedules for stock take groups with items needing checking, remove obsolete ones"""
+
+    def next_weekday(dt):
+        # If dt is Saturday (5) or Sunday (6), move to Monday
+        while dt.weekday() >= 5:
+            dt += datetime.timedelta(days=1)
+        return dt
+
     for group in StockTakeGroup.objects.all():
         items_needing_check = group.items_needing_check
 
@@ -151,15 +201,33 @@ def auto_create_stock_take_schedules():
                 if len(items_list) > 5:
                     items_summary += f" and {len(items_list) - 5} more items"
 
+                # Schedule first stock take 2 days after import, skip weekends
+                scheduled_date = timezone.now() + datetime.timedelta(days=2)
+                scheduled_date = next_weekday(scheduled_date)
+
                 schedule = Schedule.objects.create(
                     name=f"Auto: {group.name} Stock Take",
                     description=f"Auto-generated stock take for {group.name} - {items_needing_check.count()} items need checking",
-                    scheduled_date=timezone.now() + timezone.timedelta(days=max(1, 5-group.weighting)),
+                    scheduled_date=scheduled_date,
                     auto_generated=True,
                     notes=f"Priority: {group.priority_label} | Threshold: {group.auto_schedule_threshold}\nItems needing check: {items_summary}",
                     locations=', '.join(items_needing_check.values_list('location', flat=True).distinct())
                 )
                 schedule.stock_take_groups.add(group)
+
+                # Optionally, create subsequent schedules (1 day apart, skip weekends)
+                # Example: create 3 more auto schedules for demonstration
+                for i in range(1, 4):
+                    next_date = scheduled_date + datetime.timedelta(days=i)
+                    next_date = next_weekday(next_date)
+                    Schedule.objects.create(
+                        name=f"Auto: {group.name} Stock Take #{i+1}",
+                        description=f"Auto-generated stock take for {group.name} - {items_needing_check.count()} items need checking",
+                        scheduled_date=next_date,
+                        auto_generated=True,
+                        notes=f"Priority: {group.priority_label} | Threshold: {group.auto_schedule_threshold}\nItems needing check: {items_summary}",
+                        locations=', '.join(items_needing_check.values_list('location', flat=True).distinct())
+                    ).stock_take_groups.add(group)
 
 def stock_list(request):
     """Display all stock items in a table"""
