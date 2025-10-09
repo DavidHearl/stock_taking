@@ -1,0 +1,31 @@
+version: "3.9"
+services:
+  web:
+    build: .
+    env_file: .env
+    networks: [traefik-net]
+    # Assess what ports are already in use by another app in the VM
+    ports:
+      - "8001:8000"
+    # Search the name from WSGI in the settings file, ie WSGI_APPLICATION = 'stock_taking.wsgi.application'
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.stock_taking.rule=Host(`stock_taking.mediaservers.co.uk`)
+      - traefik.http.routers.stock_taking.entrypoints=web
+      - traefik.http.services.stock_taking.loadbalancer.server.port=8000
+    
+    command: gunicorn quiz.wsgi:application --bind 0.0.0.0:8000
+
+    volumes:
+      - staticfiles:/app/staticfiles
+      - media:/app/media
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8000)); print('ok')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  staticfiles:
+  media:
