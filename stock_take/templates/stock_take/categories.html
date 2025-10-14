@@ -339,129 +339,159 @@ let currentCategoryId = null;
 let currentGroupId = null;
 
 function setGroupCategory(categoryId, categoryName) {
-    currentCategoryId = categoryId;
-    document.getElementById('groupCategoryId').value = categoryId;
-    document.getElementById('groupCategoryName').textContent = categoryName;
-    // Reset form
-    document.getElementById('groupId').value = '';
-    document.getElementById('groupName').value = '';
-    document.getElementById('groupDescription').value = '';
-    document.getElementById('groupWeighting').value = '2';
-    document.getElementById('groupThreshold').value = '5';
-    document.getElementById('groupColor').value = '#6c757d';
+  currentCategoryId = categoryId;
+  document.getElementById('groupCategoryId').value = categoryId;
+  document.getElementById('groupCategoryName').textContent = categoryName;
+  // Reset form
+  document.getElementById('groupId').value = '';
+  document.getElementById('groupName').value = '';
+  document.getElementById('groupDescription').value = '';
+  document.getElementById('groupWeighting').value = '2';
+  document.getElementById('groupThreshold').value = '5';
+  document.getElementById('groupColor').value = '#6c757d';
 }
 
-$(document).ready(function() {
-    // Edit group button
-    $('.edit-group-btn').on('click', function() {
-        const id = $(this).data('id');
-        const name = $(this).data('name');
-        const description = $(this).data('description');
-        const color = $(this).data('color');
-        const weighting = $(this).data('weighting');
-        const threshold = $(this).data('threshold');
-        
-        $('#groupId').val(id);
-        $('#groupName').val(name);
-        $('#groupDescription').val(description);
-        $('#groupColor').val(color);
-        $('#groupWeighting').val(weighting);
-        $('#groupThreshold').val(threshold);
-        
-        $('#stockTakeGroupModal').modal('show');
-    });
-    
-    // Assign items button
-    $('.assign-items-btn').on('click', function() {
-        const groupId = $(this).data('group-id');
-        const categoryId = $(this).data('category-id');
-        
-        if (groupId || categoryId) {
-            // Show modal and load content
-            $('#assignItemsModal').modal('show');
-            $('#assignmentContent').html(`
-                <div class="text-center py-4">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                </div>
-            `);
-            
-            // Load assignment content via AJAX
-            $.get('{% url "get_unassigned_items" %}', {
-                'group_id': groupId,
-                'category_id': categoryId
-            })
-            .done(function(response) {
-                $('#assignmentContent').html(response.html);
-            })
-            .fail(function() {
-                $('#assignmentContent').html(`
-                    <div class="alert alert-danger">
-                        <i class="bi bi-exclamation-triangle me-2"></i>
-                        Error loading items. Please try again.
-                    </div>
-                `);
-            });
-        }
-    });
-    
-    // Remove from group
-    $('.remove-from-group-btn').on('click', function() {
-        const itemId = $(this).data('item-id');
-        const itemName = $(this).data('item-name');
-        
-        if (confirm(`Remove "${itemName}" from this stock take group?`)) {
-            $.post('{% url "assign_item_to_group" %}', {
-                'item_id': itemId,
-                'group_id': '',  // Empty to remove
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() {
-                location.reload();
-            })
-            .fail(function() {
-                alert('Error removing item from group.');
-            });
-        }
-    });
+$(function () {
+  // --- CSRF via header (recommended) ---
+  function getCookie(name) {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return m ? m.pop() : '';
+  }
+  $.ajaxSetup({
+    beforeSend: function (xhr, settings) {
+      if (!/^GET|HEAD|OPTIONS|TRACE$/i.test(settings.type)) {
+        xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+      }
+    }
+  });
 
-    $('.delete-group-btn').on('click', function() {
-        const groupId = $(this).data('id');
-        const groupName = $(this).data('name');
-        if (confirm(`Delete stock take group "${groupName}"? This will not affect items, but will remove group assignments.`)) {
-            $.post('{% url "delete_stock_take_group" 0 %}'.replace('0', groupId), {
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() { location.reload(); })
-            .fail(function() { alert('Error deleting group.'); });
-        }
-    });
+  // Helper: show BS5 modal by id
+  function showModal(id) {
+    const el = document.getElementById(id);
+    const modal = new bootstrap.Modal(el);
+    modal.show();
+  }
 
-    $('#assignmentContent').on('click', '.assign-item-btn', function() {
-        const itemId = $(this).data('item-id');
-        const groupId = $('#assignGroup').val();
-        $.post('{% url "assign_item_to_group" %}', {
-            'item_id': itemId,
-            'group_id': groupId,
-            'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-        })
-        .done(function() { location.reload(); })
-        .fail(function() { alert('Error assigning item to group.'); });
-    });
+  // --- Edit group ---
+  $('.edit-group-btn').on('click', function () {
+    const id = $(this).data('id');
+    $('#groupId').val(id);
+    $('#groupName').val($(this).data('name'));
+    $('#groupDescription').val($(this).data('description'));
+    $('#groupColor').val($(this).data('color'));
+    $('#groupWeighting').val($(this).data('weighting'));
+    $('#groupThreshold').val($(this).data('threshold'));
+    showModal('stockTakeGroupModal');
+  });
 
-    // Delete category
-    $('.delete-category-btn').on('click', function() {
-        const categoryId = $(this).data('category-id');
-        const categoryName = $(this).data('category-name');
-        if (confirm(`Delete category "${categoryName}"? This will remove all items and groups in this category.`)) {
-            $.post('{% url "delete_category" 0 %}'.replace('0', categoryId), {
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() { location.reload(); })
-            .fail(function() { alert('Error deleting category.'); });
+  // --- Assign items (open modal + load content) ---
+  $('.assign-items-btn').on('click', function () {
+    const groupId = $(this).data('group-id') || null;
+    const categoryId = $(this).data('category-id') || null;
+
+    showModal('assignItemsModal');
+    $('#assignmentContent').html(`
+      <div class="text-center py-4">
+        <div class="spinner-border" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    `);
+
+    const params = {};
+    if (groupId) params.group_id = groupId;
+    if (categoryId) params.category_id = categoryId;
+
+    $.get('{% url "get_unassigned_items" %}', params)
+      .done(function (response) {
+        if (!response || typeof response.html !== 'string') {
+          $('#assignmentContent').html(`
+            <div class="alert alert-danger">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              Invalid response from server.
+            </div>
+          `);
+          return;
         }
-    });
+        $('#assignmentContent').html(response.html);
+
+        // If opened from a specific group, preselect it
+        if (groupId) {
+          const $sel = $('#assignmentContent').find('#assignGroup');
+          if ($sel.length) $sel.val(String(groupId));
+        }
+      })
+      .fail(function () {
+        $('#assignmentContent').html(`
+          <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            Error loading items. Please try again.
+          </div>
+        `);
+      });
+  });
+
+  // --- Assign single item (delegated) ---
+  $('#assignmentContent').on('click', '.assign-item-btn', function () {
+    const itemId = $(this).data('item-id');
+
+    // Prefer modal select; fallback to per-row data attr
+    let targetGroupId = $('#assignmentContent').find('#assignGroup').val();
+    if (!targetGroupId) targetGroupId = $(this).data('target-group-id') || '';
+
+    if (!targetGroupId) {
+      alert('Please select a group first.');
+      return;
+    }
+
+    $.post('{% url "assign_item_to_group" %}', {
+      item_id: itemId,
+      group_id: targetGroupId
+    })
+    .done(function () { location.reload(); })
+    .fail(function () { alert('Error assigning item to group.'); });
+  });
+
+  // --- Remove from group ---
+  $('.remove-from-group-btn').on('click', function () {
+    const itemId = $(this).data('item-id');
+    const itemName = $(this).data('item-name');
+
+    if (!confirm(`Remove "${itemName}" from this stock take group?`)) return;
+
+    $.post('{% url "assign_item_to_group" %}', {
+      item_id: itemId,
+      group_id: '' // empty removes
+    })
+    .done(function () { location.reload(); })
+    .fail(function () { alert('Error removing item from group.'); });
+  });
+
+  // --- Delete group (safer URL replace) ---
+  $('.delete-group-btn').on('click', function () {
+    const groupId = $(this).data('id');
+    const groupName = $(this).data('name');
+    if (!confirm(`Delete stock take group "${groupName}"? This will not affect items, but will remove group assignments.`)) return;
+
+    const deleteUrl = '{% url "delete_stock_take_group" 0 %}'.replace('/0/', `/${groupId}/`);
+
+    $.post(deleteUrl, {})
+      .done(function () { location.reload(); })
+      .fail(function () { alert('Error deleting group.'); });
+  });
+
+  // --- Delete category (safer URL replace) ---
+  $('.delete-category-btn').on('click', function () {
+    const categoryId = $(this).data('category-id');
+    const categoryName = $(this).data('category-name');
+    if (!confirm(`Delete category "${categoryName}"? This will remove all items and groups in this category.`)) return;
+
+    const deleteUrl = '{% url "delete_category" 0 %}'.replace('/0/', `/${categoryId}/`);
+
+    $.post(deleteUrl, {})
+      .done(function () { location.reload(); })
+      .fail(function () { alert('Error deleting category.'); });
+  });
 });
 </script>
 {% endblock %}
