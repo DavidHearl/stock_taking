@@ -107,6 +107,7 @@ class Schedule(models.Model):
     locations = models.TextField(help_text='Comma-separated list of locations')
     scheduled_date = models.DateTimeField()
     created_date = models.DateTimeField(auto_now_add=True)
+    completed_date = models.DateTimeField(blank=True, null=True, help_text='Date when the schedule was marked as completed')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     assigned_to = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)

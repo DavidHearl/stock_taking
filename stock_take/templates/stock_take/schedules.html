@@ -35,6 +35,46 @@ $(document).ready(function() {
         }
     });
     
+    $('.edit-schedule-btn').on('click', function() {
+        const scheduleId = $(this).data('id');
+        const scheduleName = $(this).data('name');
+        const scheduleDate = $(this).data('date');
+        const scheduleDescription = $(this).data('description');
+        const scheduleLocations = $(this).data('locations');
+        const scheduleAssigned = $(this).data('assigned');
+        const scheduleNotes = $(this).data('notes');
+        
+        // Populate the edit modal with current values
+        $('#editScheduleId').val(scheduleId);
+        $('#editScheduleName').val(scheduleName);
+        $('#editScheduleDate').val(scheduleDate);
+        $('#editScheduleDescription').val(scheduleDescription);
+        $('#editScheduleLocations').val(scheduleLocations);
+        $('#editScheduleAssigned').val(scheduleAssigned);
+        $('#editScheduleNotes').val(scheduleNotes);
+        
+        // Show the edit modal
+        $('#editScheduleModal').modal('show');
+    });
+    
+    $('#editScheduleForm').on('submit', function(e) {
+        e.preventDefault();
+        const scheduleId = $('#editScheduleId').val();
+        const formData = $(this).serialize();
+        
+        $.post('{% url "schedule_edit" 0 %}'.replace('0', scheduleId), formData)
+        .done(function(response) {
+            if (response.success) {
+                location.reload();
+            } else {
+                alert('Error updating schedule: ' + response.error);
+            }
+        })
+        .fail(function() {
+            alert('Error updating schedule.');
+        });
+    });
+    
     function updateScheduleStatus(scheduleId, status) {
         $.post('{% url "schedule_update_status" 0 %}'.replace('0', scheduleId), {
             'status': status,
@@ -134,6 +174,62 @@ $(document).ready(function() {
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Create Schedule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Schedule Modal -->
+<div class="modal fade" id="editScheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Schedule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editScheduleForm">
+                {% csrf_token %}
+                <input type="hidden" id="editScheduleId" name="schedule_id">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editScheduleName" class="form-label">Name</label>
+                                <input type="text" class="form-control" id="editScheduleName" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editScheduleDate" class="form-label">Scheduled Date</label>
+                                <input type="datetime-local" class="form-control" id="editScheduleDate" name="scheduled_date" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editScheduleDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="editScheduleDescription" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editScheduleLocations" class="form-label">Locations</label>
+                        <input type="text" class="form-control" id="editScheduleLocations" name="locations" placeholder="Comma-separated locations">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editScheduleAssigned" class="form-label">Assigned To</label>
+                                <input type="text" class="form-control" id="editScheduleAssigned" name="assigned_to">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editScheduleNotes" class="form-label">Notes</label>
+                        <textarea class="form-control" id="editScheduleNotes" name="notes" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Schedule</button>
                 </div>
             </form>
         </div>

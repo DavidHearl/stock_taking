@@ -29,6 +29,7 @@ urlpatterns = [
     path('schedules/', views.schedule_list, name='schedule_list'),
     path('schedules/completed/', views.completed_stock_takes, name='completed_stock_takes'),
     path('schedules/create/', views.schedule_create, name='schedule_create'),
+    path('schedules/edit/<int:schedule_id>/', views.schedule_edit, name='schedule_edit'),
     path('schedules/update-status/<int:schedule_id>/', views.schedule_update_status, name='schedule_update_status'),
     path('schedules/delete/<int:schedule_id>/', views.delete_schedule, name='delete_schedule'),
     

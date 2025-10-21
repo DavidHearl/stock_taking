@@ -130,14 +130,45 @@ def reset_and_populate_schedules():
 
     # Remove completed jobs from pending if completed in last month
     one_month_ago = timezone.now() - datetime.timedelta(days=30)
-    recent_completed = Schedule.objects.filter(status='completed', scheduled_date__gte=one_month_ago)
+    recent_completed = Schedule.objects.filter(
+        status='completed', 
+        completed_date__isnull=False,
+        completed_date__gte=one_month_ago
+    )
     # Remove any pending schedule for the same group as a recently completed one
     for completed in recent_completed:
         for group in completed.stock_take_groups.all():
             Schedule.objects.filter(status='pending', stock_take_groups=group, auto_generated=True).delete()
 
-    # Schedule new auto jobs, high priority first
-    groups = list(StockTakeGroup.objects.all().order_by('-weighting', 'name'))
+    # Schedule new auto jobs, prioritizing groups that haven't been completed recently
+    # Groups are ordered by: 1) Never completed or completed >1 month ago, 2) High weighting first
+    all_groups = StockTakeGroup.objects.all()
+    
+    # Separate groups into those recently completed vs not recently completed
+    never_or_old_completed = []
+    recently_completed_expired = []
+    
+    for group in all_groups:
+        # Check if completed in last 60 days (wider window to determine "recently completed")
+        sixty_days_ago = timezone.now() - datetime.timedelta(days=60)
+        has_recent_completion = Schedule.objects.filter(
+            stock_take_groups=group,
+            status='completed',
+            completed_date__isnull=False,
+            completed_date__gte=sixty_days_ago
+        ).exists()
+        
+        if has_recent_completion:
+            recently_completed_expired.append(group)
+        else:
+            never_or_old_completed.append(group)
+    
+    # Sort each group by priority (weighting)
+    never_or_old_completed.sort(key=lambda g: (-g.weighting, g.name))
+    recently_completed_expired.sort(key=lambda g: (-g.weighting, g.name))
+    
+    # Combine: never/old completed first, then recently completed (back of queue)
+    groups = never_or_old_completed + recently_completed_expired
     scheduled_date = timezone.now() + datetime.timedelta(days=2)
     def next_weekday(dt):
         while dt.weekday() >= 5:
@@ -145,7 +176,18 @@ def reset_and_populate_schedules():
         return dt
     for group in groups:
         items_needing_check = group.items_needing_check
-        if items_needing_check.exists():
+        
+        # Check if this group has been completed within the last month
+        # Include completed schedules without completion dates (legacy data) to be safe
+        recently_completed = Schedule.objects.filter(
+            stock_take_groups=group,
+            status='completed',
+            completed_date__isnull=False,
+            completed_date__gte=one_month_ago
+        ).exists()
+        
+        # Only create schedule if items need checking AND group hasn't been completed recently
+        if items_needing_check.exists() and not recently_completed:
             items_list = list(items_needing_check.values_list('sku', 'name', 'quantity'))
             items_summary = ', '.join([f"{item[0]} ({item[2]} left)" for item in items_list[:5]])
             if len(items_list) > 5:
@@ -174,21 +216,25 @@ def auto_create_stock_take_schedules():
     for group in StockTakeGroup.objects.all():
         items_needing_check = group.items_needing_check
 
-        # Remove auto-generated pending schedules if no items need checking
-        Schedule.objects.filter(
+        # Check if this group has been completed within the last month
+        one_month_ago = timezone.now() - datetime.timedelta(days=30)
+        recently_completed = Schedule.objects.filter(
             stock_take_groups=group,
-            status='pending',
-            auto_generated=True
-        ).exclude(id__in=[
-            s.id for s in Schedule.objects.filter(
+            status='completed',
+            completed_date__isnull=False,
+            completed_date__gte=one_month_ago
+        ).exists()
+
+        # Remove auto-generated pending schedules if recently completed or no items need checking
+        if recently_completed or not items_needing_check.exists():
+            Schedule.objects.filter(
                 stock_take_groups=group,
                 status='pending',
                 auto_generated=True
-            ) if items_needing_check.exists()
-        ]).delete()
+            ).delete()
 
-        # Create new auto-generated schedule if needed and not already present
-        if items_needing_check.exists():
+        # Create new auto-generated schedule if needed and not already present and not recently completed
+        if items_needing_check.exists() and not recently_completed:
             existing_schedule = Schedule.objects.filter(
                 stock_take_groups=group,
                 status='pending',
@@ -214,20 +260,6 @@ def auto_create_stock_take_schedules():
                     locations=', '.join(items_needing_check.values_list('location', flat=True).distinct())
                 )
                 schedule.stock_take_groups.add(group)
-
-                # Optionally, create subsequent schedules (1 day apart, skip weekends)
-                # Example: create 3 more auto schedules for demonstration
-                for i in range(1, 4):
-                    next_date = scheduled_date + datetime.timedelta(days=i)
-                    next_date = next_weekday(next_date)
-                    Schedule.objects.create(
-                        name=f"Auto: {group.name} Stock Take #{i+1}",
-                        description=f"Auto-generated stock take for {group.name} - {items_needing_check.count()} items need checking",
-                        scheduled_date=next_date,
-                        auto_generated=True,
-                        notes=f"Priority: {group.priority_label} | Threshold: {group.auto_schedule_threshold}\nItems needing check: {items_summary}",
-                        locations=', '.join(items_needing_check.values_list('location', flat=True).distinct())
-                    ).stock_take_groups.add(group)
 
 def stock_list(request):
     """Display all stock items in a table"""
@@ -398,7 +430,16 @@ def schedule_update_status(request, schedule_id):
     if request.method == 'POST':
         try:
             schedule = get_object_or_404(Schedule, id=schedule_id)
-            schedule.status = request.POST.get('status')
+            new_status = request.POST.get('status')
+            
+            # If marking as completed, set the completed_date
+            if new_status == 'completed' and schedule.status != 'completed':
+                schedule.completed_date = timezone.now()
+            # If changing from completed to another status, clear completed_date
+            elif new_status != 'completed' and schedule.status == 'completed':
+                schedule.completed_date = None
+                
+            schedule.status = new_status
             schedule.save()
             
             return JsonResponse({'success': True})
@@ -507,6 +548,39 @@ def schedule_create(request):
             messages.error(request, f'Error creating schedule: {str(e)}')
     
     return redirect('schedule_list')
+
+def schedule_edit(request, schedule_id):
+    """Edit an existing schedule"""
+    if request.method == 'POST':
+        try:
+            schedule = get_object_or_404(Schedule, id=schedule_id)
+            
+            # Only allow editing of certain fields
+            if 'scheduled_date' in request.POST:
+                schedule.scheduled_date = request.POST.get('scheduled_date')
+            if 'name' in request.POST:
+                schedule.name = request.POST.get('name')
+            if 'description' in request.POST:
+                schedule.description = request.POST.get('description', '')
+            if 'locations' in request.POST:
+                schedule.locations = request.POST.get('locations', '')
+            if 'assigned_to' in request.POST:
+                schedule.assigned_to = request.POST.get('assigned_to', '')
+            if 'notes' in request.POST:
+                schedule.notes = request.POST.get('notes', '')
+            
+            schedule.save()
+            
+            # Update stock take groups if provided
+            if 'stock_take_groups' in request.POST:
+                group_ids = request.POST.getlist('stock_take_groups')
+                schedule.stock_take_groups.set(group_ids)
+            
+            return JsonResponse({'success': True, 'message': 'Schedule updated successfully!'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 def get_unassigned_items(request):
     """Get items available for assignment to stock take groups"""
