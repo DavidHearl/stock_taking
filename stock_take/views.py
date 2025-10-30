@@ -14,7 +14,11 @@ from django.utils import timezone
 
 def completed_stock_takes(request):
     """Display only completed stock takes"""
-    completed_schedules = Schedule.objects.filter(status='completed').order_by('-scheduled_date')
+    completed_schedules = Schedule.objects.filter(
+        status='completed',
+        completed_date__isnull=False
+    ).order_by('-completed_date')
+    
     return render(request, 'stock_take/completed_stock_takes.html', {
         'completed_schedules': completed_schedules
     })
@@ -435,14 +439,26 @@ def schedule_update_status(request, schedule_id):
             # If marking as completed, set the completed_date
             if new_status == 'completed' and schedule.status != 'completed':
                 schedule.completed_date = timezone.now()
+                schedule.status = new_status
+                schedule.save()
+                
+                # Add a success message to verify it's working
+                messages.success(request, f'Stock take "{schedule.name}" has been completed successfully!')
+                
             # If changing from completed to another status, clear completed_date
             elif new_status != 'completed' and schedule.status == 'completed':
                 schedule.completed_date = None
-                
-            schedule.status = new_status
-            schedule.save()
+                schedule.status = new_status
+                schedule.save()
+            else:
+                schedule.status = new_status
+                schedule.save()
             
-            return JsonResponse({'success': True})
+            return JsonResponse({
+                'success': True, 
+                'message': f'Schedule status updated to {new_status}',
+                'completed_date': schedule.completed_date.isoformat() if schedule.completed_date else None
+            })
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     
