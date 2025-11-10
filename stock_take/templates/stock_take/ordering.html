@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Ordering{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">    
+    <table id="order-table">
+        <thead>
+            <tr>
+                <th>First Name</th>
+                <th>Last Name</th>
+                <th>Sale Number</th>
+                <th>Customer Number</th>
+                <th>Order Date</th>
+                <th>Fit Date</th>
+                <th>Time (Days)</th>
+                <th>Boards PO</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Add New Order Form Row -->
+            <tr class="add-row">
+                <form method="POST" id="add-order-form">
+                    {% csrf_token %}
+                    <td>{{ form.first_name }}</td>
+                    <td>{{ form.last_name }}</td>
+                    <td>{{ form.sale_number }}</td>
+                    <td>{{ form.customer_number }}</td>
+                    <td>{{ form.order_date }}</td>
+                    <td>{{ form.fit_date }}</td>
+                    <td></td>
+                    <td>{{ form.boards_po }}</td>
+                    <td>
+                        <button type="submit" class="btn btn-sm btn-success">Add</button>
+                    </td>
+                </form>
+            </tr>
+            
+            {% for order in orders %}
+            <tr 
+                class="clickable-row" 
+                onclick="toggleDetails('details-{{ order.sale_number }}', this)"
+                id="main-{{ order.sale_number }}"
+            >
+                <td>{{ order.first_name }}</td>
+                <td>{{ order.last_name }}</td>
+                <td>{{ order.sale_number }}</td>
+                <td>{{ order.customer_number }}</td>
+                <td>{{ order.order_date }}</td>
+                <td>{{ order.fit_date }}</td>
+                <td>{{ order.time_allowance }}</td>
+                <td>{{ order.boards_po }}</td>
+                <td onclick="event.stopPropagation();">
+                    <button class="btn btn-sm btn-primary" onclick="editOrder({{ order.id }})">Edit</button>
+                </td>
+            </tr>
+
+            <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
+                <td colspan="9">
+                    <div style="padding: 10px;">
+                        <p><strong>Sale Details for {{ order.sale_number }}:</strong></p>
+                        <ul>
+                            <li>**Full Address:** {{ order.address_line_1 }}, {{ order.city }}</li>
+                            <li>**Phone:** {{ order.phone_number }}</li>
+                            <li>**Notes:** {{ order.internal_notes|default:"No notes available." }}</li>
+                        </ul>
+                        <p>This is where any extra information about the order is displayed when the row is clicked.</p>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+    function toggleDetails(detailRowId, clickedRowElement) {
+        // 1. Get the detail row element using the unique ID
+        var detailRow = document.getElementById(detailRowId);
+        
+        // 2. Toggle the 'hidden' class on the detail row
+        if (detailRow.classList.contains('hidden')) {
+            detailRow.classList.remove('hidden');
+            clickedRowElement.classList.add('expanded'); // Optional: visually mark the main row as expanded
+        } else {
+            detailRow.classList.add('hidden');
+            clickedRowElement.classList.remove('expanded'); // Remove visual mark
+        }
+    }
+
+    function editOrder(orderId) {
+        // Placeholder for edit functionality
+        // You can implement inline editing or redirect to an edit page
+        console.log('Edit order:', orderId);
+        alert('Edit functionality for order ' + orderId + ' - to be implemented');
+    }
+</script>
+
+{% endblock %}

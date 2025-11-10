@@ -1,3 +1,6 @@
+from .forms import OrderForm
+from .models import Order
+
 import csv
 import io
 from decimal import Decimal
@@ -11,6 +14,17 @@ from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup
 from django.template.loader import render_to_string
 import datetime
 from django.utils import timezone
+
+def ordering(request):
+    orders = Order.objects.all().order_by('-order_date')
+    form = OrderForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        form.save()
+        return redirect('ordering')
+    return render(request, 'stock_take/ordering.html', {
+        'orders': orders,
+        'form': form
+    })
 
 def completed_stock_takes(request):
     """Display only completed stock takes"""
