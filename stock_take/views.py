@@ -20,6 +20,13 @@ def ordering(request):
     form = OrderForm(request.POST or None)
     po_form = BoardsPOForm()
     
+    # Add PNX items to each order object for template access
+    for order in orders:
+        if order.boards_po:
+            order.order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
+        else:
+            order.order_pnx_items = []
+    
     if request.method == 'POST' and form.is_valid():
         form.save()
         return redirect('ordering')
@@ -27,7 +34,7 @@ def ordering(request):
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'form': form,
-        'po_form': po_form
+        'po_form': po_form,
     })
 
 def create_boards_po(request):
@@ -109,10 +116,16 @@ def order_details(request, order_id):
     if order.boards_po:
         other_orders = Order.objects.filter(boards_po=order.boards_po).exclude(id=order.id)
     
+    # Get PNX items associated with this order (based on sale_number in customer field)
+    order_pnx_items = []
+    if order.boards_po:
+        order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
         'other_orders': other_orders,
+        'order_pnx_items': order_pnx_items,
     })
 
 def completed_stock_takes(request):
