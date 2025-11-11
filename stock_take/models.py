@@ -19,6 +19,15 @@ class Order(models.Model):
     fit_date = models.DateField()
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
     boards_ordered = models.BooleanField(default=False)
+    job_finished = models.BooleanField(default=False)
+    address = models.CharField(max_length=255, blank=True)
+    postcode = models.CharField(max_length=20, blank=True)
+    ORDER_TYPE_CHOICES = [
+        ('sale', 'Sale'),
+        ('remedial', 'Remedial'),
+        ('warranty', 'Warranty'),
+    ]
+    order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, default='sale')
 
     def time_allowance(self):
         return (self.fit_date - self.order_date).days

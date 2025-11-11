@@ -4,6 +4,7 @@ from .models import Order, BoardsPO, PNXItem
 import csv
 import io
 from decimal import Decimal
+from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
@@ -137,6 +138,23 @@ def completed_stock_takes(request):
     
     return render(request, 'stock_take/completed_stock_takes.html', {
         'completed_schedules': completed_schedules
+    })
+
+def map_view(request):
+    """Display a map with order locations using Leaflet and OpenStreetMap"""
+    # Get all orders with addresses for mapping
+    orders_with_addresses = Order.objects.exclude(address__isnull=True).exclude(address='').order_by('-order_date')
+    all_orders = Order.objects.all().order_by('-order_date')
+
+    # Calculate statistics
+    completed_count = all_orders.filter(job_finished=True).count()
+    in_progress_count = all_orders.filter(job_finished=False).count()
+
+    return render(request, 'stock_take/map.html', {
+        'orders': orders_with_addresses,
+        'orders_with_addresses': orders_with_addresses,
+        'completed_count': completed_count,
+        'in_progress_count': in_progress_count,
     })
 
 def import_csv(request):

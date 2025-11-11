@@ -21,7 +21,8 @@ class OrderForm(forms.ModelForm):
         model = Order
         fields = [
             'first_name', 'last_name', 'sale_number', 'customer_number',
-            'order_date', 'fit_date', 'boards_po', 'boards_ordered'
+            'order_date', 'fit_date', 'boards_po', 'boards_ordered',
+            'job_finished', 'address', 'postcode', 'order_type'
         ]
         widgets = {
             'first_name': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
@@ -32,6 +33,10 @@ class OrderForm(forms.ModelForm):
             'fit_date': forms.DateInput(attrs={'type': 'date', 'class': 'w-full px-2 py-1 border rounded'}),
             'boards_po': forms.Select(attrs={'class': 'w-full px-2 py-1 border rounded'}),
             'boards_ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'job_finished': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'address': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
+            'postcode': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
+            'order_type': forms.Select(attrs={'class': 'w-full px-2 py-1 border rounded'}),
         }
 
     def clean_sale_number(self):

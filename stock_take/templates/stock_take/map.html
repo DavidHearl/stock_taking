@@ -1,0 +1,511 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Map{% endblock %}
+
+{% block nav_map_active %}active{% endblock %}
+
+{% block extra_css %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    #map-container {
+        height: 700px;
+        width: 100%;
+        position: relative;
+    }
+    .leaflet-popup-content {
+        font-size: 14px;
+    }
+    .legend {
+        background: white;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+    .legend-color {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 8px;
+        border: 2px solid white;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body p-0">
+                    <!-- Map Controls -->
+                    <div class="p-3 border-bottom">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">Map Controls</h6>
+                                <small class="text-muted">Using OpenStreetMap - Free geocoding service</small>
+                                <div class="mt-1">
+                                    <small class="text-muted">
+                                        <strong>Legend:</strong>
+                                        <span class="badge bg-success me-1">Sale</span>
+                                        <span class="badge bg-danger me-1">Remedial</span>
+                                        <span class="badge bg-warning me-1">Warranty</span>
+                                    </small>
+                                </div>
+                                <div class="mt-1">
+                                    <small class="text-info">
+                                        <i class="bi bi-info-circle"></i> Some locations may be approximate based on postcode area
+                                    </small>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-info" onclick="fitAllMarkers()">
+                                    <i class="bi bi-bounding-box"></i> Fit All
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="resetMap()">
+                                    <i class="bi bi-house"></i> Reset View
+                                </button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="refreshMap()">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Leaflet Map Container -->
+                    <div id="map-container">
+                        <div id="map-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2 mb-0">Loading map...</p>
+                                <small class="text-muted">Using OpenStreetMap tiles</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orders Table -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Order Details</h5>
+                        <a href="{% url 'ordering' %}" class="btn btn-outline-success btn-sm">
+                            <i class="bi bi-plus-circle"></i> New Order
+                        </a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if orders %}
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Sale #</th>
+                                    <th>Customer</th>
+                                    <th>Address</th>
+                                    <th>Postcode</th>
+                                    <th>Type</th>
+                                    <th>Order Date</th>
+                                    <th>Fit Date</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in orders %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ order.sale_number }}</strong>
+                                    </td>
+                                    <td>
+                                        {{ order.first_name }} {{ order.last_name }}
+                                        <br><small class="text-muted">{{ order.customer_number }}</small>
+                                    </td>
+                                    <td>{{ order.address|default:"-" }}</td>
+                                    <td>
+                                        {% if order.postcode %}
+                                            <span class="badge bg-secondary">{{ order.postcode }}</span>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if order.order_type == 'sale' %}
+                                            <span class="badge bg-success">{{ order.get_order_type_display }}</span>
+                                        {% elif order.order_type == 'remedial' %}
+                                            <span class="badge bg-danger">{{ order.get_order_type_display }}</span>
+                                        {% elif order.order_type == 'warranty' %}
+                                            <span class="badge bg-warning">{{ order.get_order_type_display }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ order.get_order_type_display }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ order.order_date|date:"d/m/Y" }}</td>
+                                    <td>{{ order.fit_date|date:"d/m/Y" }}</td>
+                                    <td>
+                                        {% if order.job_finished %}
+                                            <span class="badge bg-success">
+                                                <i class="bi bi-check-circle"></i> Completed
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-warning">
+                                                <i class="bi bi-clock"></i> In Progress
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <a href="{% url 'order_details' order.id %}" class="btn btn-outline-primary btn-sm" title="View Details">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                            <a href="#" class="btn btn-outline-secondary btn-sm" title="Edit" onclick="alert('Edit functionality would go here')">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet JavaScript -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+let map;
+let markers = [];
+let markerGroup;
+
+// Initialize map when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing Leaflet map...');
+
+    // Initialize the map centered on Northern Ireland
+    map = L.map('map-container').setView([54.6, -6.2], 8);
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+    }).addTo(map);
+
+    // Create marker group for bounds calculation
+    markerGroup = L.featureGroup().addTo(map);
+
+    // Add legend control
+    const legend = L.control({position: 'bottomright'});
+    legend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = `
+            <div class="legend-item">
+                <div class="legend-color" style="background: #28a745;"></div>
+                <span>Sale</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #dc3545;"></div>
+                <span>Remedial</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ffc107;"></div>
+                <span>Warranty</span>
+            </div>
+        `;
+        return div;
+    };
+    legend.addTo(map);
+
+    // Hide loading indicator
+    const loadingEl = document.getElementById('map-loading');
+    if (loadingEl) loadingEl.style.display = 'none';
+
+    // Load markers
+    loadMarkers();
+});
+
+function loadMarkers() {
+    // Clear existing markers
+    markerGroup.clearLayers();
+    markers = [];
+
+    // Add markers for each order
+    {% for order in orders %}
+        addMarker('{{ order.address|escapejs }}', '{{ order.postcode|escapejs }}', '{{ order.sale_number }}', '{{ order.first_name }} {{ order.last_name }}', '{{ order.get_order_type_display }}', {{ order.job_finished|lower }});
+    {% endfor %}
+
+    // Fit bounds after a short delay
+    setTimeout(() => {
+        if (markers.length > 0) {
+            map.fitBounds(markerGroup.getBounds().pad(0.1));
+        }
+    }, 1000);
+}
+
+function addMarker(address, postcode, saleNumber, customerName, orderType, jobFinished) {
+    const fullAddress = postcode ? `${address}, ${postcode}` : address;
+
+    // Geocode using enhanced Nominatim
+    geocodeWithNominatim(fullAddress, function(lat, lng, displayName) {
+        if (lat && lng) {
+            createMarker([lat, lng], fullAddress, saleNumber, customerName, orderType, jobFinished);
+        } else {
+            // Fallback: Use postcode area approximation for Northern Ireland
+            const fallbackCoords = getPostcodeFallback(postcode);
+            if (fallbackCoords) {
+                console.log(`Using postcode fallback for: ${fullAddress} -> ${fallbackCoords.area} (${fallbackCoords.lat}, ${fallbackCoords.lng})`);
+                createMarker([fallbackCoords.lat, fallbackCoords.lng], fullAddress, saleNumber, customerName, orderType, jobFinished, true);
+            } else {
+                console.warn(`No fallback available for postcode: ${postcode} (${fullAddress})`);
+            }
+        }
+    });
+}
+
+// Fallback coordinates for Northern Ireland postcode areas
+function getPostcodeFallback(postcode) {
+    if (!postcode) return null;
+
+    // Extract postcode area (e.g., 'BT18' from 'BT18 0EF')
+    const postcodeUpper = postcode.toUpperCase().trim();
+    const spaceIndex = postcodeUpper.indexOf(' ');
+    const area = spaceIndex > 0 ? postcodeUpper.substring(0, spaceIndex) : postcodeUpper.substring(0, 4);
+
+    console.log(`Looking up postcode area: '${area}' from '${postcode}'`);
+
+    const fallbackAreas = {
+        'BT1': { lat: 54.597, lng: -5.930, area: 'Belfast City Centre' },
+        'BT2': { lat: 54.590, lng: -5.935, area: 'Belfast South' },
+        'BT3': { lat: 54.610, lng: -5.880, area: 'Belfast Harbour' },
+        'BT4': { lat: 54.580, lng: -5.890, area: 'East Belfast' },
+        'BT5': { lat: 54.590, lng: -5.880, area: 'East Belfast' },
+        'BT6': { lat: 54.570, lng: -5.900, area: 'South Belfast' },
+        'BT7': { lat: 54.570, lng: -5.930, area: 'South Belfast' },
+        'BT8': { lat: 54.550, lng: -5.950, area: 'South Belfast' },
+        'BT9': { lat: 54.570, lng: -5.950, area: 'South Belfast' },
+        'BT10': { lat: 54.550, lng: -6.000, area: 'West Belfast' },
+        'BT11': { lat: 54.580, lng: -6.000, area: 'West Belfast' },
+        'BT12': { lat: 54.590, lng: -5.970, area: 'West Belfast' },
+        'BT13': { lat: 54.600, lng: -5.970, area: 'North Belfast' },
+        'BT14': { lat: 54.620, lng: -5.960, area: 'North Belfast' },
+        'BT15': { lat: 54.630, lng: -5.940, area: 'North Belfast' },
+        'BT16': { lat: 54.600, lng: -5.800, area: 'Dunmurry' },
+        'BT17': { lat: 54.560, lng: -6.000, area: 'Dunmurry' },
+        'BT18': { lat: 54.640, lng: -5.840, area: 'Holywood' },
+        'BT19': { lat: 54.650, lng: -5.670, area: 'Bangor' },
+        'BT20': { lat: 54.660, lng: -5.670, area: 'Bangor' },
+        'BT21': { lat: 54.650, lng: -5.700, area: 'Donaghadee' },
+        'BT22': { lat: 54.470, lng: -5.450, area: 'Newtownards' },
+        'BT23': { lat: 54.570, lng: -5.700, area: 'Newtownards' },
+        'BT24': { lat: 54.420, lng: -5.800, area: 'Ballynahinch' },
+        'BT25': { lat: 54.400, lng: -6.100, area: 'Dromore' },
+        'BT26': { lat: 54.450, lng: -6.080, area: 'Hillsborough' },
+        'BT27': { lat: 54.510, lng: -6.030, area: 'Lisburn' },
+        'BT28': { lat: 54.520, lng: -6.050, area: 'Lisburn' },
+        'BT29': { lat: 54.600, lng: -6.200, area: 'Antrim' },
+        'BT30': { lat: 54.320, lng: -5.720, area: 'Downpatrick' },
+        'BT31': { lat: 54.300, lng: -6.000, area: 'Castlewellan' },
+        'BT32': { lat: 54.350, lng: -6.270, area: 'Banbridge' },
+        'BT33': { lat: 54.200, lng: -6.100, area: 'Newcastle' },
+        'BT34': { lat: 54.070, lng: -6.280, area: 'Newry' },
+        'BT35': { lat: 54.180, lng: -6.340, area: 'Newry' },
+        'BT36': { lat: 54.670, lng: -5.950, area: 'Newtownabbey' },
+        'BT37': { lat: 54.680, lng: -5.920, area: 'Newtownabbey' },
+        'BT38': { lat: 54.680, lng: -5.880, area: 'Carrickfergus' },
+        'BT39': { lat: 54.780, lng: -6.200, area: 'Ballyclare' },
+        'BT40': { lat: 54.850, lng: -5.830, area: 'Larne' },
+        'BT41': { lat: 54.720, lng: -6.220, area: 'Antrim' },
+        'BT42': { lat: 54.870, lng: -6.280, area: 'Ballymena' },
+        'BT43': { lat: 55.050, lng: -6.280, area: 'Ballymena' },
+        'BT44': { lat: 55.180, lng: -6.150, area: 'Portrush' },
+        'BT45': { lat: 54.820, lng: -6.720, area: 'Magherafelt' },
+        'BT46': { lat: 54.850, lng: -6.670, area: 'Maghera' },
+        'BT47': { lat: 54.990, lng: -7.330, area: 'Londonderry' },
+        'BT48': { lat: 54.990, lng: -7.320, area: 'Londonderry' },
+        'BT49': { lat: 54.860, lng: -7.280, area: 'Limavady' },
+        'BT51': { lat: 54.880, lng: -6.930, area: 'Coleraine' },
+        'BT52': { lat: 55.130, lng: -6.670, area: 'Coleraine' },
+        'BT53': { lat: 55.200, lng: -6.250, area: 'Ballymoney' },
+        'BT54': { lat: 55.200, lng: -6.250, area: 'Ballycastle' },
+        'BT55': { lat: 55.200, lng: -6.250, area: 'Portstewart' },
+        'BT56': { lat: 55.200, lng: -6.250, area: 'Portrush' },
+        'BT57': { lat: 55.300, lng: -6.500, area: 'Bushmills' },
+        'BT60': { lat: 54.230, lng: -6.600, area: 'Armagh' },
+        'BT61': { lat: 54.350, lng: -6.650, area: 'Armagh' },
+        'BT62': { lat: 54.450, lng: -6.750, area: 'Portadown' },
+        'BT63': { lat: 54.430, lng: -6.450, area: 'Craigavon' },
+        'BT64': { lat: 54.470, lng: -6.330, area: 'Craigavon' },
+        'BT65': { lat: 54.470, lng: -6.330, area: 'Craigavon' },
+        'BT66': { lat: 54.430, lng: -6.250, area: 'Lurgan' },
+        'BT67': { lat: 54.470, lng: -6.330, area: 'Craigavon' },
+        'BT68': { lat: 54.430, lng: -7.150, area: 'Calder' },
+        'BT69': { lat: 54.500, lng: -6.770, area: 'Aughnacloy' },
+        'BT70': { lat: 54.600, lng: -7.120, area: 'Dungannon' },
+        'BT71': { lat: 54.500, lng: -6.770, area: 'Dungannon' },
+        'BT74': { lat: 54.350, lng: -7.630, area: 'Enniskillen' },
+        'BT75': { lat: 54.350, lng: -7.630, area: 'Enniskillen' },
+        'BT76': { lat: 54.250, lng: -7.470, area: 'Clones' },
+        'BT77': { lat: 54.350, lng: -7.630, area: 'Enniskillen' },
+        'BT78': { lat: 54.520, lng: -7.050, area: 'Omagh' },
+        'BT79': { lat: 54.600, lng: -7.300, area: 'Omagh' },
+        'BT80': { lat: 54.650, lng: -6.750, area: 'Cookstown' },
+        'BT81': { lat: 54.820, lng: -7.470, area: 'Castlederg' },
+        'BT82': { lat: 54.870, lng: -7.470, area: 'Strabane' },
+        'BT92': { lat: 54.200, lng: -7.800, area: 'Irvinestown' },
+        'BT93': { lat: 54.300, lng: -7.800, area: 'Belleek' },
+        'BT94': { lat: 54.400, lng: -7.850, area: 'Belcoo' }
+    };
+
+    return fallbackAreas[area] || null;
+}
+
+function geocodeWithNominatim(address, callback) {
+    // Enhanced geocoding for UK addresses, especially Northern Ireland
+    // Try multiple search strategies for better accuracy
+
+    const searchStrategies = [
+        // Strategy 1: Full address with UK country code
+        `${address}, United Kingdom`,
+        // Strategy 2: Postcode-focused search
+        address,
+        // Strategy 3: Add Northern Ireland context for BT postcodes
+        address.includes('BT') ? `${address}, Northern Ireland, UK` : `${address}, UK`
+    ];
+
+    let attempts = 0;
+    const maxAttempts = searchStrategies.length;
+
+    function tryGeocode(strategyIndex) {
+        if (strategyIndex >= maxAttempts) {
+            console.warn(`All geocoding attempts failed for: ${address}`);
+            callback(null, null, null);
+            return;
+        }
+
+        const searchQuery = searchStrategies[strategyIndex];
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=3&countrycodes=GB&addressdetails=1&bounded=1&viewbox=-8.2,55.4,-5.3,54.0`;
+
+        console.log(`Geocoding attempt ${strategyIndex + 1}/${maxAttempts} for: ${searchQuery}`);
+
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                if (data && data.length > 0) {
+                    // Filter results to prefer Northern Ireland for BT postcodes
+                    let bestResult = data[0];
+
+                    if (address.includes('BT')) {
+                        // For BT postcodes, prefer results in Northern Ireland
+                        const niResult = data.find(result =>
+                            result.display_name.includes('Northern Ireland') ||
+                            result.display_name.includes('Antrim') ||
+                            result.display_name.includes('Down') ||
+                            result.display_name.includes('Armagh') ||
+                            result.display_name.includes('Londonderry') ||
+                            result.display_name.includes('Tyrone') ||
+                            result.display_name.includes('Fermanagh')
+                        );
+                        if (niResult) {
+                            bestResult = niResult;
+                        }
+                    }
+
+                    const lat = parseFloat(bestResult.lat);
+                    const lng = parseFloat(bestResult.lon);
+                    const displayName = bestResult.display_name;
+
+                    console.log(`✓ Geocoded "${address}" to: ${displayName} (${lat}, ${lng})`);
+                    callback(lat, lng, displayName);
+                } else {
+                    // Try next strategy
+                    tryGeocode(strategyIndex + 1);
+                }
+            })
+            .catch(error => {
+                console.error(`Geocoding error for "${searchQuery}":`, error);
+                // Try next strategy
+                tryGeocode(strategyIndex + 1);
+            });
+    }
+
+    // Start with first strategy
+    tryGeocode(0);
+}
+
+function createMarker(position, fullAddress, saleNumber, customerName, orderType, jobFinished, isFallback = false) {
+    // Determine marker color based on order type
+    let markerColor;
+    let orderTypeLower = orderType.toLowerCase();
+
+    if (orderTypeLower.includes('sale')) {
+        markerColor = '#28a745'; // Green for Sale
+    } else if (orderTypeLower.includes('remedial')) {
+        markerColor = '#dc3545'; // Red for Remedial
+    } else if (orderTypeLower.includes('warranty') || orderTypeLower.includes('warrant')) {
+        markerColor = '#ffc107'; // Yellow/Orange for Warranty
+    } else {
+        markerColor = '#007bff'; // Blue for other types
+    }
+
+    // Create custom icon
+    const customIcon = L.divIcon({
+        html: `<div style="background-color: ${markerColor}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${orderType.charAt(0).toUpperCase()}</div>`,
+        className: 'custom-marker',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+    });
+
+    // Create marker
+    const marker = L.marker(position, {icon: customIcon}).addTo(markerGroup);
+
+    // Create popup
+    const popupContent = `
+        <div style="max-width: 200px; font-size: 14px;">
+            <h6 style="margin: 0 0 8px 0; font-size: 16px;">Order ${saleNumber}</h6>
+            <p style="margin: 0 0 4px 0;"><strong>Customer:</strong> ${customerName}</p>
+            <p style="margin: 0 0 4px 0;"><strong>Address:</strong> ${fullAddress}</p>
+            <p style="margin: 0 0 4px 0;"><strong>Type:</strong> ${orderType}</p>
+            <p style="margin: 0;"><strong>Status:</strong> <span style="color: ${jobFinished ? '#28a745' : '#6c757d'};">${jobFinished ? 'Completed' : 'In Progress'}</span></p>
+            ${isFallback ? '<p style="margin: 4px 0; color: #856404; font-size: 12px;"><i class="bi bi-info-circle"></i> Approximate location (postcode area)</small></p>' : ''}
+        </div>
+    `;
+
+    marker.bindPopup(popupContent);
+    markers.push(marker);
+}
+
+function fitAllMarkers() {
+    if (markers.length > 0) {
+        map.fitBounds(markerGroup.getBounds().pad(0.1));
+    }
+}
+
+function resetMap() {
+    map.setView([54.6, -6.2], 8);
+}
+
+function refreshMap() {
+    loadMarkers();
+}
+</script>
+{% endblock %}

@@ -44,4 +44,7 @@ urlpatterns = [
     path('ordering/create-po/', views.create_boards_po, name='create_boards_po'),
     path('order/<int:order_id>/update-boards-ordered/', views.update_boards_ordered, name='update_boards_ordered'),
     path('order/<int:order_id>/', views.order_details, name='order_details'),
+    
+    # Map page
+    path('map/', views.map_view, name='map'),
 ]
