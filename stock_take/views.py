@@ -1,5 +1,5 @@
-from .forms import OrderForm
-from .models import Order
+from .forms import OrderForm, BoardsPOForm
+from .models import Order, BoardsPO
 
 import csv
 import io
@@ -18,12 +18,66 @@ from django.utils import timezone
 def ordering(request):
     orders = Order.objects.all().order_by('-order_date')
     form = OrderForm(request.POST or None)
+    po_form = BoardsPOForm()
+    
     if request.method == 'POST' and form.is_valid():
         form.save()
         return redirect('ordering')
+    
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
-        'form': form
+        'form': form,
+        'po_form': po_form
+    })
+
+def create_boards_po(request):
+    """Create a new BoardsPO entry"""
+    if request.method == 'POST':
+        form = BoardsPOForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Boards PO {form.cleaned_data["po_number"]} created successfully.')
+            return redirect('ordering')
+        else:
+            messages.error(request, 'Error creating Boards PO. Please check the form.')
+    return redirect('ordering')
+
+def update_boards_ordered(request, order_id):
+    """Update the boards_ordered status for an order"""
+    if request.method == 'POST':
+        import json
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            data = json.loads(request.body)
+            order.boards_ordered = data.get('boards_ordered', False)
+            order.save()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+def order_details(request, order_id):
+    """Display and edit order details, including boards PO assignment"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if request.method == 'POST':
+        form = OrderForm(request.POST, instance=order)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Order {order.sale_number} updated successfully.')
+            return redirect('order_details', order_id=order_id)
+    else:
+        form = OrderForm(instance=order)
+    
+    # Get other orders with the same boards PO (excluding current order)
+    other_orders = []
+    if order.boards_po:
+        other_orders = Order.objects.filter(boards_po=order.boards_po).exclude(id=order.id)
+    
+    return render(request, 'stock_take/order_details.html', {
+        'order': order,
+        'form': form,
+        'other_orders': other_orders,
     })
 
 def completed_stock_takes(request):

@@ -38,6 +38,10 @@ urlpatterns = [
     path('stock-take/<int:schedule_id>/export/', views.export_stock_take_csv, name='export_stock_take_csv'),
     path('stock-take/update-count/', views.update_stock_count, name='update_stock_count'),
     path('stock-take-groups/delete/<int:group_id>/', views.delete_stock_take_group, name='delete_stock_take_group'),
+    
     # Ordering page
     path('ordering/', views.ordering, name='ordering'),
+    path('ordering/create-po/', views.create_boards_po, name='create_boards_po'),
+    path('order/<int:order_id>/update-boards-ordered/', views.update_boards_ordered, name='update_boards_ordered'),
+    path('order/<int:order_id>/', views.order_details, name='order_details'),
 ]

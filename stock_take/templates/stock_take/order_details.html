@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Order Details - {{ order.sale_number }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Order Details - {{ order.sale_number }}</h2>
+        <a href="{% url 'ordering' %}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Orders
+        </a>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Edit Order Information</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        {% csrf_token %}
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.first_name.id_for_label }}" class="form-label">First Name</label>
+                                    {{ form.first_name }}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.last_name.id_for_label }}" class="form-label">Last Name</label>
+                                    {{ form.last_name }}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.sale_number.id_for_label }}" class="form-label">Sale Number</label>
+                                    {{ form.sale_number }}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.customer_number.id_for_label }}" class="form-label">Customer Number</label>
+                                    {{ form.customer_number }}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.order_date.id_for_label }}" class="form-label">Order Date</label>
+                                    {{ form.order_date }}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.fit_date.id_for_label }}" class="form-label">Fit Date</label>
+                                    {{ form.fit_date }}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.boards_po.id_for_label }}" class="form-label">Boards PO</label>
+                                    {{ form.boards_po }}
+                                    <div class="form-text">Assign a Boards PO to this order</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.boards_ordered.id_for_label }}" class="form-label">Boards Ordered</label>
+                                    <div class="form-check">
+                                        {{ form.boards_ordered }}
+                                        <label class="form-check-label" for="{{ form.boards_ordered.id_for_label }}">
+                                            Boards have been ordered
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Save Changes
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Order Summary</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-sm-5">Customer:</dt>
+                        <dd class="col-sm-7">{{ order.first_name }} {{ order.last_name }}</dd>
+                        
+                        <dt class="col-sm-5">Sale #:</dt>
+                        <dd class="col-sm-7">{{ order.sale_number }}</dd>
+                        
+                        <dt class="col-sm-5">Customer #:</dt>
+                        <dd class="col-sm-7">{{ order.customer_number }}</dd>
+                        
+                        <dt class="col-sm-5">Order Date:</dt>
+                        <dd class="col-sm-7">{{ order.order_date }}</dd>
+                        
+                        <dt class="col-sm-5">Fit Date:</dt>
+                        <dd class="col-sm-7">{{ order.fit_date }}</dd>
+                        
+                        <dt class="col-sm-5">Time Allowance:</dt>
+                        <dd class="col-sm-7">{{ order.time_allowance }} days</dd>
+                        
+                        <dt class="col-sm-5">Boards PO:</dt>
+                        <dd class="col-sm-7">
+                            {% if order.boards_po %}
+                                {{ order.boards_po.po_number }}
+                                {% if order.boards_po.file %}
+                                    <a href="{{ order.boards_po.file.url }}" target="_blank" class="btn btn-sm btn-outline-primary ms-2">
+                                        <i class="bi bi-file-earmark-pdf"></i> View File
+                                    </a>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">Not assigned</span>
+                            {% endif %}
+                        </dd>
+                        
+                        <dt class="col-sm-5">Boards Ordered:</dt>
+                        <dd class="col-sm-7">
+                            {% if order.boards_ordered %}
+                                <span class="badge bg-success">Yes</span>
+                            {% else %}
+                                <span class="badge bg-warning">No</span>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+            
+            {% if order.boards_po %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h6>Boards PO Details</h6>
+                </div>
+                <div class="card-body">
+                    <p><strong>PO Number:</strong> {{ order.boards_po.po_number }}</p>
+                    {% if order.boards_po.file %}
+                        <p><strong>File:</strong> <a href="{{ order.boards_po.file.url }}" target="_blank">{{ order.boards_po.file.name }}</a></p>
+                    {% endif %}
+                    <p><strong>Other Orders:</strong></p>
+                    <ul class="list-unstyled">
+                        {% for other_order in other_orders %}
+                            <li>
+                                <a href="{% url 'order_details' other_order.id %}">{{ other_order.sale_number }}</a> - {{ other_order.first_name }} {{ other_order.last_name }}
+                            </li>
+                        {% empty %}
+                            <li class="text-muted">No other orders assigned to this PO</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
