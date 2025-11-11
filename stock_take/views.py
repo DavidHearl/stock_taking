@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm
-from .models import Order, BoardsPO
+from .models import Order, BoardsPO, PNXItem
 
 import csv
 import io
@@ -31,12 +31,47 @@ def ordering(request):
     })
 
 def create_boards_po(request):
-    """Create a new BoardsPO entry"""
+    """Create a new BoardsPO entry and parse PNX file for items"""
     if request.method == 'POST':
         form = BoardsPOForm(request.POST, request.FILES)
         if form.is_valid():
-            form.save()
-            messages.success(request, f'Boards PO {form.cleaned_data["po_number"]} created successfully.')
+            boards_po = form.save()
+            
+            # Parse PNX file if uploaded
+            if boards_po.file:
+                try:
+                    # Read the PNX file
+                    file_content = boards_po.file.read().decode('utf-8')
+                    io_string = io.StringIO(file_content)
+                    reader = csv.DictReader(io_string, delimiter=';')
+                    
+                    items_created = 0
+                    for row in reader:
+                        # Skip empty rows
+                        if not row.get('BARCODE', '').strip():
+                            continue
+                            
+                        try:
+                            PNXItem.objects.create(
+                                boards_po=boards_po,
+                                barcode=row.get('BARCODE', '').strip(),
+                                matname=row.get('MATNAME', '').strip(),
+                                cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
+                                cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
+                                cnt=Decimal(row.get('CNT', '0').strip() or '0'),
+                                customer=row.get('CUSTOMER', '').strip()
+                            )
+                            items_created += 1
+                        except (ValueError, KeyError) as e:
+                            # Skip rows with invalid data
+                            continue
+                    
+                    messages.success(request, f'Boards PO {boards_po.po_number} created successfully with {items_created} items.')
+                except Exception as e:
+                    messages.warning(request, f'Boards PO {boards_po.po_number} created but there was an error parsing the PNX file: {str(e)}')
+            else:
+                messages.success(request, f'Boards PO {boards_po.po_number} created successfully.')
+            
             return redirect('ordering')
         else:
             messages.error(request, 'Error creating Boards PO. Please check the form.')

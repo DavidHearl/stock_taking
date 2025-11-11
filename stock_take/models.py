@@ -26,6 +26,20 @@ class Order(models.Model):
     def __str__(self):
         return f"Order {self.sale_number} for {self.first_name} {self.last_name}"
 
+
+class PNXItem(models.Model):
+    boards_po = models.ForeignKey(BoardsPO, on_delete=models.CASCADE, related_name='pnx_items')
+    barcode = models.CharField(max_length=100)
+    matname = models.CharField(max_length=100)
+    cleng = models.DecimalField(max_digits=10, decimal_places=2)
+    cwidth = models.DecimalField(max_digits=10, decimal_places=2)
+    cnt = models.DecimalField(max_digits=10, decimal_places=2)
+    customer = models.CharField(max_length=200)
+
+    def __str__(self):
+        return f"{self.barcode} - {self.matname}"
+
+
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
