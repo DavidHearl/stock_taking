@@ -4,9 +4,10 @@ from .models import Order, BoardsPO
 class BoardsPOForm(forms.ModelForm):
     class Meta:
         model = BoardsPO
-        fields = ['po_number', 'file']
+        fields = ['po_number', 'boards_ordered', 'file']
         widgets = {
             'po_number': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., PO1234'}),
+            'boards_ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'file': forms.FileInput(attrs={'class': 'form-control'}),
         }
 
@@ -21,7 +22,7 @@ class OrderForm(forms.ModelForm):
         model = Order
         fields = [
             'first_name', 'last_name', 'sale_number', 'customer_number',
-            'order_date', 'fit_date', 'boards_po', 'boards_ordered',
+            'order_date', 'fit_date', 'boards_po',
             'job_finished', 'address', 'postcode', 'order_type'
         ]
         widgets = {
@@ -32,7 +33,6 @@ class OrderForm(forms.ModelForm):
             'order_date': forms.DateInput(attrs={'type': 'date', 'class': 'w-full px-2 py-1 border rounded'}),
             'fit_date': forms.DateInput(attrs={'type': 'date', 'class': 'w-full px-2 py-1 border rounded'}),
             'boards_po': forms.Select(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'boards_ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'job_finished': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'address': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
             'postcode': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),

@@ -5,6 +5,7 @@ from decimal import Decimal
 class BoardsPO(models.Model):
     po_number = models.CharField(max_length=50, unique=True)
     file = models.FileField(upload_to='boards_po_files/', blank=True, null=True)
+    boards_ordered = models.BooleanField(default=False)
 
     def __str__(self):
         return self.po_number
@@ -18,7 +19,6 @@ class Order(models.Model):
     order_date = models.DateField()
     fit_date = models.DateField()
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
-    boards_ordered = models.BooleanField(default=False)
     job_finished = models.BooleanField(default=False)
     address = models.CharField(max_length=255, blank=True)
     postcode = models.CharField(max_length=20, blank=True)

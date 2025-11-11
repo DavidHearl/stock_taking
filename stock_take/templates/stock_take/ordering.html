@@ -11,9 +11,76 @@
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Orders</h2>
-        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createPOModal">
-            <i class="bi bi-plus-circle"></i> Add New Boards PO
-        </button>
+        <div>
+            <button type="button" class="btn btn-outline-secondary btn-sm me-2" data-bs-toggle="collapse" data-bs-target="#editPOSection">
+                <i class="bi bi-pencil-square"></i> Edit Boards PO
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createPOModal">
+                <i class="bi bi-plus-circle"></i> Add New Boards PO
+            </button>
+        </div>
+    </div>
+
+    <!-- Edit Boards PO Section -->
+    <div class="collapse mb-4" id="editPOSection">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Edit Boards PO Status</h5>
+            </div>
+            <div class="card-body">
+                {% if boards_pos %}
+                <div class="row">
+                    {% for po in boards_pos %}
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card h-100 {% if po.boards_ordered %}border-success{% endif %}">
+                            <div class="card-body">
+                                <h6 class="card-title">{{ po.po_number }}</h6>
+                                <p class="card-text">
+                                    <strong>Orders:</strong> {{ po.orders.count }}<br>
+                                    {% if po.boards_ordered %}
+                                        <span class="badge bg-success"><i class="bi bi-check-circle"></i> Ordered</span>
+                                    {% endif %}
+                                </p>
+                                <div class="form-check">
+                                    <input class="form-check-input boards-ordered-toggle" type="checkbox"
+                                           id="po-{{ po.id }}" {% if po.boards_ordered %}checked{% endif %}
+                                           data-po-id="{{ po.id }}">
+                                    <label class="form-check-label" for="po-{{ po.id }}">
+                                        Mark as Ordered
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">No Boards POs found.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Form Errors Display -->
+    {% if form.errors %}
+    <div class="alert alert-danger mb-3">
+        <h6>Please correct the following errors:</h6>
+        <ul class="mb-0">
+            {% for field in form %}
+                {% for error in field.errors %}
+                    <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                {% endfor %}
+            {% endfor %}
+            {% for error in form.non_field_errors %}
+                <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    
+    <!-- Search Box -->
+    <div class="mb-3">
+        <input type="text" id="orderSearch" class="form-control" placeholder="Search orders...">
     </div>
     
     <table id="order-table">
@@ -27,7 +94,6 @@
                 <th>Fit Date</th>
                 <th>Time (Days)</th>
                 <th>Boards PO</th>
-                <th>Boards Ordered</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -44,10 +110,14 @@
                     <td>{{ form.fit_date }}</td>
                     <td></td>
                     <td>{{ form.boards_po }}</td>
-                    <td>{{ form.boards_ordered }}</td>
                     <td>
                         <button type="submit" class="btn btn-sm btn-success">Add</button>
                     </td>
+                    <!-- Hidden fields for form validation -->
+                    <input type="hidden" name="job_finished" value="False">
+                    <input type="hidden" name="order_type" value="sale">
+                    <input type="hidden" name="address" value="">
+                    <input type="hidden" name="postcode" value="">
                 </form>
             </tr>
             
@@ -66,20 +136,18 @@
                 <td>{{ order.time_allowance }}</td>
                 <td>
                     {% if order.boards_po %}
-                        <a href="{% url 'order_details' order.id %}" class="text-decoration-none">
-                            {{ order.boards_po.po_number }}
-                        </a>
+                        <div class="d-flex align-items-center">
+                            <a href="{% url 'order_details' order.id %}" class="text-decoration-none me-2">
+                                {{ order.boards_po.po_number }}
+                            </a>
+                            {% if order.boards_po.boards_ordered %}
+                                <i class="bi bi-check-circle text-success" title="Boards Ordered"></i>
+                            {% endif %}
+                        </div>
                     {% else %}
                         <a href="{% url 'order_details' order.id %}" class="text-muted">
                             <em>Not assigned</em>
                         </a>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if order.boards_ordered %}
-                        <span class="badge bg-success">Yes</span>
-                    {% else %}
-                        <span class="badge bg-warning">No</span>
                     {% endif %}
                 </td>
                 <td onclick="event.stopPropagation();">
@@ -88,14 +156,9 @@
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
-                <td colspan="10">
+                <td colspan="9">
                     <div style="padding: 10px;">
-                        <p><strong>Sale Details for {{ order.sale_number }}:</strong></p>
-                        <ul>
-                            <li>**Full Address:** {{ order.address_line_1 }}, {{ order.city }}</li>
-                            <li>**Phone:** {{ order.phone_number }}</li>
-                            <li>**Notes:** {{ order.internal_notes|default:"No notes available." }}</li>
-                        </ul>
+                        <p><strong>Details for {{ order.sale_number }}</strong></p>
                         
                         {% if order.order_pnx_items %}
                         <p><strong>PNX Items ({{ order.order_pnx_items|length }} items):</strong></p>
@@ -148,6 +211,11 @@
                         {{ po_form.po_number }}
                         <small class="form-text text-muted">Must start with "PO"</small>
                     </div>
+                    <div class="mb-3 form-check">
+                        {{ po_form.boards_ordered }}
+                        <label for="id_boards_ordered" class="form-check-label">Boards Ordered</label>
+                        <small class="form-text text-muted">Check if boards have already been ordered</small>
+                    </div>
                     <div class="mb-3">
                         <label for="id_file" class="form-label">Attach File (Optional)</label>
                         {{ po_form.file }}
@@ -184,9 +252,9 @@
         alert('Edit functionality for order ' + orderId + ' - to be implemented');
     }
 
-    function updateBoardsOrdered(orderId, isChecked) {
-        // Send AJAX request to update the boards_ordered status
-        fetch(`/stock-take/order/${orderId}/update-boards-ordered/`, {
+    function updateBoardsOrdered(poId, isChecked) {
+        // Send AJAX request to update the boards_ordered status for a Boards PO
+        fetch(`/stock-take/boards-po/${poId}/update-boards-ordered/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -200,14 +268,65 @@
         .then(data => {
             if (data.success) {
                 console.log('Boards ordered status updated successfully');
+                // Update the visual status
+                const card = document.querySelector(`#po-${poId}`).closest('.card');
+                const badge = card.querySelector('.badge');
+                if (isChecked) {
+                    card.classList.add('border-success');
+                    if (!badge) {
+                        // Add badge if it doesn't exist
+                        const badgeHtml = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Ordered</span>';
+                        card.querySelector('.card-text').insertAdjacentHTML('beforeend', '<br>' + badgeHtml);
+                    }
+                } else {
+                    card.classList.remove('border-success');
+                    if (badge) {
+                        badge.remove();
+                    }
+                }
             } else {
                 console.error('Failed to update boards ordered status');
+                // Revert the checkbox
+                document.querySelector(`#po-${poId}`).checked = !isChecked;
             }
         })
         .catch(error => {
             console.error('Error:', error);
+            // Revert the checkbox
+            document.querySelector(`#po-${poId}`).checked = !isChecked;
         });
     }
+
+    // Add event listeners to the boards ordered toggles
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.boards-ordered-toggle').forEach(function(checkbox) {
+            checkbox.addEventListener('change', function() {
+                const poId = this.getAttribute('data-po-id');
+                updateBoardsOrdered(poId, this.checked);
+            });
+        });
+
+        // Search functionality
+        const searchInput = document.getElementById('orderSearch');
+        const tableBody = document.querySelector('#order-table tbody');
+
+        searchInput.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase();
+            const rows = tableBody.querySelectorAll('tr');
+
+            rows.forEach(row => {
+                // Skip the add-row
+                if (row.classList.contains('add-row')) return;
+
+                const text = row.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    });
 </script>
 
 {% endblock %}

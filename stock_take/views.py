@@ -17,7 +17,12 @@ import datetime
 from django.utils import timezone
 
 def ordering(request):
-    orders = Order.objects.all().order_by('-order_date')
+    # Sort by boards_po.po_number first (nulls last), then by order_date descending
+    orders = Order.objects.all().order_by(
+        models.F('boards_po__po_number').asc(nulls_last=True),
+        '-order_date'
+    )
+    boards_pos = BoardsPO.objects.all().order_by('po_number')
     form = OrderForm(request.POST or None)
     po_form = BoardsPOForm()
     
@@ -34,6 +39,7 @@ def ordering(request):
     
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
+        'boards_pos': boards_pos,
         'form': form,
         'po_form': po_form,
     })
@@ -85,15 +91,15 @@ def create_boards_po(request):
             messages.error(request, 'Error creating Boards PO. Please check the form.')
     return redirect('ordering')
 
-def update_boards_ordered(request, order_id):
-    """Update the boards_ordered status for an order"""
+def update_boards_ordered(request, boards_po_id):
+    """Update the boards_ordered status for a Boards PO"""
     if request.method == 'POST':
         import json
         try:
-            order = get_object_or_404(Order, id=order_id)
+            boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
             data = json.loads(request.body)
-            order.boards_ordered = data.get('boards_ordered', False)
-            order.save()
+            boards_po.boards_ordered = data.get('boards_ordered', False)
+            boards_po.save()
             return JsonResponse({'success': True})
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
