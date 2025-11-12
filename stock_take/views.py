@@ -1,4 +1,4 @@
-from .forms import OrderForm, BoardsPOForm
+from .forms import OrderForm, BoardsPOForm, OSDoorForm
 from .models import Order, BoardsPO, PNXItem
 
 import csv
@@ -110,13 +110,25 @@ def order_details(request, order_id):
     order = get_object_or_404(Order, id=order_id)
     
     if request.method == 'POST':
-        form = OrderForm(request.POST, instance=order)
-        if form.is_valid():
-            form.save()
-            messages.success(request, f'Order {order.sale_number} updated successfully.')
-            return redirect('order_details', order_id=order_id)
+        # Check if this is an OS door form submission
+        if 'door_style' in request.POST:
+            os_door_form = OSDoorForm(request.POST)
+            if os_door_form.is_valid():
+                os_door = os_door_form.save(commit=False)
+                os_door.customer = order
+                os_door.save()
+                messages.success(request, 'OS Door added successfully.')
+                return redirect('order_details', order_id=order_id)
+        else:
+            form = OrderForm(request.POST, instance=order)
+            if form.is_valid():
+                form.save()
+                messages.success(request, f'Order {order.sale_number} updated successfully.')
+                return redirect('order_details', order_id=order_id)
     else:
         form = OrderForm(instance=order)
+    
+    os_door_form = OSDoorForm()
     
     # Get other orders with the same boards PO (excluding current order)
     other_orders = []
@@ -131,6 +143,7 @@ def order_details(request, order_id):
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
+        'os_door_form': os_door_form,
         'other_orders': other_orders,
         'order_pnx_items': order_pnx_items,
     })

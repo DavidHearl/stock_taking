@@ -94,6 +94,7 @@
                 <th>Fit Date</th>
                 <th>Time (Days)</th>
                 <th>Boards PO</th>
+                <th>OS Doors</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -110,6 +111,7 @@
                     <td>{{ form.fit_date }}</td>
                     <td></td>
                     <td>{{ form.boards_po }}</td>
+                    <td></td>
                     <td>
                         <button type="submit" class="btn btn-sm btn-success">Add</button>
                     </td>
@@ -150,13 +152,18 @@
                         </a>
                     {% endif %}
                 </td>
+                <td>
+                    {% if order.os_doors.exists %}
+                        <i class="bi bi-check-circle text-primary" title="Has OS Doors"></i>
+                    {% endif %}
+                </td>
                 <td onclick="event.stopPropagation();">
                     <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-primary">Edit</a>
                 </td>
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
-                <td colspan="9">
+                <td colspan="10">
                     <div style="padding: 10px;">
                         <p><strong>Details for {{ order.sale_number }}</strong></p>
                         
@@ -186,6 +193,50 @@
                         </div>
                         {% else %}
                         <p><strong>PNX Items:</strong> No items found for this order.</p>
+                        {% endif %}
+                        
+                        {% if order.os_doors.all %}
+                        <p><strong>OS Doors ({{ order.os_doors.count }} items):</strong></p>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Door Style</th>
+                                        <th>Style Colour</th>
+                                        <th>Dimensions</th>
+                                        <th>Colour</th>
+                                        <th>Qty</th>
+                                        <th>Ordered</th>
+                                        <th>Received</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for os_door in order.os_doors.all %}
+                                    <tr>
+                                        <td>{{ os_door.door_style }}</td>
+                                        <td>{{ os_door.style_colour }}</td>
+                                        <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                                        <td>{{ os_door.colour }}</td>
+                                        <td>{{ os_door.quantity }}</td>
+                                        <td>
+                                            {% if os_door.ordered %}
+                                                <i class="bi bi-check-circle text-success"></i>
+                                            {% else %}
+                                                <i class="bi bi-x-circle text-muted"></i>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if os_door.received %}
+                                                <i class="bi bi-check-circle text-success"></i>
+                                            {% else %}
+                                                <i class="bi bi-x-circle text-muted"></i>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                         {% endif %}
                     </div>
                 </td>

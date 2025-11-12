@@ -1,5 +1,5 @@
 from django import forms
-from .models import Order, BoardsPO
+from .models import Order, BoardsPO, OSDoor
 
 class BoardsPOForm(forms.ModelForm):
     class Meta:
@@ -50,3 +50,24 @@ class OrderForm(forms.ModelForm):
         if len(customer_number) != 6 or not customer_number.isdigit() or not customer_number.startswith('0'):
             raise forms.ValidationError('Customer Number must be a 6 digit number starting with 0.')
         return customer_number
+
+
+class OSDoorForm(forms.ModelForm):
+    class Meta:
+        model = OSDoor
+        fields = [
+            'door_style', 'style_colour', 'item_description',
+            'height', 'width', 'colour', 'quantity',
+            'ordered', 'received'
+        ]
+        widgets = {
+            'door_style': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Flush Door'}),
+            'style_colour': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., White'}),
+            'item_description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'Detailed description'}),
+            'height': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': 'Height in mm'}),
+            'width': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': 'Width in mm'}),
+            'colour': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Oak'}),
+            'quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': '1'}),
+            'ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'received': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }

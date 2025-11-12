@@ -49,6 +49,22 @@ class PNXItem(models.Model):
         return f"{self.barcode} - {self.matname}"
 
 
+class OSDoor(models.Model):
+    customer = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='os_doors')
+    door_style = models.CharField(max_length=100)
+    style_colour = models.CharField(max_length=100)
+    item_description = models.TextField()
+    height = models.DecimalField(max_digits=6, decimal_places=2)
+    width = models.DecimalField(max_digits=6, decimal_places=2)
+    colour = models.CharField(max_length=100)
+    quantity = models.PositiveIntegerField()
+    ordered = models.BooleanField(default=False)
+    received = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"OS Door for {self.customer.sale_number} - {self.door_style}"
+
+
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)

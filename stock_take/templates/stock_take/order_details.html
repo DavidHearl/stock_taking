@@ -130,6 +130,190 @@
                     </form>
                 </div>
             </div>
+
+            <!-- OS Doors Section -->
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">OS Doors</h6>
+                    <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#addOSDoorForm">
+                        <i class="bi bi-plus-circle"></i> Add OS Door
+                    </button>
+                </div>
+                <div class="card-body">
+                    <!-- Existing OS Doors -->
+                    {% if order.os_doors.all %}
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Door Style</th>
+                                    <th>Style Colour</th>
+                                    <th>Dimensions</th>
+                                    <th>Colour</th>
+                                    <th>Qty</th>
+                                    <th>Ordered</th>
+                                    <th>Received</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for os_door in order.os_doors.all %}
+                                <tr>
+                                    <td>{{ os_door.door_style }}</td>
+                                    <td>{{ os_door.style_colour }}</td>
+                                    <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                                    <td>{{ os_door.colour }}</td>
+                                    <td>{{ os_door.quantity }}</td>
+                                    <td>
+                                        {% if os_door.ordered %}
+                                            <i class="bi bi-check-circle text-success"></i>
+                                        {% else %}
+                                            <i class="bi bi-x-circle text-muted"></i>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if os_door.received %}
+                                            <i class="bi bi-check-circle text-success"></i>
+                                        {% else %}
+                                            <i class="bi bi-x-circle text-muted"></i>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-3">No OS doors added yet.</p>
+                    {% endif %}
+
+                    <!-- Add OS Door Form -->
+                    <div class="collapse" id="addOSDoorForm">
+                        <hr>
+                        <h6>Add New OS Door</h6>
+                        <form method="POST">
+                            {% csrf_token %}
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="{{ os_door_form.door_style.id_for_label }}" class="form-label">Door Style</label>
+                                        {{ os_door_form.door_style }}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="{{ os_door_form.style_colour.id_for_label }}" class="form-label">Style Colour</label>
+                                        {{ os_door_form.style_colour }}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="{{ os_door_form.item_description.id_for_label }}" class="form-label">Item Description</label>
+                                {{ os_door_form.item_description }}
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="{{ os_door_form.height.id_for_label }}" class="form-label">Height (mm)</label>
+                                        {{ os_door_form.height }}
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="{{ os_door_form.width.id_for_label }}" class="form-label">Width (mm)</label>
+                                        {{ os_door_form.width }}
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="{{ os_door_form.colour.id_for_label }}" class="form-label">Colour</label>
+                                        {{ os_door_form.colour }}
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="mb-3">
+                                        <label for="{{ os_door_form.quantity.id_for_label }}" class="form-label">Quantity</label>
+                                        {{ os_door_form.quantity }}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check mb-3">
+                                        {{ os_door_form.ordered }}
+                                        <label for="{{ os_door_form.ordered.id_for_label }}" class="form-check-label">Ordered</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mb-3">
+                                        {{ os_door_form.received }}
+                                        <label for="{{ os_door_form.received.id_for_label }}" class="form-check-label">Received</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-plus-circle"></i> Add OS Door
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            {% if order.boards_po %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h6>Boards PO Details</h6>
+                </div>
+                <div class="card-body">
+                    <p><strong>PO Number:</strong> {{ order.boards_po.po_number }}</p>
+                    {% if order.boards_po.file %}
+                        <p><strong>File:</strong> <a href="{{ order.boards_po.file.url }}" target="_blank">{{ order.boards_po.file.name }}</a></p>
+                    {% endif %}
+
+                    {% if order_pnx_items %}
+                    <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Barcode</th>
+                                    <th>Material</th>
+                                    <th>Dimensions (LxW)</th>
+                                    <th>Count</th>
+                                    <th>Customer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in order_pnx_items %}
+                                <tr>
+                                    <td>{{ item.barcode }}</td>
+                                    <td>{{ item.matname }}</td>
+                                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
+                                    <td>{{ item.cnt }}</td>
+                                    <td>{{ item.customer }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
+                    <p><strong>Other Orders:</strong></p>
+                    <ul class="list-unstyled">
+                        {% for other_order in other_orders %}
+                            <li>
+                                <a href="{% url 'order_details' other_order.id %}">{{ other_order.sale_number }}</a> - {{ other_order.first_name }} {{ other_order.last_name }}
+                            </li>
+                        {% empty %}
+                            <li class="text-muted">No other orders assigned to this PO</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
         </div>
         
         <div class="col-md-4">
@@ -207,59 +391,6 @@
                     </dl>
                 </div>
             </div>
-            
-            {% if order.boards_po %}
-            <div class="card mt-3">
-                <div class="card-header">
-                    <h6>Boards PO Details</h6>
-                </div>
-                <div class="card-body">
-                    <p><strong>PO Number:</strong> {{ order.boards_po.po_number }}</p>
-                    {% if order.boards_po.file %}
-                        <p><strong>File:</strong> <a href="{{ order.boards_po.file.url }}" target="_blank">{{ order.boards_po.file.name }}</a></p>
-                    {% endif %}
-                    
-                    {% if order_pnx_items %}
-                    <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Barcode</th>
-                                    <th>Material</th>
-                                    <th>Dimensions (LxW)</th>
-                                    <th>Count</th>
-                                    <th>Customer</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in order_pnx_items %}
-                                <tr>
-                                    <td>{{ item.barcode }}</td>
-                                    <td>{{ item.matname }}</td>
-                                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
-                                    <td>{{ item.cnt }}</td>
-                                    <td>{{ item.customer }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% endif %}
-                    
-                    <p><strong>Other Orders:</strong></p>
-                    <ul class="list-unstyled">
-                        {% for other_order in other_orders %}
-                            <li>
-                                <a href="{% url 'order_details' other_order.id %}">{{ other_order.sale_number }}</a> - {{ other_order.first_name }} {{ other_order.last_name }}
-                            </li>
-                        {% empty %}
-                            <li class="text-muted">No other orders assigned to this PO</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-            {% endif %}
         </div>
     </div>
 </div>
