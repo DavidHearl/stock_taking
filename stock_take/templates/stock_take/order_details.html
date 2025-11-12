@@ -135,11 +135,29 @@
             <div class="card mt-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">OS Doors</h6>
-                    <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#addOSDoorForm">
-                        <i class="bi bi-plus-circle"></i> Add OS Door
-                    </button>
+                    <div>
+                        {% if order.os_doors_required %}
+                        <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="modal" data-bs-target="#updateOSDModal">
+                            <i class="bi bi-pencil"></i> Update PO
+                        </button>
+                        {% endif %}
+                        <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#addOSDoorForm">
+                            <i class="bi bi-plus-circle"></i> Add OS Door
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
+                    {% if order.os_doors_required %}
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <strong>Status:</strong> 
+                            <span class="badge bg-success">Required</span>
+                            {% if order.os_doors_po %}
+                                <span class="badge bg-success ms-2">Ordered (PO: {{ order.os_doors_po }})</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                     <!-- Existing OS Doors -->
                     {% if order.os_doors.all %}
                     <div class="table-responsive mb-3">
@@ -261,6 +279,109 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Accessories Section -->
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Accessories</h6>
+                    <div>
+                        <button class="btn btn-sm btn-outline-info me-2" type="button" data-bs-toggle="modal" data-bs-target="#uploadAccessoriesModal">
+                            <i class="bi bi-upload"></i> Upload CSV
+                        </button>
+                        {% if order.accessories.exists %}
+                        <form method="POST" action="{% url 'delete_all_accessories' order.id %}" style="display: inline;" 
+                              onsubmit="return confirm('Are you sure you want to remove ALL accessories from this order? This action cannot be undone.');">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-trash"></i> Remove All
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Existing Accessories -->
+                    {% if order.accessories.all %}
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>SKU</th>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Qty</th>
+                                    <th>Available</th>
+                                    <th>Status</th>
+                                    {% if has_os_door_accessories %}
+                                    <th>Required</th>
+                                    <th>Ordered</th>
+                                    {% endif %}
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for accessory in order.accessories.all %}
+                                <tr {% if accessory.missing %}class="table-warning"{% endif %}>
+                                    <td>{{ accessory.sku }}</td>
+                                    <td>{{ accessory.name }}</td>
+                                    <td>{{ accessory.description|truncatechars:30 }}</td>
+                                    <td>{{ accessory.quantity }}</td>
+                                    <td>
+                                        {% if accessory.stock_item %}
+                                            {{ accessory.available_quantity }}
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if accessory.missing %}
+                                            <span class="badge bg-warning">Missing</span>
+                                        {% elif accessory.stock_item %}
+                                            {% if accessory.available_quantity >= accessory.quantity %}
+                                                <span class="badge bg-success">In Stock</span>
+                                            {% else %}
+                                                <span class="badge bg-danger">Low Stock</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="badge bg-info">No Stock Link</span>
+                                        {% endif %}
+                                    </td>
+                                    {% if has_os_door_accessories %}
+                                    <td>
+                                        {% if accessory.is_os_door %}
+                                            <input type="checkbox" {% if accessory.required %}checked{% endif %} disabled>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if accessory.is_os_door %}
+                                            <input type="checkbox" {% if accessory.ordered %}checked{% endif %} disabled>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endif %}
+                                    <td>
+                                        <form method="POST" action="{% url 'delete_accessory' accessory.id %}" style="display: inline;" 
+                                              onsubmit="return confirm('Are you sure you want to remove this accessory?');">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove Accessory">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-3">No accessories added yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+
 
             {% if order.boards_po %}
             <div class="card mt-3">
@@ -394,4 +515,58 @@
         </div>
     </div>
 </div>
+
+<!-- Modal for Uploading Accessories CSV -->
+<div class="modal fade" id="uploadAccessoriesModal" tabindex="-1" aria-labelledby="uploadAccessoriesModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{% url 'upload_accessories_csv' %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="uploadAccessoriesModalLabel">Upload Accessories CSV (Auto-Order Detection)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_csv_file" class="form-label">CSV File</label>
+                        <input type="file" class="form-control" id="id_csv_file" name="csv_file" accept=".csv" required>
+                        <small class="form-text text-muted">CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from customer number in filename.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Upload & Process</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Updating OS Doors PO -->
+<div class="modal fade" id="updateOSDModal" tabindex="-1" aria-labelledby="updateOSDModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{% url 'update_os_doors_po' order.id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="updateOSDModalLabel">Update OS Doors PO</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_os_doors_po" class="form-label">OS Doors PO Number</label>
+                        <input type="text" class="form-control" id="id_os_doors_po" name="os_doors_po" 
+                               value="{{ order.os_doors_po }}" placeholder="Enter PO number when ordered">
+                        <small class="form-text text-muted">Leave blank if not yet ordered</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update PO</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

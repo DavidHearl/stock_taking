@@ -1,5 +1,5 @@
-from .forms import OrderForm, BoardsPOForm, OSDoorForm
-from .models import Order, BoardsPO, PNXItem
+from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory
+from .models import Order, BoardsPO, PNXItem, StockItem, Accessory
 
 import csv
 import io
@@ -17,14 +17,16 @@ import datetime
 from django.utils import timezone
 
 def ordering(request):
-    # Sort by boards_po.po_number first (nulls last), then by order_date descending
+    # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by order_date descending
     orders = Order.objects.all().order_by(
+        'job_finished',  # Incomplete orders first
         models.F('boards_po__po_number').asc(nulls_last=True),
         '-order_date'
     )
     boards_pos = BoardsPO.objects.all().order_by('po_number')
     form = OrderForm(request.POST or None)
     po_form = BoardsPOForm()
+    accessories_csv_form = AccessoryCSVForm()
     
     # Add PNX items to each order object for template access
     for order in orders:
@@ -42,6 +44,7 @@ def ordering(request):
         'boards_pos': boards_pos,
         'form': form,
         'po_form': po_form,
+        'accessories_csv_form': accessories_csv_form,
     })
 
 def create_boards_po(request):
@@ -105,6 +108,63 @@ def update_boards_ordered(request, boards_po_id):
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
+def replace_pnx_file(request, boards_po_id):
+    """Replace the PNX file for a Boards PO and re-parse items"""
+    if request.method == 'POST':
+        boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+        
+        if 'pnx_file' not in request.FILES:
+            messages.error(request, 'No file uploaded.')
+            return redirect('ordering')
+        
+        pnx_file = request.FILES['pnx_file']
+        
+        # Validate file extension
+        if not pnx_file.name.lower().endswith('.pnx'):
+            messages.error(request, 'Only .pnx files are allowed.')
+            return redirect('ordering')
+        
+        try:
+            # Delete existing PNX items for this PO
+            boards_po.pnx_items.all().delete()
+            
+            # Update the file
+            boards_po.file = pnx_file
+            boards_po.save()
+            
+            # Re-parse the new PNX file
+            file_content = boards_po.file.read().decode('utf-8')
+            io_string = io.StringIO(file_content)
+            reader = csv.DictReader(io_string, delimiter=';')
+            
+            items_created = 0
+            for row in reader:
+                # Skip empty rows
+                if not row.get('BARCODE', '').strip():
+                    continue
+                    
+                try:
+                    PNXItem.objects.create(
+                        boards_po=boards_po,
+                        barcode=row.get('BARCODE', '').strip(),
+                        matname=row.get('MATNAME', '').strip(),
+                        cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
+                        cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
+                        cnt=Decimal(row.get('CNT', '0').strip() or '0'),
+                        customer=row.get('CUSTOMER', '').strip()
+                    )
+                    items_created += 1
+                except (ValueError, KeyError) as e:
+                    # Skip rows with invalid data
+                    continue
+            
+            messages.success(request, f'Successfully replaced PNX file for {boards_po.po_number}. Created {items_created} items.')
+            
+        except Exception as e:
+            messages.error(request, f'Error processing PNX file: {str(e)}')
+    
+    return redirect('ordering')
+
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
@@ -140,12 +200,16 @@ def order_details(request, order_id):
     if order.boards_po:
         order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
     
+    # Check if order has OS door accessories
+    has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
         'os_door_form': os_door_form,
         'other_orders': other_orders,
         'order_pnx_items': order_pnx_items,
+        'has_os_door_accessories': has_os_door_accessories,
     })
 
 def completed_stock_takes(request):
@@ -1018,3 +1082,175 @@ def delete_stock_take_group(request, group_id):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+def upload_accessories_csv(request):
+    """Upload and process accessories CSV for an order - auto-detects order from filename"""
+    if request.method == 'POST':
+        csv_file = request.FILES.get('csv_file')
+        
+        if not csv_file:
+            messages.error(request, 'No file uploaded.')
+            return redirect('ordering')
+        
+        # Validate file extension
+        if not csv_file.name.lower().endswith('.csv'):
+            messages.error(request, 'Only .csv files are allowed.')
+            return redirect('ordering')
+        
+        # Extract customer numbers from filename
+        filename = csv_file.name
+        import re
+        # Find all sequences of digits in the filename
+        number_matches = re.findall(r'\d+', filename)
+        
+        potential_customer_numbers = []
+        for match in number_matches:
+            # Try different formats: 020483, 20483, etc.
+            potential_customer_numbers.extend([
+                match,  # 20483
+                match.zfill(6),  # 020483 (pad to 6 digits)
+                f"0{match}",  # 020483 (add leading zero)
+            ])
+        
+        # Remove duplicates
+        potential_customer_numbers = list(set(potential_customer_numbers))
+        
+        # Find matching orders
+        matching_orders = []
+        for customer_num in potential_customer_numbers:
+            orders = Order.objects.filter(customer_number=customer_num)
+            matching_orders.extend(list(orders))
+        
+        # Remove duplicates
+        matching_orders = list(set(matching_orders))
+        
+        if not matching_orders:
+            messages.error(request, f'No orders found matching customer numbers extracted from filename "{filename}". Extracted numbers: {", ".join(potential_customer_numbers)}')
+            return redirect('ordering')
+        elif len(matching_orders) > 1:
+            # Multiple matches - show error with options
+            order_list = [f"{order.customer_number} ({order.first_name} {order.last_name})" for order in matching_orders]
+            messages.error(request, f'Multiple orders match the filename "{filename}". Please use a more specific filename. Matching orders: {", ".join(order_list)}')
+            return redirect('ordering')
+        
+        # Single match - use this order
+        order = matching_orders[0]
+        
+        try:
+            # Read CSV file
+            file_content = csv_file.read().decode('utf-8')
+            io_string = io.StringIO(file_content)
+            reader = csv.DictReader(io_string)
+            
+            accessories_created = 0
+            accessories_updated = 0
+            missing_items = 0
+            os_doors_required = False
+            
+            for row in reader:
+                sku = row.get('Sku', '').strip()
+                if not sku:
+                    continue
+                
+                # Check if this is an OS Door requirement indicator
+                if 'DOR_VNL_OSD_MTM' in sku:
+                    os_doors_required = True
+                    continue  # Skip creating an accessory for this row
+                
+                # Check if accessory already exists for this order and SKU
+                existing_accessory = Accessory.objects.filter(order=order, sku=sku).first()
+                
+                # Try to find matching stock item
+                try:
+                    stock_item = StockItem.objects.get(sku=sku)
+                    missing = False
+                except StockItem.DoesNotExist:
+                    stock_item = None
+                    missing = True
+                    missing_items += 1
+                
+                if existing_accessory:
+                    # Update existing accessory
+                    existing_accessory.name = row.get('Name', '').strip()
+                    existing_accessory.description = row.get('Description', '').strip()
+                    existing_accessory.cost_price = Decimal(row.get('CostPrice', '0').strip() or '0')
+                    existing_accessory.sell_price = Decimal(row.get('SellPrice', '0').strip() or '0')
+                    existing_accessory.quantity = Decimal(row.get('Quantity', '0').strip() or '0')
+                    existing_accessory.billable = row.get('Billable', 'TRUE').strip().upper() == 'TRUE'
+                    existing_accessory.stock_item = stock_item
+                    existing_accessory.missing = missing
+                    existing_accessory.save()
+                    accessories_updated += 1
+                else:
+                    # Create new accessory
+                    Accessory.objects.create(
+                        order=order,
+                        sku=sku,
+                        name=row.get('Name', '').strip(),
+                        description=row.get('Description', '').strip(),
+                        cost_price=Decimal(row.get('CostPrice', '0').strip() or '0'),
+                        sell_price=Decimal(row.get('SellPrice', '0').strip() or '0'),
+                        quantity=Decimal(row.get('Quantity', '0').strip() or '0'),
+                        billable=row.get('Billable', 'TRUE').strip().upper() == 'TRUE',
+                        stock_item=stock_item,
+                        missing=missing
+                    )
+                    accessories_created += 1
+            
+            # Update order with OS doors requirement
+            if os_doors_required:
+                order.os_doors_required = True
+                order.save()
+            
+            success_msg = f'Successfully processed accessories for order {order.sale_number} (auto-matched from filename "{filename}").'
+            if accessories_created > 0:
+                success_msg += f' {accessories_created} new accessories created.'
+            if accessories_updated > 0:
+                success_msg += f' {accessories_updated} existing accessories updated.'
+            if missing_items > 0:
+                success_msg += f' {missing_items} items marked as missing (SKUs not found in stock).'
+            if os_doors_required:
+                success_msg += f' OS Doors marked as required.'
+            
+            messages.success(request, success_msg)
+            
+        except Exception as e:
+            messages.error(request, f'Error processing CSV file: {str(e)}')
+    
+    return redirect('ordering')
+
+
+def delete_accessory(request, accessory_id):
+    """Delete a specific accessory"""
+    if request.method == 'POST':
+        accessory = get_object_or_404(Accessory, id=accessory_id)
+        order_id = accessory.order.id
+        accessory.delete()
+        messages.success(request, f'Accessory "{accessory.name}" has been removed from order {accessory.order.sale_number}.')
+        return redirect('order_details', order_id=order_id)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+def update_os_doors_po(request, order_id):
+    """Update OS Doors PO for an order"""
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        po_number = request.POST.get('os_doors_po', '').strip()
+        order.os_doors_po = po_number
+        order.save()
+        messages.success(request, f'OS Doors PO updated for order {order.sale_number}.')
+        return redirect('order_details', order_id=order_id)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+def delete_all_accessories(request, order_id):
+    """Delete all accessories for an order"""
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        deleted_count = order.accessories.count()
+        order.accessories.all().delete()
+        messages.success(request, f'All {deleted_count} accessories have been removed from order {order.sale_number}.')
+        return redirect('order_details', order_id=order_id)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+

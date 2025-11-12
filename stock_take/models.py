@@ -28,6 +28,8 @@ class Order(models.Model):
         ('warranty', 'Warranty'),
     ]
     order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, default='sale')
+    os_doors_required = models.BooleanField(default=False, help_text='True if OS Doors are required for this order')
+    os_doors_po = models.CharField(max_length=50, blank=True, help_text='PO number when OS Doors are ordered')
 
     def time_allowance(self):
         return (self.fit_date - self.order_date).days
@@ -63,6 +65,32 @@ class OSDoor(models.Model):
 
     def __str__(self):
         return f"OS Door for {self.customer.sale_number} - {self.door_style}"
+
+
+class Accessory(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='accessories')
+    sku = models.CharField(max_length=100)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    sell_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    billable = models.BooleanField(default=True)
+    stock_item = models.ForeignKey('StockItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='accessories')
+    is_os_door = models.BooleanField(default=False, help_text='True if this is an OS Door accessory (DOR_VNL_OSD_MTM)')
+    required = models.BooleanField(default=False, help_text='Required for OS Doors')
+    ordered = models.BooleanField(default=False, help_text='Ordered for OS Doors')
+    missing = models.BooleanField(default=False, help_text='True if SKU not found in stock')
+
+    @property
+    def available_quantity(self):
+        """Get available quantity from linked stock item"""
+        if self.stock_item:
+            return self.stock_item.quantity
+        return 0
+
+    def __str__(self):
+        return f"{self.sku} - {self.name} ({self.order.sale_number})"
 
 
 class Category(models.Model):

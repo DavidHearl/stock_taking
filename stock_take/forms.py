@@ -1,5 +1,5 @@
 from django import forms
-from .models import Order, BoardsPO, OSDoor
+from .models import Order, BoardsPO, OSDoor, Accessory
 
 class BoardsPOForm(forms.ModelForm):
     class Meta:
@@ -71,3 +71,11 @@ class OSDoorForm(forms.ModelForm):
             'ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'received': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
+
+
+class AccessoryCSVForm(forms.Form):
+    csv_file = forms.FileField(
+        label='Upload Accessories CSV',
+        help_text='CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from filename.',
+        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.csv'})
+    )
