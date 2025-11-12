@@ -8,6 +8,7 @@ from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db.models import Sum, F, Count, Q
 from django.db import models
@@ -16,6 +17,7 @@ from django.template.loader import render_to_string
 import datetime
 from django.utils import timezone
 
+@login_required
 def ordering(request):
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by order_date descending
     orders = Order.objects.all().order_by(
@@ -47,6 +49,7 @@ def ordering(request):
         'accessories_csv_form': accessories_csv_form,
     })
 
+@login_required
 def create_boards_po(request):
     """Create a new BoardsPO entry and parse PNX file for items"""
     if request.method == 'POST':
@@ -94,6 +97,7 @@ def create_boards_po(request):
             messages.error(request, 'Error creating Boards PO. Please check the form.')
     return redirect('ordering')
 
+@login_required
 def update_boards_ordered(request, boards_po_id):
     """Update the boards_ordered status for a Boards PO"""
     if request.method == 'POST':
@@ -108,6 +112,7 @@ def update_boards_ordered(request, boards_po_id):
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
+@login_required
 def replace_pnx_file(request, boards_po_id):
     """Replace the PNX file for a Boards PO and re-parse items"""
     if request.method == 'POST':
@@ -165,6 +170,7 @@ def replace_pnx_file(request, boards_po_id):
     
     return redirect('ordering')
 
+@login_required
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
@@ -223,6 +229,7 @@ def completed_stock_takes(request):
         'completed_schedules': completed_schedules
     })
 
+@login_required
 def map_view(request):
     """Display a map with order locations using Leaflet and OpenStreetMap"""
     # Get all orders with addresses for mapping
@@ -1084,6 +1091,7 @@ def delete_stock_take_group(request, group_id):
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 
+@login_required
 def upload_accessories_csv(request):
     """Upload and process accessories CSV for an order - auto-detects order from filename"""
     if request.method == 'POST':
@@ -1221,6 +1229,7 @@ def upload_accessories_csv(request):
     return redirect('ordering')
 
 
+@login_required
 def delete_accessory(request, accessory_id):
     """Delete a specific accessory"""
     if request.method == 'POST':
@@ -1232,6 +1241,7 @@ def delete_accessory(request, accessory_id):
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 
+@login_required
 def update_os_doors_po(request, order_id):
     """Update OS Doors PO for an order"""
     if request.method == 'POST':
@@ -1244,6 +1254,7 @@ def update_os_doors_po(request, order_id):
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 
+@login_required
 def delete_all_accessories(request, order_id):
     """Delete all accessories for an order"""
     if request.method == 'POST':

@@ -204,7 +204,7 @@ let markerGroup;
 
 // Initialize map when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initializing Leaflet map...');
+    // Initialize the map
 
     // Initialize the map centered on Northern Ireland
     map = L.map('map-container').setView([54.6, -6.2], 8);
@@ -277,10 +277,9 @@ function addMarker(address, postcode, saleNumber, customerName, orderType, jobFi
             // Fallback: Use postcode area approximation for Northern Ireland
             const fallbackCoords = getPostcodeFallback(postcode);
             if (fallbackCoords) {
-                console.log(`Using postcode fallback for: ${fullAddress} -> ${fallbackCoords.area} (${fallbackCoords.lat}, ${fallbackCoords.lng})`);
                 createMarker([fallbackCoords.lat, fallbackCoords.lng], fullAddress, saleNumber, customerName, orderType, jobFinished, true);
             } else {
-                console.warn(`No fallback available for postcode: ${postcode} (${fullAddress})`);
+                // No fallback available for this postcode
             }
         }
     });
@@ -294,8 +293,6 @@ function getPostcodeFallback(postcode) {
     const postcodeUpper = postcode.toUpperCase().trim();
     const spaceIndex = postcodeUpper.indexOf(' ');
     const area = spaceIndex > 0 ? postcodeUpper.substring(0, spaceIndex) : postcodeUpper.substring(0, 4);
-
-    console.log(`Looking up postcode area: '${area}' from '${postcode}'`);
 
     const fallbackAreas = {
         'BT1': { lat: 54.597, lng: -5.930, area: 'Belfast City Centre' },
@@ -401,15 +398,12 @@ function geocodeWithNominatim(address, callback) {
 
     function tryGeocode(strategyIndex) {
         if (strategyIndex >= maxAttempts) {
-            console.warn(`All geocoding attempts failed for: ${address}`);
             callback(null, null, null);
             return;
         }
 
         const searchQuery = searchStrategies[strategyIndex];
         const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=3&countrycodes=GB&addressdetails=1&bounded=1&viewbox=-8.2,55.4,-5.3,54.0`;
-
-        console.log(`Geocoding attempt ${strategyIndex + 1}/${maxAttempts} for: ${searchQuery}`);
 
         fetch(url)
             .then(response => response.json())
@@ -438,7 +432,6 @@ function geocodeWithNominatim(address, callback) {
                     const lng = parseFloat(bestResult.lon);
                     const displayName = bestResult.display_name;
 
-                    console.log(`✓ Geocoded "${address}" to: ${displayName} (${lat}, ${lng})`);
                     callback(lat, lng, displayName);
                 } else {
                     // Try next strategy
@@ -446,7 +439,6 @@ function geocodeWithNominatim(address, callback) {
                 }
             })
             .catch(error => {
-                console.error(`Geocoding error for "${searchQuery}":`, error);
                 // Try next strategy
                 tryGeocode(strategyIndex + 1);
             });
