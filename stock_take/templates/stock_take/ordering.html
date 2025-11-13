@@ -8,10 +8,18 @@
 {% endblock %}
 
 {% block content %}
-<div class="container mt-4 pb-5">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+<div class="container mt-2 pb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
         <h2>Orders</h2>
         <div>
+            <form method="post" action="{% url 'ordering' %}" class="d-inline me-2">
+                {% csrf_token %}
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text">£/m²</span>
+                    <input type="number" step="0.01" min="0" max="9999" class="form-control form-control-sm" style="width: 80px;" name="price_per_sqm" value="{{ price_per_sqm|default:50 }}" placeholder="50.00">
+                    <button type="submit" class="btn btn-outline-primary btn-sm">Update</button>
+                </div>
+            </form>
             <button type="button" class="btn btn-outline-secondary btn-sm me-2" data-bs-toggle="collapse" data-bs-target="#editPOSection">
                 <i class="bi bi-pencil-square"></i> Edit Boards PO
             </button>
@@ -94,7 +102,7 @@
     {% endif %}
     
     <!-- Search Box -->
-    <div class="mb-3">
+    <div class="mb-2">
         <input type="text" id="orderSearch" class="form-control" placeholder="Search orders...">
     </div>
     
@@ -110,8 +118,11 @@
                 <th>Time (Days)</th>
                 <th>Boards PO</th>
                 <th>OS Doors</th>
-                <th>Address</th>
-                <th>Accessories</th>
+                <th>Add</th>
+                <th>Acc</th>
+                <th>Ordered</th>
+                <th>Ant</th>
+                <th>Wrk</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -131,6 +142,9 @@
                     <td></td>
                     <td></td>
                     <td></td>
+                    <td></td>
+                    <td>{{ form.anthill_id }}</td>
+                    <td>{{ form.workguru_id }}</td>
                     <td>
                         <button type="submit" class="btn btn-sm btn-success">Add</button>
                     </td>
@@ -139,6 +153,8 @@
                     <input type="hidden" name="order_type" value="sale">
                     <input type="hidden" name="address" value="">
                     <input type="hidden" name="postcode" value="">
+                    <input type="hidden" name="os_doors_required" value="False">
+                    <input type="hidden" name="all_items_ordered" value="False">
                 </form>
             </tr>
             
@@ -192,7 +208,28 @@
                 </td>
                 <td>
                     {% if order.accessories.exists %}
-                        <i class="bi bi-check-circle text-info" title="Has Accessories"></i>
+                        <i class="bi bi-check-circle text-success" title="Has Accessories"></i>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if order.all_items_ordered %}
+                        <i class="bi bi-check-circle text-success" title="All Materials Ordered"></i>
+                    {% endif %}
+                </td>
+                <td onclick="event.stopPropagation();">
+                    {% if order.anthill_id %}
+                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" 
+                           target="_blank" class="btn btn-sm btn-outline-info" title="Open in Anthill CRM">
+                            <i class="bi bi-person-circle"></i>
+                        </a>
+                    {% endif %}
+                </td>
+                <td onclick="event.stopPropagation();">
+                    {% if order.workguru_id %}
+                        <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" 
+                           target="_blank" class="btn btn-sm btn-outline-success" title="Open in WorkGuru">
+                            <i class="bi bi-tools"></i>
+                        </a>
                     {% endif %}
                 </td>
                 <td onclick="event.stopPropagation();">
@@ -201,7 +238,7 @@
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
-                <td colspan="12">
+                <td colspan="15">
                     <div style="padding: 10px;">
                         <p><strong>Details for {{ order.sale_number }}</strong></p>
                         
@@ -214,6 +251,7 @@
                                     <th>Material</th>
                                     <th>Dimensions</th>
                                     <th>Count</th>
+                                    <th>Cost</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -223,8 +261,13 @@
                                     <td>{{ item.matname }}</td>
                                     <td>{{ item.cleng }} x {{ item.cwidth }}</td>
                                     <td>{{ item.cnt }}</td>
+                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
                                 </tr>
                                 {% endfor %}
+                                <tr class="table-info">
+                                    <td colspan="4"><strong>Total Cost:</strong></td>
+                                    <td><strong>£{{ order.pnx_total_cost|floatformat:2 }}</strong></td>
+                                </tr>
                             </tbody>
                         </table>
                         {% else %}

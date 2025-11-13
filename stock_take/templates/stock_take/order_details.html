@@ -18,6 +18,24 @@
                 <div class="card-header">
                     <h5>Edit Order Information</h5>
                 </div>
+                
+                <!-- Form Errors Display -->
+                {% if form.errors %}
+                <div class="alert alert-danger mb-3">
+                    <h6>Please correct the following errors:</h6>
+                    <ul class="mb-0">
+                        {% for field in form %}
+                            {% for error in field.errors %}
+                                <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                            {% endfor %}
+                        {% endfor %}
+                        {% for error in form.non_field_errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
                 <div class="card-body">
                     <form method="POST">
                         {% csrf_token %}
@@ -101,8 +119,41 @@
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-3">
+                                    <label for="{{ form.all_items_ordered.id_for_label }}" class="form-label">All Items Ordered</label>
+                                    <div class="form-check">
+                                        {{ form.all_items_ordered }}
+                                        <label class="form-check-label" for="{{ form.all_items_ordered.id_for_label }}">
+                                            All materials have been ordered
+                                        </label>
+                                    </div>
+                                    <div class="form-text">Check this box when all items for this order have been ordered</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.anthill_id.id_for_label }}" class="form-label">Anthill ID</label>
+                                    {{ form.anthill_id }}
+                                    <div class="form-text">Anthill CRM Customer ID</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.workguru_id.id_for_label }}" class="form-label">WorkGuru ID</label>
+                                    {{ form.workguru_id }}
+                                    <div class="form-text">WorkGuru Project ID</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
                                     <label for="{{ form.order_type.id_for_label }}" class="form-label">Order Type</label>
                                     {{ form.order_type }}
+                                    <div class="form-text">Type of order (Sale, Remedial, or Warranty)</div>
                                 </div>
                             </div>
                         </div>
@@ -404,6 +455,7 @@
                                     <th>Material</th>
                                     <th>Dimensions (LxW)</th>
                                     <th>Count</th>
+                                    <th>Cost</th>
                                     <th>Customer</th>
                                 </tr>
                             </thead>
@@ -414,9 +466,14 @@
                                     <td>{{ item.matname }}</td>
                                     <td>{{ item.cleng }} x {{ item.cwidth }}</td>
                                     <td>{{ item.cnt }}</td>
+                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
                                     <td>{{ item.customer }}</td>
                                 </tr>
                                 {% endfor %}
+                                <tr class="table-info">
+                                    <td colspan="5"><strong>Total Cost:</strong></td>
+                                    <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>

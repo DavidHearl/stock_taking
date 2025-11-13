@@ -3,7 +3,7 @@ from .models import Order, BoardsPO, PNXItem, StockItem, Accessory
 
 import csv
 import io
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
@@ -19,6 +19,20 @@ from django.utils import timezone
 
 @login_required
 def ordering(request):
+    # Handle price per square meter update
+    if request.method == 'POST' and 'price_per_sqm' in request.POST:
+        try:
+            price_per_sqm = float(request.POST.get('price_per_sqm', 50))
+            request.session['price_per_sqm'] = str(price_per_sqm)  # Store as string for Decimal conversion
+            messages.success(request, f'Price per square meter updated to £{price_per_sqm:.2f}')
+        except (ValueError, TypeError):
+            messages.error(request, 'Invalid price per square meter value')
+        return redirect('ordering')
+    
+    # Get price per square meter from session, default to 50
+    price_per_sqm_str = request.session.get('price_per_sqm', '50')
+    price_per_sqm = float(price_per_sqm_str)
+    
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by order_date descending
     orders = Order.objects.all().order_by(
         'job_finished',  # Incomplete orders first
@@ -26,7 +40,7 @@ def ordering(request):
         '-order_date'
     )
     boards_pos = BoardsPO.objects.all().order_by('po_number')
-    form = OrderForm(request.POST or None)
+    form = OrderForm(request.POST or None, initial={'order_type': 'sale'})
     po_form = BoardsPOForm()
     accessories_csv_form = AccessoryCSVForm()
     
@@ -34,8 +48,13 @@ def ordering(request):
     for order in orders:
         if order.boards_po:
             order.order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
+            # Calculate cost for each item and total
+            for item in order.order_pnx_items:
+                item.calculated_cost = item.get_cost(price_per_sqm)
+            order.pnx_total_cost = sum(item.calculated_cost for item in order.order_pnx_items)
         else:
             order.order_pnx_items = []
+            order.pnx_total_cost = 0
     
     if request.method == 'POST' and form.is_valid():
         form.save()
@@ -47,6 +66,7 @@ def ordering(request):
         'form': form,
         'po_form': po_form,
         'accessories_csv_form': accessories_csv_form,
+        'price_per_sqm': price_per_sqm,
     })
 
 @login_required
@@ -175,6 +195,10 @@ def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
     
+    # Get price per square meter from session, default to 50
+    price_per_sqm_str = request.session.get('price_per_sqm', '50')
+    price_per_sqm = float(price_per_sqm_str)
+    
     if request.method == 'POST':
         # Check if this is an OS door form submission
         if 'door_style' in request.POST:
@@ -203,8 +227,13 @@ def order_details(request, order_id):
     
     # Get PNX items associated with this order (based on sale_number in customer field)
     order_pnx_items = []
+    pnx_total_cost = 0
     if order.boards_po:
         order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
+        # Calculate cost for each item and total using dynamic price
+        for item in order_pnx_items:
+            item.calculated_cost = item.get_cost(price_per_sqm)
+        pnx_total_cost = sum(item.calculated_cost for item in order_pnx_items)
     
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
@@ -215,7 +244,9 @@ def order_details(request, order_id):
         'os_door_form': os_door_form,
         'other_orders': other_orders,
         'order_pnx_items': order_pnx_items,
+        'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
+        'price_per_sqm': price_per_sqm,
     })
 
 def completed_stock_takes(request):
@@ -1155,8 +1186,10 @@ def upload_accessories_csv(request):
             accessories_updated = 0
             missing_items = 0
             os_doors_required = False
+            rows_processed = 0
             
             for row in reader:
+                rows_processed += 1
                 sku = row.get('Sku', '').strip()
                 if not sku:
                     continue
@@ -1178,33 +1211,49 @@ def upload_accessories_csv(request):
                     missing = True
                     missing_items += 1
                 
-                if existing_accessory:
-                    # Update existing accessory
-                    existing_accessory.name = row.get('Name', '').strip()
-                    existing_accessory.description = row.get('Description', '').strip()
-                    existing_accessory.cost_price = Decimal(row.get('CostPrice', '0').strip() or '0')
-                    existing_accessory.sell_price = Decimal(row.get('SellPrice', '0').strip() or '0')
-                    existing_accessory.quantity = Decimal(row.get('Quantity', '0').strip() or '0')
-                    existing_accessory.billable = row.get('Billable', 'TRUE').strip().upper() == 'TRUE'
-                    existing_accessory.stock_item = stock_item
-                    existing_accessory.missing = missing
-                    existing_accessory.save()
-                    accessories_updated += 1
-                else:
-                    # Create new accessory
-                    Accessory.objects.create(
-                        order=order,
-                        sku=sku,
-                        name=row.get('Name', '').strip(),
-                        description=row.get('Description', '').strip(),
-                        cost_price=Decimal(row.get('CostPrice', '0').strip() or '0'),
-                        sell_price=Decimal(row.get('SellPrice', '0').strip() or '0'),
-                        quantity=Decimal(row.get('Quantity', '0').strip() or '0'),
-                        billable=row.get('Billable', 'TRUE').strip().upper() == 'TRUE',
-                        stock_item=stock_item,
-                        missing=missing
-                    )
-                    accessories_created += 1
+                # Safe decimal conversion functions
+                def safe_decimal(value, default='0'):
+                    try:
+                        cleaned = str(value).strip() or default
+                        return Decimal(cleaned)
+                    except (ValueError, TypeError, InvalidOperation):
+                        return Decimal(default)
+                
+                cost_price = safe_decimal(row.get('CostPrice', '0'))
+                sell_price = safe_decimal(row.get('SellPrice', '0'))
+                quantity = safe_decimal(row.get('Quantity', '0'))
+                
+                try:
+                    if existing_accessory:
+                        # Update existing accessory
+                        existing_accessory.name = row.get('Name', '').strip()
+                        existing_accessory.description = row.get('Description', '').strip()
+                        existing_accessory.cost_price = cost_price
+                        existing_accessory.sell_price = sell_price
+                        existing_accessory.quantity = quantity
+                        existing_accessory.billable = row.get('Billable', 'TRUE').strip().upper() == 'TRUE'
+                        existing_accessory.stock_item = stock_item
+                        existing_accessory.missing = missing
+                        existing_accessory.save()
+                        accessories_updated += 1
+                    else:
+                        # Create new accessory
+                        Accessory.objects.create(
+                            order=order,
+                            sku=sku,
+                            name=row.get('Name', '').strip(),
+                            description=row.get('Description', '').strip(),
+                            cost_price=cost_price,
+                            sell_price=sell_price,
+                            quantity=quantity,
+                            billable=row.get('Billable', 'TRUE').strip().upper() == 'TRUE',
+                            stock_item=stock_item,
+                            missing=missing
+                        )
+                        accessories_created += 1
+                except Exception as row_error:
+                    messages.warning(request, f'Error processing row {rows_processed} (SKU: {sku}): {str(row_error)}. Skipping this row.')
+                    continue
             
             # Update order with OS doors requirement
             if os_doors_required:
@@ -1223,6 +1272,8 @@ def upload_accessories_csv(request):
             
             messages.success(request, success_msg)
             
+        except UnicodeDecodeError:
+            messages.error(request, 'Error reading CSV file. Please ensure it is saved as UTF-8 encoding.')
         except Exception as e:
             messages.error(request, f'Error processing CSV file: {str(e)}')
     

@@ -30,9 +30,36 @@ class Order(models.Model):
     order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, default='sale')
     os_doors_required = models.BooleanField(default=False, help_text='True if OS Doors are required for this order')
     os_doors_po = models.CharField(max_length=50, blank=True, help_text='PO number when OS Doors are ordered')
+    all_items_ordered = models.BooleanField(default=False, help_text='Manual confirmation that all items have been ordered')
+    anthill_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
+    workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
 
     def time_allowance(self):
         return (self.fit_date - self.order_date).days
+
+    @property
+    def all_materials_ordered(self):
+        """Check if all materials for this order have been ordered"""
+        # If manually marked as ordered, return True
+        if self.all_items_ordered:
+            return True
+            
+        # Check boards are ordered
+        if not (self.boards_po and self.boards_po.boards_ordered):
+            return False
+        
+        # Check OS doors are ordered (if required)
+        if self.os_doors_required and not self.os_doors_po:
+            return False
+        
+        # Check all accessories are ordered (if any exist)
+        if self.accessories.exists():
+            total_accessories = self.accessories.count()
+            ordered_accessories = self.accessories.filter(ordered=True).count()
+            if ordered_accessories != total_accessories:
+                return False
+        
+        return True
 
     def __str__(self):
         return f"Order {self.sale_number} for {self.first_name} {self.last_name}"
@@ -47,8 +74,29 @@ class PNXItem(models.Model):
     cnt = models.DecimalField(max_digits=10, decimal_places=2)
     customer = models.CharField(max_length=200)
 
+    # Price per square meter for boards
+    PRICE_PER_SQM = 50
+
     def __str__(self):
         return f"{self.barcode} - {self.matname}"
+
+    def get_cost(self, price_per_sqm=None):
+        """Calculate cost based on dimensions and count"""
+        if price_per_sqm is None:
+            price_per_sqm = self.PRICE_PER_SQM
+        
+        # Convert price to Decimal for consistent calculations
+        price_per_sqm = Decimal(str(price_per_sqm))
+        
+        # Convert mm to meters
+        length_m = self.cleng / 1000
+        width_m = self.cwidth / 1000
+        
+        # Calculate area in square meters
+        area_sqm = length_m * width_m
+        
+        # Multiply by count and price per sqm
+        return area_sqm * self.cnt * price_per_sqm
 
 
 class OSDoor(models.Model):
