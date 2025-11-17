@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block nav_substitutions_active %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+.table td {
+    white-space: nowrap;
+    vertical-align: middle;
+    padding: 0.75rem 0.5rem;
+}
+.table th {
+    vertical-align: middle;
+    padding: 0.75rem 0.5rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-2 pb-3">
+    <h2>Substitutions</h2>
+
+    <!-- Form Errors Display -->
+    {% if form.errors %}
+        <div class="alert alert-danger">
+            <strong>Please correct the following errors:</strong>
+            <ul>
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <li>{{ field.label }}: {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th style="background-color: #ffaaaa;">Missing SKU</th>
+                    <th style="background-color: #ffaaaa;">Missing Name</th>
+                    <th>Replacement SKU</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Add New Substitution Form Row -->
+                <tr class="table-light">
+                    <form method="POST" id="add-substitution-form">
+                        {% csrf_token %}
+                        <td style="background-color: #ffaaaa;">{{ form.missing_sku }}</td>
+                        <td style="background-color: #ffaaaa;">{{ form.missing_name }}</td>
+                        <td>{{ form.replacement_sku }}</td>
+                        <td>
+                            <button type="submit" class="btn btn-sm btn-success">Add</button>
+                        </td>
+                    </form>
+                </tr>
+
+                {% for substitution in substitutions %}
+                <tr>
+                    <td style="background-color: #ffaaaa;">{{ substitution.missing_sku }}</td>
+                    <td style="background-color: #ffaaaa;">{{ substitution.missing_name }}</td>
+                    <td>{{ substitution.replacement_sku }}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <a href="{% url 'edit_substitution' substitution.id %}" class="btn btn-outline-primary" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <button class="btn btn-outline-danger delete-substitution-btn"
+                                    data-id="{{ substitution.id }}"
+                                    data-missing="{{ substitution.missing_name }}"
+                                    data-replacement="{{ substitution.replacement_name }}"
+                                    title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    $('.delete-substitution-btn').on('click', function() {
+        const substitutionId = $(this).data('id');
+        const missingName = $(this).data('missing');
+        const replacementName = $(this).data('replacement');
+        if (confirm(`Are you sure you want to delete the substitution: ${missingName} -> ${replacementName}?`)) {
+            $.post('{% url "delete_substitution" 0 %}'.replace('0', substitutionId), {
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            })
+            .done(function() {
+                location.reload();
+            })
+            .fail(function() {
+                alert('Error deleting substitution.');
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

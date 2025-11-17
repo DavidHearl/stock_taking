@@ -33,6 +33,9 @@ class Order(models.Model):
     all_items_ordered = models.BooleanField(default=False, help_text='Manual confirmation that all items have been ordered')
     anthill_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
     workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
+    original_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Original uploaded CSV file')
+    processed_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Processed CSV with substitutions applied')
+    csv_has_missing_items = models.BooleanField(default=False, help_text='True if the uploaded CSV has unresolved missing items that need substitution')
 
     def time_allowance(self):
         return (self.fit_date - self.order_date).days
@@ -277,3 +280,37 @@ class ImportHistory(models.Model):
     
     def __str__(self):
         return f"Import on {self.imported_at} - {self.record_count} records"
+
+
+class Substitution(models.Model):
+    missing_sku = models.CharField(max_length=100)
+    missing_name = models.CharField(max_length=255)
+    replacement_sku = models.CharField(max_length=100)
+    replacement_name = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    sell_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    quantity = models.IntegerField(null=True, blank=True)
+    billable = models.BooleanField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.missing_name} -> {self.replacement_name}"
+
+
+class CSVSkipItem(models.Model):
+    """Items to skip/remove during CSV processing and resolution"""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='csv_skip_items')
+    sku = models.CharField(max_length=100)
+    name = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ['order', 'sku']  # Prevent duplicate SKUs per order
+    
+    def __str__(self):
+        return f"{self.sku} - {self.name}"

@@ -1,8 +1,10 @@
-from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory
+from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
 from .models import Order, BoardsPO, PNXItem, StockItem, Accessory
 
 import csv
 import io
+import os
+import logging
 from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
@@ -12,7 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db.models import Sum, F, Count, Q
 from django.db import models
-from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup
+from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
 from django.template.loader import render_to_string
 import datetime
 from django.utils import timezone
@@ -22,15 +24,15 @@ def ordering(request):
     # Handle price per square meter update
     if request.method == 'POST' and 'price_per_sqm' in request.POST:
         try:
-            price_per_sqm = float(request.POST.get('price_per_sqm', 50))
+            price_per_sqm = float(request.POST.get('price_per_sqm', 12))
             request.session['price_per_sqm'] = str(price_per_sqm)  # Store as string for Decimal conversion
             messages.success(request, f'Price per square meter updated to £{price_per_sqm:.2f}')
         except (ValueError, TypeError):
             messages.error(request, 'Invalid price per square meter value')
         return redirect('ordering')
     
-    # Get price per square meter from session, default to 50
-    price_per_sqm_str = request.session.get('price_per_sqm', '50')
+    # Get price per square meter from session, default to 12
+    price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
     
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by order_date descending
@@ -67,6 +69,22 @@ def ordering(request):
         'po_form': po_form,
         'accessories_csv_form': accessories_csv_form,
         'price_per_sqm': price_per_sqm,
+    })
+
+@login_required
+def substitutions(request):
+    """Display and manage substitutions"""
+    substitutions = Substitution.objects.all()
+    form = SubstitutionForm(request.POST or None)
+    
+    if request.method == 'POST' and form.is_valid():
+        form.save()
+        messages.success(request, 'Substitution added successfully.')
+        return redirect('substitutions')
+    
+    return render(request, 'stock_take/substitutions.html', {
+        'substitutions': substitutions,
+        'form': form,
     })
 
 @login_required
@@ -195,8 +213,8 @@ def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
     
-    # Get price per square meter from session, default to 50
-    price_per_sqm_str = request.session.get('price_per_sqm', '50')
+    # Get price per square meter from session, default to 12
+    price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
     
     if request.method == 'POST':
@@ -238,6 +256,12 @@ def order_details(request, order_id):
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
     
+    # Get substitutions and skip items for this order
+    substitutions = Substitution.objects.filter(missing_sku__in=[acc.sku for acc in order.accessories.filter(missing=True)])
+    skip_items = order.csv_skip_items.all()
+    substitution_form = SubstitutionForm()
+    skip_item_form = CSVSkipItemForm()
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -247,6 +271,10 @@ def order_details(request, order_id):
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
         'price_per_sqm': price_per_sqm,
+        'substitutions': substitutions,
+        'skip_items': skip_items,
+        'substitution_form': substitution_form,
+        'skip_item_form': skip_item_form,
     })
 
 def completed_stock_takes(request):
@@ -650,6 +678,35 @@ def delete_schedule(request, schedule_id):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+def delete_substitution(request, substitution_id):
+    """Delete a substitution"""
+    if request.method == 'POST':
+        try:
+            substitution = get_object_or_404(Substitution, id=substitution_id)
+            substitution.delete()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+def edit_substitution(request, substitution_id):
+    """Edit a substitution"""
+    substitution = get_object_or_404(Substitution, id=substitution_id)
+    
+    if request.method == 'POST':
+        form = SubstitutionForm(request.POST, instance=substitution)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Substitution updated successfully.')
+            return redirect('substitutions')
+    else:
+        form = SubstitutionForm(instance=substitution)
+    
+    return render(request, 'stock_take/edit_substitution.html', {
+        'form': form,
+        'substitution': substitution,
+    })
 
 def stock_take_group_create(request):
     """Create or update a stock take group"""
@@ -1125,8 +1182,13 @@ def delete_stock_take_group(request, group_id):
 @login_required
 def upload_accessories_csv(request):
     """Upload and process accessories CSV for an order - auto-detects order from filename"""
+    import logging
+    logging.basicConfig(filename='csv_upload.log', level=logging.DEBUG)
+    logging.info(f"upload_accessories_csv called with method: {request.method}")
+    
     if request.method == 'POST':
         csv_file = request.FILES.get('csv_file')
+        logging.info(f"csv_file received: {csv_file}")
         
         if not csv_file:
             messages.error(request, 'No file uploaded.')
@@ -1142,6 +1204,7 @@ def upload_accessories_csv(request):
         import re
         # Find all sequences of digits in the filename
         number_matches = re.findall(r'\d+', filename)
+        logging.info(f"filename: {filename}, number_matches: {number_matches}")
         
         potential_customer_numbers = []
         for match in number_matches:
@@ -1154,6 +1217,7 @@ def upload_accessories_csv(request):
         
         # Remove duplicates
         potential_customer_numbers = list(set(potential_customer_numbers))
+        logging.info(f"potential_customer_numbers: {potential_customer_numbers}")
         
         # Find matching orders
         matching_orders = []
@@ -1163,6 +1227,7 @@ def upload_accessories_csv(request):
         
         # Remove duplicates
         matching_orders = list(set(matching_orders))
+        logging.info(f"matching_orders count: {len(matching_orders)}")
         
         if not matching_orders:
             messages.error(request, f'No orders found matching customer numbers extracted from filename "{filename}". Extracted numbers: {", ".join(potential_customer_numbers)}')
@@ -1175,29 +1240,80 @@ def upload_accessories_csv(request):
         
         # Single match - use this order
         order = matching_orders[0]
+        logging.info(f"Using order: {order.customer_number} - {order.first_name} {order.last_name}")
+        
+        # Save the original CSV file to the order
+        order.original_csv.save(f"{order.customer_number}_original_{filename}", csv_file)
         
         try:
-            # Read CSV file
+            # Read CSV file content
+            csv_file.seek(0)  # Reset file pointer
             file_content = csv_file.read().decode('utf-8')
             io_string = io.StringIO(file_content)
-            reader = csv.DictReader(io_string)
+            
+            # Detect delimiter
+            sample = file_content[:1024]  # First 1KB should be enough to detect delimiter
+            sniffer = csv.Sniffer()
+            try:
+                delimiter = sniffer.sniff(sample, delimiters=',\t;').delimiter
+                logging.info(f"Detected CSV delimiter: '{delimiter}'")
+            except csv.Error:
+                # Try to detect manually by counting delimiters
+                comma_count = sample.count(',')
+                tab_count = sample.count('\t')
+                semicolon_count = sample.count(';')
+                
+                if tab_count > comma_count and tab_count > semicolon_count:
+                    delimiter = '\t'
+                    logging.info("Manual detection: using tab delimiter")
+                elif semicolon_count > comma_count:
+                    delimiter = ';'
+                    logging.info("Manual detection: using semicolon delimiter")
+                else:
+                    delimiter = ','
+                    logging.info("Manual detection: using comma delimiter")
+            
+            reader = csv.DictReader(io_string, delimiter=delimiter)
+            
+            # Log detected fieldnames
+            logging.info(f"CSV fieldnames: {reader.fieldnames}")
             
             accessories_created = 0
             accessories_updated = 0
             missing_items = 0
+            substitutions_used = 0
+            substitutions_created = 0
             os_doors_required = False
             rows_processed = 0
+            processed_rows = []  # Store processed rows for the new CSV
+            
+            # Safe decimal conversion functions
+            def safe_decimal(value, default='0'):
+                try:
+                    cleaned = str(value).strip() or default
+                    return Decimal(cleaned)
+                except (ValueError, TypeError, InvalidOperation):
+                    return Decimal(default)
             
             for row in reader:
                 rows_processed += 1
+                logging.info(f"Processing row {rows_processed}: {row}")
                 sku = row.get('Sku', '').strip()
                 if not sku:
+                    logging.info(f"Skipping row {rows_processed}: empty SKU")
                     continue
                 
                 # Check if this is an OS Door requirement indicator
                 if 'DOR_VNL_OSD_MTM' in sku:
                     os_doors_required = True
                     continue  # Skip creating an accessory for this row
+                
+                # Store original row for processed CSV
+                processed_row = row.copy()
+                
+                # Parse billable field early (needed for substitution creation)
+                billable_str = row.get('Billable', 'TRUE') or 'TRUE'
+                billable = billable_str.strip().upper() == 'TRUE'
                 
                 # Check if accessory already exists for this order and SKU
                 existing_accessory = Accessory.objects.filter(order=order, sku=sku).first()
@@ -1206,78 +1322,130 @@ def upload_accessories_csv(request):
                 try:
                     stock_item = StockItem.objects.get(sku=sku)
                     missing = False
+                    substituted = False
                 except StockItem.DoesNotExist:
-                    stock_item = None
-                    missing = True
-                    missing_items += 1
-                
-                # Safe decimal conversion functions
-                def safe_decimal(value, default='0'):
+                    # Check for substitution
                     try:
-                        cleaned = str(value).strip() or default
-                        return Decimal(cleaned)
-                    except (ValueError, TypeError, InvalidOperation):
-                        return Decimal(default)
+                        substitution = Substitution.objects.get(missing_sku=sku)
+                        replacement_sku = substitution.replacement_sku
+                        try:
+                            stock_item = StockItem.objects.get(sku=replacement_sku)
+                            missing = False
+                            substituted = True
+                            substitutions_used += 1
+                            # Update processed row with replacement SKU and name
+                            processed_row['Sku'] = replacement_sku
+                            processed_row['Name'] = substitution.replacement_name or substitution.missing_name
+                        except StockItem.DoesNotExist:
+                            # Substitution exists but replacement SKU also not found
+                            stock_item = None
+                            missing = True
+                            missing_items += 1
+                    except Substitution.DoesNotExist:
+                        # No substitution found, create one for manual handling
+                        logging.info(f"Creating substitution for missing SKU: {sku}")
+                        Substitution.objects.create(
+                            missing_sku=sku,
+                            missing_name=row.get('Name', '').strip() if row.get('Name') else '',
+                            replacement_sku='',  # Empty, to be filled manually
+                            replacement_name='',
+                            description='Auto-created from CSV upload',
+                            cost_price=safe_decimal(row.get('CostPrice', '0')),
+                            sell_price=safe_decimal(row.get('SellPrice', '0')),
+                            quantity=int(safe_decimal(row.get('Quantity', '0'))),
+                            billable=billable
+                        )
+                        stock_item = None
+                        missing = True
+                        missing_items += 1
+                        substitutions_created += 1
+                        logging.info(f"Substitution created for {sku}, total created: {substitutions_created}")
                 
                 cost_price = safe_decimal(row.get('CostPrice', '0'))
                 sell_price = safe_decimal(row.get('SellPrice', '0'))
-                quantity = safe_decimal(row.get('Quantity', '0'))
+                quantity_str = row.get('Quantity', '0') or '0'
+                quantity = safe_decimal(quantity_str)
+
+                if existing_accessory:
+                    # Update existing accessory
+                    existing_accessory.name = (row.get('Name') or '').strip()
+                    existing_accessory.description = (row.get('Description') or '').strip()
+                    existing_accessory.cost_price = cost_price
+                    existing_accessory.sell_price = sell_price
+                    existing_accessory.quantity = quantity
+                    existing_accessory.billable = billable
+                    existing_accessory.stock_item = stock_item
+                    existing_accessory.missing = missing
+                    existing_accessory.save()
+                    accessories_updated += 1
+                else:
+                    # Create new accessory
+                    Accessory.objects.create(
+                        order=order,
+                        sku=sku,
+                        name=(row.get('Name') or '').strip(),
+                        description=(row.get('Description') or '').strip(),
+                        cost_price=cost_price,
+                        sell_price=sell_price,
+                        quantity=quantity,
+                        billable=billable,
+                        stock_item=stock_item,
+                        missing=missing
+                    )
+                    accessories_created += 1
                 
-                try:
-                    if existing_accessory:
-                        # Update existing accessory
-                        existing_accessory.name = row.get('Name', '').strip()
-                        existing_accessory.description = row.get('Description', '').strip()
-                        existing_accessory.cost_price = cost_price
-                        existing_accessory.sell_price = sell_price
-                        existing_accessory.quantity = quantity
-                        existing_accessory.billable = row.get('Billable', 'TRUE').strip().upper() == 'TRUE'
-                        existing_accessory.stock_item = stock_item
-                        existing_accessory.missing = missing
-                        existing_accessory.save()
-                        accessories_updated += 1
-                    else:
-                        # Create new accessory
-                        Accessory.objects.create(
-                            order=order,
-                            sku=sku,
-                            name=row.get('Name', '').strip(),
-                            description=row.get('Description', '').strip(),
-                            cost_price=cost_price,
-                            sell_price=sell_price,
-                            quantity=quantity,
-                            billable=row.get('Billable', 'TRUE').strip().upper() == 'TRUE',
-                            stock_item=stock_item,
-                            missing=missing
-                        )
-                        accessories_created += 1
-                except Exception as row_error:
-                    messages.warning(request, f'Error processing row {rows_processed} (SKU: {sku}): {str(row_error)}. Skipping this row.')
-                    continue
+                # Add processed row to the list (only for rows that weren't skipped)
+                processed_rows.append(processed_row)
             
             # Update order with OS doors requirement
             if os_doors_required:
                 order.os_doors_required = True
                 order.save()
             
+            # Set flag if there are missing items that need resolution
+            if substitutions_created > 0:
+                order.csv_has_missing_items = True
+                order.save()
+            
+            # Create processed CSV with substitutions applied
+            if processed_rows:
+                processed_csv_content = io.StringIO()
+                fieldnames = processed_rows[0].keys()
+                writer = csv.DictWriter(processed_csv_content, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(processed_rows)
+                
+                # Save processed CSV to order
+                processed_csv_content.seek(0)
+                order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
+                                       io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
+            
             success_msg = f'Successfully processed accessories for order {order.sale_number} (auto-matched from filename "{filename}").'
             if accessories_created > 0:
                 success_msg += f' {accessories_created} new accessories created.'
             if accessories_updated > 0:
                 success_msg += f' {accessories_updated} existing accessories updated.'
+            if substitutions_used > 0:
+                success_msg += f' {substitutions_used} items substituted with replacements.'
+            if substitutions_created > 0:
+                success_msg += f' {substitutions_created} new substitutions created for manual review.'
             if missing_items > 0:
-                success_msg += f' {missing_items} items marked as missing (SKUs not found in stock).'
+                success_msg += f' {missing_items} items still marked as missing.'
             if os_doors_required:
                 success_msg += f' OS Doors marked as required.'
             
             messages.success(request, success_msg)
             
         except UnicodeDecodeError:
+            logging.error(f"UnicodeDecodeError processing CSV file: {filename}")
             messages.error(request, 'Error reading CSV file. Please ensure it is saved as UTF-8 encoding.')
         except Exception as e:
+            logging.error(f"Exception processing CSV file: {filename}, error: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
             messages.error(request, f'Error processing CSV file: {str(e)}')
     
-    return redirect('ordering')
+    return redirect('order_details', order_id=order.id)
 
 
 @login_required
@@ -1313,6 +1481,215 @@ def delete_all_accessories(request, order_id):
         deleted_count = order.accessories.count()
         order.accessories.all().delete()
         messages.success(request, f'All {deleted_count} accessories have been removed from order {order.sale_number}.')
+        return redirect('order_details', order_id=order_id)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def remove_order_csv(request, order_id, csv_type):
+    """Remove original or processed CSV file from an order"""
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        
+        if csv_type == 'original' and order.original_csv:
+            order.original_csv.delete()
+            messages.success(request, f'Original CSV file has been removed from order {order.sale_number}.')
+        elif csv_type == 'processed' and order.processed_csv:
+            order.processed_csv.delete()
+            messages.success(request, f'Processed CSV file has been removed from order {order.sale_number}.')
+        else:
+            messages.error(request, f'No {csv_type} CSV file found for this order.')
+        
+        return redirect('order_details', order_id=order_id)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def resolve_missing_items(request, order_id):
+    """Resolve missing items by applying substitutions from the substitution table"""
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        
+        # Get all substitutions that have replacement SKUs filled in
+        substitutions = Substitution.objects.filter(
+            missing_sku__in=[acc.sku for acc in order.accessories.filter(missing=True)],
+            replacement_sku__isnull=False
+        ).exclude(replacement_sku='')
+        
+        logging.info(f"Found {len(substitutions)} substitutions to process")
+        for sub in substitutions:
+            logging.info(f"Substitution: {sub.missing_sku} -> {sub.replacement_sku}")
+        
+        resolved_count = 0
+        
+        for substitution in substitutions:
+            # Find accessories with this missing SKU
+            accessories = order.accessories.filter(sku=substitution.missing_sku, missing=True)
+            
+            for accessory in accessories:
+                # Try to find the replacement stock item
+                try:
+                    replacement_stock_item = StockItem.objects.get(sku=substitution.replacement_sku)
+                    logging.info(f"Found replacement stock item: {replacement_stock_item.name} (cost: {replacement_stock_item.cost})")
+                    
+                    # Use data from stock item
+                    replacement_name = replacement_stock_item.name
+                    replacement_cost = replacement_stock_item.cost
+                    replacement_description = replacement_stock_item.name
+                    
+                except StockItem.DoesNotExist:
+                    logging.warning(f"Replacement stock item not found: {substitution.replacement_sku}, using substitution data only")
+                    # Use data from substitution object
+                    replacement_name = substitution.replacement_name or substitution.missing_name
+                    replacement_cost = substitution.cost_price or 0
+                    replacement_description = substitution.description or substitution.replacement_name or substitution.missing_name
+                
+                logging.info(f"Resolving accessory {accessory.sku} -> {substitution.replacement_sku}")
+                logging.info(f"Before update: name={accessory.name}, desc={accessory.description}, cost={accessory.cost_price}, sell={accessory.sell_price}, qty={accessory.quantity}, billable={accessory.billable}")
+                
+                # Handle quantity first - check original description before overwriting
+                original_description = accessory.description
+                if original_description and original_description.strip().isdigit():
+                    # If original description is just a number, use it as quantity
+                    accessory.quantity = Decimal(int(original_description.strip()))
+                    logging.info(f"Setting quantity to {accessory.quantity} from original description")
+                elif substitution.quantity is not None and substitution.quantity > 0:
+                    # Use quantity from substitution if available
+                    accessory.quantity = Decimal(substitution.quantity)
+                    logging.info(f"Setting quantity to {substitution.quantity} from substitution")
+                else:
+                    # Default to 1 if no quantity found
+                    accessory.quantity = Decimal(1)
+                    logging.info("Setting quantity to default 1")
+                
+                # Update the accessory with substitution data
+                accessory.sku = substitution.replacement_sku
+                accessory.name = replacement_name
+                accessory.description = replacement_description
+                accessory.stock_item = replacement_stock_item if 'replacement_stock_item' in locals() else None
+                accessory.missing = False
+                
+                # Use cost price from replacement data
+                accessory.cost_price = replacement_cost
+                logging.info(f"Setting cost_price to {replacement_cost}")
+                
+                # Set sell price to 0 as requested
+                accessory.sell_price = 0
+                
+                # Set billable to false as requested
+                accessory.billable = False
+                
+                logging.info(f"After update: name={accessory.name}, desc={accessory.description}, cost={accessory.cost_price}, sell={accessory.sell_price}, qty={accessory.quantity}, billable={accessory.billable}")
+                
+                accessory.save()
+                resolved_count += 1
+        
+        # Also remove items marked for skipping
+        skip_items_removed = 0
+        for skip_item in order.csv_skip_items.all():
+            accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
+            logging.info(f"Removing {accessories_to_remove.count()} accessories with SKU {skip_item.sku}")
+            for accessory in accessories_to_remove:
+                accessory.delete()
+                skip_items_removed += 1
+        
+        # Clear the skip items after processing
+        order.csv_skip_items.all().delete()
+        
+        # Regenerate processed CSV with resolved data
+        if order.accessories.exists():
+            processed_rows = []
+            for accessory in order.accessories.all():
+                row = {
+                    'Sku': accessory.sku,
+                    'Name': accessory.name,
+                    'Description': accessory.description,
+                    'CostPrice': str(accessory.cost_price),
+                    'SellPrice': str(accessory.sell_price),
+                    'Quantity': str(accessory.quantity),
+                    'Billable': 'TRUE' if accessory.billable else 'FALSE'
+                }
+                processed_rows.append(row)
+            
+            if processed_rows:
+                processed_csv_content = io.StringIO()
+                fieldnames = ['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable']
+                writer = csv.DictWriter(processed_csv_content, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(processed_rows)
+                
+                # Save updated processed CSV to order
+                processed_csv_content.seek(0)
+                filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
+                order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
+                                       io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
+                logging.info(f"Regenerated processed CSV with {len(processed_rows)} items")
+        
+        # Check if all missing items have been resolved
+        remaining_missing = order.accessories.filter(missing=True).count()
+        if remaining_missing == 0:
+            order.csv_has_missing_items = False
+            order.save()
+        
+        success_msg = f'Successfully resolved {resolved_count} missing items using substitutions.'
+        if skip_items_removed > 0:
+            success_msg += f' Removed {skip_items_removed} items from skip list.'
+        messages.success(request, success_msg)
+        
+        return redirect('order_details', order_id=order_id)
+    
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def add_substitution(request, order_id):
+    """Add a substitution for a specific order"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if request.method == 'POST':
+        form = SubstitutionForm(request.POST)
+        if form.is_valid():
+            substitution = form.save(commit=False)
+            # Find the missing accessory to get the name
+            missing_accessory = order.accessories.filter(sku=substitution.missing_sku, missing=True).first()
+            if missing_accessory:
+                substitution.missing_name = missing_accessory.name
+            substitution.save()
+            messages.success(request, 'Substitution added successfully.')
+            return redirect('order_details', order_id=order_id)
+    else:
+        form = SubstitutionForm()
+    
+    return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def add_skip_item(request, order_id):
+    """Add an item to skip/remove for a specific order"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if request.method == 'POST':
+        form = CSVSkipItemForm(request.POST)
+        if form.is_valid():
+            skip_item = form.save(commit=False)
+            skip_item.order = order
+            skip_item.save()
+            messages.success(request, 'Item added to skip list successfully.')
+            return redirect('order_details', order_id=order_id)
+    else:
+        form = CSVSkipItemForm()
+    
+    return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def delete_skip_item(request, skip_item_id):
+    """Delete a skip item"""
+    if request.method == 'POST':
+        skip_item = get_object_or_404(CSVSkipItem, id=skip_item_id)
+        order_id = skip_item.order.id
+        skip_item.delete()
+        messages.success(request, f'Item "{skip_item.name}" removed from skip list.')
         return redirect('order_details', order_id=order_id)
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 

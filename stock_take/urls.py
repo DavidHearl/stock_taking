@@ -41,6 +41,9 @@ urlpatterns = [
     
     # Ordering page
     path('ordering/', views.ordering, name='ordering'),
+    path('substitutions/', views.substitutions, name='substitutions'),
+    path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),
+    path('substitution/edit/<int:substitution_id>/', views.edit_substitution, name='edit_substitution'),
     path('ordering/create-po/', views.create_boards_po, name='create_boards_po'),
     path('stock-take/boards-po/<int:boards_po_id>/update-boards-ordered/', views.update_boards_ordered, name='update_boards_ordered'),
     path('stock-take/boards-po/<int:boards_po_id>/replace-pnx/', views.replace_pnx_file, name='replace_pnx_file'),
@@ -49,6 +52,11 @@ urlpatterns = [
     path('accessory/delete/<int:accessory_id>/', views.delete_accessory, name='delete_accessory'),
     path('order/<int:order_id>/update-os-doors-po/', views.update_os_doors_po, name='update_os_doors_po'),
     path('order/<int:order_id>/delete-all-accessories/', views.delete_all_accessories, name='delete_all_accessories'),
+    path('order/<int:order_id>/remove-csv/<str:csv_type>/', views.remove_order_csv, name='remove_order_csv'),
+    path('order/<int:order_id>/resolve-missing-items/', views.resolve_missing_items, name='resolve_missing_items'),
+    path('order/<int:order_id>/add-substitution/', views.add_substitution, name='add_substitution'),
+    path('order/<int:order_id>/add-skip-item/', views.add_skip_item, name='add_skip_item'),
+    path('skip-item/delete/<int:skip_item_id>/', views.delete_skip_item, name='delete_skip_item'),
     
     # Map page
     path('map/', views.map_view, name='map'),

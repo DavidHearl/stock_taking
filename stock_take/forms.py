@@ -1,5 +1,5 @@
 from django import forms
-from .models import Order, BoardsPO, OSDoor, Accessory
+from .models import Order, BoardsPO, OSDoor, Accessory, Substitution, CSVSkipItem
 
 class BoardsPOForm(forms.ModelForm):
     class Meta:
@@ -83,3 +83,26 @@ class AccessoryCSVForm(forms.Form):
         help_text='CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from filename.',
         widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.csv'})
     )
+
+
+class SubstitutionForm(forms.ModelForm):
+    class Meta:
+        model = Substitution
+        fields = [
+            'missing_sku', 'missing_name', 'replacement_sku'
+        ]
+        widgets = {
+            'missing_sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Missing SKU'}),
+            'missing_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Missing Item Name'}),
+            'replacement_sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Replacement SKU'}),
+        }
+
+
+class CSVSkipItemForm(forms.ModelForm):
+    class Meta:
+        model = CSVSkipItem
+        fields = ['sku', 'name']
+        widgets = {
+            'sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'SKU to skip'}),
+            'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Item name'}),
+        }
