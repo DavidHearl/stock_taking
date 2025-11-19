@@ -303,14 +303,18 @@ class Substitution(models.Model):
 
 class CSVSkipItem(models.Model):
     """Items to skip/remove during CSV processing and resolution"""
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='csv_skip_items')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='csv_skip_items', null=True, blank=True)
     sku = models.CharField(max_length=100)
     name = models.CharField(max_length=200)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         ordering = ['-created_at']
-        unique_together = ['order', 'sku']  # Prevent duplicate SKUs per order
+        # Prevent duplicate SKUs per order, and globally for null orders
+        constraints = [
+            models.UniqueConstraint(fields=['order', 'sku'], name='unique_order_sku_skipitem'),
+            models.UniqueConstraint(fields=['sku'], condition=models.Q(order__isnull=True), name='unique_global_sku_skipitem')
+        ]
     
     def __str__(self):
         return f"{self.sku} - {self.name}"

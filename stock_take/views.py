@@ -73,18 +73,27 @@ def ordering(request):
 
 @login_required
 def substitutions(request):
-    """Display and manage substitutions"""
+    """Display and manage substitutions and skip items"""
     substitutions = Substitution.objects.all()
+    skip_items = CSVSkipItem.objects.all()
     form = SubstitutionForm(request.POST or None)
+    skip_form = CSVSkipItemForm(request.POST or None)
     
     if request.method == 'POST' and form.is_valid():
         form.save()
         messages.success(request, 'Substitution added successfully.')
         return redirect('substitutions')
     
+    if request.method == 'POST' and skip_form.is_valid():
+        skip_form.save()
+        messages.success(request, 'Skip item added successfully.')
+        return redirect('substitutions')
+    
     return render(request, 'stock_take/substitutions.html', {
         'substitutions': substitutions,
+        'skip_items': skip_items,
         'form': form,
+        'skip_form': skip_form,
     })
 
 @login_required
@@ -256,12 +265,6 @@ def order_details(request, order_id):
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
     
-    # Get substitutions and skip items for this order
-    substitutions = Substitution.objects.filter(missing_sku__in=[acc.sku for acc in order.accessories.filter(missing=True)])
-    skip_items = order.csv_skip_items.all()
-    substitution_form = SubstitutionForm()
-    skip_item_form = CSVSkipItemForm()
-    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -271,10 +274,6 @@ def order_details(request, order_id):
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
         'price_per_sqm': price_per_sqm,
-        'substitutions': substitutions,
-        'skip_items': skip_items,
-        'substitution_form': substitution_form,
-        'skip_item_form': skip_item_form,
     })
 
 def completed_stock_takes(request):
@@ -1311,6 +1310,9 @@ def upload_accessories_csv(request):
                 # Store original row for processed CSV
                 processed_row = row.copy()
                 
+                # Always set SellPrice to 0 in processed CSV
+                processed_row['SellPrice'] = '0'
+                
                 # Parse billable field early (needed for substitution creation)
                 billable_str = row.get('Billable', 'TRUE') or 'TRUE'
                 billable = billable_str.strip().upper() == 'TRUE'
@@ -1328,16 +1330,42 @@ def upload_accessories_csv(request):
                     try:
                         substitution = Substitution.objects.get(missing_sku=sku)
                         replacement_sku = substitution.replacement_sku
-                        try:
-                            stock_item = StockItem.objects.get(sku=replacement_sku)
-                            missing = False
-                            substituted = True
-                            substitutions_used += 1
-                            # Update processed row with replacement SKU and name
+                        if replacement_sku and replacement_sku.strip():
+                            # Apply substitution immediately
                             processed_row['Sku'] = replacement_sku
                             processed_row['Name'] = substitution.replacement_name or substitution.missing_name
-                        except StockItem.DoesNotExist:
-                            # Substitution exists but replacement SKU also not found
+                            processed_row['Description'] = substitution.description or substitution.replacement_name or substitution.missing_name
+                            if substitution.cost_price is not None:
+                                processed_row['CostPrice'] = str(substitution.cost_price)
+                            # Always set SellPrice to 0 for substituted items
+                            processed_row['SellPrice'] = '0'
+                            # Set quantity from substitution if available, otherwise check description or set default
+                            if substitution.quantity is not None and substitution.quantity > 0:
+                                processed_row['Quantity'] = str(substitution.quantity)
+                            else:
+                                # Check if original description is a number (like "8")
+                                original_desc = row.get('Description', '').strip()
+                                if original_desc and original_desc.isdigit():
+                                    processed_row['Quantity'] = original_desc
+                                elif not processed_row.get('Quantity') or processed_row.get('Quantity').strip() in ('', '0'):
+                                    # If no valid quantity found, set to 1
+                                    processed_row['Quantity'] = '1'
+                            processed_row['Billable'] = 'FALSE'  # Always set to FALSE for substituted items
+                            
+                            # Try to find the replacement stock item
+                            try:
+                                stock_item = StockItem.objects.get(sku=replacement_sku)
+                                missing = False
+                                substituted = True
+                                substitutions_used += 1
+                            except StockItem.DoesNotExist:
+                                # Substitution applied but replacement SKU not in stock
+                                stock_item = None
+                                missing = False  # Don't mark as missing since substitution was applied
+                                substituted = True
+                                substitutions_used += 1
+                        else:
+                            # Substitution exists but no replacement SKU
                             stock_item = None
                             missing = True
                             missing_items += 1
@@ -1361,19 +1389,24 @@ def upload_accessories_csv(request):
                         substitutions_created += 1
                         logging.info(f"Substitution created for {sku}, total created: {substitutions_created}")
                 
-                cost_price = safe_decimal(row.get('CostPrice', '0'))
-                sell_price = safe_decimal(row.get('SellPrice', '0'))
-                quantity_str = row.get('Quantity', '0') or '0'
-                quantity = safe_decimal(quantity_str)
+                # Use processed_row data if substitution was applied
+                final_sku = processed_row.get('Sku', sku)
+                final_name = processed_row.get('Name', (row.get('Name') or '').strip())
+                final_description = processed_row.get('Description', (row.get('Description') or '').strip())
+                final_cost_price = safe_decimal(processed_row.get('CostPrice', row.get('CostPrice', '0')))
+                final_sell_price = safe_decimal(processed_row.get('SellPrice', row.get('SellPrice', '0')))
+                final_quantity = safe_decimal(processed_row.get('Quantity', row.get('Quantity', '0')))
+                final_billable = processed_row.get('Billable', billable) == 'TRUE'
 
                 if existing_accessory:
                     # Update existing accessory
-                    existing_accessory.name = (row.get('Name') or '').strip()
-                    existing_accessory.description = (row.get('Description') or '').strip()
-                    existing_accessory.cost_price = cost_price
-                    existing_accessory.sell_price = sell_price
-                    existing_accessory.quantity = quantity
-                    existing_accessory.billable = billable
+                    existing_accessory.sku = final_sku
+                    existing_accessory.name = final_name
+                    existing_accessory.description = final_description
+                    existing_accessory.cost_price = final_cost_price
+                    existing_accessory.sell_price = final_sell_price
+                    existing_accessory.quantity = final_quantity
+                    existing_accessory.billable = final_billable
                     existing_accessory.stock_item = stock_item
                     existing_accessory.missing = missing
                     existing_accessory.save()
@@ -1382,13 +1415,13 @@ def upload_accessories_csv(request):
                     # Create new accessory
                     Accessory.objects.create(
                         order=order,
-                        sku=sku,
-                        name=(row.get('Name') or '').strip(),
-                        description=(row.get('Description') or '').strip(),
-                        cost_price=cost_price,
-                        sell_price=sell_price,
-                        quantity=quantity,
-                        billable=billable,
+                        sku=final_sku,
+                        name=final_name,
+                        description=final_description,
+                        cost_price=final_cost_price,
+                        sell_price=final_sell_price,
+                        quantity=final_quantity,
+                        billable=final_billable,
                         stock_item=stock_item,
                         missing=missing
                     )
@@ -1510,13 +1543,19 @@ def resolve_missing_items(request, order_id):
     if request.method == 'POST':
         order = get_object_or_404(Order, id=order_id)
         
-        # Get all substitutions that have replacement SKUs filled in
+        # Get all missing accessories
+        missing_accessories = order.accessories.filter(missing=True)
+        logging.info(f"Found {missing_accessories.count()} missing accessories")
+        for acc in missing_accessories:
+            logging.info(f"Missing accessory: {acc.sku} - {acc.name}")
+        
+        # Get all substitutions that could apply to missing items
         substitutions = Substitution.objects.filter(
-            missing_sku__in=[acc.sku for acc in order.accessories.filter(missing=True)],
+            missing_sku__in=[acc.sku for acc in missing_accessories],
             replacement_sku__isnull=False
         ).exclude(replacement_sku='')
         
-        logging.info(f"Found {len(substitutions)} substitutions to process")
+        logging.info(f"Found {len(substitutions)} applicable substitutions")
         for sub in substitutions:
             logging.info(f"Substitution: {sub.missing_sku} -> {sub.replacement_sku}")
         
@@ -1525,8 +1564,11 @@ def resolve_missing_items(request, order_id):
         for substitution in substitutions:
             # Find accessories with this missing SKU
             accessories = order.accessories.filter(sku=substitution.missing_sku, missing=True)
+            logging.info(f"Found {accessories.count()} accessories to update for {substitution.missing_sku}")
             
             for accessory in accessories:
+                replacement_stock_item = None  # Initialize to None
+                
                 # Try to find the replacement stock item
                 try:
                     replacement_stock_item = StockItem.objects.get(sku=substitution.replacement_sku)
@@ -1566,7 +1608,7 @@ def resolve_missing_items(request, order_id):
                 accessory.sku = substitution.replacement_sku
                 accessory.name = replacement_name
                 accessory.description = replacement_description
-                accessory.stock_item = replacement_stock_item if 'replacement_stock_item' in locals() else None
+                accessory.stock_item = replacement_stock_item
                 accessory.missing = False
                 
                 # Use cost price from replacement data
@@ -1584,16 +1626,28 @@ def resolve_missing_items(request, order_id):
                 accessory.save()
                 resolved_count += 1
         
-        # Also remove items marked for skipping
+        # Also remove items marked for skipping (both order-specific and global)
         skip_items_removed = 0
+        
+        # Remove order-specific skip items
         for skip_item in order.csv_skip_items.all():
             accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
-            logging.info(f"Removing {accessories_to_remove.count()} accessories with SKU {skip_item.sku}")
+            logging.info(f"Removing {accessories_to_remove.count()} accessories with SKU {skip_item.sku} (order-specific skip)")
             for accessory in accessories_to_remove:
                 accessory.delete()
                 skip_items_removed += 1
         
-        # Clear the skip items after processing
+        # Remove global skip items
+        global_skip_items = CSVSkipItem.objects.filter(order__isnull=True)
+        for skip_item in global_skip_items:
+            accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
+            if accessories_to_remove.exists():
+                logging.info(f"Removing {accessories_to_remove.count()} accessories with SKU {skip_item.sku} (global skip)")
+                for accessory in accessories_to_remove:
+                    accessory.delete()
+                    skip_items_removed += 1
+        
+        # Clear the order-specific skip items after processing
         order.csv_skip_items.all().delete()
         
         # Regenerate processed CSV with resolved data
@@ -1687,9 +1741,13 @@ def delete_skip_item(request, skip_item_id):
     """Delete a skip item"""
     if request.method == 'POST':
         skip_item = get_object_or_404(CSVSkipItem, id=skip_item_id)
-        order_id = skip_item.order.id
         skip_item.delete()
         messages.success(request, f'Item "{skip_item.name}" removed from skip list.')
-        return redirect('order_details', order_id=order_id)
+        
+        # Redirect based on whether it was an order-specific or global skip item
+        if skip_item.order:
+            return redirect('order_details', order_id=skip_item.order.id)
+        else:
+            return redirect('substitutions')
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 

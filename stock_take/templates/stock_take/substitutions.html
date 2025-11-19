@@ -19,7 +19,7 @@
 
 {% block content %}
 <div class="container mt-2 pb-3">
-    <h2>Substitutions</h2>
+    <h2>Substitutions & Skip Items</h2>
 
     <!-- Form Errors Display -->
     {% if form.errors %}
@@ -38,53 +38,129 @@
         </div>
     {% endif %}
 
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th style="background-color: #ffaaaa;">Missing SKU</th>
-                    <th style="background-color: #ffaaaa;">Missing Name</th>
-                    <th>Replacement SKU</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Add New Substitution Form Row -->
-                <tr class="table-light">
-                    <form method="POST" id="add-substitution-form">
-                        {% csrf_token %}
-                        <td style="background-color: #ffaaaa;">{{ form.missing_sku }}</td>
-                        <td style="background-color: #ffaaaa;">{{ form.missing_name }}</td>
-                        <td>{{ form.replacement_sku }}</td>
-                        <td>
-                            <button type="submit" class="btn btn-sm btn-success">Add</button>
-                        </td>
-                    </form>
-                </tr>
+    <!-- Substitutions Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Substitutions</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th style="background-color: #ffaaaa;">Missing SKU</th>
+                            <th style="background-color: #ffaaaa;">Missing Name</th>
+                            <th>Replacement SKU</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Add New Substitution Form Row -->
+                        <tr class="table-light">
+                            <form method="POST" id="add-substitution-form">
+                                {% csrf_token %}
+                                <td style="background-color: #ffaaaa;">{{ form.missing_sku }}</td>
+                                <td style="background-color: #ffaaaa;">{{ form.missing_name }}</td>
+                                <td>{{ form.replacement_sku }}</td>
+                                <td>
+                                    <button type="submit" class="btn btn-sm btn-success">Add</button>
+                                </td>
+                            </form>
+                        </tr>
 
-                {% for substitution in substitutions %}
-                <tr>
-                    <td style="background-color: #ffaaaa;">{{ substitution.missing_sku }}</td>
-                    <td style="background-color: #ffaaaa;">{{ substitution.missing_name }}</td>
-                    <td>{{ substitution.replacement_sku }}</td>
-                    <td>
-                        <div class="btn-group btn-group-sm">
-                            <a href="{% url 'edit_substitution' substitution.id %}" class="btn btn-outline-primary" title="Edit">
-                                <i class="bi bi-pencil"></i>
-                            </a>
-                            <button class="btn btn-outline-danger delete-substitution-btn"
-                                    data-id="{{ substitution.id }}"
-                                    data-missing="{{ substitution.missing_name }}"
-                                    data-replacement="{{ substitution.replacement_name }}"
-                                    title="Delete">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                        {% for substitution in substitutions %}
+                        <tr>
+                            <td style="background-color: #ffaaaa;">{{ substitution.missing_sku }}</td>
+                            <td style="background-color: #ffaaaa;">{{ substitution.missing_name }}</td>
+                            <td>{{ substitution.replacement_sku }}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{% url 'edit_substitution' substitution.id %}" class="btn btn-outline-primary" title="Edit">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                    <button class="btn btn-outline-danger delete-substitution-btn"
+                                            data-id="{{ substitution.id }}"
+                                            data-missing="{{ substitution.missing_name }}"
+                                            data-replacement="{{ substitution.replacement_name }}"
+                                            title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skip Items Section -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Items to Remove/Skip</h5>
+        </div>
+        <div class="card-body">
+            <!-- Form Errors Display for Skip Form -->
+            {% if skip_form.errors %}
+                <div class="alert alert-danger">
+                    <strong>Please correct the following errors:</strong>
+                    <ul>
+                        {% for field in skip_form %}
+                            {% for error in field.errors %}
+                                <li>{{ field.label }}: {{ error }}</li>
+                            {% endfor %}
+                        {% endfor %}
+                        {% for error in skip_form.non_field_errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th style="background-color: #ffaaaa;">SKU</th>
+                            <th style="background-color: #ffaaaa;">Name</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Add New Skip Item Form Row -->
+                        <tr class="table-light">
+                            <form method="POST" id="add-skip-item-form">
+                                {% csrf_token %}
+                                <td style="background-color: #ffaaaa;">{{ skip_form.sku }}</td>
+                                <td style="background-color: #ffaaaa;">{{ skip_form.name }}</td>
+                                <td>
+                                    <button type="submit" class="btn btn-sm btn-success">Add</button>
+                                </td>
+                            </form>
+                        </tr>
+
+                        {% for skip_item in skip_items %}
+                        <tr>
+                            <td style="background-color: #ffaaaa;">{{ skip_item.sku }}</td>
+                            <td style="background-color: #ffaaaa;">{{ skip_item.name }}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-danger delete-skip-item-btn"
+                                            data-id="{{ skip_item.id }}"
+                                            data-sku="{{ skip_item.sku }}"
+                                            data-name="{{ skip_item.name }}"
+                                            title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -105,6 +181,23 @@ $(document).ready(function() {
             })
             .fail(function() {
                 alert('Error deleting substitution.');
+            });
+        }
+    });
+
+    $('.delete-skip-item-btn').on('click', function() {
+        const skipItemId = $(this).data('id');
+        const sku = $(this).data('sku');
+        const name = $(this).data('name');
+        if (confirm(`Are you sure you want to delete the skip item: ${sku} - ${name}?`)) {
+            $.post('{% url "delete_skip_item" 0 %}'.replace('0', skipItemId), {
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            })
+            .done(function() {
+                location.reload();
+            })
+            .fail(function() {
+                alert('Error deleting skip item.');
             });
         }
     });
