@@ -41,6 +41,8 @@ urlpatterns = [
     
     # Ordering page
     path('ordering/', views.ordering, name='ordering'),
+    path('search/', views.search_orders, name='search_orders'),
+    path('material-report/', views.material_report, name='material_report'),
     path('substitutions/', views.substitutions, name='substitutions'),
     path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),
     path('substitution/edit/<int:substitution_id>/', views.edit_substitution, name='edit_substitution'),

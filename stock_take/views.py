@@ -72,6 +72,220 @@ def ordering(request):
     })
 
 @login_required
+def search_orders(request):
+    """Search for orders by name, sale number, or customer number"""
+    query = request.GET.get('q', '').strip()
+    orders = []
+    
+    if query:
+        # Search by first name, last name, sale number, or customer number
+        orders = Order.objects.filter(
+            Q(first_name__icontains=query) |
+            Q(last_name__icontains=query) |
+            Q(sale_number__icontains=query) |
+            Q(customer_number__icontains=query)
+        ).order_by('-order_date')[:10]  # Limit to 10 results
+    
+    return render(request, 'stock_take/search_results.html', {
+        'query': query,
+        'orders': orders,
+    })
+
+@login_required
+def material_report(request):
+    """Display aggregated material usage report with filtering"""
+    from datetime import datetime, timedelta
+    from django.utils import timezone
+    from collections import defaultdict
+    
+    # Get filter parameters
+    filter_type = request.GET.get('filter', 'all')  # 'all', 'week', 'month'
+    date_param = request.GET.get('date', '')
+    
+    # Set default date to today if not provided
+    if not date_param:
+        current_date = timezone.now().date()
+    else:
+        try:
+            current_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+        except ValueError:
+            current_date = timezone.now().date()
+    
+    # Calculate date range based on filter
+    if filter_type == 'week':
+        # Get the start of the week (Monday)
+        start_of_week = current_date - timedelta(days=current_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+        date_range = (start_of_week, end_of_week)
+        period_label = f"Week of {start_of_week.strftime('%B %d, %Y')} - {end_of_week.strftime('%B %d, %Y')}"
+    elif filter_type == 'month':
+        # Get the first and last day of the month
+        start_of_month = current_date.replace(day=1)
+        if current_date.month == 12:
+            end_of_month = current_date.replace(year=current_date.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            end_of_month = current_date.replace(month=current_date.month + 1, day=1) - timedelta(days=1)
+        date_range = (start_of_month, end_of_month)
+        period_label = f"{start_of_month.strftime('%B %Y')}"
+    else:
+        # All time - no date filter
+        date_range = None
+        period_label = "All Time"
+    
+    # Aggregate materials from different sources
+    materials = defaultdict(lambda: {'quantity': 0, 'orders': set()})
+    
+    # 1. Aggregate from PNX Items (boards)
+    # Get all orders within the date range, then get their PNX items
+    if date_range:
+        orders_in_range = Order.objects.filter(order_date__range=date_range)
+        boards_pos_in_range = BoardsPO.objects.filter(orders__in=orders_in_range).distinct()
+        pnx_query = PNXItem.objects.filter(boards_po__in=boards_pos_in_range)
+    else:
+        pnx_query = PNXItem.objects.all()
+    
+    for item in pnx_query:
+        key = f"PNX-{item.matname}"
+        materials[key]['quantity'] += float(item.cnt)
+        materials[key]['name'] = item.matname
+        # Store all unique SKUs for this material
+        if 'skus' not in materials[key]:
+            materials[key]['skus'] = set()
+        materials[key]['skus'].add(item.barcode)
+        materials[key]['sku'] = item.barcode  # Keep for compatibility
+        materials[key]['type'] = 'Board'
+        materials[key]['source'] = 'PNX'
+        # Add all orders that use this BoardsPO
+        for order in item.boards_po.orders.all():
+            if not date_range or (date_range[0] <= order.order_date <= date_range[1]):
+                materials[key]['orders'].add((order.id, order.sale_number))
+    
+    # 2. Aggregate from Accessories
+    accessory_query = Accessory.objects.select_related('order', 'stock_item')
+    if date_range:
+        accessory_query = accessory_query.filter(
+            order__order_date__range=date_range
+        )
+    
+    for accessory in accessory_query:
+        key = f"ACC-{accessory.sku}-{accessory.name}"
+        materials[key]['quantity'] += float(accessory.quantity)
+        materials[key]['name'] = accessory.name
+        materials[key]['sku'] = accessory.sku
+        materials[key]['type'] = 'Accessory'
+        materials[key]['source'] = 'CSV'
+        materials[key]['stock'] = accessory.available_quantity if accessory.stock_item else 0
+        materials[key]['orders'].add((accessory.order.id, accessory.order.sale_number))
+    
+    # 3. Aggregate from OS Doors (if they have materials)
+    # OS Doors don't seem to have specific materials, so we'll skip this for now
+    
+    # Convert to list and sort by quantity descending
+    material_list = []
+    boards_list = []
+    rau_list = []
+    accessories_list = []
+    
+    # Get all stock items for RAU lookup
+    rau_stock_items = {item.sku: item.quantity for item in StockItem.objects.filter(sku__icontains='RAU')}
+    
+    for key, data in materials.items():
+        # Sort orders by sale number
+        sorted_orders = sorted(list(data['orders']), key=lambda x: x[1])
+        
+        # Handle SKU display differently for boards (grouped by material name)
+        if data['type'] == 'Board':
+            sku_display = ', '.join(sorted(data['skus']))
+        else:
+            sku_display = data.get('sku', '')
+            
+        material_data = {
+            'sku': sku_display,
+            'name': data['name'],
+            'quantity': data['quantity'],
+            'type': data['type'],
+            'source': data['source'],
+            'order_count': len(data['orders']),
+            'orders': sorted_orders
+        }
+        
+        # Add stock information
+        if data['type'] == 'Accessory':
+            material_data['stock'] = data.get('stock', 0)
+        elif data.get('sku') and 'RAU' in data['sku'].upper():
+            # For RAU materials, we need to check stock for each SKU in the group
+            # For now, we'll use the first SKU found or 0 if none match
+            rau_stock = 0
+            for sku in data.get('skus', [data['sku']]):
+                if sku in rau_stock_items:
+                    rau_stock += rau_stock_items[sku]
+            material_data['stock'] = rau_stock
+        else:
+            material_data['stock'] = None  # Not applicable for boards
+        
+        # Categorize materials
+        if data.get('sku') and 'RAU' in data['sku'].upper():
+            rau_list.append(material_data)
+        elif data['type'] == 'Board':
+            boards_list.append(material_data)
+        else:
+            accessories_list.append(material_data)
+        
+        material_list.append(material_data)
+    
+    # Sort each category by quantity descending
+    boards_list.sort(key=lambda x: x['quantity'], reverse=True)
+    rau_list.sort(key=lambda x: x['quantity'], reverse=True)
+    accessories_list.sort(key=lambda x: x['quantity'], reverse=True)
+    
+    # Calculate materials with insufficient stock (RAU and Accessories only)
+    materials_missing_stock = 0
+    for material in rau_list + accessories_list:
+        if material['stock'] is not None and material['stock'] < material['quantity']:
+            materials_missing_stock += 1
+    
+    # Calculate board popularity for chart (top 10 by order count)
+    board_popularity = sorted(boards_list, key=lambda x: x['order_count'], reverse=True)[:10]
+    max_orders = max([b['order_count'] for b in board_popularity]) if board_popularity else 1
+    
+    # Add percentage for chart display
+    for board in board_popularity:
+        board['percentage'] = (board['order_count'] / max_orders) * 100 if max_orders > 0 else 0
+    
+    # Calculate navigation dates
+    if filter_type == 'week':
+        prev_date = (current_date - timedelta(days=7)).strftime('%Y-%m-%d')
+        next_date = (current_date + timedelta(days=7)).strftime('%Y-%m-%d')
+    elif filter_type == 'month':
+        if current_date.month == 1:
+            prev_date = current_date.replace(year=current_date.year - 1, month=12).strftime('%Y-%m-%d')
+        else:
+            prev_date = current_date.replace(month=current_date.month - 1).strftime('%Y-%m-%d')
+        
+        if current_date.month == 12:
+            next_date = current_date.replace(year=current_date.year + 1, month=1).strftime('%Y-%m-%d')
+        else:
+            next_date = current_date.replace(month=current_date.month + 1).strftime('%Y-%m-%d')
+    else:
+        prev_date = next_date = None
+    
+    return render(request, 'stock_take/material_report.html', {
+        'boards': boards_list,
+        'rau_materials': rau_list,
+        'accessories': accessories_list,
+        'filter_type': filter_type,
+        'current_date': current_date.strftime('%Y-%m-%d') if filter_type != 'all' else None,
+        'period_label': period_label,
+        'prev_date': prev_date,
+        'next_date': next_date,
+        'total_materials': len(material_list),
+        'total_quantity': sum(m['quantity'] for m in material_list),
+        'board_popularity': board_popularity,
+        'max_orders': max_orders,
+        'materials_missing_stock': materials_missing_stock,
+    })
+
+@login_required
 def substitutions(request):
     """Display and manage substitutions and skip items"""
     substitutions = Substitution.objects.all()
@@ -264,6 +478,54 @@ def order_details(request, order_id):
     
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
+    
+    # Automatically remove items that are in skip lists
+    skip_items_removed = 0
+    
+    # Remove order-specific skip items
+    for skip_item in order.csv_skip_items.all():
+        accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
+        for accessory in accessories_to_remove:
+            accessory.delete()
+            skip_items_removed += 1
+    
+    # Remove global skip items
+    global_skip_items = CSVSkipItem.objects.filter(order__isnull=True)
+    for skip_item in global_skip_items:
+        accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
+        for accessory in accessories_to_remove:
+            accessory.delete()
+            skip_items_removed += 1
+    
+    # Regenerate processed CSV if items were removed
+    if skip_items_removed > 0:
+        if order.accessories.exists():
+            processed_rows = []
+            for accessory in order.accessories.all():
+                row = {
+                    'Sku': accessory.sku,
+                    'Name': accessory.name,
+                    'Description': accessory.description,
+                    'CostPrice': str(accessory.cost_price),
+                    'SellPrice': str(accessory.sell_price),
+                    'Quantity': str(accessory.quantity),
+                    'Billable': 'TRUE' if accessory.billable else 'FALSE'
+                }
+                processed_rows.append(row)
+            
+            if processed_rows:
+                processed_csv_content = io.StringIO()
+                fieldnames = ['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable']
+                writer = csv.DictWriter(processed_csv_content, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(processed_rows)
+                
+                # Save updated processed CSV
+                filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
+                order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
+                                       io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
+        
+        messages.info(request, f'Automatically removed {skip_items_removed} items from skip lists.')
     
     return render(request, 'stock_take/order_details.html', {
         'order': order,
@@ -1486,10 +1748,39 @@ def delete_accessory(request, accessory_id):
     """Delete a specific accessory"""
     if request.method == 'POST':
         accessory = get_object_or_404(Accessory, id=accessory_id)
-        order_id = accessory.order.id
+        order = accessory.order
+        accessory_name = accessory.name
         accessory.delete()
-        messages.success(request, f'Accessory "{accessory.name}" has been removed from order {accessory.order.sale_number}.')
-        return redirect('order_details', order_id=order_id)
+        
+        # Regenerate processed CSV after deletion
+        if order.accessories.exists():
+            processed_rows = []
+            for acc in order.accessories.all():
+                row = {
+                    'Sku': acc.sku,
+                    'Name': acc.name,
+                    'Description': acc.description,
+                    'CostPrice': str(acc.cost_price),
+                    'SellPrice': str(acc.sell_price),
+                    'Quantity': str(acc.quantity),
+                    'Billable': 'TRUE' if acc.billable else 'FALSE'
+                }
+                processed_rows.append(row)
+            
+            if processed_rows:
+                processed_csv_content = io.StringIO()
+                fieldnames = ['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable']
+                writer = csv.DictWriter(processed_csv_content, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(processed_rows)
+                
+                # Save updated processed CSV
+                filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
+                order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
+                                       io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
+        
+        messages.success(request, f'Accessory "{accessory_name}" has been removed from order {order.sale_number} and CSV regenerated.')
+        return redirect('order_details', order_id=order.id)
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 

@@ -1,0 +1,284 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block nav_material_report_active %}active{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Material Report</h2>
+        <a href="{% url 'ordering' %}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Orders
+        </a>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Filter by Time Period</h5>
+        </div>
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <div class="btn-group w-100" role="group">
+                        <a href="?filter=all" class="btn btn-outline-primary {% if filter_type == 'all' %}active{% endif %}">All Time</a>
+                        <a href="?filter=week{% if current_date %}&date={{ current_date }}{% endif %}" class="btn btn-outline-primary {% if filter_type == 'week' %}active{% endif %}">Week</a>
+                        <a href="?filter=month{% if current_date %}&date={{ current_date }}{% endif %}" class="btn btn-outline-primary {% if filter_type == 'month' %}active{% endif %}">Month</a>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    {% if filter_type != 'all' %}
+                    <div class="d-flex justify-content-between align-items-center">
+                        <a href="?filter={{ filter_type }}&date={{ prev_date }}" class="btn btn-outline-secondary">
+                            <i class="bi bi-chevron-left"></i> Previous {{ filter_type|title }}
+                        </a>
+                        <div class="text-center">
+                            <strong>{{ period_label }}</strong>
+                        </div>
+                        <a href="?filter={{ filter_type }}&date={{ next_date }}" class="btn btn-outline-secondary">
+                            Next {{ filter_type|title }} <i class="bi bi-chevron-right"></i>
+                        </a>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Statistics -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-primary">{{ total_materials }}</h3>
+                    <p class="text-muted mb-0">Unique Materials</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="{% if materials_missing_stock > 0 %}text-danger{% else %}text-success{% endif %}">{{ materials_missing_stock }}</h3>
+                    <p class="text-muted mb-0">Materials Missing Stock</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Top 10 Boards by Order Usage</h6>
+                </div>
+                <div class="card-body">
+                    {% if board_popularity %}
+                        {% for board in board_popularity %}
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="flex-grow-1">
+                                <small class="text-muted">{{ board.name|truncatechars:25 }}</small>
+                            </div>
+                            <div class="flex-shrink-0 ms-2" style="width: 60px;">
+                                <div class="progress" style="height: 8px;">
+                                    <div class="progress-bar bg-primary" role="progressbar" 
+                                         data-width="{{ board.percentage|stringformat:'g' }}%"
+                                         aria-valuenow="{{ board.order_count }}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="{{ max_orders }}"></div>
+                                </div>
+                            </div>
+                            <div class="flex-shrink-0 ms-2" style="width: 30px;">
+                                <small class="text-muted">{{ board.order_count }}</small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted mb-0 small">No board data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Materials Sections -->
+    {% if boards or rau_materials or accessories %}
+        <!-- Boards Section -->
+        {% if boards %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Boards ({{ boards|length }} materials)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SKU</th>
+                                <th>Material Name</th>
+                                <th>Source</th>
+                                <th class="text-end">Total Quantity</th>
+                                <th class="text-center">Orders Used In</th>
+                                <th>Order Numbers</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for material in boards %}
+                            <tr>
+                                <td><code>{{ material.sku }}</code></td>
+                                <td>{{ material.name }}</td>
+                                <td>
+                                    <span class="badge bg-info">{{ material.source }}</span>
+                                </td>
+                                <td class="text-end">
+                                    <strong>{{ material.quantity|floatformat:2 }}</strong>
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark">{{ material.order_count }}</span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% for order_tuple in material.orders %}
+                                            <a href="{% url 'order_details' order_tuple.0 %}" class="text-decoration-none">{{ order_tuple.1 }}</a>{% if not forloop.last %}, {% endif %}
+                                        {% endfor %}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Raumplus (RAU) Section -->
+        {% if rau_materials %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Raumplus (RAU) ({{ rau_materials|length }} materials)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SKU</th>
+                                <th>Material Name</th>
+                                <th>Source</th>
+                                <th class="text-end">Total Quantity</th>
+                                <th class="text-center">Stock</th>
+                                <th class="text-center">Orders Used In</th>
+                                <th>Order Numbers</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for material in rau_materials %}
+                            <tr class="{% if material.stock is not None and material.stock < material.quantity %}table-danger{% endif %}">
+                                <td><code>{{ material.sku }}</code></td>
+                                <td>{{ material.name }}</td>
+                                <td>
+                                    <span class="badge bg-info">{{ material.source }}</span>
+                                </td>
+                                <td class="text-end">
+                                    <strong>{{ material.quantity|floatformat:2 }}</strong>
+                                </td>
+                                <td class="text-center">
+                                    {% if material.stock is not None %}
+                                        <span class="badge {% if material.stock < material.quantity %}bg-danger{% else %}bg-success{% endif %}">{{ material.stock }}</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark">{{ material.order_count }}</span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% for order_tuple in material.orders %}
+                                            <a href="{% url 'order_details' order_tuple.0 %}" class="text-decoration-none">{{ order_tuple.1 }}</a>{% if not forloop.last %}, {% endif %}
+                                        {% endfor %}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Accessories Section -->
+        {% if accessories %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Accessories ({{ accessories|length }} materials)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SKU</th>
+                                <th>Material Name</th>
+                                <th>Source</th>
+                                <th class="text-end">Total Quantity</th>
+                                <th class="text-center">Stock</th>
+                                <th class="text-center">Orders Used In</th>
+                                <th>Order Numbers</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for material in accessories %}
+                            <tr class="{% if material.stock is not None and material.stock < material.quantity %}table-danger{% endif %}">
+                                <td><code>{{ material.sku }}</code></td>
+                                <td>{{ material.name }}</td>
+                                <td>
+                                    <span class="badge bg-warning">{{ material.source }}</span>
+                                </td>
+                                <td class="text-end">
+                                    <strong>{{ material.quantity|floatformat:2 }}</strong>
+                                </td>
+                                <td class="text-center">
+                                    {% if material.stock is not None %}
+                                        <span class="badge {% if material.stock < material.quantity %}bg-danger{% else %}bg-success{% endif %}">{{ material.stock }}</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark">{{ material.order_count }}</span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% for order_tuple in material.orders %}
+                                            <a href="{% url 'order_details' order_tuple.0 %}" class="text-decoration-none">{{ order_tuple.1 }}</a>{% if not forloop.last %}, {% endif %}
+                                        {% endfor %}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% else %}
+    <div class="card">
+        <div class="card-body text-center">
+            <i class="bi bi-info-circle text-muted" style="font-size: 3rem;"></i>
+            <h5 class="text-muted mt-3">No Materials Found</h5>
+            <p class="text-muted">No materials were used during the selected time period.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Set progress bar widths based on data attributes
+    document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
+        bar.style.width = bar.getAttribute('data-width');
+    });
+});
+</script>
+
+{% endblock %}

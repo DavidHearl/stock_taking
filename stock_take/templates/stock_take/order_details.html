@@ -151,8 +151,7 @@
                                     <div class="form-text">
                                         Anthill CRM Customer ID
                                         {% if order.anthill_id %}
-                                            <!-- TODO: Update this URL to match your Anthill CRM system -->
-                                            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"  target="_blank" class="ms-2 btn btn-sm btn-outline-primary">
+                                            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"  target="_blank" class="ms-2 btn btn-sm btn-outline-success">
                                                 <i class="bi bi-box-arrow-up-right"></i> Open in Anthill
                                             </a>
                                         {% endif %}
@@ -166,7 +165,6 @@
                                     <div class="form-text">
                                         WorkGuru Project ID
                                         {% if order.workguru_id %}
-                                            <!-- TODO: Update this URL to match your WorkGuru system -->
                                             <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" target="_blank" class="ms-2 btn btn-sm btn-outline-primary">
                                                 <i class="bi bi-box-arrow-up-right"></i> Open in WorkGuru
                                             </a>
@@ -208,6 +206,146 @@
                         </button>
                     </form>
                 </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Order Summary</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-sm-5">Customer:</dt>
+                        <dd class="col-sm-7">{{ order.first_name }} {{ order.last_name }}</dd>
+                        
+                        <dt class="col-sm-5">Sale #:</dt>
+                        <dd class="col-sm-7">{{ order.sale_number }}</dd>
+                        
+                        <dt class="col-sm-5">Customer #:</dt>
+                        <dd class="col-sm-7">{{ order.customer_number }}</dd>
+                        
+                        <dt class="col-sm-5">Order Date:</dt>
+                        <dd class="col-sm-7">{{ order.order_date }}</dd>
+                        
+                        <dt class="col-sm-5">Fit Date:</dt>
+                        <dd class="col-sm-7">{{ order.fit_date }}</dd>
+                        
+                        <dt class="col-sm-5">Time Allowance:</dt>
+                        <dd class="col-sm-7">{{ order.time_allowance }} days</dd>
+                        
+                        <dt class="col-sm-5">Boards PO:</dt>
+                        <dd class="col-sm-7">
+                            {% if order.boards_po %}
+                                {{ order.boards_po.po_number }}
+                                {% if order.boards_po.file %}
+                                    <a href="{{ order.boards_po.file.url }}" target="_blank" class="btn btn-sm btn-outline-primary ms-2">
+                                        <i class="bi bi-file-earmark-pdf"></i> View File
+                                    </a>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">Not assigned</span>
+                            {% endif %}
+                        </dd>
+                        
+                        <dt class="col-sm-5">Boards Ordered:</dt>
+                        <dd class="col-sm-7">
+                            {% if order.boards_ordered %}
+                                <span class="badge bg-success">Yes</span>
+                            {% else %}
+                                <span class="badge bg-warning">No</span>
+                            {% endif %}
+                        </dd>
+                        
+                        <dt class="col-sm-5">Job Finished:</dt>
+                        <dd class="col-sm-7">
+                            {% if order.job_finished %}
+                                <span class="badge bg-success">Yes</span>
+                            {% else %}
+                                <span class="badge bg-warning">No</span>
+                            {% endif %}
+                        </dd>
+                        
+                        <dt class="col-sm-5">Order Type:</dt>
+                        <dd class="col-sm-7">
+                            <span class="badge bg-{% if order.order_type == 'sale' %}primary{% elif order.order_type == 'remedial' %}warning{% else %}info{% endif %}">
+                                {{ order.get_order_type_display }}
+                            </span>
+                        </dd>
+                        
+                        <dt class="col-sm-5">Address:</dt>
+                        <dd class="col-sm-7">
+                            {% if order.address %}
+                                {{ order.address }}
+                            {% else %}
+                                <span class="text-muted">Not provided</span>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            {% if order.boards_po %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h6>Boards PO Details</h6>
+                </div>
+                <div class="card-body">
+                    <p><strong>PO Number:</strong> {{ order.boards_po.po_number }}</p>
+                    {% if order.boards_po.file %}
+                        <p><strong>File:</strong> <a href="{{ order.boards_po.file.url }}" target="_blank">{{ order.boards_po.file.name }}</a></p>
+                    {% endif %}
+
+                    {% if order_pnx_items %}
+                    <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Barcode</th>
+                                    <th>Material</th>
+                                    <th>Dimensions (LxW)</th>
+                                    <th>Count</th>
+                                    <th>Cost</th>
+                                    <th>Customer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in order_pnx_items %}
+                                <tr>
+                                    <td>{{ item.barcode }}</td>
+                                    <td>{{ item.matname }}</td>
+                                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
+                                    <td>{{ item.cnt }}</td>
+                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
+                                    <td>{{ item.customer }}</td>
+                                </tr>
+                                {% endfor %}
+                                <tr class="table-info">
+                                    <td colspan="5"><strong>Total Cost:</strong></td>
+                                    <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
+                    <p><strong>Other Orders:</strong></p>
+                    <ul class="list-unstyled">
+                        {% for other_order in other_orders %}
+                            <li>
+                                <a href="{% url 'order_details' other_order.id %}">{{ other_order.sale_number }}</a> - {{ other_order.first_name }} {{ other_order.last_name }}
+                            </li>
+                        {% empty %}
+                            <li class="text-muted">No other orders assigned to this PO</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
             </div>
 
             <!-- OS Doors Section -->
@@ -369,7 +507,7 @@
                         </button>
                         {% if order.accessories.exists %}
                         <form method="POST" action="{% url 'delete_all_accessories' order.id %}" style="display: inline;" 
-                              onsubmit="return confirm('Are you sure you want to remove ALL accessories from this order? This action cannot be undone.');">
+                            onsubmit="return confirm('Are you sure you want to remove ALL accessories from this order? This action cannot be undone.');">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-sm btn-outline-danger">
                                 <i class="bi bi-trash"></i> Remove All
@@ -413,7 +551,7 @@
                                             </form>
                                             {% endif %}
                                             <form method="POST" action="{% url 'remove_order_csv' order.id 'original' %}" style="display: inline;" 
-                                                  onsubmit="return confirm('Are you sure you want to remove the original CSV file?');">
+                                                onsubmit="return confirm('Are you sure you want to remove the original CSV file?');">
                                                 {% csrf_token %}
                                                 <button type="submit" class="btn btn-sm btn-outline-danger">
                                                     <i class="bi bi-trash"></i> Remove
@@ -438,7 +576,7 @@
                                                 <i class="bi bi-download"></i> Download
                                             </a>
                                             <form method="POST" action="{% url 'remove_order_csv' order.id 'processed' %}" style="display: inline;" 
-                                                  onsubmit="return confirm('Are you sure you want to remove the processed CSV file?');">
+                                                onsubmit="return confirm('Are you sure you want to remove the processed CSV file?');">
                                                 {% csrf_token %}
                                                 <button type="submit" class="btn btn-sm btn-outline-danger">
                                                     <i class="bi bi-trash"></i> Remove
@@ -517,7 +655,7 @@
                                     {% endif %}
                                     <td>
                                         <form method="POST" action="{% url 'delete_accessory' accessory.id %}" style="display: inline;" 
-                                              onsubmit="return confirm('Are you sure you want to remove this accessory?');">
+                                            onsubmit="return confirm('Are you sure you want to remove this accessory?');">
                                             {% csrf_token %}
                                             <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove Accessory">
                                                 <i class="bi bi-trash"></i>
@@ -534,146 +672,10 @@
                     {% endif %}
                 </div>
             </div>
-
-
-            {% if order.boards_po %}
-            <div class="card mt-3">
-                <div class="card-header">
-                    <h6>Boards PO Details</h6>
-                </div>
-                <div class="card-body">
-                    <p><strong>PO Number:</strong> {{ order.boards_po.po_number }}</p>
-                    {% if order.boards_po.file %}
-                        <p><strong>File:</strong> <a href="{{ order.boards_po.file.url }}" target="_blank">{{ order.boards_po.file.name }}</a></p>
-                    {% endif %}
-
-                    {% if order_pnx_items %}
-                    <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Barcode</th>
-                                    <th>Material</th>
-                                    <th>Dimensions (LxW)</th>
-                                    <th>Count</th>
-                                    <th>Cost</th>
-                                    <th>Customer</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in order_pnx_items %}
-                                <tr>
-                                    <td>{{ item.barcode }}</td>
-                                    <td>{{ item.matname }}</td>
-                                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
-                                    <td>{{ item.cnt }}</td>
-                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
-                                    <td>{{ item.customer }}</td>
-                                </tr>
-                                {% endfor %}
-                                <tr class="table-info">
-                                    <td colspan="5"><strong>Total Cost:</strong></td>
-                                    <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    {% endif %}
-
-                    <p><strong>Other Orders:</strong></p>
-                    <ul class="list-unstyled">
-                        {% for other_order in other_orders %}
-                            <li>
-                                <a href="{% url 'order_details' other_order.id %}">{{ other_order.sale_number }}</a> - {{ other_order.first_name }} {{ other_order.last_name }}
-                            </li>
-                        {% empty %}
-                            <li class="text-muted">No other orders assigned to this PO</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-            {% endif %}
-        </div>
-        
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5>Order Summary</h5>
-                </div>
-                <div class="card-body">
-                    <dl class="row">
-                        <dt class="col-sm-5">Customer:</dt>
-                        <dd class="col-sm-7">{{ order.first_name }} {{ order.last_name }}</dd>
-                        
-                        <dt class="col-sm-5">Sale #:</dt>
-                        <dd class="col-sm-7">{{ order.sale_number }}</dd>
-                        
-                        <dt class="col-sm-5">Customer #:</dt>
-                        <dd class="col-sm-7">{{ order.customer_number }}</dd>
-                        
-                        <dt class="col-sm-5">Order Date:</dt>
-                        <dd class="col-sm-7">{{ order.order_date }}</dd>
-                        
-                        <dt class="col-sm-5">Fit Date:</dt>
-                        <dd class="col-sm-7">{{ order.fit_date }}</dd>
-                        
-                        <dt class="col-sm-5">Time Allowance:</dt>
-                        <dd class="col-sm-7">{{ order.time_allowance }} days</dd>
-                        
-                        <dt class="col-sm-5">Boards PO:</dt>
-                        <dd class="col-sm-7">
-                            {% if order.boards_po %}
-                                {{ order.boards_po.po_number }}
-                                {% if order.boards_po.file %}
-                                    <a href="{{ order.boards_po.file.url }}" target="_blank" class="btn btn-sm btn-outline-primary ms-2">
-                                        <i class="bi bi-file-earmark-pdf"></i> View File
-                                    </a>
-                                {% endif %}
-                            {% else %}
-                                <span class="text-muted">Not assigned</span>
-                            {% endif %}
-                        </dd>
-                        
-                        <dt class="col-sm-5">Boards Ordered:</dt>
-                        <dd class="col-sm-7">
-                            {% if order.boards_ordered %}
-                                <span class="badge bg-success">Yes</span>
-                            {% else %}
-                                <span class="badge bg-warning">No</span>
-                            {% endif %}
-                        </dd>
-                        
-                        <dt class="col-sm-5">Job Finished:</dt>
-                        <dd class="col-sm-7">
-                            {% if order.job_finished %}
-                                <span class="badge bg-success">Yes</span>
-                            {% else %}
-                                <span class="badge bg-warning">No</span>
-                            {% endif %}
-                        </dd>
-                        
-                        <dt class="col-sm-5">Order Type:</dt>
-                        <dd class="col-sm-7">
-                            <span class="badge bg-{% if order.order_type == 'sale' %}primary{% elif order.order_type == 'remedial' %}warning{% else %}info{% endif %}">
-                                {{ order.get_order_type_display }}
-                            </span>
-                        </dd>
-                        
-                        <dt class="col-sm-5">Address:</dt>
-                        <dd class="col-sm-7">
-                            {% if order.address %}
-                                {{ order.address }}
-                            {% else %}
-                                <span class="text-muted">Not provided</span>
-                            {% endif %}
-                        </dd>
-                    </dl>
-                </div>
-            </div>
         </div>
     </div>
 </div>
+
 
 <!-- Modal for Uploading Accessories CSV -->
 <div class="modal fade" id="uploadAccessoriesModal" tabindex="-1" aria-labelledby="uploadAccessoriesModalLabel" aria-hidden="true">

@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Search Results - {{ query }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Search Results</h2>
+        <a href="{% url 'ordering' %}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Orders
+        </a>
+    </div>
+
+    {% if query %}
+        <div class="mb-4">
+            <h5>Search results for: "<strong>{{ query }}</strong>"</h5>
+        </div>
+    {% endif %}
+
+    {% if orders %}
+        <div class="row">
+            {% for order in orders %}
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <a href="{% url 'order_details' order.id %}" class="text-decoration-none">
+                                {{ order.first_name }} {{ order.last_name }}
+                            </a>
+                        </h6>
+                        <div class="card-text">
+                            <small class="text-muted">
+                                <strong>Sale #:</strong> {{ order.sale_number }}<br>
+                                <strong>Customer #:</strong> {{ order.customer_number }}<br>
+                                <strong>Order Date:</strong> {{ order.order_date }}<br>
+                                <strong>Status:</strong>
+                                {% if order.job_finished %}
+                                    <span class="badge bg-success">Complete</span>
+                                {% else %}
+                                    <span class="badge bg-warning">In Progress</span>
+                                {% endif %}
+                            </small>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <a href="{% url 'order_details' order.id %}" class="btn btn-primary btn-sm w-100">
+                            View Details
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        {% if query %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> No orders found matching "{{ query }}".
+                <br><small>Try searching by customer name, sale number, or customer number.</small>
+            </div>
+        {% else %}
+            <div class="alert alert-info">
+                <i class="bi bi-search"></i> Enter a search term to find orders.
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
