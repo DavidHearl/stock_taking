@@ -51,6 +51,7 @@ urlpatterns = [
     path('stock-take/boards-po/<int:boards_po_id>/replace-pnx/', views.replace_pnx_file, name='replace_pnx_file'),
     path('ordering/upload-accessories-csv/', views.upload_accessories_csv, name='upload_accessories_csv'),
     path('order/<int:order_id>/', views.order_details, name='order_details'),
+    path('order/<int:order_id>/download-processed-csv/', views.download_processed_csv, name='download_processed_csv'),
     path('accessory/delete/<int:accessory_id>/', views.delete_accessory, name='delete_accessory'),
     path('order/<int:order_id>/update-os-doors-po/', views.update_os_doors_po, name='update_os_doors_po'),
     path('order/<int:order_id>/delete-all-accessories/', views.delete_all_accessories, name='delete_all_accessories'),

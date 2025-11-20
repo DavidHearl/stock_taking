@@ -524,6 +524,8 @@ def order_details(request, order_id):
                 filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
                 order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
                                        io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
+                order.processed_csv_created_at = timezone.now()
+                order.save()
         
         messages.info(request, f'Automatically removed {skip_items_removed} items from skip lists.')
     
@@ -1505,6 +1507,8 @@ def upload_accessories_csv(request):
         
         # Save the original CSV file to the order
         order.original_csv.save(f"{order.customer_number}_original_{filename}", csv_file)
+        order.original_csv_uploaded_at = timezone.now()
+        order.save()
         
         try:
             # Read CSV file content
@@ -1968,6 +1972,8 @@ def resolve_missing_items(request, order_id):
                 filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
                 order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
                                        io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
+                order.processed_csv_created_at = timezone.now()
+                order.save()
                 logging.info(f"Regenerated processed CSV with {len(processed_rows)} items")
         
         # Check if all missing items have been resolved
@@ -2041,4 +2047,29 @@ def delete_skip_item(request, skip_item_id):
         else:
             return redirect('substitutions')
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+@login_required
+def download_processed_csv(request, order_id):
+    """Download processed CSV with proper filename and force download dialog"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if not order.processed_csv:
+        messages.error(request, 'No processed CSV available for this order.')
+        return redirect('order_details', order_id=order_id)
+    
+    # Read the file content
+    try:
+        with order.processed_csv.open('rb') as f:
+            file_content = f.read()
+    except Exception as e:
+        messages.error(request, f'Error reading processed CSV: {str(e)}')
+        return redirect('order_details', order_id=order_id)
+    
+    # Create response with proper headers for download
+    response = HttpResponse(file_content, content_type='text/csv')
+    filename = f"{order.customer_number}_WG_Accessories.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['Content-Length'] = len(file_content)
+    
+    return response
 

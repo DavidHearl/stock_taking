@@ -35,6 +35,8 @@ class Order(models.Model):
     workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
     original_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Original uploaded CSV file')
     processed_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Processed CSV with substitutions applied')
+    original_csv_uploaded_at = models.DateTimeField(blank=True, null=True, help_text='When the original CSV was uploaded')
+    processed_csv_created_at = models.DateTimeField(blank=True, null=True, help_text='When the processed CSV was created')
     csv_has_missing_items = models.BooleanField(default=False, help_text='True if the uploaded CSV has unresolved missing items that need substitution')
 
     def time_allowance(self):
