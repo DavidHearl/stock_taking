@@ -96,7 +96,7 @@
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header bg-dark
+            <div class="card-header bg-dark">
                 <h6 class="mb-0">Filters</h6>
             </div>
             <div class="card-body">
@@ -140,181 +140,190 @@
     </div>
 </div>
 
-<!-- In Stock Items Table -->
-{% if in_stock_items %}
+<!-- Stock Items Table with Tabs -->
 <div class="row mb-4">
     <div class="col-12">
-        <div class="card border-success">
-            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+        <div class="card">
+            <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="bi bi-check-circle me-2"></i>
-                    In Stock Items
+                    <i class="bi bi-box-seam me-2"></i>
+                    Stock Items
                 </h5>
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-white text-success me-2">{{ in_stock_items.count }} items</span>
-                    <button class="btn btn-sm btn-outline-light table-toggle" data-target="#inStockTable">
-                        <i class="bi bi-chevron-up"></i>
-                    </button>
-                </div>
             </div>
-            <div class="collapse show" id="inStockTable">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead class="table-success">
-                                <tr>
-                                    <th>SKU</th>
-                                    <th>Name</th>
-                                    <th>Cost</th>
-                                    <th>Category</th>
-                                    <th>Qty</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in in_stock_items %}
-                                <tr>
-                                    <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
-                                    <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
-                                    <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
-                                    <td>
-                                        {% if item.category %}
-                                            <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
-                                                {{ item.category.name }}
-                                            </span>
-                                        {% else %}
-                                            <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
-                                    <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
+            <div class="card-body">
+                <!-- Tab Navigation -->
+                <ul class="nav nav-tabs" id="stockTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="in-stock-tab" data-bs-toggle="tab" data-bs-target="#in-stock" type="button" role="tab" aria-controls="in-stock" aria-selected="true">
+                            <i class="bi bi-check-circle me-1"></i>
+                            In Stock
+                            {% if in_stock_count %}
+                                <span class="badge bg-success ms-1">{{ in_stock_count }}</span>
+                            {% endif %}
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="low-stock-tab" data-bs-toggle="tab" data-bs-target="#low-stock" type="button" role="tab" aria-controls="low-stock" aria-selected="false">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            Low Stock
+                            {% if low_stock_count %}
+                                <span class="badge bg-warning ms-1">{{ low_stock_count }}</span>
+                            {% endif %}
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="out-of-stock-tab" data-bs-toggle="tab" data-bs-target="#out-of-stock" type="button" role="tab" aria-controls="out-of-stock" aria-selected="false">
+                            <i class="bi bi-x-circle me-1"></i>
+                            Out of Stock
+                            {% if zero_quantity_count %}
+                                <span class="badge bg-danger ms-1">{{ zero_quantity_count }}</span>
+                            {% endif %}
+                        </button>
+                    </li>
+                </ul>
 
-<!-- Low Stock Items Table -->
-{% if low_stock_items %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card border-warning">
-            <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    Low Stock Items (&lt; 10 in stock)
-                </h5>
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-dark text-warning me-2">{{ low_stock_items.count }} items</span>
-                    <button class="btn btn-sm btn-outline-dark table-toggle" data-target="#lowStockTable">
-                        <i class="bi bi-chevron-down"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="collapse" id="lowStockTable">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead class="table-warning">
-                                <tr>
-                                    <th>SKU</th>
-                                    <th>Name</th>
-                                    <th>Cost</th>
-                                    <th>Category</th>
-                                    <th>Qty</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in low_stock_items %}
-                                <tr class="table-warning">
-                                    <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
-                                    <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
-                                    <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
-                                    <td>
-                                        {% if item.category %}
-                                            <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
-                                                {{ item.category.name }}
-                                            </span>
-                                        {% else %}
-                                            <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
-                                    <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                <!-- Tab Content -->
+                <div class="tab-content mt-3" id="stockTabsContent">
+                    <!-- In Stock Tab -->
+                    <div class="tab-pane fade show active" id="in-stock" role="tabpanel" aria-labelledby="in-stock-tab">
+                        {% if in_stock_items %}
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-success">
+                                        <tr>
+                                            <th>SKU</th>
+                                            <th>Name</th>
+                                            <th>Cost</th>
+                                            <th>Category</th>
+                                            <th>Qty</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in in_stock_items %}
+                                        <tr>
+                                            <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
+                                            <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
+                                            <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
+                                            <td>
+                                                {% if item.category %}
+                                                    <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
+                                                        {{ item.category.name }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
+                                            <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted py-4">
+                                <i class="bi bi-check-circle fs-1 text-success mb-2"></i>
+                                <p class="mb-0">All items are in stock!</p>
+                            </div>
+                        {% endif %}
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
 
-<!-- Out of Stock Items Table -->
-{% if zero_quantity_items %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card border-danger">
-            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-x-circle me-2"></i>
-                    Out of Stock Items
-                </h5>
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-white text-danger me-2">{{ zero_quantity_items.count }} items</span>
-                    <button class="btn btn-sm btn-outline-light table-toggle" data-target="#outOfStockTable">
-                        <i class="bi bi-chevron-down"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="collapse" id="outOfStockTable">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead class="table-danger">
-                                <tr>
-                                    <th>SKU</th>
-                                    <th>Name</th>
-                                    <th>Cost</th>
-                                    <th>Category</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in zero_quantity_items %}
-                                <tr class="table-danger">
-                                    <td class="fw-bold">{{ item.sku }}</td>
-                                    <td>{{ item.name }}</td>
-                                    <td class="text-end">£{{ item.cost|floatformat:2 }}</td>
-                                    <td>
-                                        {% if item.category %}
-                                            <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
-                                                {{ item.category.name }}
-                                            </span>
-                                        {% else %}
-                                            <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <!-- Low Stock Tab -->
+                    <div class="tab-pane fade" id="low-stock" role="tabpanel" aria-labelledby="low-stock-tab">
+                        {% if low_stock_items %}
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-warning">
+                                        <tr>
+                                            <th>SKU</th>
+                                            <th>Name</th>
+                                            <th>Cost</th>
+                                            <th>Category</th>
+                                            <th>Qty</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+
+                                        {% for item in low_stock_items %}
+                                        <tr class="table-warning">
+                                            <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
+                                            <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
+                                            <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
+                                            <td>
+                                                {% if item.category %}
+                                                    <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
+                                                        {{ item.category.name }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
+                                            <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted py-4">
+                                <i class="bi bi-exclamation-triangle fs-1 text-warning mb-2"></i>
+                                <p class="mb-0">No low stock items!</p>
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Out of Stock Tab -->
+                    <div class="tab-pane fade" id="out-of-stock" role="tabpanel" aria-labelledby="out-of-stock-tab">
+                        {% if zero_quantity_items %}
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-danger">
+                                        <tr>
+                                            <th>SKU</th>
+                                            <th>Name</th>
+                                            <th>Cost</th>
+                                            <th>Category</th>
+                                            <th>Qty</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in zero_quantity_items %}
+                                        <tr class="table-danger">
+                                            <td class="fw-bold" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
+                                            <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
+                                            <td class="text-end currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
+                                            <td>
+                                                {% if item.category %}
+                                                    <span class="badge" style="background-color: {{ item.category.color }}; color: white;">
+                                                        {{ item.category.name }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted">{{ item.category_name|default:"Uncategorized" }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
+                                            <td class="text-end currency">£{{ item.total_value|floatformat:2 }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted py-4">
+                                <i class="bi bi-x-circle fs-1 text-danger mb-2"></i>
+                                <p class="mb-0">No out of stock items!</p>
+                            </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
-{% endif %}
 
 <!-- Empty State -->
 {% if not in_stock_items and not low_stock_items and not zero_quantity_items %}
@@ -384,7 +393,6 @@
             </div>
         </div>
     </div>
-</div>
 </div>
 {% endif %}
 {% endblock %}

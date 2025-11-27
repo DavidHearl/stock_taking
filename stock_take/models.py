@@ -10,6 +10,13 @@ class BoardsPO(models.Model):
     def __str__(self):
         return self.po_number
 
+    @property
+    def boards_received(self):
+        """Check if all PNX items have been received"""
+        if not self.pnx_items.exists():
+            return False
+        return self.pnx_items.filter(received=False).count() == 0
+
 
 class Order(models.Model):
     first_name = models.CharField(max_length=100)
@@ -66,8 +73,37 @@ class Order(models.Model):
         
         return True
 
-    def __str__(self):
-        return f"Order {self.sale_number} for {self.first_name} {self.last_name}"
+    @property
+    def order_boards_received(self):
+        """Check if all boards for this specific order have been received"""
+        if not self.boards_po:
+            return False
+        
+        # Get PNX items for this order (same logic as in the view)
+        order_pnx_items = self.boards_po.pnx_items.filter(customer__icontains=self.sale_number)
+        
+        if not order_pnx_items.exists():
+            return False
+        
+        # Check if all PNX items for this order are received
+        return order_pnx_items.filter(received=False).count() == 0
+
+    @property
+    def os_doors_ordered(self):
+        """Check if OS doors are ordered for this order"""
+        return self.os_doors_required and bool(self.os_doors_po)
+
+    @property
+    def os_doors_received(self):
+        """Check if all OS doors for this order have been received"""
+        if not self.os_doors_required:
+            return False
+        
+        if not self.os_doors.exists():
+            return False
+        
+        # Check if all OS doors for this order are received
+        return self.os_doors.filter(received=False).count() == 0
 
 
 class PNXItem(models.Model):
@@ -78,6 +114,7 @@ class PNXItem(models.Model):
     cwidth = models.DecimalField(max_digits=10, decimal_places=2)
     cnt = models.DecimalField(max_digits=10, decimal_places=2)
     customer = models.CharField(max_length=200)
+    received = models.BooleanField(default=False)
 
     # Price per square meter for boards
     PRICE_PER_SQM = 50

@@ -374,6 +374,67 @@ def update_boards_ordered(request, boards_po_id):
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 @login_required
+def update_pnx_received(request, pnx_item_id):
+    """Update the received status for a PNX item"""
+    if request.method == 'POST':
+        import json
+        try:
+            pnx_item = get_object_or_404(PNXItem, id=pnx_item_id)
+            data = json.loads(request.body)
+            pnx_item.received = data.get('received', False)
+            pnx_item.save()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+@login_required
+def update_pnx_batch(request):
+    """Update the received status for multiple PNX items"""
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+            changes = data.get('changes', {})
+            
+            # Update all PNX items in batch
+            for pnx_id, received in changes.items():
+                try:
+                    pnx_item = PNXItem.objects.get(id=int(pnx_id))
+                    pnx_item.received = received
+                    pnx_item.save()
+                except PNXItem.DoesNotExist:
+                    continue
+            
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+@login_required
+def update_os_doors_batch(request):
+    """Update the received status for multiple OS Doors"""
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+            changes = data.get('changes', {})
+            
+            # Update all OS Doors in batch
+            for os_door_id, received in changes.items():
+                try:
+                    os_door = OSDoor.objects.get(id=int(os_door_id))
+                    os_door.received = received
+                    os_door.save()
+                except OSDoor.DoesNotExist:
+                    continue
+            
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+@login_required
 def replace_pnx_file(request, boards_po_id):
     """Replace the PNX file for a Boards PO and re-parse items"""
     if request.method == 'POST':
