@@ -143,14 +143,49 @@
     <table id="order-table">
         <thead>
             <tr>
-                <th>First Name</th>
-                <th>Last Name</th>
-                <th>Sale #</th>
-                <th class="td-center">Customer #</th>
-                <th class="td-center">Order Date</th>
-                <th class="td-center">Fit Date</th>
+                <th class="sortable" data-sort="first_name">
+                    First Name 
+                    {% if current_sort == 'first_name' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
+                <th class="sortable" data-sort="last_name">
+                    Last Name 
+                    {% if current_sort == 'last_name' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
+                <th class="sortable" data-sort="sale_number">
+                    Sale # 
+                    {% if current_sort == 'sale_number' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
+                <th class="td-center sortable" data-sort="customer_number">
+                    Customer # 
+                    {% if current_sort == 'customer_number' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
+                <th class="td-center sortable" data-sort="order_date">
+                    Order Date 
+                    {% if current_sort == 'order_date' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
+                <th class="td-center sortable" data-sort="fit_date">
+                    Fit Date 
+                    {% if current_sort == 'fit_date' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
                 <th class="td-center">Time (Days)</th>
-                <th class="td-center">Boards PO</th>
+                <th class="td-center sortable" data-sort="boards_po">
+                    Boards PO 
+                    {% if current_sort == 'boards_po' %}
+                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
+                    {% endif %}
+                </th>
                 <th class="td-center">OS Doors</th>
                 <th class="td-center">Addr</th>
                 <th class="td-center">CSV</th>
@@ -164,7 +199,7 @@
             
             {% for order in orders %}
             <tr 
-                class="clickable-row {% if order.job_finished %}opacity-25{% endif %}" 
+                class="clickable-row {% if order.job_finished %}opacity-25{% endif %} {% if order.has_missing_accessories %}table-missing-row{% endif %}" 
                 onclick="toggleDetails('details-{{ order.sale_number }}', this)"
                 id="main-{{ order.sale_number }}"
             >
@@ -264,7 +299,7 @@
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
                 <td colspan="15">
-                    <div style="padding: 8px;">
+                    <div style="padding: 16px 8px;">
                         <div class="d-flex align-items-center justify-content-between mb-3" style="background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
                             <div class="d-flex align-items-center gap-3">
                                 <small class="text-muted">Sale:</small>
@@ -373,7 +408,7 @@
                             </thead>
                             <tbody>
                                 {% for accessory in order.accessories.all %}
-                                <tr {% if accessory.missing %}class="table-warning"{% endif %}>
+                                <tr>
                                     <td>{{ accessory.sku }}</td>
                                     <td>{{ accessory.name|truncatechars:20 }}</td>
                                     <td>{{ accessory.quantity }}</td>
@@ -521,14 +556,44 @@
                             <label for="{{ form.workguru_id.id_for_label }}" class="form-label fw-semibold">WorkGuru ID</label>
                             {{ form.workguru_id }}
                         </div>
+                        <div class="col-md-6">
+                            <label for="{{ form.address.id_for_label }}" class="form-label fw-semibold">Address</label>
+                            {{ form.address }}
+                        </div>
+                        <div class="col-md-6">
+                            <label for="{{ form.postcode.id_for_label }}" class="form-label fw-semibold">Postcode</label>
+                            {{ form.postcode }}
+                        </div>
+                        <div class="col-md-6">
+                            <label for="{{ form.order_type.id_for_label }}" class="form-label fw-semibold">Order Type</label>
+                            {{ form.order_type }}
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                {{ form.os_doors_required }}
+                                <label for="{{ form.os_doors_required.id_for_label }}" class="form-check-label fw-semibold">
+                                    OS Doors Required
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                {{ form.all_items_ordered }}
+                                <label for="{{ form.all_items_ordered.id_for_label }}" class="form-check-label fw-semibold">
+                                    All Items Ordered
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                {{ form.job_finished }}
+                                <label for="{{ form.job_finished.id_for_label }}" class="form-check-label fw-semibold">
+                                    Job Finished
+                                </label>
+                            </div>
+                        </div>
                     </div>
-                    <!-- Hidden fields for form validation -->
-                    <input type="hidden" name="job_finished" value="False">
-                    <input type="hidden" name="order_type" value="sale">
-                    <input type="hidden" name="address" value="">
-                    <input type="hidden" name="postcode" value="">
-                    <input type="hidden" name="os_doors_required" value="False">
-                    <input type="hidden" name="all_items_ordered" value="False">
+                    <!-- Hidden fields removed - now visible above -->
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
@@ -743,6 +808,26 @@
                     }
                 }
             });
+        });
+    });
+
+    // Sorting functionality
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', function() {
+            const sortBy = this.dataset.sort;
+            const currentSort = '{{ current_sort }}';
+            const currentOrder = '{{ current_order }}';
+            
+            let newOrder = 'desc';
+            if (currentSort === sortBy && currentOrder === 'desc') {
+                newOrder = 'asc';
+            }
+            
+            const url = new URL(window.location);
+            url.searchParams.set('sort', sortBy);
+            url.searchParams.set('order', newOrder);
+            window.location.href = url.toString();
         });
     });
 </script>

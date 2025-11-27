@@ -105,6 +105,11 @@ class Order(models.Model):
         # Check if all OS doors for this order are received
         return self.os_doors.filter(received=False).count() == 0
 
+    @property
+    def has_missing_accessories(self):
+        """Check if this order has any missing accessories"""
+        return self.accessories.filter(missing=True).exists()
+
 
 class PNXItem(models.Model):
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.CASCADE, related_name='pnx_items')

@@ -506,7 +506,7 @@
                 </div>
                 <div class="card-body">
                     <!-- CSV Files Section -->
-                    {% if order.original_csv or order.processed_csv %}
+                    {% if order.original_csv %}
                     <div class="mb-3">
                         <h6>CSV Files</h6>
                         <div class="row">
@@ -582,6 +582,25 @@
                                 </div>
                             </div>
                             {% endif %}
+                            {% if not order.processed_csv %}
+                            <div class="col-md-6">
+                                <div class="card border-warning">
+                                    <div class="card-header bg-warning text-dark">
+                                        <h6 class="mb-0"><i class="bi bi-file-earmark-spreadsheet-fill"></i> Processed CSV</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="mb-2"><strong>Status:</strong> Not generated</p>
+                                        <p class="text-muted small">Generate a processed CSV with substitutions applied</p>
+                                        <form method="POST" action="{% url 'resolve_missing_items' order.id %}" style="display: inline;">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-warning">
+                                                <i class="bi bi-arrow-repeat"></i> Generate Processed CSV
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     {% endif %}
@@ -607,7 +626,7 @@
                             </thead>
                             <tbody>
                                 {% for accessory in order.accessories.all %}
-                                <tr {% if accessory.missing %}class="table-warning"{% endif %}>
+                                <tr>
                                     <td>{{ accessory.sku }}</td>
                                     <td>{{ accessory.name }}</td>
                                     <td>{{ accessory.description|truncatechars:30 }}</td>

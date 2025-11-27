@@ -35,12 +35,34 @@ def ordering(request):
     price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
     
-    # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by order_date descending
-    orders = Order.objects.all().order_by(
-        'job_finished',  # Incomplete orders first
-        models.F('boards_po__po_number').asc(nulls_last=True),
-        '-order_date'
-    )
+    # Handle sorting
+    sort_by = request.GET.get('sort', 'order_date')
+    sort_order = request.GET.get('order', 'desc')
+    
+    # Define valid sort fields
+    valid_sort_fields = {
+        'first_name': 'first_name',
+        'last_name': 'last_name', 
+        'sale_number': 'sale_number',
+        'customer_number': 'customer_number',
+        'order_date': 'order_date',
+        'fit_date': 'fit_date',
+        'boards_po': 'boards_po__po_number',
+        'job_finished': 'job_finished'
+    }
+    
+    if sort_by not in valid_sort_fields:
+        sort_by = 'order_date'
+    
+    # Build ordering string
+    order_field = valid_sort_fields[sort_by]
+    if sort_order == 'asc':
+        ordering = ['job_finished', order_field, models.F('boards_po__po_number').asc(nulls_last=True)]
+    else:
+        ordering = ['job_finished', f'-{order_field}', models.F('boards_po__po_number').asc(nulls_last=True)]
+    
+    # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by selected field
+    orders = Order.objects.all().order_by(*ordering)
     boards_pos = BoardsPO.objects.all().order_by('po_number')
     form = OrderForm(request.POST or None, initial={'order_type': 'sale'})
     po_form = BoardsPOForm()
@@ -69,6 +91,8 @@ def ordering(request):
         'po_form': po_form,
         'accessories_csv_form': accessories_csv_form,
         'price_per_sqm': price_per_sqm,
+        'current_sort': sort_by,
+        'current_order': sort_order,
     })
 
 @login_required
@@ -520,7 +544,20 @@ def order_details(request, order_id):
     else:
         form = OrderForm(instance=order)
     
-    os_door_form = OSDoorForm()
+    # Initialize OS door form with pre-populated data if existing OS doors exist
+    if order.os_doors.exists():
+        # Get the most recent OS door item to pre-populate form
+        latest_os_door = order.os_doors.order_by('-id').first()
+        os_door_form = OSDoorForm(initial={
+            'door_style': latest_os_door.door_style,
+            'style_colour': latest_os_door.style_colour,
+            'colour': latest_os_door.colour,
+            'height': latest_os_door.height,
+            'width': latest_os_door.width,
+            'item_description': latest_os_door.item_description,
+        })
+    else:
+        os_door_form = OSDoorForm()
     
     # Get other orders with the same boards PO (excluding current order)
     other_orders = []
