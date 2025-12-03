@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, StockItem, Accessory
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory
 
 import csv
 import io
@@ -12,7 +12,7 @@ from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
-from django.db.models import Sum, F, Count, Q
+from django.db.models import Sum, F, Count, Q, Prefetch
 from django.db import models
 from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
 from django.template.loader import render_to_string
@@ -399,13 +399,23 @@ def update_boards_ordered(request, boards_po_id):
 
 @login_required
 def update_pnx_received(request, pnx_item_id):
-    """Update the received status for a PNX item"""
+    """Update the received quantity for a PNX item"""
     if request.method == 'POST':
         import json
         try:
             pnx_item = get_object_or_404(PNXItem, id=pnx_item_id)
             data = json.loads(request.body)
-            pnx_item.received = data.get('received', False)
+            
+            # Handle both boolean (for backward compatibility) and quantity updates
+            if 'received' in data:
+                # Boolean update - set to full quantity if received, 0 if not
+                received = data.get('received', False)
+                pnx_item.received_quantity = pnx_item.cnt if received else 0
+            elif 'received_quantity' in data:
+                # Quantity update
+                received_quantity = Decimal(str(data.get('received_quantity', 0)))
+                pnx_item.received_quantity = received_quantity
+            
             pnx_item.save()
             return JsonResponse({'success': True})
         except Exception as e:
@@ -422,10 +432,19 @@ def update_pnx_batch(request):
             changes = data.get('changes', {})
             
             # Update all PNX items in batch
-            for pnx_id, received in changes.items():
+            for pnx_id, value in changes.items():
                 try:
                     pnx_item = PNXItem.objects.get(id=int(pnx_id))
-                    pnx_item.received = received
+                    
+                    # Handle both boolean and quantity values
+                    if isinstance(value, bool):
+                        # Boolean update - set to full quantity if received, 0 if not
+                        pnx_item.received_quantity = pnx_item.cnt if value else 0
+                    else:
+                        # Quantity update
+                        received_quantity = Decimal(str(value))
+                        pnx_item.received_quantity = received_quantity
+                    
                     pnx_item.save()
                 except PNXItem.DoesNotExist:
                     continue
@@ -445,10 +464,19 @@ def update_os_doors_batch(request):
             changes = data.get('changes', {})
             
             # Update all OS Doors in batch
-            for os_door_id, received in changes.items():
+            for os_door_id, value in changes.items():
                 try:
                     os_door = OSDoor.objects.get(id=int(os_door_id))
-                    os_door.received = received
+                    
+                    # Handle both boolean and quantity values
+                    if isinstance(value, bool):
+                        # Boolean update - set to full quantity if received, 0 if not
+                        os_door.received_quantity = os_door.quantity if value else 0
+                    else:
+                        # Quantity update
+                        received_quantity = Decimal(str(value))
+                        os_door.received_quantity = received_quantity
+                    
                     os_door.save()
                 except OSDoor.DoesNotExist:
                     continue
@@ -2170,4 +2198,61 @@ def download_processed_csv(request, order_id):
     response['Content-Length'] = len(file_content)
     
     return response
+
+
+@login_required
+def boards_summary(request):
+    """Display summary of all boards POs with their received status"""
+    boards_pos = BoardsPO.objects.all().order_by('po_number').prefetch_related(
+        Prefetch('pnx_items', queryset=PNXItem.objects.order_by('barcode', 'matname', 'customer'))
+    )
+    
+    # Add order count and received status to each BoardsPO
+    for boards_po in boards_pos:
+        boards_po.order_count = boards_po.orders.count()
+        boards_po.total_pnx_items = boards_po.pnx_items.count()
+        boards_po.received_pnx_items = sum(1 for item in boards_po.pnx_items.all() if item.is_fully_received)
+        boards_po.partially_received_items = sum(1 for item in boards_po.pnx_items.all() if item.is_partially_received)
+    
+    return render(request, 'stock_take/boards_summary.html', {
+        'boards_pos': boards_pos,
+    })
+
+@login_required
+def os_doors_summary(request):
+    """Display summary of all OS Doors POs with their received status"""
+    # Get distinct OS Doors POs
+    os_doors_pos = Order.objects.filter(
+        os_doors_required=True, 
+        os_doors_po__isnull=False, 
+        os_doors_po__gt=''
+    ).values('os_doors_po').distinct().order_by('os_doors_po')
+    
+    # Convert to list and add order/os door data
+    os_doors_pos_list = []
+    for po_data in os_doors_pos:
+        po_number = po_data['os_doors_po']
+        orders = Order.objects.filter(os_doors_po=po_number).prefetch_related(
+            Prefetch('os_doors', queryset=OSDoor.objects.order_by('door_style', 'style_colour', 'colour'))
+        )
+        
+        total_orders = orders.count()
+        total_os_doors = sum(order.os_doors.count() for order in orders)
+        received_os_doors = sum(
+            1 for order in orders for os_door in order.os_doors.all() if os_door.is_fully_received
+        )
+        
+        po_obj = {
+            'po_number': po_number,
+            'orders': orders,
+            'order_count': total_orders,
+            'total_os_doors': total_os_doors,
+            'received_os_doors': received_os_doors,
+            'os_doors_received': received_os_doors == total_os_doors if total_os_doors > 0 else False
+        }
+        os_doors_pos_list.append(po_obj)
+    
+    return render(request, 'stock_take/os_doors_summary.html', {
+        'os_doors_pos': os_doors_pos_list,
+    })
 

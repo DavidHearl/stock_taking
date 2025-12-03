@@ -63,6 +63,8 @@ urlpatterns = [
     path('order/<int:order_id>/add-substitution/', views.add_substitution, name='add_substitution'),
     path('order/<int:order_id>/add-skip-item/', views.add_skip_item, name='add_skip_item'),
     path('skip-item/delete/<int:skip_item_id>/', views.delete_skip_item, name='delete_skip_item'),
+    path('boards-summary/', views.boards_summary, name='boards_summary'),
+    path('os-doors-summary/', views.os_doors_summary, name='os_doors_summary'),
     
     # Map page
     path('map/', views.map_view, name='map'),

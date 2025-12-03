@@ -1,0 +1,315 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}OS Doors Summary{% endblock %}
+
+{% block nav_os_doors_summary_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
+<style>
+.table-received {
+    background-color: #d4edda !important;
+}
+.table-not-received {
+    background-color: #f8d7da !important;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-2 pb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="mb-0">OS Doors Summary</h2>
+        <button id="save-changes-btn" class="btn btn-success" style="display: none;">
+            <i class="bi bi-save"></i> Save Changes
+        </button>
+    </div>
+
+    {% if os_doors_pos %}
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>PO Number</th>
+                    <th>Orders</th>
+                    <th>Total OS Doors</th>
+                    <th>Received</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for os_doors_po in os_doors_pos %}
+                <tr class="clickable-row {% if os_doors_po.os_doors_received %}table-received{% else %}table-not-received{% endif %}"
+                    onclick="toggleDetails('details-{{ forloop.counter }}', this)">
+                    <td>
+                        <strong>{{ os_doors_po.po_number }}</strong>
+                    </td>
+                    <td class="text-center">
+                        <span class="badge bg-primary">{{ os_doors_po.order_count }}</span>
+                    </td>
+                    <td class="text-center">
+                        {{ os_doors_po.total_os_doors }}
+                    </td>
+                    <td class="text-center">
+                        {{ os_doors_po.received_os_doors }} / {{ os_doors_po.total_os_doors }}
+                    </td>
+                    <td>
+                        {% if os_doors_po.os_doors_received %}
+                            <span class="badge bg-success">Fully Received</span>
+                        {% elif os_doors_po.received_os_doors > 0 %}
+                            <span class="badge bg-warning">Partially Received</span>
+                        {% else %}
+                            <span class="badge bg-danger">Not Received</span>
+                        {% endif %}
+                    </td>
+                    <td onclick="event.stopPropagation();">
+                        <button class="btn btn-sm btn-outline-primary" onclick="toggleDetails('details-{{ forloop.counter }}', this.closest('tr'))">
+                            <i class="bi bi-eye"></i> View OS Doors
+                        </button>
+                    </td>
+                </tr>
+
+                <tr class="detail-row hidden" id="details-{{ forloop.counter }}">
+                    <td colspan="6">
+                        <div style="padding: 16px 8px;">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">OS Doors for {{ os_doors_po.po_number }}</h5>
+                                <div>
+                                    <button class="btn btn-sm btn-success" onclick="markAllReceived({{ forloop.counter }}, true)">
+                                        <i class="bi bi-check-circle"></i> Mark All Received
+                                    </button>
+                                    <button class="btn btn-sm btn-warning" onclick="markAllReceived({{ forloop.counter }}, false)">
+                                        <i class="bi bi-x-circle"></i> Mark All Not Received
+                                    </button>
+                                </div>
+                            </div>
+
+                            {% for order in os_doors_po.orders %}
+                            {% if order.os_doors.all %}
+                            <div class="mb-4">
+                                <h6>Order: {{ order.sale_number }} - {{ order.first_name }} {{ order.last_name }}</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Door Style</th>
+                                                <th>Style Colour</th>
+                                                <th>Dimensions</th>
+                                                <th>Colour</th>
+                                                <th>Qty</th>
+                                                <th>Ordered</th>
+                                                <th>Status</th>
+                                                <th>Received</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for os_door in order.os_doors.all %}
+                                            <tr>
+                                                <td>{{ os_door.door_style }}</td>
+                                                <td>{{ os_door.style_colour }}</td>
+                                                <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                                                <td>{{ os_door.colour }}</td>
+                                                <td>{{ os_door.quantity }}</td>
+                                                <td>
+                                                    {% if os_door.ordered %}
+                                                        <i class="bi bi-check-circle-fill text-success"></i>
+                                                    {% else %}
+                                                        <i class="bi bi-x-circle-fill text-danger"></i>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if os_door.is_fully_received %}
+                                                        <i class="bi bi-check-circle-fill text-success" title="Fully Received"></i>
+                                                    {% elif os_door.is_partially_received %}
+                                                        <i class="bi bi-dash-circle-fill text-warning" title="Partially Received ({{ os_door.received_quantity }}/{{ os_door.quantity }})"></i>
+                                                    {% else %}
+                                                        <i class="bi bi-x-circle-fill text-danger" title="Not Received"></i>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <div class="d-flex align-items-center">
+                                                        <input type="checkbox" 
+                                                               class="form-check-input me-2 received-checkbox"
+                                                               data-os-door-id="{{ os_door.id }}"
+                                                               data-max-quantity="{{ os_door.quantity }}"
+                                                               {% if os_door.is_fully_received %}checked{% endif %}>
+                                                        <input type="number" 
+                                                               class="form-control received-quantity"
+                                                               data-os-door-id="{{ os_door.id }}"
+                                                               data-max-quantity="{{ os_door.quantity }}"
+                                                               data-original-quantity="{{ os_door.received_quantity|default:0 }}"
+                                                               value="{{ os_door.received_quantity|default:0 }}"
+                                                               min="0"
+                                                               max="{{ os_door.quantity }}"
+                                                               step="1"
+                                                               style="width: 80px;">
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <h5>No OS Doors POs found</h5>
+        <p>There are currently no OS doors purchase orders in the system.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Track changes that need to be saved
+let changes = {};
+
+function toggleDetails(detailRowId, clickedRowElement) {
+    var detailRow = document.getElementById(detailRowId);
+
+    if (detailRow.classList.contains('hidden')) {
+        detailRow.classList.remove('hidden');
+        clickedRowElement.classList.add('expanded');
+    } else {
+        detailRow.classList.add('hidden');
+        clickedRowElement.classList.remove('expanded');
+    }
+}
+
+function updateChangeTracking(osDoorId, quantity) {
+    const originalQuantity = parseFloat(document.querySelector(`[data-os-door-id="${osDoorId}"].received-quantity`).getAttribute('data-original-quantity') || 0);
+    
+    if (parseFloat(quantity) !== originalQuantity) {
+        changes[osDoorId] = parseFloat(quantity);
+    } else {
+        delete changes[osDoorId];
+    }
+    updateSaveButtonVisibility();
+}
+
+function markAllReceived(poIndex, received) {
+    const inputs = document.querySelectorAll(`#details-${poIndex} .received-quantity`);
+    const checkboxes = document.querySelectorAll(`#details-${poIndex} .received-checkbox`);
+    inputs.forEach((input, index) => {
+        const osDoorId = input.getAttribute('data-os-door-id');
+        const maxQuantity = parseFloat(input.getAttribute('data-max-quantity') || 0);
+        const newQuantity = received ? maxQuantity : 0;
+        input.value = newQuantity;
+        checkboxes[index].checked = received;
+        updateChangeTracking(osDoorId, newQuantity);
+    });
+}
+
+function saveChanges() {
+    if (Object.keys(changes).length === 0) {
+        alert('No changes to save.');
+        return;
+    }
+
+    const saveBtn = document.getElementById('save-changes-btn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
+    saveBtn.disabled = true;
+
+    fetch('/stock-take/update-os-doors-batch/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            changes: changes
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Successfully saved ${Object.keys(changes).length} changes.`);
+            // Update original quantity for inputs and checkboxes
+            Object.keys(changes).forEach(osDoorId => {
+                const input = document.querySelector(`[data-os-door-id="${osDoorId}"].received-quantity`);
+                const checkbox = document.querySelector(`[data-os-door-id="${osDoorId}"].received-checkbox`);
+                if (input) {
+                    input.setAttribute('data-original-quantity', changes[osDoorId].toString());
+                }
+                if (checkbox) {
+                    const maxQuantity = parseFloat(checkbox.getAttribute('data-max-quantity') || 0);
+                    checkbox.checked = changes[osDoorId] >= maxQuantity;
+                }
+            });
+            // Reset changes tracking
+            changes = {};
+            updateSaveButtonVisibility();
+            // Reload to update the summary counts
+            location.reload();
+        } else {
+            alert('Error saving changes: ' + (data.error || 'Unknown error'));
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while saving changes.');
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    });
+}
+
+function updateSaveButtonVisibility() {
+    const saveBtn = document.getElementById('save-changes-btn');
+    if (Object.keys(changes).length > 0) {
+        saveBtn.style.display = 'block';
+        saveBtn.textContent = `Save Changes (${Object.keys(changes).length})`;
+    } else {
+        saveBtn.style.display = 'none';
+    }
+}
+
+// Add event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    // Track checkbox changes
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('received-checkbox')) {
+            const osDoorId = e.target.getAttribute('data-os-door-id');
+            const maxQuantity = parseFloat(e.target.getAttribute('data-max-quantity') || 0);
+            const isChecked = e.target.checked;
+            const newQuantity = isChecked ? maxQuantity : 0;
+            const input = document.querySelector(`[data-os-door-id="${osDoorId}"].received-quantity`);
+            if (input) {
+                input.value = newQuantity;
+            }
+            updateChangeTracking(osDoorId, newQuantity);
+        }
+    });
+
+    // Track quantity input changes
+    document.addEventListener('input', function(e) {
+        if (e.target.classList.contains('received-quantity')) {
+            const osDoorId = e.target.getAttribute('data-os-door-id');
+            const quantity = e.target.value;
+            const maxQuantity = parseFloat(e.target.getAttribute('data-max-quantity') || 0);
+            const checkbox = document.querySelector(`[data-os-door-id="${osDoorId}"].received-checkbox`);
+            if (checkbox) {
+                checkbox.checked = parseFloat(quantity) >= maxQuantity;
+            }
+            updateChangeTracking(osDoorId, quantity);
+        }
+    });
+
+    // Save changes button
+    document.getElementById('save-changes-btn').addEventListener('click', saveChanges);
+});
+</script>
+
+{% endblock %}

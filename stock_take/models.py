@@ -12,10 +12,10 @@ class BoardsPO(models.Model):
 
     @property
     def boards_received(self):
-        """Check if all PNX items have been received"""
+        """Check if all PNX items have been fully received"""
         if not self.pnx_items.exists():
             return False
-        return self.pnx_items.filter(received=False).count() == 0
+        return all(item.is_fully_received for item in self.pnx_items.all())
 
 
 class Order(models.Model):
@@ -85,8 +85,8 @@ class Order(models.Model):
         if not order_pnx_items.exists():
             return False
         
-        # Check if all PNX items for this order are received
-        return order_pnx_items.filter(received=False).count() == 0
+        # Check if all PNX items for this order are fully received
+        return all(item.is_fully_received for item in order_pnx_items)
 
     @property
     def os_doors_ordered(self):
@@ -102,8 +102,8 @@ class Order(models.Model):
         if not self.os_doors.exists():
             return False
         
-        # Check if all OS doors for this order are received
-        return self.os_doors.filter(received=False).count() == 0
+        # Check if all OS doors for this order are fully received
+        return all(os_door.is_fully_received for os_door in self.os_doors.all())
 
     @property
     def has_missing_accessories(self):
@@ -120,12 +120,26 @@ class PNXItem(models.Model):
     cnt = models.DecimalField(max_digits=10, decimal_places=2)
     customer = models.CharField(max_length=200)
     received = models.BooleanField(default=False)
+    received_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Quantity that has been received')
 
     # Price per square meter for boards
     PRICE_PER_SQM = 50
 
+    class Meta:
+        ordering = ['barcode', 'matname', 'customer']
+
     def __str__(self):
         return f"{self.barcode} - {self.matname}"
+
+    @property
+    def is_fully_received(self):
+        """Check if the item is fully received"""
+        return self.received_quantity >= self.cnt
+
+    @property
+    def is_partially_received(self):
+        """Check if the item is partially received"""
+        return self.received_quantity > 0 and self.received_quantity < self.cnt
 
     def get_cost(self, price_per_sqm=None):
         """Calculate cost based on dimensions and count"""
@@ -157,9 +171,20 @@ class OSDoor(models.Model):
     quantity = models.PositiveIntegerField()
     ordered = models.BooleanField(default=False)
     received = models.BooleanField(default=False)
+    received_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Quantity that has been received')
 
     def __str__(self):
         return f"OS Door for {self.customer.sale_number} - {self.door_style}"
+
+    @property
+    def is_fully_received(self):
+        """Check if the item is fully received"""
+        return self.received_quantity >= self.quantity
+
+    @property
+    def is_partially_received(self):
+        """Check if the item is partially received"""
+        return self.received_quantity > 0 and self.received_quantity < self.quantity
 
 
 class Accessory(models.Model):

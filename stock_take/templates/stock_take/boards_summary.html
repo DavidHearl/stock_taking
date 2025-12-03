@@ -1,0 +1,303 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Boards Summary{% endblock %}
+
+{% block nav_boards_summary_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
+<style>
+.table-received {
+    background-color: #d4edda !important;
+}
+.table-not-received {
+    background-color: #f8d7da !important;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-2 pb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="mb-0">Boards Summary</h2>
+        <button id="save-changes-btn" class="btn btn-success" style="display: none;">
+            <i class="bi bi-save"></i> Save Changes
+        </button>
+    </div>
+
+    {% if boards_pos %}
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>PO Number</th>
+                    <th>Orders</th>
+                    <th>Total Items</th>
+                    <th>Received</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for boards_po in boards_pos %}
+                <tr class="clickable-row {% if boards_po.boards_received %}table-received{% else %}table-not-received{% endif %}"
+                    onclick="toggleDetails('details-{{ boards_po.id }}', this)">
+                    <td>
+                        <strong>{{ boards_po.po_number }}</strong>
+                    </td>
+                    <td class="text-center">
+                        <span class="badge bg-primary">{{ boards_po.order_count }}</span>
+                    </td>
+                    <td class="text-center">
+                        {{ boards_po.total_pnx_items }}
+                    </td>
+                    <td class="text-center">
+                        {{ boards_po.received_pnx_items }} / {{ boards_po.total_pnx_items }}
+                    </td>
+                    <td>
+                        {% if boards_po.boards_received %}
+                            <span class="badge bg-success">Fully Received</span>
+                        {% elif boards_po.received_pnx_items > 0 %}
+                            <span class="badge bg-warning">Partially Received</span>
+                        {% else %}
+                            <span class="badge bg-danger">Not Received</span>
+                        {% endif %}
+                    </td>
+                    <td onclick="event.stopPropagation();">
+                        <button class="btn btn-sm btn-outline-primary" onclick="toggleDetails('details-{{ boards_po.id }}', this.closest('tr'))">
+                            <i class="bi bi-eye"></i> View Items
+                        </button>
+                    </td>
+                </tr>
+
+                <tr class="detail-row hidden" id="details-{{ boards_po.id }}">
+                    <td colspan="6">
+                        <div style="padding: 16px 8px;">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="mb-0">PNX Items for {{ boards_po.po_number }}</h5>
+                                <div>
+                                    <button class="btn btn-sm btn-success" onclick="markAllReceived({{ boards_po.id }}, true)">
+                                        <i class="bi bi-check-circle"></i> Mark All Received
+                                    </button>
+                                    <button class="btn btn-sm btn-warning" onclick="markAllReceived({{ boards_po.id }}, false)">
+                                        <i class="bi bi-x-circle"></i> Mark All Not Received
+                                    </button>
+                                </div>
+                            </div>
+
+                            {% if boards_po.pnx_items.all %}
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Barcode</th>
+                                            <th>Material</th>
+                                            <th>Dimensions</th>
+                                            <th>Ordered</th>
+                                            <th>Received</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in boards_po.pnx_items.all %}
+                                        <tr>
+                                            <td>{{ item.barcode }}</td>
+                                            <td>{{ item.matname }}</td>
+                                            <td>{{ item.cleng }} x {{ item.cwidth }}</td>
+                                            <td>{{ item.cnt }}</td>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <input type="checkbox" 
+                                                           class="form-check-input me-2 received-checkbox"
+                                                           data-pnx-id="{{ item.id }}"
+                                                           data-max-quantity="{{ item.cnt }}"
+                                                           {% if item.is_fully_received %}checked{% endif %}>
+                                                    <input type="number" 
+                                                           class="form-control received-quantity"
+                                                           data-pnx-id="{{ item.id }}"
+                                                           data-max-quantity="{{ item.cnt }}"
+                                                           data-original-quantity="{{ item.received_quantity|default:0 }}"
+                                                           value="{{ item.received_quantity|default:0 }}"
+                                                           min="0"
+                                                           max="{{ item.cnt }}"
+                                                           step="1"
+                                                           style="width: 80px;">
+                                                </div>
+                                            </td>
+                                            <td>
+                                                {% if item.is_fully_received %}
+                                                    <i class="bi bi-check-circle-fill text-success me-1" title="Fully Received"></i>
+                                                    <span class="badge bg-success">Received</span>
+                                                {% elif item.is_partially_received %}
+                                                    <span class="badge bg-warning">Partial</span>
+                                                {% else %}
+                                                    <span class="badge bg-danger">Not Received</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No PNX items found for this PO.</p>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <h5>No Boards POs found</h5>
+        <p>There are currently no boards purchase orders in the system.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Track changes that need to be saved
+let changes = {};
+
+function toggleDetails(detailRowId, clickedRowElement) {
+    var detailRow = document.getElementById(detailRowId);
+
+    if (detailRow.classList.contains('hidden')) {
+        detailRow.classList.remove('hidden');
+        clickedRowElement.classList.add('expanded');
+    } else {
+        detailRow.classList.add('hidden');
+        clickedRowElement.classList.remove('expanded');
+    }
+}
+
+function updateChangeTracking(pnxId, quantity) {
+    const originalQuantity = parseFloat(document.querySelector(`[data-pnx-id="${pnxId}"]`).getAttribute('data-original-quantity') || 0);
+    
+    if (parseFloat(quantity) !== originalQuantity) {
+        changes[pnxId] = parseFloat(quantity);
+    } else {
+        delete changes[pnxId];
+    }
+    updateSaveButtonVisibility();
+}
+
+function markAllReceived(boardsPoId, received) {
+    const inputs = document.querySelectorAll(`#details-${boardsPoId} .received-quantity`);
+    const checkboxes = document.querySelectorAll(`#details-${boardsPoId} .received-checkbox`);
+    inputs.forEach((input, index) => {
+        const pnxId = input.getAttribute('data-pnx-id');
+        const maxQuantity = parseFloat(input.getAttribute('data-max-quantity') || 0);
+        const newQuantity = received ? maxQuantity : 0;
+        input.value = newQuantity;
+        checkboxes[index].checked = received;
+        updateChangeTracking(pnxId, newQuantity);
+    });
+}
+
+function saveChanges() {
+    if (Object.keys(changes).length === 0) {
+        alert('No changes to save.');
+        return;
+    }
+
+    const saveBtn = document.getElementById('save-changes-btn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
+    saveBtn.disabled = true;
+
+    fetch('/stock-take/update-pnx-batch/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            changes: changes
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Successfully saved ${Object.keys(changes).length} changes.`);
+            // Reset changes tracking
+            changes = {};
+            updateSaveButtonVisibility();
+            // Update original quantity for inputs and checkboxes
+            Object.keys(changes).forEach(pnxId => {
+                const input = document.querySelector(`[data-pnx-id="${pnxId}"]`);
+                const checkbox = document.querySelector(`[data-pnx-id="${pnxId}"].received-checkbox`);
+                if (input) {
+                    input.setAttribute('data-original-quantity', changes[pnxId].toString());
+                }
+                if (checkbox) {
+                    const maxQuantity = parseFloat(checkbox.getAttribute('data-max-quantity') || 0);
+                    checkbox.checked = changes[pnxId] >= maxQuantity;
+                }
+            });
+            // Reload to update the summary counts
+            location.reload();
+        } else {
+            alert('Error saving changes: ' + (data.error || 'Unknown error'));
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while saving changes.');
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    });
+}
+
+function updateSaveButtonVisibility() {
+    const saveBtn = document.getElementById('save-changes-btn');
+    if (Object.keys(changes).length > 0) {
+        saveBtn.style.display = 'block';
+        saveBtn.textContent = `Save Changes (${Object.keys(changes).length})`;
+    } else {
+        saveBtn.style.display = 'none';
+    }
+}
+
+// Add event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    // Track checkbox changes
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('received-checkbox')) {
+            const pnxId = e.target.getAttribute('data-pnx-id');
+            const maxQuantity = parseFloat(e.target.getAttribute('data-max-quantity') || 0);
+            const isChecked = e.target.checked;
+            const newQuantity = isChecked ? maxQuantity : 0;
+            const input = document.querySelector(`[data-pnx-id="${pnxId}"].received-quantity`);
+            if (input) {
+                input.value = newQuantity;
+            }
+            updateChangeTracking(pnxId, newQuantity);
+        }
+    });
+
+    // Track quantity input changes
+    document.addEventListener('input', function(e) {
+        if (e.target.classList.contains('received-quantity')) {
+            const pnxId = e.target.getAttribute('data-pnx-id');
+            const quantity = e.target.value;
+            const maxQuantity = parseFloat(e.target.getAttribute('data-max-quantity') || 0);
+            const checkbox = document.querySelector(`[data-pnx-id="${pnxId}"].received-checkbox`);
+            if (checkbox) {
+                checkbox.checked = parseFloat(quantity) >= maxQuantity;
+            }
+            updateChangeTracking(pnxId, quantity);
+        }
+    });
+
+    // Save changes button
+    document.getElementById('save-changes-btn').addEventListener('click', saveChanges);
+});
+</script>
+
+{% endblock %}

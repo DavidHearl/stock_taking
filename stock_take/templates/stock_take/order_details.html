@@ -288,6 +288,7 @@
                                         <th>Cost</th>
                                         <th>Customer</th>
                                         <th>Received</th>
+                                        <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -300,14 +301,29 @@
                                         <td>£{{ item.calculated_cost|floatformat:2 }}</td>
                                         <td>{{ item.customer }}</td>
                                         <td>
-                                            <input type="checkbox" class="form-check-input pnx-received-checkbox" 
-                                                data-pnx-id="{{ item.id }}" 
-                                                {% if item.received %}checked{% endif %}>
+                                            <input type="number" 
+                                                   class="form-control form-control-sm pnx-received-quantity" 
+                                                   style="width: 80px;" 
+                                                   min="0" 
+                                                   max="{{ item.cnt }}"
+                                                   step="0.01"
+                                                   value="{{ item.received_quantity }}"
+                                                   data-pnx-id="{{ item.id }}"
+                                                   data-original-quantity="{{ item.received_quantity }}">
+                                        </td>
+                                        <td>
+                                            {% if item.is_fully_received %}
+                                                <span class="badge bg-success">Received</span>
+                                            {% elif item.is_partially_received %}
+                                                <span class="badge bg-warning">Partial</span>
+                                            {% else %}
+                                                <span class="badge bg-danger">Not Received</span>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}
                                     <tr class="table-info">
-                                        <td colspan="6"><strong>Total Cost:</strong></td>
+                                        <td colspan="7"><strong>Total Cost:</strong></td>
                                         <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
                                     </tr>
                                 </tbody>
@@ -758,12 +774,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // Track PNX changes instead of auto-saving
     let pnxChanges = {};
 
-    // Handle PNX received checkbox changes (just track changes, don't save)
-    document.querySelectorAll('.pnx-received-checkbox').forEach(function(checkbox) {
-        checkbox.addEventListener('change', function() {
+    // Handle PNX received quantity changes (just track changes, don't save)
+    document.querySelectorAll('.pnx-received-quantity').forEach(function(input) {
+        input.addEventListener('input', function() {
             const pnxId = this.getAttribute('data-pnx-id');
-            const received = this.checked;
-            pnxChanges[pnxId] = received;
+            const quantity = parseFloat(this.value) || 0;
+            const originalQuantity = parseFloat(this.getAttribute('data-original-quantity')) || 0;
+            
+            if (quantity !== originalQuantity) {
+                pnxChanges[pnxId] = quantity;
+            } else {
+                delete pnxChanges[pnxId];
+            }
         });
     });
 
@@ -792,6 +814,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.success) {
                 showAlert('PNX changes saved successfully!', 'success');
                 pnxChanges = {}; // Clear changes
+                // Update original quantities
+                Object.keys(pnxChanges).forEach(pnxId => {
+                    const input = document.querySelector(`[data-pnx-id="${pnxId}"]`);
+                    if (input) {
+                        input.setAttribute('data-original-quantity', pnxChanges[pnxId].toString());
+                    }
+                });
                 location.reload(); // Reload to show updated status
             } else {
                 showAlert('Error saving PNX changes: ' + data.error, 'danger');
@@ -816,7 +845,11 @@ document.addEventListener('DOMContentLoaded', function() {
         checkbox.addEventListener('change', function() {
             const osDoorId = this.getAttribute('data-os-door-id');
             const received = this.checked;
-            osDoorsChanges[osDoorId] = received;
+            // Find the corresponding quantity from the table
+            const row = this.closest('tr');
+            const quantityCell = row.querySelector('td:nth-child(5)'); // Qty column
+            const quantity = parseInt(quantityCell.textContent.trim()) || 0;
+            osDoorsChanges[osDoorId] = received ? quantity : 0;
         });
     });
 
