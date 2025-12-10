@@ -4,16 +4,16 @@
 {% block nav_material_report_active %}active{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container mt-3">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Material Report</h2>
+        <h2 class="mb-0">Material Report</h2>
         <a href="{% url 'ordering' %}" class="btn btn-secondary">
             <i class="bi bi-arrow-left"></i> Back to Orders
         </a>
     </div>
 
     <!-- Filter Controls -->
-    <div class="card mb-4">
+    <div class="card mb-3">
         <div class="card-header">
             <h5 class="mb-0">Filter by Time Period</h5>
         </div>
@@ -21,25 +21,35 @@
             <div class="row align-items-center">
                 <div class="col-md-4">
                     <div class="btn-group w-100" role="group">
-                        <a href="?filter=all" class="btn btn-outline-primary {% if filter_type == 'all' %}active{% endif %}">All Time</a>
-                        <a href="?filter=week{% if current_date %}&date={{ current_date }}{% endif %}" class="btn btn-outline-primary {% if filter_type == 'week' %}active{% endif %}">Week</a>
-                        <a href="?filter=month{% if current_date %}&date={{ current_date }}{% endif %}" class="btn btn-outline-primary {% if filter_type == 'month' %}active{% endif %}">Month</a>
+                        <a href="?filter=all&include_completed={% if include_completed %}true{% else %}false{% endif %}" class="btn btn-outline-primary {% if filter_type == 'all' %}active{% endif %}">All Time</a>
+                        <a href="?filter=week{% if current_date %}&date={{ current_date }}{% endif %}&include_completed={% if include_completed %}true{% else %}false{% endif %}" class="btn btn-outline-primary {% if filter_type == 'week' %}active{% endif %}">Week</a>
+                        <a href="?filter=month{% if current_date %}&date={{ current_date }}{% endif %}&include_completed={% if include_completed %}true{% else %}false{% endif %}" class="btn btn-outline-primary {% if filter_type == 'month' %}active{% endif %}">Month</a>
                     </div>
                 </div>
                 <div class="col-md-8">
                     {% if filter_type != 'all' %}
                     <div class="d-flex justify-content-between align-items-center">
-                        <a href="?filter={{ filter_type }}&date={{ prev_date }}" class="btn btn-outline-secondary">
+                        <a href="?filter={{ filter_type }}&date={{ prev_date }}&include_completed={% if include_completed %}true{% else %}false{% endif %}" class="btn btn-outline-secondary">
                             <i class="bi bi-chevron-left"></i> Previous {{ filter_type|title }}
                         </a>
                         <div class="text-center">
                             <strong>{{ period_label }}</strong>
                         </div>
-                        <a href="?filter={{ filter_type }}&date={{ next_date }}" class="btn btn-outline-secondary">
+                        <a href="?filter={{ filter_type }}&date={{ next_date }}&include_completed={% if include_completed %}true{% else %}false{% endif %}" class="btn btn-outline-secondary">
                             Next {{ filter_type|title }} <i class="bi bi-chevron-right"></i>
                         </a>
                     </div>
                     {% endif %}
+                </div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="include_completed" {% if include_completed %}checked{% endif %}>
+                        <label class="form-check-label" for="include_completed">
+                            Include completed projects
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -63,7 +73,9 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+    </div>
+    <div class="row mb-4">
+        <div class="col-md-6">
             <div class="card">
                 <div class="card-header">
                     <h6 class="mb-0">Top 10 Boards by Order Usage</h6>
@@ -91,6 +103,38 @@
                         {% endfor %}
                     {% else %}
                         <p class="text-muted mb-0 small">No board data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Top 10 Styles by Usage</h6>
+                </div>
+                <div class="card-body">
+                    {% if top_styles %}
+                        {% for style in top_styles %}
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="flex-grow-1">
+                                <small class="text-muted">{{ style.style }}</small>
+                            </div>
+                            <div class="flex-shrink-0 ms-2" style="width: 60px;">
+                                <div class="progress" style="height: 8px;">
+                                    <div class="progress-bar bg-success" role="progressbar" 
+                                         data-width="{{ style.percentage|stringformat:'g' }}%"
+                                         aria-valuenow="{{ style.quantity }}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="{{ max_style_quantity }}"></div>
+                                </div>
+                            </div>
+                            <div class="flex-shrink-0 ms-2" style="width: 30px;">
+                                <small class="text-muted">{{ style.quantity }}</small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted mb-0 small">No style data available</p>
                     {% endif %}
                 </div>
             </div>
@@ -127,7 +171,7 @@
                                     <span class="badge bg-info">{{ material.source }}</span>
                                 </td>
                                 <td class="text-end">
-                                    <strong>{{ material.quantity|floatformat:2 }}</strong>
+                                    <strong>{{ material.quantity|floatformat:0 }}</strong>
                                 </td>
                                 <td class="text-center">
                                     <span class="badge bg-light text-dark">{{ material.order_count }}</span>
@@ -177,7 +221,7 @@
                                     <span class="badge bg-info">{{ material.source }}</span>
                                 </td>
                                 <td class="text-end">
-                                    <strong>{{ material.quantity|floatformat:2 }}</strong>
+                                    <strong>{{ material.quantity|floatformat:0 }}</strong>
                                 </td>
                                 <td class="text-center">
                                     {% if material.stock is not None %}
@@ -234,7 +278,7 @@
                                     <span class="badge bg-warning">{{ material.source }}</span>
                                 </td>
                                 <td class="text-end">
-                                    <strong>{{ material.quantity|floatformat:2 }}</strong>
+                                    <strong>{{ material.quantity|floatformat:0 }}</strong>
                                 </td>
                                 <td class="text-center">
                                     {% if material.stock is not None %}
@@ -277,6 +321,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set progress bar widths based on data attributes
     document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
         bar.style.width = bar.getAttribute('data-width');
+    });
+
+    // Handle include completed checkbox
+    document.getElementById('include_completed').addEventListener('change', function() {
+        const url = new URL(window.location);
+        url.searchParams.set('include_completed', this.checked ? 'true' : 'false');
+        window.location.href = url.toString();
     });
 });
 </script>

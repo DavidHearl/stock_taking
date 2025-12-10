@@ -125,6 +125,7 @@ def material_report(request):
     # Get filter parameters
     filter_type = request.GET.get('filter', 'all')  # 'all', 'week', 'month'
     date_param = request.GET.get('date', '')
+    include_completed = request.GET.get('include_completed', 'true') == 'true'
     
     # Set default date to today if not provided
     if not date_param:
@@ -163,14 +164,19 @@ def material_report(request):
     # Get all orders within the date range, then get their PNX items
     if date_range:
         orders_in_range = Order.objects.filter(order_date__range=date_range)
+        if not include_completed:
+            orders_in_range = orders_in_range.filter(order_pnx_items__is_fully_received=False)
         boards_pos_in_range = BoardsPO.objects.filter(orders__in=orders_in_range).distinct()
         pnx_query = PNXItem.objects.filter(boards_po__in=boards_pos_in_range)
     else:
+        orders_in_range = Order.objects.all()
+        if not include_completed:
+            orders_in_range = orders_in_range.filter(order_pnx_items__is_fully_received=False)
         pnx_query = PNXItem.objects.all()
     
     for item in pnx_query:
         key = f"PNX-{item.matname}"
-        materials[key]['quantity'] += float(item.cnt)
+        materials[key]['quantity'] += int(float(item.cnt))
         materials[key]['name'] = item.matname
         # Store all unique SKUs for this material
         if 'skus' not in materials[key]:
@@ -190,10 +196,12 @@ def material_report(request):
         accessory_query = accessory_query.filter(
             order__order_date__range=date_range
         )
+    if not include_completed:
+        accessory_query = accessory_query.filter(order__in=orders_in_range)
     
     for accessory in accessory_query:
         key = f"ACC-{accessory.sku}-{accessory.name}"
-        materials[key]['quantity'] += float(accessory.quantity)
+        materials[key]['quantity'] += int(float(accessory.quantity))
         materials[key]['name'] = accessory.name
         materials[key]['sku'] = accessory.sku
         materials[key]['type'] = 'Accessory'
@@ -276,6 +284,33 @@ def material_report(request):
     for board in board_popularity:
         board['percentage'] = (board['order_count'] / max_orders) * 100 if max_orders > 0 else 0
     
+    # Calculate top 10 styles by usage (extract from Material Name)
+    import re
+    styles_usage = {}
+    for material in material_list:
+        # Look for pattern like "S750 - Black Mat" in material name
+        match = re.search(r'S\d{3} - .+', material['name'])
+        if match:
+            style_code = match.group(0).strip()
+            if style_code not in styles_usage:
+                styles_usage[style_code] = {
+                    'style': style_code,
+                    'quantity': 0,
+                    'orders': set(),
+                    'order_count': 0
+                }
+            styles_usage[style_code]['quantity'] += material['quantity']
+            styles_usage[style_code]['orders'].update(material['orders'])
+            styles_usage[style_code]['order_count'] = len(styles_usage[style_code]['orders'])
+    
+    # Convert to list and sort by quantity descending, take top 10
+    top_styles = sorted(styles_usage.values(), key=lambda x: x['quantity'], reverse=True)[:10]
+    max_style_quantity = max([s['quantity'] for s in top_styles]) if top_styles else 1
+    
+    # Add percentage for chart display
+    for style in top_styles:
+        style['percentage'] = (style['quantity'] / max_style_quantity) * 100 if max_style_quantity > 0 else 0
+    
     # Calculate navigation dates
     if filter_type == 'week':
         prev_date = (current_date - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -307,6 +342,9 @@ def material_report(request):
         'board_popularity': board_popularity,
         'max_orders': max_orders,
         'materials_missing_stock': materials_missing_stock,
+        'top_styles': top_styles,
+        'max_style_quantity': max_style_quantity,
+        'include_completed': include_completed,
     })
 
 @login_required
