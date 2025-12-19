@@ -373,6 +373,7 @@ def substitutions(request):
     })
 
 @login_required
+@login_required
 def create_boards_po(request):
     """Create a new BoardsPO entry and parse PNX file for items"""
     if request.method == 'POST':
@@ -705,15 +706,136 @@ def order_details(request, order_id):
     })
 
 def completed_stock_takes(request):
-    """Display only completed stock takes"""
+    """Display completed stock takes with analytics and filtering"""
+    from datetime import timedelta
+    from django.db.models import Count, Q
+    from django.db.models.functions import TruncMonth
+    
+    # Base queryset
     completed_schedules = Schedule.objects.filter(
         status='completed',
         completed_date__isnull=False
-    ).order_by('-completed_date')
+    ).prefetch_related('stock_take_groups__category')
     
-    return render(request, 'stock_take/completed_stock_takes.html', {
-        'completed_schedules': completed_schedules
-    })
+    # Get filter parameters
+    search_query = request.GET.get('search', '').strip()
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    assigned_to = request.GET.get('assigned_to', '')
+    auto_generated = request.GET.get('auto_generated', '')
+    sort_by = request.GET.get('sort', '-completed_date')
+    
+    # Apply search filter
+    if search_query:
+        completed_schedules = completed_schedules.filter(
+            Q(name__icontains=search_query) |
+            Q(description__icontains=search_query) |
+            Q(locations__icontains=search_query) |
+            Q(assigned_to__icontains=search_query) |
+            Q(notes__icontains=search_query)
+        )
+    
+    # Apply date filters
+    if date_from:
+        try:
+            from_date = timezone.datetime.strptime(date_from, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
+            completed_schedules = completed_schedules.filter(completed_date__gte=from_date)
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            to_date = timezone.datetime.strptime(date_to, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
+            to_date = to_date.replace(hour=23, minute=59, second=59)
+            completed_schedules = completed_schedules.filter(completed_date__lte=to_date)
+        except ValueError:
+            pass
+    
+    # Apply assigned_to filter
+    if assigned_to:
+        completed_schedules = completed_schedules.filter(assigned_to__icontains=assigned_to)
+    
+    # Apply auto_generated filter
+    if auto_generated == 'true':
+        completed_schedules = completed_schedules.filter(auto_generated=True)
+    elif auto_generated == 'false':
+        completed_schedules = completed_schedules.filter(auto_generated=False)
+    
+    # Apply sorting
+    valid_sorts = {
+        'name': 'name',
+        '-name': '-name',
+        'completed_date': 'completed_date',
+        '-completed_date': '-completed_date',
+        'scheduled_date': 'scheduled_date',
+        '-scheduled_date': '-scheduled_date',
+        'assigned_to': 'assigned_to',
+        '-assigned_to': '-assigned_to',
+    }
+    if sort_by in valid_sorts:
+        completed_schedules = completed_schedules.order_by(valid_sorts[sort_by])
+    else:
+        completed_schedules = completed_schedules.order_by('-completed_date')
+    
+    # Calculate statistics
+    total_completed = completed_schedules.count()
+    
+    # Get all completed schedules for overall stats (before filtering)
+    all_completed = Schedule.objects.filter(status='completed', completed_date__isnull=False)
+    
+    # Time-based stats
+    now = timezone.now()
+    last_7_days = all_completed.filter(completed_date__gte=now - timedelta(days=7)).count()
+    last_30_days = all_completed.filter(completed_date__gte=now - timedelta(days=30)).count()
+    this_year = all_completed.filter(completed_date__year=now.year).count()
+    
+    # Auto vs Manual
+    auto_generated_count = all_completed.filter(auto_generated=True).count()
+    manual_count = all_completed.filter(auto_generated=False).count()
+    
+    # Get unique assigned users
+    assigned_users = all_completed.exclude(assigned_to='').values_list('assigned_to', flat=True).distinct().order_by('assigned_to')
+    
+    # Monthly breakdown for the last 6 months
+    six_months_ago = now - timedelta(days=180)
+    monthly_stats = all_completed.filter(
+        completed_date__gte=six_months_ago
+    ).annotate(
+        month=TruncMonth('completed_date')
+    ).values('month').annotate(
+        count=Count('id')
+    ).order_by('month')
+    
+    # Get most active groups
+    from django.db.models import Count
+    top_groups = StockTakeGroup.objects.filter(
+        schedule__status='completed',
+        schedule__completed_date__isnull=False
+    ).annotate(
+        completion_count=Count('schedule')
+    ).order_by('-completion_count')[:5]
+    
+    context = {
+        'completed_schedules': completed_schedules,
+        'total_completed': total_completed,
+        'last_7_days': last_7_days,
+        'last_30_days': last_30_days,
+        'this_year': this_year,
+        'auto_generated_count': auto_generated_count,
+        'manual_count': manual_count,
+        'assigned_users': assigned_users,
+        'monthly_stats': list(monthly_stats),
+        'top_groups': top_groups,
+        # Filter values for form persistence
+        'search_query': search_query,
+        'date_from': date_from,
+        'date_to': date_to,
+        'assigned_to_filter': assigned_to,
+        'auto_generated_filter': auto_generated,
+        'current_sort': sort_by,
+    }
+    
+    return render(request, 'stock_take/completed_stock_takes.html', context)
 
 @login_required
 def map_view(request):
@@ -831,11 +953,84 @@ def category_edit(request, category_id):
     return redirect('category_list')
 
 def import_history(request):
-    """Display all import history records"""
-    imports = ImportHistory.objects.all().order_by('-imported_at')
-    return render(request, 'stock_take/import_history.html', {
-        'imports': imports
-    })
+    """Display import history with analytics and filtering"""
+    from datetime import timedelta
+    from django.db.models import Sum, Count, Q
+    from django.db.models.functions import TruncMonth
+    
+    # Base queryset
+    imports = ImportHistory.objects.all()
+    
+    # Get filter parameters
+    search_query = request.GET.get('search', '').strip()
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    sort_by = request.GET.get('sort', '-imported_at')
+    
+    # Apply search filter
+    if search_query:
+        imports = imports.filter(filename__icontains=search_query)
+    
+    # Apply date filters
+    if date_from:
+        try:
+            from_date = timezone.datetime.strptime(date_from, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
+            imports = imports.filter(imported_at__gte=from_date)
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            to_date = timezone.datetime.strptime(date_to, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
+            to_date = to_date.replace(hour=23, minute=59, second=59)
+            imports = imports.filter(imported_at__lte=to_date)
+        except ValueError:
+            pass
+    
+    # Apply sorting
+    valid_sorts = {
+        'imported_at': 'imported_at',
+        '-imported_at': '-imported_at',
+        'filename': 'filename',
+        '-filename': '-filename',
+        'record_count': 'record_count',
+        '-record_count': '-record_count',
+    }
+    if sort_by in valid_sorts:
+        imports = imports.order_by(valid_sorts[sort_by])
+    else:
+        imports = imports.order_by('-imported_at')
+    
+    # Calculate statistics
+    total_imports = imports.count()
+    total_records = imports.aggregate(Sum('record_count'))['record_count__sum'] or 0
+    
+    # Get all imports for overall stats (before filtering)
+    all_imports = ImportHistory.objects.all()
+    
+    # Time-based stats
+    now = timezone.now()
+    last_7_days = all_imports.filter(imported_at__gte=now - timedelta(days=7)).count()
+    last_30_days = all_imports.filter(imported_at__gte=now - timedelta(days=30)).count()
+    
+    # Average records per import
+    avg_records = all_imports.aggregate(models.Avg('record_count'))['record_count__avg'] or 0
+    
+    context = {
+        'imports': imports,
+        'total_imports': total_imports,
+        'total_records': total_records,
+        'last_7_days': last_7_days,
+        'last_30_days': last_30_days,
+        'avg_records': round(avg_records, 0),
+        # Filter values for form persistence
+        'search_query': search_query,
+        'date_from': date_from,
+        'date_to': date_to,
+        'current_sort': sort_by,
+    }
+    
+    return render(request, 'stock_take/import_history.html', context)
 
 def reset_and_populate_schedules():
     """Reset pending schedules, schedule high priority first, and remove completed jobs from pending if completed in last month."""
@@ -2240,21 +2435,85 @@ def download_processed_csv(request, order_id):
 
 @login_required
 def boards_summary(request):
-    """Display summary of all boards POs with their received status"""
-    boards_pos = BoardsPO.objects.all().order_by('po_number').prefetch_related(
-        Prefetch('pnx_items', queryset=PNXItem.objects.order_by('barcode', 'matname', 'customer'))
+    """Display summary of all boards POs with their received status and filtering"""
+    from django.db.models import Count, Q
+    
+    # Get filter parameters
+    search_query = request.GET.get('search', '').strip()
+    status_filter = request.GET.get('status', '')
+    order_type_filter = request.GET.get('order_type', '')
+    sort_by = request.GET.get('sort', 'po_number')
+    
+    # Base queryset with prefetch
+    boards_pos = BoardsPO.objects.all().prefetch_related(
+        Prefetch('pnx_items', queryset=PNXItem.objects.order_by('barcode', 'matname', 'customer')),
+        Prefetch('orders', queryset=Order.objects.all())
     )
     
-    # Add order count and received status to each BoardsPO
+    # Apply search filter
+    if search_query:
+        boards_pos = boards_pos.filter(po_number__icontains=search_query)
+    
+    # Apply sorting
+    valid_sorts = {
+        'po_number': 'po_number',
+        '-po_number': '-po_number',
+    }
+    if sort_by in valid_sorts:
+        boards_pos = boards_pos.order_by(valid_sorts[sort_by])
+    else:
+        boards_pos = boards_pos.order_by('po_number')
+    
+    # Add order count, order types, and received status to each BoardsPO
+    filtered_pos = []
     for boards_po in boards_pos:
         boards_po.order_count = boards_po.orders.count()
         boards_po.total_pnx_items = boards_po.pnx_items.count()
         boards_po.received_pnx_items = sum(1 for item in boards_po.pnx_items.all() if item.is_fully_received)
         boards_po.partially_received_items = sum(1 for item in boards_po.pnx_items.all() if item.is_partially_received)
+        
+        # Count order types
+        boards_po.sale_count = boards_po.orders.filter(order_type='sale').count()
+        boards_po.remedial_count = boards_po.orders.filter(order_type='remedial').count()
+        boards_po.warranty_count = boards_po.orders.filter(order_type='warranty').count()
+        
+        # Apply status filter
+        if status_filter == 'received' and not boards_po.boards_received:
+            continue
+        elif status_filter == 'partial' and not (boards_po.partially_received_items > 0 and not boards_po.boards_received):
+            continue
+        elif status_filter == 'not_received' and (boards_po.received_pnx_items > 0):
+            continue
+        
+        # Apply order type filter
+        if order_type_filter == 'sale' and boards_po.sale_count == 0:
+            continue
+        elif order_type_filter == 'remedial' and boards_po.remedial_count == 0:
+            continue
+        elif order_type_filter == 'warranty' and boards_po.warranty_count == 0:
+            continue
+        
+        filtered_pos.append(boards_po)
     
-    return render(request, 'stock_take/boards_summary.html', {
-        'boards_pos': boards_pos,
-    })
+    # Calculate statistics
+    total_pos = len(filtered_pos)
+    total_items = sum(po.total_pnx_items for po in filtered_pos)
+    total_received = sum(po.received_pnx_items for po in filtered_pos)
+    total_orders = sum(po.order_count for po in filtered_pos)
+    
+    context = {
+        'boards_pos': filtered_pos,
+        'total_pos': total_pos,
+        'total_items': total_items,
+        'total_received': total_received,
+        'total_orders': total_orders,
+        'search_query': search_query,
+        'status_filter': status_filter,
+        'order_type_filter': order_type_filter,
+        'current_sort': sort_by,
+    }
+    
+    return render(request, 'stock_take/boards_summary.html', context)
 
 @login_required
 def os_doors_summary(request):
@@ -2268,29 +2527,44 @@ def os_doors_summary(request):
     
     # Convert to list and add order/os door data
     os_doors_pos_list = []
+    total_os_doors = 0
+    total_received = 0
+    total_orders = 0
+    
     for po_data in os_doors_pos:
         po_number = po_data['os_doors_po']
         orders = Order.objects.filter(os_doors_po=po_number).prefetch_related(
             Prefetch('os_doors', queryset=OSDoor.objects.order_by('door_style', 'style_colour', 'colour'))
         )
         
-        total_orders = orders.count()
-        total_os_doors = sum(order.os_doors.count() for order in orders)
-        received_os_doors = sum(
+        po_order_count = orders.count()
+        po_total_os_doors = sum(order.os_doors.count() for order in orders)
+        po_received_os_doors = sum(
             1 for order in orders for os_door in order.os_doors.all() if os_door.is_fully_received
         )
+        
+        total_orders += po_order_count
+        total_os_doors += po_total_os_doors
+        total_received += po_received_os_doors
+        
+        # Get unique customer names for this PO
+        customers = list(set([f"{order.first_name} {order.last_name}".strip() for order in orders if order.first_name or order.last_name]))
         
         po_obj = {
             'po_number': po_number,
             'orders': orders,
-            'order_count': total_orders,
-            'total_os_doors': total_os_doors,
-            'received_os_doors': received_os_doors,
-            'os_doors_received': received_os_doors == total_os_doors if total_os_doors > 0 else False
+            'order_count': po_order_count,
+            'total_os_doors': po_total_os_doors,
+            'received_os_doors': po_received_os_doors,
+            'os_doors_received': po_received_os_doors == po_total_os_doors if po_total_os_doors > 0 else False,
+            'customers': customers
         }
         os_doors_pos_list.append(po_obj)
     
     return render(request, 'stock_take/os_doors_summary.html', {
         'os_doors_pos': os_doors_pos_list,
+        'total_os_doors': total_os_doors,
+        'total_received': total_received,
+        'total_orders': total_orders,
     })
 

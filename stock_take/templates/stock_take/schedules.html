@@ -1,90 +1,83 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Schedules - {{ block.super }}{% endblock %}
+{% block title %}Stock Takes - {{ block.super }}{% endblock %}
 
 {% block nav_schedules_active %}active{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/schedules.css' %}">
+{% endblock %}
+
 {% block extra_js %}
 <script>
-$(document).ready(function() {
-    // Start schedule
-    $('.start-schedule-btn').on('click', function() {
-        const scheduleId = $(this).data('id');
-        updateScheduleStatus(scheduleId, 'in_progress');
-    });
-    
-    // Complete schedule
-    $('.complete-schedule-btn').on('click', function() {
-        const scheduleId = $(this).data('id');
-        updateScheduleStatus(scheduleId, 'completed');
-    });
-    
-    $('.delete-schedule-btn').on('click', function() {
-        const scheduleId = $(this).data('id');
-        if (confirm('Are you sure you want to delete this schedule?')) {
-            $.post('{% url "delete_schedule" 0 %}'.replace('0', scheduleId), {
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() {
-                location.reload();
-            })
-            .fail(function() {
-                alert('Error deleting schedule.');
-            });
+function getCookie(name) {
+  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return m ? m.pop() : '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Delete schedule
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.delete-schedule-btn')) {
+            e.preventDefault();
+            const btn = e.target.closest('.delete-schedule-btn');
+            const scheduleId = btn.dataset.id;
+            
+            if (confirm('Are you sure you want to delete this schedule?')) {
+                fetch('{% url "delete_schedule" 0 %}'.replace('0', scheduleId), {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                })
+                .then(() => location.reload())
+                .catch(() => alert('Error deleting schedule.'));
+            }
         }
     });
     
-    $('.edit-schedule-btn').on('click', function() {
-        const scheduleId = $(this).data('id');
-        const scheduleName = $(this).data('name');
-        const scheduleDate = $(this).data('date');
-        const scheduleDescription = $(this).data('description');
-        const scheduleLocations = $(this).data('locations');
-        const scheduleAssigned = $(this).data('assigned');
-        const scheduleNotes = $(this).data('notes');
-        
-        // Populate the edit modal with current values
-        $('#editScheduleId').val(scheduleId);
-        $('#editScheduleName').val(scheduleName);
-        $('#editScheduleDate').val(scheduleDate);
-        $('#editScheduleDescription').val(scheduleDescription);
-        $('#editScheduleLocations').val(scheduleLocations);
-        $('#editScheduleAssigned').val(scheduleAssigned);
-        $('#editScheduleNotes').val(scheduleNotes);
-        
-        // Show the edit modal
-        $('#editScheduleModal').modal('show');
+    // Edit schedule
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.edit-schedule-btn')) {
+            e.preventDefault();
+            const btn = e.target.closest('.edit-schedule-btn');
+            
+            // Populate the edit modal with current values
+            document.getElementById('editScheduleId').value = btn.dataset.id;
+            document.getElementById('editScheduleName').value = btn.dataset.name;
+            document.getElementById('editScheduleDate').value = btn.dataset.date;
+            document.getElementById('editScheduleDescription').value = btn.dataset.description || '';
+            document.getElementById('editScheduleLocations').value = btn.dataset.locations || '';
+            document.getElementById('editScheduleAssigned').value = btn.dataset.assigned || '';
+            document.getElementById('editScheduleNotes').value = btn.dataset.notes || '';
+            
+            // Show the edit modal
+            openModal('editScheduleModal');
+        }
     });
     
-    $('#editScheduleForm').on('submit', function(e) {
-        e.preventDefault();
-        const scheduleId = $('#editScheduleId').val();
-        const formData = $(this).serialize();
-        
-        $.post('{% url "schedule_edit" 0 %}'.replace('0', scheduleId), formData)
-        .done(function(response) {
-            if (response.success) {
-                location.reload();
-            } else {
-                alert('Error updating schedule: ' + response.error);
-            }
-        })
-        .fail(function() {
-            alert('Error updating schedule.');
-        });
-    });
-    
-    function updateScheduleStatus(scheduleId, status) {
-        $.post('{% url "schedule_update_status" 0 %}'.replace('0', scheduleId), {
-            'status': status,
-            'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-        })
-        .done(function() {
-            location.reload();
-        })
-        .fail(function() {
-            alert('Error updating schedule status.');
+    // Edit schedule form submission
+    const editForm = document.getElementById('editScheduleForm');
+    if (editForm) {
+        editForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const scheduleId = document.getElementById('editScheduleId').value;
+            const formData = new FormData(this);
+            
+            fetch('{% url "schedule_edit" 0 %}'.replace('0', scheduleId), {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error updating schedule: ' + data.error);
+                }
+            })
+            .catch(() => alert('Error updating schedule.'));
         });
     }
 });
@@ -94,101 +87,90 @@ $(document).ready(function() {
 
 {% block content %}
 {% if user.is_authenticated %}
-<div class="container mt-4 pb-5">
-<div class="row">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div class="d-flex gap-3">
-                <div class="text-center">
-                    <div class="h5 mb-0">{{ pending_count }}</div>
-                    <small class="text-muted">Pending</small>
-                </div>
-                <div class="text-center">
-                    <div class="h5 mb-0">{{ in_progress_count }}</div>
-                    <small class="text-muted">In Progress</small>
-                </div>
-                <div class="text-center">
-                    <div class="h5 mb-0">{{ completed_count }}</div>
-                    <small class="text-muted">Completed</small>
-                </div>
-                {% if auto_schedules_count > 0 %}
-                <div class="text-center">
-                    <div class="h5 mb-0 text-info">{{ auto_schedules_count }}</div>
-                    <small class="text-muted">Auto-generated</small>
-                </div>
-                {% endif %}
-            </div>
-            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#scheduleModal">
-                <i class="bi bi-plus-circle me-1"></i> Add New Schedule
-            </button>
-        </div>
-    <!-- Status Summary Cards removed -->
+<div class="page-content">
+    <div class="page-header">
+        <h1>Stock Takes</h1>
+        <button type="button" class="btn btn-primary" onclick="openModal('scheduleModal')">
+            <i class="bi bi-plus-lg"></i> Add New Schedule
+        </button>
+    </div>
 
-        <!-- Pending Schedules Table -->
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">
-                    <i class="bi bi-clock me-2"></i>
-                    Pending Stock Takes
-                </h5>
-            </div>
-            <div class="card-body p-0">
-                {% if pending_schedules %}
-                    {% include 'stock_take/schedule_table.html' with schedules=pending_schedules hide_description=True hide_assigned_to=True %}
-                {% else %}
-                    <div class="text-center text-muted py-5">
-                        <i class="bi bi-check-circle fs-1 mb-3"></i>
-                        <h5>No Pending Schedules</h5>
-                        <p>All stock takes are either in progress or completed.</p>
-                    </div>
-                {% endif %}
-            </div>
+    <div class="stats-bar">
+        <div class="stat-box">
+            <span class="stat-value">{{ pending_count }}</span>
+            <span class="stat-label">Pending</span>
         </div>
+        <div class="stat-box">
+            <span class="stat-value">{{ in_progress_count }}</span>
+            <span class="stat-label">In Progress</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-value">{{ completed_count }}</span>
+            <span class="stat-label">Completed</span>
+        </div>
+        {% if auto_schedules_count > 0 %}
+        <div class="stat-box">
+            <span class="stat-value info">{{ auto_schedules_count }}</span>
+            <span class="stat-label">Auto-generated</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="schedule-card">
+        <div class="schedule-card-header">
+            <h2>⏱️ Pending Stock Takes</h2>
+        </div>
+        {% if pending_schedules %}
+            {% include 'stock_take/schedule_table.html' with schedules=pending_schedules hide_description=True hide_assigned_to=True %}
+        {% else %}
+            <div class="empty-state">
+                <div class="empty-state-icon">✓</div>
+                <h5>No Pending Schedules</h5>
+                <p>All stock takes are either in progress or completed.</p>
+            </div>
+        {% endif %}
     </div>
 </div>
 
 <!-- Schedule Modal -->
-<div class="modal fade" id="scheduleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+<div class="modal" id="scheduleModal">
+    <div class="modal-overlay" onclick="closeModal('scheduleModal')"></div>
+    <div class="modal-dialog" style="max-width: 800px;">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Create New Schedule</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h3>Create New Schedule</h3>
+                <button type="button" class="modal-close" onclick="closeModal('scheduleModal')">✕</button>
             </div>
             <form method="post" action="{% url 'schedule_create' %}">
                 {% csrf_token %}
                 <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="scheduleName" class="form-label">Name</label>
-                                <input type="text" class="form-control" id="scheduleName" name="name" required>
-                            </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="scheduleName">Name</label>
+                            <input type="text" class="form-input" id="scheduleName" name="name" required>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="scheduleDate" class="form-label">Scheduled Date</label>
-                                <input type="datetime-local" class="form-control" id="scheduleDate" name="scheduled_date" required>
-                            </div>
+                        <div class="form-group">
+                            <label for="scheduleDate">Scheduled Date</label>
+                            <input type="datetime-local" class="form-input" id="scheduleDate" name="scheduled_date" required>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="scheduleDescription" class="form-label">Description</label>
-                        <textarea class="form-control" id="scheduleDescription" name="description" rows="3"></textarea>
+                    <div class="form-group">
+                        <label for="scheduleDescription">Description</label>
+                        <textarea class="form-textarea" id="scheduleDescription" name="description" rows="3"></textarea>
                     </div>
-                    <div class="mb-3">
-                        <label for="scheduleGroups" class="form-label">Stock Take Groups</label>
-                        <select class="form-select" id="scheduleGroups" name="stock_take_groups" multiple size="8">
+                    <div class="form-group">
+                        <label for="scheduleGroups">Stock Take Groups</label>
+                        <select class="form-select" id="scheduleGroups" name="stock_take_groups" multiple>
                             {% for group in stock_take_groups %}
                                 <option value="{{ group.id }}">{{ group.category.name }} - {{ group.name }}</option>
                             {% endfor %}
                         </select>
-                        <div class="form-text">Hold Ctrl/Cmd to select multiple groups</div>
+                        <small class="form-text">Hold Ctrl/Cmd to select multiple groups</small>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Schedule</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💾 Create Schedule</button>
                 </div>
             </form>
         </div>
@@ -196,55 +178,50 @@ $(document).ready(function() {
 </div>
 
 <!-- Edit Schedule Modal -->
-<div class="modal fade" id="editScheduleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+<div class="modal" id="editScheduleModal">
+    <div class="modal-overlay" onclick="closeModal('editScheduleModal')"></div>
+    <div class="modal-dialog" style="max-width: 800px;">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Edit Schedule</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h3>Edit Schedule</h3>
+                <button type="button" class="modal-close" onclick="closeModal('editScheduleModal')">✕</button>
             </div>
             <form id="editScheduleForm">
                 {% csrf_token %}
                 <input type="hidden" id="editScheduleId" name="schedule_id">
                 <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editScheduleName" class="form-label">Name</label>
-                                <input type="text" class="form-control" id="editScheduleName" name="name" required>
-                            </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="editScheduleName">Name</label>
+                            <input type="text" class="form-input" id="editScheduleName" name="name" required>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editScheduleDate" class="form-label">Scheduled Date</label>
-                                <input type="datetime-local" class="form-control" id="editScheduleDate" name="scheduled_date" required>
-                            </div>
+                        <div class="form-group">
+                            <label for="editScheduleDate">Scheduled Date</label>
+                            <input type="datetime-local" class="form-input" id="editScheduleDate" name="scheduled_date" required>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="editScheduleDescription" class="form-label">Description</label>
-                        <textarea class="form-control" id="editScheduleDescription" name="description" rows="3"></textarea>
+                    <div class="form-group">
+                        <label for="editScheduleDescription">Description</label>
+                        <textarea class="form-textarea" id="editScheduleDescription" name="description" rows="3"></textarea>
                     </div>
-                    <div class="mb-3">
-                        <label for="editScheduleLocations" class="form-label">Locations</label>
-                        <input type="text" class="form-control" id="editScheduleLocations" name="locations" placeholder="Comma-separated locations">
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editScheduleAssigned" class="form-label">Assigned To</label>
-                                <input type="text" class="form-control" id="editScheduleAssigned" name="assigned_to">
-                            </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="editScheduleLocations">Locations</label>
+                            <input type="text" class="form-input" id="editScheduleLocations" name="locations" placeholder="Comma-separated locations">
+                        </div>
+                        <div class="form-group">
+                            <label for="editScheduleAssigned">Assigned To</label>
+                            <input type="text" class="form-input" id="editScheduleAssigned" name="assigned_to">
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="editScheduleNotes" class="form-label">Notes</label>
-                        <textarea class="form-control" id="editScheduleNotes" name="notes" rows="3"></textarea>
+                    <div class="form-group">
+                        <label for="editScheduleNotes">Notes</label>
+                        <textarea class="form-textarea" id="editScheduleNotes" name="notes" rows="3"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Update Schedule</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('editScheduleModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💾 Update Schedule</button>
                 </div>
             </form>
         </div>

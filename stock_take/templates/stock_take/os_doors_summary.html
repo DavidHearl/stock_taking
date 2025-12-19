@@ -1,188 +1,299 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}OS Doors Summary{% endblock %}
+{% block title %}OS Doors Summary - {{ block.super }}{% endblock %}
 
 {% block nav_os_doors_summary_active %}active{% endblock %}
 
 {% block extra_css %}
-<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
-<style>
-.table-received {
-    background-color: #d4edda !important;
-}
-.table-not-received {
-    background-color: #f8d7da !important;
-}
-</style>
+<link rel="stylesheet" href="{% static 'css/os_doors_summary.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="container mt-2 pb-3">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h2 class="mb-0">OS Doors Summary</h2>
-        <button id="save-changes-btn" class="btn btn-success" style="display: none;">
-            <i class="bi bi-save"></i> Save Changes
-        </button>
+{% if user.is_authenticated %}
+<div class="os-doors-summary-page">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="header-content">
+            <h1>🚪 OS Doors Summary</h1>
+            <p class="header-subtitle">Track OS doors purchase orders and receiving status</p>
+        </div>
+        <div class="header-actions">
+            <button id="save-changes-btn" class="btn btn-success" style="display: none;">
+                💾 Save Changes
+            </button>
+        </div>
     </div>
 
-    {% if os_doors_pos %}
-    <div class="table-responsive">
-        <table class="table table-striped table-hover">
-            <thead class="table-dark">
-                <tr>
-                    <th>PO Number</th>
-                    <th>Orders</th>
-                    <th>Total OS Doors</th>
-                    <th>Received</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for os_doors_po in os_doors_pos %}
-                <tr class="clickable-row {% if os_doors_po.os_doors_received %}table-received{% else %}table-not-received{% endif %}"
-                    onclick="toggleDetails('details-{{ forloop.counter }}', this)">
-                    <td>
-                        <strong>{{ os_doors_po.po_number }}</strong>
-                    </td>
-                    <td class="text-center">
-                        <span class="badge bg-primary">{{ os_doors_po.order_count }}</span>
-                    </td>
-                    <td class="text-center">
-                        {{ os_doors_po.total_os_doors }}
-                    </td>
-                    <td class="text-center">
-                        {{ os_doors_po.received_os_doors }} / {{ os_doors_po.total_os_doors }}
-                    </td>
-                    <td>
-                        {% if os_doors_po.os_doors_received %}
-                            <span class="badge bg-success">Fully Received</span>
-                        {% elif os_doors_po.received_os_doors > 0 %}
-                            <span class="badge bg-warning">Partially Received</span>
-                        {% else %}
-                            <span class="badge bg-danger">Not Received</span>
-                        {% endif %}
-                    </td>
-                    <td onclick="event.stopPropagation();">
-                        <button class="btn btn-sm btn-outline-primary" onclick="toggleDetails('details-{{ forloop.counter }}', this.closest('tr'))">
-                            <i class="bi bi-eye"></i> View OS Doors
-                        </button>
-                    </td>
-                </tr>
+    <!-- Statistics Dashboard -->
+    <div class="stats-dashboard">
+        <div class="stat-card stat-primary">
+            <div class="stat-icon"><i class="bi bi-file-text"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ total_pos }}</div>
+                <div class="stat-label">Total POs</div>
+            </div>
+        </div>
+        
+        <div class="stat-card stat-success">
+            <div class="stat-icon"><i class="bi bi-check-circle-fill"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ received_pos }}</div>
+                <div class="stat-label">Fully Received</div>
+            </div>
+        </div>
+        
+        <div class="stat-card stat-warning">
+            <div class="stat-icon"><i class="bi bi-cart"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ total_orders }}</div>
+                <div class="stat-label">Orders</div>
+            </div>
+        </div>
+    </div>
 
-                <tr class="detail-row hidden" id="details-{{ forloop.counter }}">
-                    <td colspan="6">
-                        <div style="padding: 16px 8px;">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5 class="mb-0">OS Doors for {{ os_doors_po.po_number }}</h5>
-                                <div>
-                                    <button class="btn btn-sm btn-success" onclick="markAllReceived({{ forloop.counter }}, true)">
-                                        <i class="bi bi-check-circle"></i> Mark All Received
-                                    </button>
-                                    <button class="btn btn-sm btn-warning" onclick="markAllReceived({{ forloop.counter }}, false)">
-                                        <i class="bi bi-x-circle"></i> Mark All Not Received
-                                    </button>
-                                </div>
-                            </div>
+    <!-- Search Bar -->
+    <div class="search-section">
+        <form method="get" action="" class="search-form">
+            <div class="search-input-wrapper">
+                <input type="text" 
+                       id="search" 
+                       name="search" 
+                       class="search-input" 
+                       placeholder="Search by PO number..."
+                       value="">
+            </div>
+        </form>
+    </div>
 
-                            {% for order in os_doors_po.orders %}
-                            {% if order.os_doors.all %}
-                            <div class="mb-4">
-                                <h6>Order: {{ order.sale_number }} - {{ order.first_name }} {{ order.last_name }}</h6>
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-striped mb-0">
-                                        <thead>
-                                            <tr>
-                                                <th>Door Style</th>
-                                                <th>Style Colour</th>
-                                                <th>Dimensions</th>
-                                                <th>Colour</th>
-                                                <th>Qty</th>
-                                                <th>Ordered</th>
-                                                <th>Status</th>
-                                                <th>Received</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for os_door in order.os_doors.all %}
-                                            <tr>
-                                                <td>{{ os_door.door_style }}</td>
-                                                <td>{{ os_door.style_colour }}</td>
-                                                <td>{{ os_door.height }} x {{ os_door.width }}</td>
-                                                <td>{{ os_door.colour }}</td>
-                                                <td>{{ os_door.quantity }}</td>
-                                                <td>
-                                                    {% if os_door.ordered %}
-                                                        <i class="bi bi-check-circle-fill text-success"></i>
-                                                    {% else %}
-                                                        <i class="bi bi-x-circle-fill text-danger"></i>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {% if os_door.is_fully_received %}
-                                                        <i class="bi bi-check-circle-fill text-success" title="Fully Received"></i>
-                                                    {% elif os_door.is_partially_received %}
-                                                        <i class="bi bi-dash-circle-fill text-warning" title="Partially Received ({{ os_door.received_quantity }}/{{ os_door.quantity }})"></i>
-                                                    {% else %}
-                                                        <i class="bi bi-x-circle-fill text-danger" title="Not Received"></i>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    <div class="d-flex align-items-center">
-                                                        <input type="checkbox" 
-                                                               class="form-check-input me-2 received-checkbox"
-                                                               data-os-door-id="{{ os_door.id }}"
-                                                               data-max-quantity="{{ os_door.quantity }}"
-                                                               {% if os_door.is_fully_received %}checked{% endif %}>
-                                                        <input type="number" 
-                                                               class="form-control received-quantity"
-                                                               data-os-door-id="{{ os_door.id }}"
-                                                               data-max-quantity="{{ os_door.quantity }}"
-                                                               data-original-quantity="{{ os_door.received_quantity|default:0 }}"
-                                                               value="{{ os_door.received_quantity|default:0 }}"
-                                                               min="0"
-                                                               max="{{ os_door.quantity }}"
-                                                               step="1"
-                                                               style="width: 80px;">
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
+    <!-- Results Section -->
+    <div class="results-section">
+        <div class="results-header">
+            <h3 class="section-title">
+                🚪 OS Doors POs
+                <span class="results-count">({{ os_doors_pos|length }} PO{{ os_doors_pos|pluralize }})</span>
+            </h3>
+        </div>
+
+        {% if os_doors_pos %}
+        <div class="os-doors-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>PO Number</th>
+                        <th>Customers</th>
+                        <th>Orders</th>
+                        <th>Received</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for os_doors_po in os_doors_pos %}
+                    <tr class="po-row" onclick="toggleDetails('details-{{ forloop.counter }}', event)" style="cursor: pointer;">
+                        <td>
+                            <div class="po-number-cell">
+                                <strong>{{ os_doors_po.po_number }}</strong>
                             </div>
+                        </td>
+                        <td>
+                            <div class="customers-cell">
+                                {% for customer in os_doors_po.customers|slice:":3" %}
+                                    <span class="customer-name">{{ customer }}</span>{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                                {% if os_doors_po.customers|length > 3 %}
+                                    <span class="customer-more">+{{ os_doors_po.customers|length|add:"-3" }} more</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="order-count-cell">
+                                <span class="count-badge">{{ os_doors_po.order_count }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="received-cell">
+                                <span class="received-text">{{ os_doors_po.received_os_doors }} / {{ os_doors_po.total_os_doors }}</span>
+                                {% if os_doors_po.total_os_doors > 0 %}
+                                <div class="progress-bar-mini">
+                                    <div class="progress-fill" style="width: {% widthratio os_doors_po.received_os_doors os_doors_po.total_os_doors 100 %}%;"></div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if os_doors_po.os_doors_received %}
+                                <span class="status-badge status-received">✅ Fully Received</span>
+                            {% elif os_doors_po.received_os_doors > 0 %}
+                                <span class="status-badge status-partial">⏳ Partial</span>
+                            {% else %}
+                                <span class="status-badge status-not-received">🚪 Not Received</span>
                             {% endif %}
-                            {% endfor %}
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="alert alert-info">
-        <h5>No OS Doors POs found</h5>
-        <p>There are currently no OS doors purchase orders in the system.</p>
-    </div>
-    {% endif %}
-</div>
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <span class="expand-icon" id="icon-details-{{ forloop.counter }}">
+                                    ▶
+                                </span>
+                            </div>
+                        </td>
+                    </tr>
 
+                    <tr class="detail-row" id="details-{{ forloop.counter }}" style="display: none;">
+                        <td colspan="6">
+                            <div class="details-container">
+                                {% for order in os_doors_po.orders %}
+                                {% if order.os_doors.all %}
+                                <div class="order-section">
+                                    <h6 class="order-title">Order: {{ order.sale_number }} - {{ order.first_name }} {{ order.last_name }}</h6>
+                                    <div class="items-table">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Door Style</th>
+                                                    <th>Style Colour</th>
+                                                    <th>Dimensions</th>
+                                                    <th>Colour</th>
+                                                    <th>Qty</th>
+                                                    <th>Ordered</th>
+                                                    <th>Status</th>
+                                                    <th>Received</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for os_door in order.os_doors.all %}
+                                                <tr>
+                                                    <td>{{ os_door.door_style }}</td>
+                                                    <td>{{ os_door.style_colour }}</td>
+                                                    <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                                                    <td>{{ os_door.colour }}</td>
+                                                    <td>{{ os_door.quantity }}</td>
+                                                    <td>
+                                                        {% if os_door.ordered %}
+                                                            <span class="status-icon status-yes">✓</span>
+                                                        {% else %}
+                                                            <span class="status-icon status-no">✗</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if os_door.is_fully_received %}
+                                                            <span class="status-icon status-yes" title="Fully Received">✓</span>
+                                                        {% elif os_door.is_partially_received %}
+                                                            <span class="status-icon status-partial" title="Partially Received ({{ os_door.received_quantity }}/{{ os_door.quantity }})">⏳</span>
+                                                        {% else %}
+                                                            <span class="status-icon status-no" title="Not Received">✗</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        <div class="received-input-group">
+                                                            <input type="checkbox" 
+                                                                   class="received-checkbox"
+                                                                   data-os-door-id="{{ os_door.id }}"
+                                                                   data-max-quantity="{{ os_door.quantity }}"
+                                                                   {% if os_door.is_fully_received %}checked{% endif %}>
+                                                            <input type="number" 
+                                                                   class="received-quantity"
+                                                                   data-os-door-id="{{ os_door.id }}"
+                                                                   data-max-quantity="{{ os_door.quantity }}"
+                                                                   data-original-quantity="{{ os_door.received_quantity|default:0 }}"
+                                                                   value="{{ os_door.received_quantity|default:0 }}"
+                                                                   min="0"
+                                                                   max="{{ os_door.quantity }}"
+                                                                   step="1">
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="order-actions">
+                                        <button class="btn btn-success btn-sm" onclick="markOrderReceived('{{ order.id }}', true)">
+                                            ✅ Mark Order Received
+                                        </button>
+                                        <button class="btn btn-warning btn-sm" onclick="markOrderReceived('{{ order.id }}', false)">
+                                            ❌ Mark Order Not Received
+                                        </button>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <h3 class="empty-title">No OS Doors POs Found</h3>
+            <p class="empty-message">
+                There are currently no OS doors purchase orders in the system.
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
 <script>
 // Track changes that need to be saved
 let changes = {};
 
-function toggleDetails(detailRowId, clickedRowElement) {
-    var detailRow = document.getElementById(detailRowId);
+// Live search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('search');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase();
+            const tbody = document.querySelector('.os-doors-table tbody');
+            if (!tbody) return;
+            
+            const rows = tbody.querySelectorAll('.po-row');
+            rows.forEach(row => {
+                const poNumber = row.querySelector('.po-number-cell strong').textContent.toLowerCase();
+                const detailRow = row.nextElementSibling;
+                
+                if (poNumber.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                    // Close detail row if parent is hidden
+                    if (detailRow && detailRow.classList.contains('detail-row')) {
+                        detailRow.style.display = 'none';
+                        const icon = row.querySelector('.expand-icon');
+                        if (icon) icon.textContent = '▶';
+                    }
+                }
+            });
+        });
+    }
+});
 
-    if (detailRow.classList.contains('hidden')) {
-        detailRow.classList.remove('hidden');
-        clickedRowElement.classList.add('expanded');
+function toggleDetails(detailRowId, event) {
+    // Prevent row click if clicking on inputs/buttons inside detail section
+    if (event && event.target && (
+        event.target.tagName === 'INPUT' || 
+        event.target.tagName === 'BUTTON' ||
+        event.target.closest('.details-container')
+    )) {
+        return;
+    }
+    
+    const detailRow = document.getElementById(detailRowId);
+    const icon = document.getElementById('icon-' + detailRowId);
+    const isVisible = detailRow.style.display === 'table-row';
+    
+    if (isVisible) {
+        detailRow.style.display = 'none';
+        if (icon) icon.textContent = '▶';
     } else {
-        detailRow.classList.add('hidden');
-        clickedRowElement.classList.remove('expanded');
+        detailRow.style.display = 'table-row';
+        if (icon) icon.textContent = '▼';
     }
 }
 
@@ -197,9 +308,14 @@ function updateChangeTracking(osDoorId, quantity) {
     updateSaveButtonVisibility();
 }
 
-function markAllReceived(poIndex, received) {
-    const inputs = document.querySelectorAll(`#details-${poIndex} .received-quantity`);
-    const checkboxes = document.querySelectorAll(`#details-${poIndex} .received-checkbox`);
+function markOrderReceived(orderId, received) {
+    // Find all inputs within the order section
+    const orderSection = event.target.closest('.order-section');
+    if (!orderSection) return;
+    
+    const inputs = orderSection.querySelectorAll('.received-quantity');
+    const checkboxes = orderSection.querySelectorAll('.received-checkbox');
+    
     inputs.forEach((input, index) => {
         const osDoorId = input.getAttribute('data-os-door-id');
         const maxQuantity = parseFloat(input.getAttribute('data-max-quantity') || 0);
@@ -308,7 +424,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Save changes button
-    document.getElementById('save-changes-btn').addEventListener('click', saveChanges);
+    const saveBtn = document.getElementById('save-changes-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveChanges);
+    }
 });
 </script>
 

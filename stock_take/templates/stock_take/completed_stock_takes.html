@@ -4,40 +4,321 @@
 {% block title %}Completed Stock Takes - {{ block.super }}{% endblock %}
 {% block nav_completed_stock_takes_active %}active{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/completed_stock_takes.css' %}">
+{% endblock %}
 
 {% block content %}
-    {% if user.is_authenticated %}
-<div class="container mt-4 pb-5">
-        <div class="row">
-            <div class="col-12">
-                <h3 class="mb-4">Completed Stock Takes</h3>
-                {% if completed_schedules %}
-                    {% include 'stock_take/schedule_table.html' with schedules=completed_schedules %}
-                {% else %}
-                    <p class="text-muted">No completed stock takes found.</p>
-                {% endif %}
+{% if user.is_authenticated %}
+<div class="completed-stock-takes-page">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="header-content">
+            <h1><i class="bi bi-clipboard-check"></i> Completed Stock Takes</h1>
+            <p class="header-subtitle">View and analyze your completed stock take history</p>
+        </div>
+    </div>
+
+    <!-- Statistics Dashboard -->
+    <div class="stats-dashboard">
+        <div class="stat-card stat-primary">
+            <div class="stat-icon"><i class="bi bi-check-circle-fill"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stock_takes|length }}</div>
+                <div class="stat-label">Completed</div>
             </div>
         </div>
+        
+        <div class="stat-card stat-info">
+            <div class="stat-icon"><i class="bi bi-calendar-check"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ last_7_days }}</div>
+                <div class="stat-label">Last 7 Days</div>
+            </div>
+        </div>
+        
+        <div class="stat-card stat-success">
+            <div class="stat-icon">📊</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ last_30_days }}</div>
+                <div class="stat-label">Last 30 Days</div>
+            </div>
+        </div>
+        
+        <div class="stat-card stat-warning">
+            <div class="stat-icon">🗓️</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ this_year }}</div>
+                <div class="stat-label">This Year</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters & Search -->
+    <div class="filters-section">
+        <div class="filters-header">
+            <h3 class="section-title">🔍 Filter & Search</h3>
+            <button type="button" class="btn-toggle-filters" id="toggleFilters">
+                <span class="toggle-text">Show Filters</span>
+                <span class="toggle-icon">▼</span>
+            </button>
+        </div>
+        
+        <div class="filters-content" id="filtersContent" style="display: none;">
+            {% csrf_token %}
+            <form method="get" action="" class="filters-form">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="search">Search</label>
+                        <input type="text" 
+                               id="search" 
+                               name="search" 
+                               class="filter-input" 
+                               placeholder="Search by name, location, notes..."
+                               value="{{ search_query }}">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="date_from">From Date</label>
+                        <input type="date" 
+                               id="date_from" 
+                               name="date_from" 
+                               class="filter-input"
+                               value="{{ date_from }}">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="date_to">To Date</label>
+                        <input type="date" 
+                               id="date_to" 
+                               name="date_to" 
+                               class="filter-input"
+                               value="{{ date_to }}">
+                    </div>
+                </div>
+                
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="assigned_to">Assigned To</label>
+                        <select id="assigned_to" name="assigned_to" class="filter-select">
+                            <option value="">All Users</option>
+                            {% for user in assigned_users %}
+                            <option value="{{ user }}" {% if assigned_to_filter == user %}selected{% endif %}>
+                                {{ user }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="auto_generated">Type</label>
+                        <select id="auto_generated" name="auto_generated" class="filter-select">
+                            <option value="">All Types</option>
+                            <option value="true" {% if auto_generated_filter == "true" %}selected{% endif %}>
+                                Auto-Generated
+                            </option>
+                            <option value="false" {% if auto_generated_filter == "false" %}selected{% endif %}>
+                                Manual
+                            </option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="sort">Sort By</label>
+                        <select id="sort" name="sort" class="filter-select">
+                            <option value="-completed_date" {% if current_sort == "-completed_date" %}selected{% endif %}>
+                                Completed Date (Newest)
+                            </option>
+                            <option value="completed_date" {% if current_sort == "completed_date" %}selected{% endif %}>
+                                Completed Date (Oldest)
+                            </option>
+                            <option value="name" {% if current_sort == "name" %}selected{% endif %}>
+                                Name (A-Z)
+                            </option>
+                            <option value="-name" {% if current_sort == "-name" %}selected{% endif %}>
+                                Name (Z-A)
+                            </option>
+                            <option value="-scheduled_date" {% if current_sort == "-scheduled_date" %}selected{% endif %}>
+                                Scheduled Date (Newest)
+                            </option>
+                            <option value="scheduled_date" {% if current_sort == "scheduled_date" %}selected{% endif %}>
+                                Scheduled Date (Oldest)
+                            </option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="filter-actions">
+                    <button type="submit" class="btn btn-primary">
+                        <span>Apply Filters</span>
+                    </button>
+                    <a href="{% url 'completed_stock_takes' %}" class="btn btn-secondary">
+                        <span>Clear All</span>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="results-section">
+        <div class="results-header">
+            <h3 class="section-title">
+                📝 Stock Takes 
+                <span class="results-count">({{ total_completed }} result{{ total_completed|pluralize }})</span>
+            </h3>
+            {% if completed_schedules %}
+            <div class="export-actions">
+                <button class="btn btn-outline" onclick="window.print()">
+                    <span><i class="bi bi-printer"></i> Print</span>
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if completed_schedules %}
+        <div class="completed-schedules-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Completed Date</th>
+                        <th>Scheduled Date</th>
+                        <th>Assigned To</th>
+                        <th>Locations</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for schedule in completed_schedules %}
+                    <tr>
+                        <td>
+                            <div class="schedule-name-cell">
+                                <strong>{{ schedule.name }}</strong>
+                                {% if schedule.description %}
+                                <small>{{ schedule.description|truncatewords:10 }}</small>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="date-cell">
+                                {{ schedule.completed_date|date:"M d, Y" }}
+                                <small>{{ schedule.completed_date|date:"H:i" }}</small>
+                            </div>
+                        </td>
+                        <td>{{ schedule.scheduled_date|date:"M d, Y" }}</td>
+                        <td>{{ schedule.assigned_to|default:"—" }}</td>
+                        <td>{{ schedule.locations|truncatewords:3|default:"All locations" }}</td>
+                        <td>
+                            <div class="action-buttons">
+                                <a href="{% url 'stock_take_detail' schedule.id %}" 
+                                   class="btn-icon" 
+                                   title="View Details">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                
+                                <a href="{% url 'export_stock_take_csv' schedule.id %}" 
+                                   class="btn-icon" 
+                                   title="Export CSV">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                
+                                <button class="btn-icon delete-schedule-btn" 
+                                        data-id="{{ schedule.id }}" 
+                                        title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <h3 class="empty-title">No Completed Stock Takes Found</h3>
+            <p class="empty-message">
+                {% if search_query or date_from or date_to or assigned_to_filter or auto_generated_filter %}
+                    Try adjusting your filters to see more results.
+                {% else %}
+                    Complete your first stock take to see it here.
+                {% endif %}
+            </p>
+            {% if search_query or date_from or date_to or assigned_to_filter or auto_generated_filter %}
+            <a href="{% url 'completed_stock_takes' %}" class="btn btn-primary">
+                Clear Filters
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
 </div>
-    {% endif %}
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
-$(document).ready(function() {
-    $('.delete-schedule-btn').on('click', function() {
-        const scheduleId = $(this).data('id');
-        if (confirm('Are you sure you want to delete this schedule?')) {
-            $.post('{% url "delete_schedule" 0 %}'.replace('0', scheduleId), {
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() {
-                location.reload();
-            })
-            .fail(function() {
-                alert('Error deleting schedule.');
-            });
-        }
+document.addEventListener('DOMContentLoaded', function() {
+    // Toggle filters
+    const toggleBtn = document.getElementById('toggleFilters');
+    const filtersContent = document.getElementById('filtersContent');
+    
+    if (toggleBtn && filtersContent) {
+        toggleBtn.addEventListener('click', function() {
+            const icon = this.querySelector('.toggle-icon');
+            const text = this.querySelector('.toggle-text');
+            
+            if (filtersContent.style.display === 'none' || !filtersContent.style.display) {
+                filtersContent.style.display = 'block';
+                icon.textContent = '▲';
+                text.textContent = 'Hide Filters';
+            } else {
+                filtersContent.style.display = 'none';
+                icon.textContent = '▼';
+                text.textContent = 'Show Filters';
+            }
+        });
+    }
+    
+    // Auto-show filters if any are active
+    {% if search_query or date_from or date_to or assigned_to_filter or auto_generated_filter %}
+    if (filtersContent) {
+        filtersContent.style.display = 'block';
+        const icon = toggleBtn.querySelector('.toggle-icon');
+        const text = toggleBtn.querySelector('.toggle-text');
+        icon.textContent = '▲';
+        text.textContent = 'Hide Filters';
+    }
+    {% endif %}
+    
+    // Delete schedule
+    document.querySelectorAll('.delete-schedule-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const scheduleId = this.dataset.id;
+            const scheduleName = this.closest('tr').querySelector('.schedule-name-cell strong').textContent;
+            
+            if (confirm(`Are you sure you want to delete "${scheduleName}"?\n\nThis action cannot be undone.`)) {
+                fetch('{% url "delete_schedule" 0 %}'.replace('0', scheduleId), {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        alert('Error deleting schedule. Please try again.');
+                    }
+                })
+                .catch(() => {
+                    alert('Error deleting schedule. Please try again.');
+                });
+            }
+        });
     });
 });
 </script>

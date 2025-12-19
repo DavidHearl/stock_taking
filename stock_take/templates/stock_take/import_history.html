@@ -1,49 +1,242 @@
 {% extends 'base.html' %}
+{% load static %}
+
 {% block title %}Import History - {{ block.super }}{% endblock %}
 {% block nav_import_history_active %}active{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/import_history.css' %}">
+{% endblock %}
 
 {% block content %}
 {% if user.is_authenticated %}
-<div class="container mt-4 pb-5">
-<div class="row mb-4">
-    <div class="col-12">
-        <h4>Import History</h4>
-        <div class="table-responsive">
-            <table class="table table-striped">
+<div class="import-history-page">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="header-content">
+            <h1><i class="bi bi-clock-history"></i> Import History</h1>
+            <p class="header-subtitle">Track and manage your CSV import records</p>
+        </div>
+    </div>
+
+    <!-- Filters & Search -->
+    <div class="filters-section">
+        <div class="filters-header">
+            <h3 class="section-title"><i class="bi bi-funnel"></i> Filter & Search</h3>
+            <button type="button" class="btn-toggle-filters" id="toggleFilters">
+                <span class="toggle-text">Show Filters</span>
+                <span class="toggle-icon">▼</span>
+            </button>
+        </div>
+        
+        <div class="filters-content" id="filtersContent" style="display: none;">
+            {% csrf_token %}
+            <form method="get" action="" class="filters-form">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="search">Search Filename</label>
+                        <input type="text" 
+                               id="search" 
+                               name="search" 
+                               class="filter-input" 
+                               placeholder="Search by filename..."
+                               value="{{ search_query }}">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="date_from">From Date</label>
+                        <input type="date" 
+                               id="date_from" 
+                               name="date_from" 
+                               class="filter-input"
+                               value="{{ date_from }}">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="date_to">To Date</label>
+                        <input type="date" 
+                               id="date_to" 
+                               name="date_to" 
+                               class="filter-input"
+                               value="{{ date_to }}">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="sort">Sort By</label>
+                        <select id="sort" name="sort" class="filter-select">
+                            <option value="-imported_at" {% if current_sort == "-imported_at" %}selected{% endif %}>
+                                Date (Newest)
+                            </option>
+                            <option value="imported_at" {% if current_sort == "imported_at" %}selected{% endif %}>
+                                Date (Oldest)
+                            </option>
+                            <option value="filename" {% if current_sort == "filename" %}selected{% endif %}>
+                                Filename (A-Z)
+                            </option>
+                            <option value="-filename" {% if current_sort == "-filename" %}selected{% endif %}>
+                                Filename (Z-A)
+                            </option>
+                            <option value="-record_count" {% if current_sort == "-record_count" %}selected{% endif %}>
+                                Records (High-Low)
+                            </option>
+                            <option value="record_count" {% if current_sort == "record_count" %}selected{% endif %}>
+                                Records (Low-High)
+                            </option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="filter-actions">
+                    <button type="submit" class="btn btn-primary">
+                        <span>Apply Filters</span>
+                    </button>
+                    <a href="{% url 'import_history' %}" class="btn btn-secondary">
+                        <span>Clear All</span>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="results-section">
+        <div class="results-header">
+            <h3 class="section-title">
+                <i class="bi bi-list-check"></i> Import Records 
+                <span class="results-count">({{ total_imports }} record{{ total_imports|pluralize }})</span>
+            </h3>
+        </div>
+
+        {% if imports %}
+        <div class="imports-table">
+            <table>
                 <thead>
                     <tr>
-                        <th>Date</th>
+                        <th>Import Date</th>
                         <th>Filename</th>
-                        <th>Records</th>
+                        <th>Records Imported</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for import in imports %}
                     <tr>
-                        <td>{{ import.imported_at|date:"M d, Y H:i" }}</td>
-                        <td>{{ import.filename }}</td>
-                        <td>{{ import.record_count }}</td>
                         <td>
-                            <form method="post" action="{% url 'delete_import' import.id %}" style="display:inline;">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Import Record" onclick="return confirm('Are you sure you want to delete this import record?');">
+                            <div class="date-cell">
+                                {{ import.imported_at|date:"M d, Y" }}
+                                <small>{{ import.imported_at|date:"H:i" }}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="filename-cell">
+                                <strong>{{ import.filename }}</strong>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="records-cell">
+                                <span class="record-badge">{{ import.record_count }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <button class="btn-icon delete-import-btn" 
+                                        data-id="{{ import.id }}" 
+                                        data-filename="{{ import.filename }}"
+                                        title="Delete Import Record">
                                     <i class="bi bi-trash"></i>
                                 </button>
-                            </form>
+                            </div>
                         </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="3" class="text-center text-muted">No import records found.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <h3 class="empty-title">No Import Records Found</h3>
+            <p class="empty-message">
+                {% if search_query or date_from or date_to %}
+                    Try adjusting your filters to see more results.
+                {% else %}
+                    Import your first CSV file to see records here.
+                {% endif %}
+            </p>
+            {% if search_query or date_from or date_to %}
+            <a href="{% url 'import_history' %}" class="btn btn-primary">
+                Clear Filters
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
 </div>
-</div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Toggle filters
+    const toggleBtn = document.getElementById('toggleFilters');
+    const filtersContent = document.getElementById('filtersContent');
+    
+    if (toggleBtn && filtersContent) {
+        toggleBtn.addEventListener('click', function() {
+            const icon = this.querySelector('.toggle-icon');
+            const text = this.querySelector('.toggle-text');
+            
+            if (filtersContent.style.display === 'none' || !filtersContent.style.display) {
+                filtersContent.style.display = 'block';
+                icon.textContent = '▲';
+                text.textContent = 'Hide Filters';
+            } else {
+                filtersContent.style.display = 'none';
+                icon.textContent = '▼';
+                text.textContent = 'Show Filters';
+            }
+        });
+    }
+    
+    // Auto-show filters if any are active
+    {% if search_query or date_from or date_to %}
+    if (filtersContent) {
+        filtersContent.style.display = 'block';
+        const icon = toggleBtn.querySelector('.toggle-icon');
+        const text = toggleBtn.querySelector('.toggle-text');
+        icon.textContent = '▲';
+        text.textContent = 'Hide Filters';
+    }
+    {% endif %}
+    
+    // Delete import record
+    document.querySelectorAll('.delete-import-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const importId = this.dataset.id;
+            const filename = this.dataset.filename;
+            
+            if (confirm(`Are you sure you want to delete the import record for "${filename}"?\n\nThis action cannot be undone.`)) {
+                fetch('{% url "delete_import" 0 %}'.replace('0', importId), {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        alert('Error deleting import record. Please try again.');
+                    }
+                })
+                .catch(() => {
+                    alert('Error deleting import record. Please try again.');
+                });
+            }
+        });
+    });
+});
+</script>
 {% endblock %}

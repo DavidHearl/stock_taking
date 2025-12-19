@@ -27,21 +27,21 @@ class OrderForm(forms.ModelForm):
             'anthill_id', 'workguru_id'
         ]
         widgets = {
-            'first_name': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'last_name': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'sale_number': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'customer_number': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'order_date': forms.DateInput(attrs={'type': 'date', 'class': 'w-full px-2 py-1 border rounded'}),
-            'fit_date': forms.DateInput(attrs={'type': 'date', 'class': 'w-full px-2 py-1 border rounded'}),
-            'boards_po': forms.Select(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'job_finished': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-            'address': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'postcode': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'order_type': forms.Select(attrs={'class': 'w-full px-2 py-1 border rounded'}),
-            'os_doors_required': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-            'all_items_ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-            'anthill_id': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded', 'placeholder': 'e.g., 273121'}),
-            'workguru_id': forms.TextInput(attrs={'class': 'w-full px-2 py-1 border rounded', 'placeholder': 'e.g., 41422'}),
+            'first_name': forms.TextInput(attrs={'class': 'form-input'}),
+            'last_name': forms.TextInput(attrs={'class': 'form-input'}),
+            'sale_number': forms.TextInput(attrs={'class': 'form-input'}),
+            'customer_number': forms.TextInput(attrs={'class': 'form-input'}),
+            'order_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-input'}),
+            'fit_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-input'}),
+            'boards_po': forms.Select(attrs={'class': 'form-input'}),
+            'job_finished': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
+            'address': forms.TextInput(attrs={'class': 'form-input'}),
+            'postcode': forms.TextInput(attrs={'class': 'form-input'}),
+            'order_type': forms.Select(attrs={'class': 'form-input'}),
+            'os_doors_required': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
+            'all_items_ordered': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
+            'anthill_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 273121'}),
+            'workguru_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 41422'}),
         }
 
     def clean_sale_number(self):

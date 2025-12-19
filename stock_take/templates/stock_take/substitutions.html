@@ -4,162 +4,176 @@
 {% block nav_substitutions_active %}active{% endblock %}
 
 {% block extra_css %}
-<style>
-.table td {
-    white-space: nowrap;
-    vertical-align: middle;
-    padding: 0.75rem 0.5rem;
-}
-.table th {
-    vertical-align: middle;
-    padding: 0.75rem 0.5rem;
-}
-</style>
+<link rel="stylesheet" href="{% static 'css/substitutions.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="container mt-2 pb-3">
-    <h2>Substitutions & Skip Items</h2>
+<div class="page-container">
+    <h1 class="page-title">Substitutions & Skip Items</h1>
 
-    <!-- Form Errors Display -->
-    {% if form.errors %}
-        <div class="alert alert-danger">
-            <strong>Please correct the following errors:</strong>
-            <ul>
-                {% for field in form %}
-                    {% for error in field.errors %}
-                        <li>{{ field.label }}: {{ error }}</li>
-                    {% endfor %}
-                {% endfor %}
-                {% for error in form.non_field_errors %}
-                    <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon"><i class="bi bi-arrow-repeat"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ substitutions|length }}</div>
+                <div class="stat-label">Substitutions</div>
+            </div>
         </div>
-    {% endif %}
-
-    <!-- Substitutions Section -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Substitutions</h5>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th style="background-color: #ffcccc;">Missing SKU</th>
-                            <th style="background-color: #ffcccc;">Missing Name</th>
-                            <th>Replacement SKU</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Add New Substitution Form Row -->
-                        <tr class="table-light">
-                            <form method="POST" id="add-substitution-form">
-                                {% csrf_token %}
-                                <td style="background-color: #ffcccc;">{{ form.missing_sku }}</td>
-                                <td style="background-color: #ffcccc;">{{ form.missing_name }}</td>
-                                <td>{{ form.replacement_sku }}</td>
-                                <td>
-                                    <button type="submit" class="btn btn-sm btn-success">Add</button>
-                                </td>
-                            </form>
-                        </tr>
-
-                        {% for substitution in substitutions %}
-                        <tr>
-                            <td style="background-color: #ffcccc;">{{ substitution.missing_sku }}</td>
-                            <td style="background-color: #ffcccc;">{{ substitution.missing_name }}</td>
-                            <td>{{ substitution.replacement_sku }}</td>
-                            <td>
-                                <div class="btn-group btn-group-sm">
-                                    <a href="{% url 'edit_substitution' substitution.id %}" class="btn btn-outline-primary" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </a>
-                                    <button class="btn btn-outline-danger delete-substitution-btn"
-                                            data-id="{{ substitution.id }}"
-                                            data-missing="{{ substitution.missing_name }}"
-                                            data-replacement="{{ substitution.replacement_name }}"
-                                            title="Delete">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+        <div class="stat-card">
+            <div class="stat-icon"><i class="bi bi-skip-forward-fill"></i></div>
+            <div class="stat-content">
+                <div class="stat-value">{{ skip_items|length }}</div>
+                <div class="stat-label">Skip Items</div>
             </div>
         </div>
     </div>
 
-    <!-- Skip Items Section -->
-    <div class="card">
-        <div class="card-header">
-            <h5 class="mb-0">Items to Remove/Skip</h5>
+    <!-- Substitutions Section -->
+    <div class="section">
+        <div class="section-header">
+            <h2 class="section-title">Substitutions</h2>
+            <input type="text" id="substitutionsSearch" class="search-input" placeholder="Search substitutions...">
         </div>
-        <div class="card-body">
-            <!-- Form Errors Display for Skip Form -->
-            {% if skip_form.errors %}
-                <div class="alert alert-danger">
-                    <strong>Please correct the following errors:</strong>
-                    <ul>
-                        {% for field in skip_form %}
-                            {% for error in field.errors %}
-                                <li>{{ field.label }}: {{ error }}</li>
-                            {% endfor %}
-                        {% endfor %}
-                        {% for error in skip_form.non_field_errors %}
-                            <li>{{ error }}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            {% endif %}
 
-            <div class="table-responsive">
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th style="background-color: #ffcccc;">SKU</th>
-                            <th style="background-color: #ffcccc;">Name</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Add New Skip Item Form Row -->
-                        <tr class="table-light">
-                            <form method="POST" id="add-skip-item-form">
-                                {% csrf_token %}
-                                <td style="background-color: #ffcccc;">{{ skip_form.sku }}</td>
-                                <td style="background-color: #ffcccc;">{{ skip_form.name }}</td>
-                                <td>
-                                    <button type="submit" class="btn btn-sm btn-success">Add</button>
-                                </td>
-                            </form>
-                        </tr>
-
-                        {% for skip_item in skip_items %}
-                        <tr>
-                            <td style="background-color: #ffcccc;">{{ skip_item.sku }}</td>
-                            <td style="background-color: #ffcccc;">{{ skip_item.name }}</td>
-                            <td>
-                                <div class="btn-group btn-group-sm">
-                                    <button class="btn btn-outline-danger delete-skip-item-btn"
-                                            data-id="{{ skip_item.id }}"
-                                            data-sku="{{ skip_item.sku }}"
-                                            data-name="{{ skip_item.name }}"
-                                            title="Delete">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
+        <!-- Form Errors Display -->
+        {% if form.errors %}
+            <div class="error-message">
+                <strong>Please correct the following errors:</strong>
+                <ul>
+                    {% for field in form %}
+                        {% for error in field.errors %}
+                            <li>{{ field.label }}: {{ error }}</li>
                         {% endfor %}
-                    </tbody>
-                </table>
+                    {% endfor %}
+                    {% for error in form.non_field_errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
             </div>
+        {% endif %}
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="missing-col">Missing SKU</th>
+                        <th class="missing-col">Missing Name</th>
+                        <th>Replacement SKU</th>
+                        <th class="actions-col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="substitutionsTableBody">
+                    <!-- Add New Substitution Form Row -->
+                    <tr class="add-row">
+                        <form method="POST" id="add-substitution-form" class="add-form">
+                            {% csrf_token %}
+                            <td class="missing-col">{{ form.missing_sku }}</td>
+                            <td class="missing-col">{{ form.missing_name }}</td>
+                            <td>{{ form.replacement_sku }}</td>
+                            <td class="actions-col">
+                                <button type="submit" class="action-btn success">
+                                    <span><i class="bi bi-plus-lg"></i></span>
+                                    <span>Add</span>
+                                </button>
+                            </td>
+                        </form>
+                    </tr>
+
+                    {% for substitution in substitutions %}
+                    <tr class="data-row">
+                        <td class="missing-col">{{ substitution.missing_sku }}</td>
+                        <td class="missing-col">{{ substitution.missing_name }}</td>
+                        <td>{{ substitution.replacement_sku }}</td>
+                        <td class="actions-col">
+                            <div class="action-buttons">
+                                <a href="{% url 'edit_substitution' substitution.id %}" class="action-btn primary" title="Edit">
+                                    <span><i class="bi bi-pencil"></i></span>
+                                </a>
+                                <button class="action-btn danger delete-substitution-btn"
+                                        data-id="{{ substitution.id }}"
+                                        data-missing="{{ substitution.missing_name }}"
+                                        data-replacement="{{ substitution.replacement_name }}"
+                                        title="Delete">
+                                    <span><i class="bi bi-trash"></i></span>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Skip Items Section -->
+    <div class="section">
+        <div class="section-header">
+            <h2 class="section-title">Items to Remove/Skip</h2>
+            <input type="text" id="skipItemsSearch" class="search-input" placeholder="Search skip items...">
+        </div>
+
+        <!-- Form Errors Display for Skip Form -->
+        {% if skip_form.errors %}
+            <div class="error-message">
+                <strong>Please correct the following errors:</strong>
+                <ul>
+                    {% for field in skip_form %}
+                        {% for error in field.errors %}
+                            <li>{{ field.label }}: {{ error }}</li>
+                        {% endfor %}
+                    {% endfor %}
+                    {% for error in skip_form.non_field_errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="missing-col">SKU</th>
+                        <th class="missing-col">Name</th>
+                        <th class="actions-col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="skipItemsTableBody">
+                    <!-- Add New Skip Item Form Row -->
+                    <tr class="add-row">
+                        <form method="POST" id="add-skip-item-form" class="add-form">
+                            {% csrf_token %}
+                            <td class="missing-col">{{ skip_form.sku }}</td>
+                            <td class="missing-col">{{ skip_form.name }}</td>
+                            <td class="actions-col">
+                                <button type="submit" class="action-btn success">
+                                    <span><i class="bi bi-plus-lg"></i></span>
+                                    <span>Add</span>
+                                </button>
+                            </td>
+                        </form>
+                    </tr>
+
+                    {% for skip_item in skip_items %}
+                    <tr class="data-row">
+                        <td class="missing-col">{{ skip_item.sku }}</td>
+                        <td class="missing-col">{{ skip_item.name }}</td>
+                        <td class="actions-col">
+                            <div class="action-buttons">
+                                <button class="action-btn danger delete-skip-item-btn"
+                                        data-id="{{ skip_item.id }}"
+                                        data-sku="{{ skip_item.sku }}"
+                                        data-name="{{ skip_item.name }}"
+                                        title="Delete">
+                                    <span><i class="bi bi-trash"></i></span>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -167,39 +181,83 @@
 
 {% block extra_js %}
 <script>
-$(document).ready(function() {
-    $('.delete-substitution-btn').on('click', function() {
-        const substitutionId = $(this).data('id');
-        const missingName = $(this).data('missing');
-        const replacementName = $(this).data('replacement');
-        if (confirm(`Are you sure you want to delete the substitution: ${missingName} -> ${replacementName}?`)) {
-            $.post('{% url "delete_substitution" 0 %}'.replace('0', substitutionId), {
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() {
-                location.reload();
-            })
-            .fail(function() {
-                alert('Error deleting substitution.');
-            });
-        }
+// Live search for substitutions
+const substitutionsSearch = document.getElementById('substitutionsSearch');
+const substitutionsTableBody = document.getElementById('substitutionsTableBody');
+
+substitutionsSearch.addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const rows = substitutionsTableBody.querySelectorAll('.data-row');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+// Live search for skip items
+const skipItemsSearch = document.getElementById('skipItemsSearch');
+const skipItemsTableBody = document.getElementById('skipItemsTableBody');
+
+skipItemsSearch.addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const rows = skipItemsTableBody.querySelectorAll('.data-row');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+// Delete substitution
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.delete-substitution-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const substitutionId = this.dataset.id;
+            const missingName = this.dataset.missing;
+            const replacementName = this.dataset.replacement;
+            
+            if (confirm(`Are you sure you want to delete the substitution: ${missingName} → ${replacementName}?`)) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '{% url "delete_substitution" 0 %}'.replace('0', substitutionId);
+                
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrfmiddlewaretoken';
+                csrfInput.value = csrfToken;
+                
+                form.appendChild(csrfInput);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        });
     });
 
-    $('.delete-skip-item-btn').on('click', function() {
-        const skipItemId = $(this).data('id');
-        const sku = $(this).data('sku');
-        const name = $(this).data('name');
-        if (confirm(`Are you sure you want to delete the skip item: ${sku} - ${name}?`)) {
-            $.post('{% url "delete_skip_item" 0 %}'.replace('0', skipItemId), {
-                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
-            })
-            .done(function() {
-                location.reload();
-            })
-            .fail(function() {
-                alert('Error deleting skip item.');
-            });
-        }
+    // Delete skip item
+    document.querySelectorAll('.delete-skip-item-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const skipItemId = this.dataset.id;
+            const sku = this.dataset.sku;
+            const name = this.dataset.name;
+            
+            if (confirm(`Are you sure you want to delete the skip item: ${sku} - ${name}?`)) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '{% url "delete_skip_item" 0 %}'.replace('0', skipItemId);
+                
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrfmiddlewaretoken';
+                csrfInput.value = csrfToken;
+                
+                form.appendChild(csrfInput);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        });
     });
 });
 </script>

@@ -8,139 +8,134 @@
 {% endblock %}
 
 {% block content %}
-<div class="container mt-2 pb-3">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h2 class="mb-0">Orders</h2>
-        <div class="d-flex gap-2">
-            <form method="post" action="{% url 'ordering' %}" class="d-inline">
-                {% csrf_token %}
-                <div class="input-group input-group-sm">
-                    <span class="input-group-text">£/m²</span>
-                    <input type="number" step="0.1" min="1" max="100" class="form-control form-control-sm" style="width: 100px;" name="price_per_sqm" value="{{ price_per_sqm|default:12 }}" placeholder="12.00">
-                    <button type="submit" class="btn btn-primary btn-sm">Update</button>
-                </div>
-            </form>
-            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editPOSection">
-                <i class="bi bi-pencil-square"></i> Edit Boards PO
-            </button>
-            <button type="button" class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#uploadAccessoriesModal">
-                <i class="bi bi-upload"></i> Upload Accessories CSV
-            </button>
-            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createPOModal">
-                <i class="bi bi-plus-circle"></i> Add New Boards PO
-            </button>
-            <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addOrderModal">
-                <i class="bi bi-plus-lg"></i> Add New Order
-            </button>
-        </div>
+<!-- Page Header -->
+<div class="page-header">
+    <h1>Orders</h1>
+    <div class="header-actions">
+        <form method="post" action="{% url 'ordering' %}" class="price-form">
+            {% csrf_token %}
+            <div class="input-group-compact">
+                <span class="input-prefix">£/m²</span>
+                <input type="number" step="0.1" min="1" max="100" name="price_per_sqm" value="{{ price_per_sqm|default:12 }}" placeholder="12.00">
+                <button type="submit" class="btn btn-primary btn-sm">Update</button>
+            </div>
+        </form>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSection('editPOSection')">
+            <i class="bi bi-pencil"></i> Edit Boards PO
+        </button>
+        <button type="button" class="btn btn-info btn-sm" onclick="openModal('uploadAccessoriesModal')">
+            📤 Upload CSV
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createPOModal')">
+            <i class="bi bi-plus-lg"></i> Add Boards PO
+        </button>
+        <button type="button" class="btn btn-success btn-sm" onclick="openModal('addOrderModal')">
+            <i class="bi bi-plus-lg"></i> Add Order
+        </button>
     </div>
+</div>
 
-    <!-- Edit Boards PO Section -->
-    <div class="collapse mb-4" id="editPOSection">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">Edit Boards PO Status & Replace PNX Files</h5>
-            </div>
-            <div class="card-body">
-                {% if boards_pos %}
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover mb-0">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>PO Number</th>
-                                <th>Status</th>
-                                <th>Orders Count</th>
-                                <th>Current File</th>
-                                <th>Mark Ordered</th>
-                                <th>Replace PNX File</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for po in boards_pos %}
-                            <tr class="{% if po.boards_ordered %}table-success{% endif %}">
-                                <td>
-                                    <strong>{{ po.po_number }}</strong>
-                                </td>
-                                <td>
-                                    <div class="d-flex align-items-center gap-2">
-                                        {% if po.boards_ordered %}
-                                            <i class="bi bi-check-circle-fill text-success" title="Ordered"></i>
-                                            <span class="badge bg-success">Ordered</span>
-                                        {% else %}
-                                            <i class="bi bi-x-circle-fill text-danger" title="Not Ordered"></i>
-                                            <span class="badge bg-danger">Not Ordered</span>
-                                        {% endif %}
-                                        {% if po.boards_received %}
-                                            <i class="bi bi-check-circle-fill text-success ms-2" title="Received"></i>
-                                        {% else %}
-                                            <i class="bi bi-x-circle-fill text-danger ms-2" title="Not Received"></i>
-                                        {% endif %}
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="badge bg-primary">{{ po.orders.count }}</span>
-                                </td>
-                                <td>
-                                    {% if po.file %}
-                                        <small class="text-muted">{{ po.file.name }}</small>
-                                    {% else %}
-                                        <small class="text-muted">No file</small>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <div class="form-check">
-                                        <input class="form-check-input boards-ordered-toggle" type="checkbox"
-                                               id="po-{{ po.id }}" {% if po.boards_ordered %}checked{% endif %}
-                                               data-po-id="{{ po.id }}">
-                                        <label class="form-check-label" for="po-{{ po.id }}">
-                                            Ordered
-                                        </label>
-                                    </div>
-                                </td>
-                                <td>
-                                    <form method="POST" enctype="multipart/form-data" action="{% url 'replace_pnx_file' po.id %}" class="d-flex gap-2">
-                                        {% csrf_token %}
-                                        <input type="file" class="form-control form-control-sm" name="pnx_file" accept=".pnx" required style="max-width: 200px;">
-                                        <button type="submit" class="btn btn-outline-primary btn-sm">
-                                            <i class="bi bi-upload"></i> Replace
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-muted">No Boards POs found.</p>
-                {% endif %}
-            </div>
+<!-- Edit Boards PO Section -->
+<div class="collapsible-section" id="editPOSection" style="display: none;">
+    <div class="card">
+        <div class="card-header">
+            Edit Boards PO Status & Replace PNX Files
+        </div>
+        <div class="card-body">
+            {% if boards_pos %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>PO Number</th>
+                        <th>Status</th>
+                        <th>Orders Count</th>
+                        <th>Current File</th>
+                        <th>Mark Ordered</th>
+                        <th>Replace PNX File</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for po in boards_pos %}
+                    <tr class="{% if po.boards_ordered %}row-success{% endif %}">
+                        <td class="sku-cell">{{ po.po_number }}</td>
+                        <td>
+                            <div class="status-group">
+                                {% if po.boards_ordered %}
+                                    <span class="status-icon success" title="Ordered">✓</span>
+                                    <span class="badge badge-success">Ordered</span>
+                                {% else %}
+                                    <span class="status-icon danger" title="Not Ordered">✗</span>
+                                    <span class="badge badge-danger">Not Ordered</span>
+                                {% endif %}
+                                {% if po.boards_received %}
+                                    <span class="status-icon success" title="Received">✓</span>
+                                {% else %}
+                                    <span class="status-icon danger" title="Not Received">✗</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge badge-primary">{{ po.orders.count }}</span>
+                        </td>
+                        <td class="file-cell">
+                            {% if po.file %}
+                                {{ po.file.name }}
+                            {% else %}
+                                No file
+                            {% endif %}
+                        </td>
+                        <td>
+                            <label class="checkbox-label">
+                                <input class="boards-ordered-toggle" type="checkbox"
+                                       id="po-{{ po.id }}" {% if po.boards_ordered %}checked{% endif %}
+                                       data-po-id="{{ po.id }}">
+                                Ordered
+                            </label>
+                        </td>
+                        <td>
+                            <form method="POST" enctype="multipart/form-data" action="{% url 'replace_pnx_file' po.id %}" class="inline-form">
+                                {% csrf_token %}
+                                <input type="file" name="pnx_file" accept=".pnx" required>
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    📤 Replace
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted">No Boards POs found.</p>
+            {% endif %}
         </div>
     </div>
-    
-    <!-- Form Errors Display -->
-    {% if form.errors %}
-    <div class="alert alert-danger mb-3">
-        <h6>Please correct the following errors:</h6>
-        <ul class="mb-0">
-            {% for field in form %}
-                {% for error in field.errors %}
-                    <li><strong>{{ field.label }}:</strong> {{ error }}</li>
-                {% endfor %}
+</div>
+
+<!-- Form Errors Display -->
+{% if form.errors %}
+<div class="alert alert-danger">
+    <strong>Please correct the following errors:</strong>
+    <ul>
+        {% for field in form %}
+            {% for error in field.errors %}
+                <li><strong>{{ field.label }}:</strong> {{ error }}</li>
             {% endfor %}
-            {% for error in form.non_field_errors %}
-                <li>{{ error }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-    
-    <!-- Search Box -->
-    <div class="mb-2">
-        <input type="text" id="orderSearch" class="form-control" placeholder="Search orders...">
-    </div>
-    
-    <table id="order-table">
+        {% endfor %}
+        {% for error in form.non_field_errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Search Box -->
+<div class="search-box">
+    <input type="text" id="orderSearch" placeholder="🔍 Search orders...">
+</div>
+
+<div class="card">
+    <table class="table orders-table" id="order-table">
         <thead>
             <tr>
                 <th class="sortable" data-sort="first_name">
@@ -155,101 +150,100 @@
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="sortable" data-sort="sale_number">
+                <th class="sortable text-center" data-sort="sale_number">
                     Sale # 
                     {% if current_sort == 'sale_number' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="td-center sortable" data-sort="customer_number">
+                <th class="sortable text-center" data-sort="customer_number">
                     Customer # 
                     {% if current_sort == 'customer_number' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="td-center sortable" data-sort="order_date">
+                <th class="sortable text-center" data-sort="order_date">
                     Order Date 
                     {% if current_sort == 'order_date' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="td-center sortable" data-sort="fit_date">
+                <th class="sortable text-center" data-sort="fit_date">
                     Fit Date 
                     {% if current_sort == 'fit_date' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="td-center">Time (Days)</th>
-                <th class="td-center sortable" data-sort="boards_po">
+                <th class="text-center">Days</th>
+                <th class="sortable text-center" data-sort="boards_po">
                     Boards PO 
                     {% if current_sort == 'boards_po' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="td-center">OS Doors</th>
-                <th class="td-center">Addr</th>
-                <th class="td-center">CSV</th>
-                <th class="td-center">Ordered</th>
-                <th class="td-center">Ant</th>
-                <th class="td-center">Wrk</th>
-                <th class="td-center">Actions</th>
+                <th class="text-center">OS Doors</th>
+                <th class="text-center">Addr</th>
+                <th class="text-center">CSV</th>
+                <th class="text-center">Ord</th>
+                <th class="text-center">Ant</th>
+                <th class="text-center">Wrk</th>
+                <th class="text-center">Actions</th>
             </tr>
         </thead>
         <tbody>
-            
             {% for order in orders %}
             <tr 
-                class="clickable-row {% if order.job_finished %}opacity-25{% endif %} {% if order.has_missing_accessories %}table-missing-row{% endif %}" 
+                class="clickable-row {% if order.job_finished %}row-finished{% endif %} {% if order.has_missing_accessories %}row-missing{% endif %}" 
                 onclick="toggleDetails('details-{{ order.sale_number }}', this)"
                 id="main-{{ order.sale_number }}"
             >
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
-                <td class="td-center">{{ order.sale_number }}</td>
-                <td class="td-center">{{ order.customer_number }}</td>
-                <td class="td-center">{{ order.order_date }}</td>
-                <td class="td-center">{{ order.fit_date }}</td>
-                <td class="td-center">{{ order.time_allowance }}</td>
+                <td class="text-center">{{ order.sale_number }}</td>
+                <td class="text-center">{{ order.customer_number }}</td>
+                <td class="text-center">{{ order.order_date }}</td>
+                <td class="text-center">{{ order.fit_date }}</td>
+                <td class="text-center">{{ order.time_allowance }}</td>
                 <!-- Boards -->
-                <td>
+                <td class="text-center">
                     {% if order.boards_po %}
-                        <div class="d-flex align-items-center">
-                            <a href="{% url 'order_details' order.id %}" class="text-decoration-none">
+                        <div class="status-cell">
+                            <a class="po-link" href="{% url 'order_details' order.id %}">
                                 {{ order.boards_po.po_number }}
                             </a>
                             {% if order.boards_po.boards_ordered %}
-                                <i class="bi bi-check-circle-fill ms-1 text-success" title="Ordered"></i>
+                                <span class="status-icon success" title="Ordered">✓</span>
                             {% else %}
-                                <i class="bi bi-x-circle-fill ms-1 text-danger" title="Not Ordered"></i>
+                                <span class="status-icon danger" title="Not Ordered">✗</span>
                             {% endif %}
                             {% if order.order_boards_received %}
-                                <i class="bi bi-check-circle-fill ms-1 text-success" title="Order Boards Received"></i>
+                                <span class="status-icon success" title="Order Boards Received">✓</span>
                             {% else %}
-                                <i class="bi bi-x-circle-fill ms-1 text-danger" title="Order Boards Not Received"></i>
+                                <span class="status-icon danger" title="Order Boards Not Received">✗</span>
                             {% endif %}
                         </div>
                     {% else %}
                         <a href="{% url 'order_details' order.id %}" class="text-muted">
-                            <em>Not assigned</em>
+                            Not assigned
                         </a>
                     {% endif %}
                 </td>
                 <!-- OS Doors -->
-                <td>
+                <td class="text-center">
                     {% if order.os_doors_required %}
-                        <div class="d-flex align-items-center">
-                            <a href="{% url 'order_details' order.id %}" class="text-decoration-none">
+                        <div class="status-cell">
+                            <a class="po-link" href="{% url 'order_details' order.id %}">
                                 {% if order.os_doors_po %}{{ order.os_doors_po }}{% else %}Required{% endif %}
                             </a>
                             {% if order.os_doors_ordered %}
-                                <i class="bi bi-check-circle-fill ms-1 text-success" title="OS Doors Ordered"></i>
+                                <span class="status-icon success" title="OS Doors Ordered">✓</span>
                             {% else %}
-                                <i class="bi bi-x-circle-fill ms-1 text-danger" title="OS Doors Not Ordered"></i>
+                                <span class="status-icon danger" title="OS Doors Not Ordered">✗</span>
                             {% endif %}
                             {% if order.os_doors_received %}
-                                <i class="bi bi-check-circle-fill ms-1 text-success" title="OS Doors Received"></i>
+                                <span class="status-icon success" title="OS Doors Received">✓</span>
                             {% else %}
-                                <i class="bi bi-x-circle-fill ms-1 text-danger" title="OS Doors Not Received"></i>
+                                <span class="status-icon danger" title="OS Doors Not Received">✗</span>
                             {% endif %}
                         </div>
                     {% else %}
@@ -257,187 +251,194 @@
                     {% endif %}
                 </td>
                 <!-- Address Check -->
-                <td class="td-center">
+                <td class="text-center">
                     {% if order.address %}
-                        <i class="bi bi-check-circle-fill text-success" title="Has Address"></i>
+                        <span class="status-icon success" title="Has Address">✓</span>
                     {% else %}
-                        <i class="bi bi-x-circle text-danger" title="No Address"></i>
+                        <span class="status-icon danger" title="No Address">✗</span>
                     {% endif %}
                 </td>
                 <!-- Accessories Check -->
-                <td class="td-center">
+                <td class="text-center">
                     {% if order.accessories.exists %}
-                        <i class="bi bi-check-circle-fill text-success" title="Has Accessories"></i>
+                        <span class="status-icon success" title="Has Accessories">✓</span>
                     {% endif %}
                 </td>
                 <!-- Items ordered Check -->
-                <td class="td-center">
+                <td class="text-center">
                     {% if order.all_items_ordered %}
-                        <i class="bi bi-check-circle-fill text-success" title="All Materials Ordered"></i>
+                        <span class="status-icon success" title="All Materials Ordered">✓</span>
                     {% endif %}
                 </td>
-                <td class="td-center" onclick="event.stopPropagation();">
+                <td class="text-center" onclick="event.stopPropagation();">
                     {% if order.anthill_id %}
                         <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" 
-                           target="_blank" class="btn btn-sm btn-outline-success" title="Open in Anthill CRM">
-                            <i class="bi bi-person-circle"></i>
+                           target="_blank" class="btn btn-sm btn-success" title="Open in Anthill CRM">
+                            👤
                         </a>
                     {% endif %}
                 </td>
-                <td class="td-center" onclick="event.stopPropagation();">
+                <td class="text-center" onclick="event.stopPropagation();">
                     {% if order.workguru_id %}
                         <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" 
-                           target="_blank" class="btn btn-sm btn-outline-primary" title="Open in WorkGuru">
-                            <i class="bi bi-tools"></i>
+                           target="_blank" class="btn btn-sm btn-primary" title="Open in WorkGuru">
+                            🛠️
                         </a>
                     {% endif %}
                 </td>
-                <td class="td-center" onclick="event.stopPropagation();">
+                <td class="text-center" onclick="event.stopPropagation();">
                     <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-primary">Edit</a>
                 </td>
             </tr>
 
-            <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
-                <td colspan="15">
-                    <div style="padding: 16px 8px;">
-                        <div class="d-flex align-items-center justify-content-between mb-3" style="background: #f8f9fa; padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
-                            <div class="d-flex align-items-center gap-3">
-                                <small class="text-muted">Sale:</small>
-                                <input type="text" class="form-control form-control-sm" value="{{ order.sale_number }}" readonly style="width: 100px; background-color: white; border: 1px solid #dee2e6;">
-                                <button class="btn btn-sm btn-outline-secondary copy-detail-btn" data-text="{{ order.sale_number }}" title="Copy Sale Number">
-                                    <i class="bi bi-clipboard"></i>
-                                </button>
-                                <small class="text-muted">Customer:</small>
-                                <input type="text" class="form-control form-control-sm" value="{{ order.customer_number }}" readonly style="width: 100px; background-color: white; border: 1px solid #dee2e6;">
-                                <button class="btn btn-sm btn-outline-secondary copy-detail-btn" data-text="{{ order.customer_number }}" title="Copy Customer Number">
-                                    <i class="bi bi-clipboard"></i>
-                                </button>
-                            </div>
+            <tr class="detail-row" id="details-{{ order.sale_number }}" style="display: none;">
+                <td colspan="15" class="detail-cell">
+                    <div class="detail-content">
+                        <div class="copy-controls">
+                            <span class="copy-label">Sale:</span>
+                            <input type="text" class="copy-input" value="{{ order.sale_number }}" readonly>
+                            <button class="btn btn-sm btn-secondary copy-detail-btn" data-text="{{ order.sale_number }}" title="Copy Sale Number">
+                                📋
+                            </button>
+                            <span class="copy-label">Customer:</span>
+                            <input type="text" class="copy-input" value="{{ order.customer_number }}" readonly>
+                            <button class="btn btn-sm btn-secondary copy-detail-btn" data-text="{{ order.customer_number }}" title="Copy Customer Number">
+                                📋
+                            </button>
                         </div>
                         
                         {% if order.order_pnx_items %}
-                        <p class="mb-2"><strong>PNX Items ({{ order.order_pnx_items|length }} items):</strong></p>
-                        <table class="table table-sm table-striped mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Barcode</th>
-                                    <th>Material</th>
-                                    <th>Dimensions</th>
-                                    <th>Count</th>
-                                    <th>Cost</th>
-                                    <th>Received</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in order.order_pnx_items %}
-                                <tr>
-                                    <td>{{ item.barcode }}</td>
-                                    <td>{{ item.matname }}</td>
-                                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
-                                    <td>{{ item.cnt|floatformat:0 }}</td>
-                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
-                                    <td>
-                                        {% if item.is_fully_received %}
-                                            <i class="bi bi-check-circle-fill text-success" title="Fully Received"></i>
-                                        {% elif item.is_partially_received %}
-                                            <i class="bi bi-dash-circle-fill text-warning" title="Partially Received ({{ item.received_quantity|floatformat:0 }}/{{ item.cnt|floatformat:0 }})"></i>
-                                        {% else %}
-                                            <i class="bi bi-x-circle-fill text-danger" title="Not Received"></i>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                                <tr class="table-info">
-                                    <td colspan="5"><strong>Total Cost:</strong></td>
-                                    <td><strong>£{{ order.pnx_total_cost|floatformat:2 }}</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        {% else %}
-                        <p><strong>PNX Items:</strong> No items found for this order.</p>
-                        {% endif %}                        {% if order.os_doors.all %}
-                        <p class="my-2"><strong>OS Doors ({{ order.os_doors.count }} items):</strong></p>
-                        <table class="table table-sm table-striped mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Door Style</th>
-                                    <th>Style Colour</th>
-                                    <th>Dimensions</th>
-                                    <th>Colour</th>
-                                    <th>Qty</th>
-                                    <th>Ordered</th>
-                                    <th>Received</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for os_door in order.os_doors.all %}
-                                <tr>
-                                    <td>{{ os_door.door_style }}</td>
-                                    <td>{{ os_door.style_colour }}</td>
-                                    <td>{{ os_door.height }} x {{ os_door.width }}</td>
-                                    <td>{{ os_door.colour }}</td>
-                                    <td>{{ os_door.quantity|floatformat:0 }}</td>
-                                    <td>
-                                        {% if os_door.ordered %}
-                                            <i class="bi bi-check-circle-fill text-success"></i>
-                                        {% else %}
-                                            <i class="bi bi-x-circle-fill text-danger"></i>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if os_door.received %}
-                                            <i class="bi bi-check-circle-fill text-success"></i>
-                                        {% else %}
-                                            <i class="bi bi-x-circle-fill text-danger"></i>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                        {% endif %}
-                        {% if order.accessories.all %}
-                        <p class="my-2"><strong>Accessories ({{ order.accessories.count }} items):</strong></p>
-                        <table class="table table-sm table-striped mb-0">
-                            <thead>
-                                <tr>
-                                    <th>SKU</th>
-                                    <th>Name</th>
-                                    <th>Qty</th>
-                                    <th>Available</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for accessory in order.accessories.all %}
-                                <tr>
-                                    <td>{{ accessory.sku }}</td>
-                                    <td>{{ accessory.name|truncatechars:20 }}</td>
-                                    <td>{{ accessory.quantity|floatformat:0 }}</td>
-                                    <td>
-                                        {% if accessory.stock_item %}
-                                            {{ accessory.available_quantity|floatformat:0 }}
-                                        {% else %}
-                                            <span class="text-muted">-</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if accessory.missing %}
-                                            <span class="badge bg-warning">Missing</span>
-                                        {% elif accessory.stock_item %}
-                                            {% if accessory.available_quantity >= accessory.quantity %}
-                                                <span class="badge bg-success">In Stock</span>
+                        <div class="detail-section">
+                            <h4>PNX Items ({{ order.order_pnx_items|length }} items)</h4>
+                            <table class="table detail-table">
+                                <thead>
+                                    <tr>
+                                        <th>Barcode</th>
+                                        <th>Material</th>
+                                        <th>Dimensions</th>
+                                        <th>Count</th>
+                                        <th>Cost</th>
+                                        <th>Received</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in order.order_pnx_items %}
+                                    <tr>
+                                        <td>{{ item.barcode }}</td>
+                                        <td>{{ item.matname }}</td>
+                                        <td>{{ item.cleng }} x {{ item.cwidth }}</td>
+                                        <td>{{ item.cnt|floatformat:0 }}</td>
+                                        <td>£{{ item.calculated_cost|floatformat:2 }}</td>
+                                        <td>
+                                            {% if item.is_fully_received %}
+                                                <span class="status-icon success" title="Fully Received">✓</span>
+                                            {% elif item.is_partially_received %}
+                                                <span class="status-icon warning" title="Partially Received ({{ item.received_quantity|floatformat:0 }}/{{ item.cnt|floatformat:0 }})">⚠</span>
                                             {% else %}
-                                                <span class="badge bg-danger">Low Stock</span>
+                                                <span class="status-icon danger" title="Not Received">✗</span>
                                             {% endif %}
-                                        {% else %}
-                                            <span class="badge bg-info">No Stock Link</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                    <tr class="total-row">
+                                        <td colspan="5"><strong>Total Cost:</strong></td>
+                                        <td><strong>£{{ order.pnx_total_cost|floatformat:2 }}</strong></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="detail-section">
+                            <p><strong>PNX Items:</strong> No items found for this order.</p>
+                        </div>
+                        {% endif %}                        {% if order.os_doors.all %}
+                        <div class="detail-section">
+                            <h4>OS Doors ({{ order.os_doors.count }} items)</h4>
+                            <table class="table detail-table">
+                                <thead>
+                                    <tr>
+                                        <th>Door Style</th>
+                                        <th>Style Colour</th>
+                                        <th>Dimensions</th>
+                                        <th>Colour</th>
+                                        <th>Qty</th>
+                                        <th>Ordered</th>
+                                        <th>Received</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for os_door in order.os_doors.all %}
+                                    <tr>
+                                        <td>{{ os_door.door_style }}</td>
+                                        <td>{{ os_door.style_colour }}</td>
+                                        <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                                        <td>{{ os_door.colour }}</td>
+                                        <td>{{ os_door.quantity|floatformat:0 }}</td>
+                                        <td>
+                                            {% if os_door.ordered %}
+                                                <span class="status-icon success">✓</span>
+                                            {% else %}
+                                                <span class="status-icon danger">✗</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if os_door.received %}
+                                                <span class="status-icon success">✓</span>
+                                            {% else %}
+                                                <span class="status-icon danger">✗</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
+                        
+                        {% if order.accessories.all %}
+                        <div class="detail-section">
+                            <h4>Accessories ({{ order.accessories.count }} items)</h4>
+                            <table class="table detail-table">
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>Name</th>
+                                        <th>Qty</th>
+                                        <th>Available</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for accessory in order.accessories.all %}
+                                    <tr>
+                                        <td>{{ accessory.sku }}</td>
+                                        <td>{{ accessory.name|truncatechars:20 }}</td>
+                                        <td>{{ accessory.quantity|floatformat:0 }}</td>
+                                        <td>
+                                            {% if accessory.stock_item %}
+                                                {{ accessory.available_quantity|floatformat:0 }}
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if accessory.missing %}
+                                                <span class="badge badge-warning">Missing</span>
+                                            {% elif accessory.stock_item %}
+                                                {% if accessory.available_quantity >= accessory.quantity %}
+                                                    <span class="badge badge-success">In Stock</span>
+                                                {% else %}
+                                                    <span class="badge badge-danger">Low Stock</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge badge-info">No Stock Link</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                         {% endif %}
                     </div>
                 </td>
@@ -448,33 +449,36 @@
 </div>
 
 <!-- Modal for Creating New Boards PO -->
-<div class="modal fade" id="createPOModal" tabindex="-1" aria-labelledby="createPOModalLabel" aria-hidden="true">
+<div class="modal" id="createPOModal">
+    <div class="modal-overlay" onclick="closeModal('createPOModal')"></div>
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" action="{% url 'create_boards_po' %}" enctype="multipart/form-data">
                 {% csrf_token %}
                 <div class="modal-header">
-                    <h5 class="modal-title" id="createPOModalLabel">Add New Boards PO</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h3>Add New Boards PO</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('createPOModal')">✕</button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="id_po_number" class="form-label">PO Number</label>
+                    <div class="form-group">
+                        <label for="id_po_number">PO Number</label>
                         {{ po_form.po_number }}
-                        <small class="form-text text-muted">Must start with "PO"</small>
+                        <small class="form-help">Must start with "PO"</small>
                     </div>
-                    <div class="mb-3 form-check">
-                        {{ po_form.boards_ordered }}
-                        <label for="id_boards_ordered" class="form-check-label">Boards Ordered</label>
-                        <small class="form-text text-muted">Check if boards have already been ordered</small>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            {{ po_form.boards_ordered }}
+                            <span>Boards Ordered</span>
+                        </label>
+                        <small class="form-help">Check if boards have already been ordered</small>
                     </div>
-                    <div class="mb-3">
-                        <label for="id_file" class="form-label">Attach File (Optional)</label>
+                    <div class="form-group">
+                        <label for="id_file">Attach File (Optional)</label>
                         {{ po_form.file }}
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('createPOModal')">Cancel</button>
                     <button type="submit" class="btn btn-primary">Create PO</button>
                 </div>
             </form>
@@ -483,24 +487,25 @@
 </div>
 
 <!-- Modal for Uploading Accessories CSV -->
-<div class="modal fade" id="uploadAccessoriesModal" tabindex="-1" aria-labelledby="uploadAccessoriesModalLabel" aria-hidden="true">
+<div class="modal" id="uploadAccessoriesModal">
+    <div class="modal-overlay" onclick="closeModal('uploadAccessoriesModal')"></div>
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" action="{% url 'upload_accessories_csv' %}" enctype="multipart/form-data">
                 {% csrf_token %}
                 <div class="modal-header">
-                    <h5 class="modal-title" id="uploadAccessoriesModalLabel">Upload Accessories CSV (Auto-Order Detection)</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h3>Upload Accessories CSV (Auto-Order Detection)</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('uploadAccessoriesModal')">✕</button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="id_csv_file" class="form-label">CSV File</label>
-                        <input type="file" class="form-control" id="id_csv_file" name="csv_file" accept=".csv" required>
-                        <small class="form-text text-muted">CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from customer number in filename.</small>
+                    <div class="form-group">
+                        <label for="id_csv_file">CSV File</label>
+                        <input type="file" class="form-input" id="id_csv_file" name="csv_file" accept=".csv" required>
+                        <small class="form-help">CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from customer number in filename.</small>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('uploadAccessoriesModal')">Cancel</button>
                     <button type="submit" class="btn btn-primary">Upload & Process</button>
                 </div>
             </form>
@@ -509,101 +514,89 @@
 </div>
 
 <!-- Modal for Adding New Order -->
-<div class="modal fade" id="addOrderModal" tabindex="-1" aria-labelledby="addOrderModalLabel" aria-hidden="true">
+<div class="modal" id="addOrderModal">
+    <div class="modal-overlay" onclick="closeModal('addOrderModal')"></div>
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="POST" id="add-order-form">
                 {% csrf_token %}
-                <div class="modal-header bg-gradient-primary text-white">
-                    <h5 class="modal-title" id="addOrderModalLabel">
-                        <i class="bi bi-plus-circle me-2"></i>Add New Order
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-header">
+                    <h3>Add New Order</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('addOrderModal')">✕</button>
                 </div>
                 <div class="modal-body">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label for="{{ form.first_name.id_for_label }}" class="form-label fw-semibold">First Name</label>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="{{ form.first_name.id_for_label }}">First Name</label>
                             {{ form.first_name }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.last_name.id_for_label }}" class="form-label fw-semibold">Last Name</label>
+                        <div class="form-group">
+                            <label for="{{ form.last_name.id_for_label }}">Last Name</label>
                             {{ form.last_name }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.sale_number.id_for_label }}" class="form-label fw-semibold">Sale Number</label>
+                        <div class="form-group">
+                            <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
                             {{ form.sale_number }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.customer_number.id_for_label }}" class="form-label fw-semibold">Customer Number</label>
+                        <div class="form-group">
+                            <label for="{{ form.customer_number.id_for_label }}">Customer Number</label>
                             {{ form.customer_number }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.order_date.id_for_label }}" class="form-label fw-semibold">Order Date</label>
+                        <div class="form-group">
+                            <label for="{{ form.order_date.id_for_label }}">Order Date</label>
                             {{ form.order_date }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.fit_date.id_for_label }}" class="form-label fw-semibold">Fit Date</label>
+                        <div class="form-group">
+                            <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
                             {{ form.fit_date }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.boards_po.id_for_label }}" class="form-label fw-semibold">Boards PO</label>
+                        <div class="form-group">
+                            <label for="{{ form.boards_po.id_for_label }}">Boards PO</label>
                             {{ form.boards_po }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.anthill_id.id_for_label }}" class="form-label fw-semibold">Anthill ID</label>
+                        <div class="form-group">
+                            <label for="{{ form.anthill_id.id_for_label }}">Anthill ID</label>
                             {{ form.anthill_id }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.workguru_id.id_for_label }}" class="form-label fw-semibold">WorkGuru ID</label>
+                        <div class="form-group">
+                            <label for="{{ form.workguru_id.id_for_label }}">WorkGuru ID</label>
                             {{ form.workguru_id }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.address.id_for_label }}" class="form-label fw-semibold">Address</label>
+                        <div class="form-group">
+                            <label for="{{ form.address.id_for_label }}">Address</label>
                             {{ form.address }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.postcode.id_for_label }}" class="form-label fw-semibold">Postcode</label>
+                        <div class="form-group">
+                            <label for="{{ form.postcode.id_for_label }}">Postcode</label>
                             {{ form.postcode }}
                         </div>
-                        <div class="col-md-6">
-                            <label for="{{ form.order_type.id_for_label }}" class="form-label fw-semibold">Order Type</label>
+                        <div class="form-group">
+                            <label for="{{ form.order_type.id_for_label }}">Order Type</label>
                             {{ form.order_type }}
                         </div>
-                        <div class="col-md-6">
-                            <div class="form-check">
+                        <div class="form-group">
+                            <label class="checkbox-label">
                                 {{ form.os_doors_required }}
-                                <label for="{{ form.os_doors_required.id_for_label }}" class="form-check-label fw-semibold">
-                                    OS Doors Required
-                                </label>
-                            </div>
+                                <span>OS Doors Required</span>
+                            </label>
                         </div>
-                        <div class="col-md-6">
-                            <div class="form-check">
+                        <div class="form-group">
+                            <label class="checkbox-label">
                                 {{ form.all_items_ordered }}
-                                <label for="{{ form.all_items_ordered.id_for_label }}" class="form-check-label fw-semibold">
-                                    All Items Ordered
-                                </label>
-                            </div>
+                                <span>All Items Ordered</span>
+                            </label>
                         </div>
-                        <div class="col-md-6">
-                            <div class="form-check">
+                        <div class="form-group">
+                            <label class="checkbox-label">
                                 {{ form.job_finished }}
-                                <label for="{{ form.job_finished.id_for_label }}" class="form-check-label fw-semibold">
-                                    Job Finished
-                                </label>
-                            </div>
+                                <span>Job Finished</span>
+                            </label>
                         </div>
                     </div>
-                    <!-- Hidden fields removed - now visible above -->
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
-                        <i class="bi bi-x-circle me-1"></i>Cancel
-                    </button>
-                    <button type="submit" class="btn btn-success">
-                        <i class="bi bi-check-circle me-1"></i>Add Order
-                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addOrderModal')">Cancel</button>
+                    <button type="submit" class="btn btn-success">Add Order</button>
                 </div>
             </form>
         </div>
@@ -612,16 +605,18 @@
 
 <script>
     function toggleDetails(detailRowId, clickedRowElement) {
-        // 1. Get the detail row element using the unique ID
+        // Get the detail row element using the unique ID
         var detailRow = document.getElementById(detailRowId);
         
-        // 2. Toggle the 'hidden' class on the detail row
-        if (detailRow.classList.contains('hidden')) {
-            detailRow.classList.remove('hidden');
-            clickedRowElement.classList.add('expanded'); // Optional: visually mark the main row as expanded
+        if (!detailRow) return;
+        
+        // Toggle the display style
+        if (detailRow.style.display === 'none' || detailRow.style.display === '') {
+            detailRow.style.display = 'table-row';
+            clickedRowElement.classList.add('expanded');
         } else {
-            detailRow.classList.add('hidden');
-            clickedRowElement.classList.remove('expanded'); // Remove visual mark
+            detailRow.style.display = 'none';
+            clickedRowElement.classList.remove('expanded');
         }
     }
 
@@ -692,47 +687,6 @@
 
         // Copy functionality
         document.addEventListener('click', function(e) {
-            if (e.target.closest('.copy-btn')) {
-                const button = e.target.closest('.copy-btn');
-                const textToCopy = button.getAttribute('data-text');
-                
-                navigator.clipboard.writeText(textToCopy).then(function() {
-                    // Show success feedback
-                    const originalIcon = button.innerHTML;
-                    button.innerHTML = '<i class="bi bi-check"></i>';
-                    button.classList.remove('btn-outline-secondary');
-                    button.classList.add('btn-success');
-                    
-                    setTimeout(function() {
-                        button.innerHTML = originalIcon;
-                        button.classList.remove('btn-success');
-                        button.classList.add('btn-outline-secondary');
-                    }, 1000);
-                }).catch(function(err) {
-                    console.error('Failed to copy: ', err);
-                    // Fallback for older browsers
-                    const textArea = document.createElement('textarea');
-                    textArea.value = textToCopy;
-                    document.body.appendChild(textArea);
-                    textArea.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(textArea);
-                    
-                    // Show success feedback
-                    const originalIcon = button.innerHTML;
-                    button.innerHTML = '<i class="bi bi-check"></i>';
-                    button.classList.remove('btn-outline-secondary');
-                    button.classList.add('btn-success');
-                    
-                    setTimeout(function() {
-                        button.innerHTML = originalIcon;
-                        button.classList.remove('btn-success');
-                        button.classList.add('btn-outline-secondary');
-                    }, 1000);
-                });
-            }
-
-            // Detail row copy functionality
             if (e.target.closest('.copy-detail-btn')) {
                 const button = e.target.closest('.copy-detail-btn');
                 const textToCopy = button.getAttribute('data-text');
@@ -745,14 +699,14 @@
             navigator.clipboard.writeText(text).then(function() {
                 // Show success feedback
                 const originalIcon = button.innerHTML;
-                button.innerHTML = '<i class="bi bi-check"></i>';
-                button.classList.remove('btn-outline-secondary');
+                button.innerHTML = '✓';
+                button.classList.remove('btn-secondary');
                 button.classList.add('btn-success');
                 
                 setTimeout(function() {
                     button.innerHTML = originalIcon;
                     button.classList.remove('btn-success');
-                    button.classList.add('btn-outline-secondary');
+                    button.classList.add('btn-secondary');
                 }, 1000);
             }).catch(function(err) {
                 console.error('Failed to copy: ', err);
@@ -766,14 +720,14 @@
                 
                 // Show success feedback
                 const originalIcon = button.innerHTML;
-                button.innerHTML = '<i class="bi bi-check"></i>';
-                button.classList.remove('btn-outline-secondary');
+                button.innerHTML = '✓';
+                button.classList.remove('btn-secondary');
                 button.classList.add('btn-success');
                 
                 setTimeout(function() {
                     button.innerHTML = originalIcon;
                     button.classList.remove('btn-success');
-                    button.classList.add('btn-outline-secondary');
+                    button.classList.add('btn-secondary');
                 }, 1000);
             });
         }
@@ -799,17 +753,71 @@
                     row.classList.remove('expanded');
                     // Ensure detail row is hidden (collapsed state)
                     if (detailRow) {
-                        detailRow.classList.add('hidden');
+                        detailRow.style.display = 'none';
                     }
                 } else {
                     // Hide the main row
                     row.style.display = 'none';
                     // Ensure detail row is hidden
                     if (detailRow) {
-                        detailRow.classList.add('hidden');
+                        detailRow.style.display = 'none';
                     }
                 }
             });
+        });
+    });
+
+    // Modal functions
+    function openModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.classList.add('active');
+        }
+    }
+
+    function closeModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.classList.remove('active');
+        }
+    }
+
+    // Toggle section function
+    function toggleSection(sectionId) {
+        const section = document.getElementById(sectionId);
+        if (section) {
+            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+        }
+    }
+
+    // Add event listeners for modal triggers
+    document.addEventListener('DOMContentLoaded', function() {
+        // Update existing event listeners that reference Bootstrap modals
+        document.querySelectorAll('[data-target]').forEach(function(el) {
+            el.addEventListener('click', function(e) {
+                e.preventDefault();
+                const targetId = this.getAttribute('data-target').replace('#', '');
+                openModal(targetId);
+            });
+        });
+        
+        // Close modals on overlay click
+        document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+            overlay.addEventListener('click', function() {
+                const modal = this.closest('.modal');
+                if (modal) {
+                    modal.classList.remove('active');
+                }
+            });
+        });
+        
+        // Close modals on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal.active').forEach(function(modal) {
+                    modal.classList.remove('active');
+                });
+            }
         });
     });
 

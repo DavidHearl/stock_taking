@@ -5,247 +5,264 @@
 
 {% block nav_categories_active %}active{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/categories.css' %}">
+{% endblock %}
+
 
 {% block content %}
 {% if user.is_authenticated %}
-{% include 'stock_take/edit_category_modal.html' %}
-<div class="container mt-4 pb-5">
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Categories & Stock Take Groups</h5>
-                <div class="btn-group">
-                    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#categoryModal">
-                        <i class="bi bi-plus-circle me-1"></i>Add Category
-                    </button>
+<div class="page-content">
+    <div class="page-header">
+        <h1>Categories & Stock Take Groups</h1>
+        <button type="button" class="btn btn-primary" onclick="openModal('categoryModal')">
+            <i class="bi bi-plus-lg"></i> Add Category
+        </button>
+    </div>
+
+    {% if categories %}
+    <div class="categories-grid">
+        {% for category in categories %}
+        <div class="category-card" data-category-id="{{ category.id }}">
+            <div class="category-card-header" onclick="toggleCategory({{ category.id }})">
+                <div class="category-card-title">
+                    <div class="category-color-indicator" style="background-color: {{ category.color }};"></div>
+                    <h3>{{ category.name }}</h3>
+                    <span class="category-expand-icon">▼</span>
+                </div>
+                <div class="category-card-stats">
+                    <div class="stat-item">
+                        <span class="stat-value">{{ category.item_count }}</span>
+                        <span class="stat-label">Items</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-value">{{ category.stock_take_groups.count }}</span>
+                        <span class="stat-label">Groups</span>
+                    </div>
+                    {% with category.unassigned_items as unassigned_items %}
+                        {% if unassigned_items %}
+                        <div class="stat-divider"></div>
+                        <div class="stat-item warning">
+                            <span class="stat-value">{{ unassigned_items.count }}</span>
+                            <span class="stat-label"><i class="bi bi-exclamation-triangle"></i> Unassigned</span>
+                        </div>
+                        {% endif %}
+                    {% endwith %}
                 </div>
             </div>
-            <div class="card-body table-body">
-                {% if categories %}
-                    <div class="accordion" id="categoryAccordion">
-                        {% for category in categories %}
-                        <div class="accordion-item rounded shadow-sm" style="background-color: #ffffff;">
-                            <h2 class="accordion-header">
-                                <button class="accordion-button collapsed" type="button" 
-                                        data-bs-toggle="collapse" 
-                                        data-bs-target="#category{{ category.id }}" 
-                                        aria-expanded="false">
-                                    <div class="d-flex justify-content-between align-items-center w-100 me-3">
-                                        <div class="d-flex align-items-center">
-                                            <span class="badge me-3" style="background-color: {{ category.color }}; color: white;">
-                                                {{ category.name }}
-                                            </span>
-                                            <small class="text-muted">
-                                                {{ category.item_count }} items | 
-                                                {{ category.stock_take_groups.count }} stock take groups
-                                            </small>
-                                        </div>
-                                        {% with category.unassigned_items as unassigned_items %}
-                                            {% if unassigned_items %}
-                                                <span class="badge bg-warning text-dark ms-2" title="Unassigned items need to be added to a stock group">
-                                                    <i class="bi bi-exclamation-triangle me-1"></i>
-                                                    {{ unassigned_items.count }} need assignment
-                                                </span>
-                                            {% endif %}
-                                        {% endwith %}
-                                    </div>
-                                </button>
-                            </h2>
-                            <div id="category{{ category.id }}" class="accordion-collapse collapse">
-                                <div class="accordion-body">
-                                    <!-- Stock Take Groups -->
-                                    <div class="p-3">
-                                        <div class="mb-2">
-                                            <span class="fw-bold text-primary"><i class="bi bi-folder me-1"></i>Category: {{ category.name }}</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between align-items-center mb-3">
-                                            <h6 class="mb-0">Stock Take Groups</h6>
-                                            <div class="d-flex align-items-center gap-2">
-                                                <button class="btn btn-outline-primary btn-sm" 
-                                                        data-bs-toggle="modal" 
-                                                        data-bs-target="#stockTakeGroupModal"
-                                                        onclick="setGroupCategory({{ category.id }}, '{{ category.name }}')">
-                                                    <i class="bi bi-plus me-1"></i>Add Stock Take Group
-                                                </button>
-                                                <button type="button" class="btn btn-outline-primary btn-sm edit-category-btn" data-category-id="{{ category.id }}" data-category-name="{{ category.name }}" data-category-description="{{ category.description }}" data-category-color="{{ category.color }}">Edit Category</button>
-                                                <button type="button" class="btn btn-outline-danger btn-sm delete-category-btn" data-category-id="{{ category.id }}" data-category-name="{{ category.name }}">Delete Category</button>
-                                            </div>
-                                        </div>
-                                        
-                                        {% if category.stock_take_groups.all %}
-                                            {% for group in category.stock_take_groups.all %}
-                                            <div class="card mb-2 border border-info" style="background-color: #e9f7fd; border-left: 6px solid {{ group.color }};">
-                                                <div class="card-body p-2">
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <div class="fw-bold" style="min-width:90px;">{{ group.name }}</div>
-                                                        <div class="d-flex align-items-center gap-2">
-                                                            <div class="group-info-box px-2 py-1 bg-light border rounded text-center">
-                                                                <span class="text-muted">Items</span>
-                                                                <span class="fw-bold ms-1">{{ group.stock_items.count }}</span>
-                                                            </div>
-                                                            <div class="group-info-box px-2 py-1 bg-warning border rounded text-center">
-                                                                <span class="text-dark">Low Stock</span>
-                                                                <span class="fw-bold ms-1 text-dark">{{ group.items_needing_check.count }}</span>
-                                                            </div>
-                                                            <div class="group-info-box px-2 py-1 border rounded text-center fw-bold" style="background-color: {% if group.priority_label == 'Critical Priority' %}#dc3545{% elif group.priority_label == 'High Priority' %}#fd7e14{% else %}#198754{% endif %}; color: white;">
-                                                                {{ group.priority_label }}
-                                                            </div>
-                                                            <div class="btn-group btn-group-sm ms-2">
-                                                                <button class="btn btn-outline-primary edit-group-btn"
-                                                                        data-id="{{ group.id }}"
-                                                                        data-name="{{ group.name }}"
-                                                                        data-description="{{ group.description }}"
-                                                                        data-color="{{ group.color }}"
-                                                                        data-weighting="{{ group.weighting }}"
-                                                                        data-threshold="{{ group.auto_schedule_threshold }}"
-                                                                        title="Edit Group">
-                                                                    <i class="bi bi-pencil"></i>
-                                                                </button>
-                                                                <button class="btn btn-outline-success assign-items-btn"
-                                                                        data-group-id="{{ group.id }}"
-                                                                        data-group-name="{{ group.name }}"
-                                                                        title="Assign Items">
-                                                                    <i class="bi bi-box-arrow-in-right"></i>
-                                                                </button>
-                                                                <button class="btn btn-outline-danger delete-group-btn"
-                                                                        data-id="{{ group.id }}"
-                                                                        data-name="{{ group.name }}"
-                                                                        title="Delete Group">
-                                                                    <i class="bi bi-trash"></i>
-                                                                </button>
-                                                                <button class="btn btn-sm btn-outline-secondary table-toggle ms-2 view-items" 
-                                                                        data-bs-toggle="collapse" 
-                                                                        data-bs-target="#groupItems{{ group.id }}">
-                                                                    <i class="bi bi-list me-1"></i>View Items ({{ group.stock_items.count }})
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- Collapsible Items Table -->
-                                                    {% if group.stock_items.all %}
-                                                    <div>
-                                                        <div class="collapse mt-2" id="groupItems{{ group.id }}">
-                                                            <div class="table-responsive">
-                                                                <table class="table table-sm stock-take-group-table">
-                                                                    <thead>
-                                                                        <tr>
-                                                                            <th>SKU</th>
-                                                                            <th>Name</th>
-                                                                            <th>Qty</th>
-                                                                            <th>Status</th>
-                                                                            <th>Last Checked</th>
-                                                                            <th>Action</th>
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        {% for item in group.stock_items.all %}
-                                                                        <tr {% if item.needs_stock_take %}class="table-warning"{% endif %}>
-                                                                            <td class="fw-bold">{{ item.sku }}</td>
-                                                                            <td>{{ item.name|truncatechars:30 }}</td>
-                                                                            <td>{{ item.quantity }}</td>
-                                                                            <td>
-                                                                                {% if item.needs_stock_take %}
-                                                                                    <span class="badge bg-warning">Needs Check</span>
-                                                                                {% else %}
-                                                                                    <span class="badge bg-success">OK</span>
-                                                                                {% endif %}
-                                                                            </td>
-                                                                            <td>{{ item.last_checked|date:"M d"|default:"Never" }}</td>
-                                                                            <td>
-                                                                                <button class="btn btn-sm btn-outline-danger remove-from-group-btn"
-                                                                                        data-item-id="{{ item.id }}"
-                                                                                        data-item-name="{{ item.name }}"
-                                                                                        title="Remove from Group">
-                                                                                    <i class="bi bi-x"></i>
-                                                                                </button>
-                                                                            </td>
-                                                                        </tr>
-                                                                        {% endfor %}
-                                                                    </tbody>
-                                                                </table>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                            {% endfor %}
-                                        {% else %}
-                                            <div class="alert alert-info">
-                                                <i class="bi bi-info-circle me-2"></i>
-                                                No stock take groups yet. Create one to organize stock checks.
-                                            </div>
-                                        {% endif %}
-                                    </div>
-                                    
-                                    <!-- Unassigned Items -->
-                                    {% with category.unassigned_items as unassigned_items %}
-                                        {% if unassigned_items %}
-                                        <div class="px-3">
-                                            <h6>Unassigned Items in Category</h6>
-                                            <div class="alert alert-warning px-3">
-                                                <small>
-                                                    <i class="bi bi-exclamation-triangle me-1"></i>
-                                                    {{ unassigned_items.count }} items not assigned to any stock take group.
-                                                    <button class="btn btn-sm btn-outline-primary ms-2 assign-items-btn"
-                                                            data-category-id="{{ category.id }}">
-                                                        Assign Items
-                                                    </button>
-
-                                                </small>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                    {% endwith %}
+            <div class="category-card-body">
+                <div class="category-actions-bar">
+                    <div class="action-buttons-group">
+                                        <button class="btn btn-primary" onclick="openModal('stockTakeGroupModal'); setGroupCategory({{ category.id }}, '{{ category.name }}')">
+                            <i class="bi bi-plus-lg"></i> Add Stock Take Group
+                        </button>
+                        <button type="button" class="btn btn-secondary edit-category-btn" data-category-id="{{ category.id }}" data-category-name="{{ category.name }}" data-category-description="{{ category.description }}" data-category-color="{{ category.color }}">
+                            <i class="bi bi-pencil"></i> Edit Category
+                        </button>
+                        <button type="button" class="btn btn-danger delete-category-btn" data-category-id="{{ category.id }}" data-category-name="{{ category.name }}">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+                
+                {% if category.stock_take_groups.all %}
+                    {% for group in category.stock_take_groups.all %}
+                    <div class="group-card" style="border-left-color: {{ group.color }};">
+                        <div class="group-header">
+                            <div class="group-name">{{ group.name }}</div>
+                            <div class="group-controls">
+                                <div class="group-info-box items">
+                                    <span>Items</span>
+                                    <strong>{{ group.stock_items.count }}</strong>
+                                </div>
+                                <div class="group-info-box low-stock">
+                                    <span>Low Stock</span>
+                                    <strong>{{ group.items_needing_check.count }}</strong>
+                                </div>
+                                <div class="group-info-box priority {% if group.priority_label == 'Critical Priority' %}critical{% elif group.priority_label == 'High Priority' %}high{% else %}normal{% endif %}">
+                                    {{ group.priority_label }}
+                                </div>
+                                <div class="group-action-buttons">
+                                    <button class="btn btn-secondary edit-group-btn"
+                                            data-id="{{ group.id }}"
+                                            data-name="{{ group.name }}"
+                                            data-description="{{ group.description }}"
+                                            data-color="{{ group.color }}"
+                                            data-weighting="{{ group.weighting }}"
+                                            data-threshold="{{ group.auto_schedule_threshold }}"
+                                            title="Edit Group">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-success assign-items-btn"
+                                            data-group-id="{{ group.id }}"
+                                            data-group-name="{{ group.name }}"
+                                            title="Assign Items">
+                                        <i class="bi bi-plus-lg"></i>
+                                    </button>
+                                    <button class="btn btn-danger delete-group-btn"
+                                            data-id="{{ group.id }}"
+                                            data-name="{{ group.name }}"
+                                            title="Delete Group">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                    <button class="btn btn-primary group-items-toggle" onclick="toggleGroupItems({{ group.id }})">
+                                        <i class="bi bi-list-ul"></i> View Items ({{ group.stock_items.count }})
+                                    </button>
                                 </div>
                             </div>
                         </div>
-                        {% endfor %}
+                        
+                        <!-- Collapsible Items Table -->
+                        {% if group.stock_items.all %}
+                        <div class="group-items" id="groupItems{{ group.id }}">
+                            <table class="group-items-table">
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>Name</th>
+                                        <th>Qty</th>
+                                        <th>Status</th>
+                                        <th>Last Checked</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in group.stock_items.all %}
+                                    <tr {% if item.needs_stock_take %}class="needs-check"{% endif %}>
+                                        <td><strong>{{ item.sku }}</strong></td>
+                                        <td>{{ item.name|truncatechars:30 }}</td>
+                                        <td>{{ item.quantity }}</td>
+                                        <td>
+                                            {% if item.needs_stock_take %}
+                                                <span class="badge badge-warning">Needs Check</span>
+                                            {% else %}
+                                                <span class="badge badge-success">OK</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ item.last_checked|date:"M d"|default:"Never" }}</td>
+                                        <td>
+                                            <button class="btn btn-danger remove-from-group-btn"
+                                                    data-item-id="{{ item.id }}"
+                                                    data-item-name="{{ item.name }}"
+                                                    title="Remove from Group">
+                                                ✗
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
                     </div>
+                    {% endfor %}
                 {% else %}
-                    <div class="text-center py-5">
-                        <i class="bi bi-tags fs-1 text-muted mb-3"></i>
-                        <h4 class="mb-2">No Categories</h4>
-                        <p class="text-muted mb-4">Create categories and stock take groups to organize your inventory.</p>
-                        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#categoryModal">
-                            <i class="bi bi-plus-circle me-2"></i>Add Category
-                        </button>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> No stock take groups yet. Create one to organize stock checks.
                     </div>
                 {% endif %}
+                
+                <!-- Unassigned Items -->
+                {% with category.unassigned_items as unassigned_items %}
+                    {% if unassigned_items %}
+                    <div class="unassigned-alert">
+                        <h4><i class="bi bi-exclamation-triangle"></i> Unassigned Items in Category</h4>
+                        <div class="unassigned-alert-content">
+                            <span>{{ unassigned_items.count }} items not assigned to any stock take group.</span>
+                            <button class="btn btn-primary assign-items-btn"
+                                    data-category-id="{{ category.id }}">
+                                <i class="bi bi-plus-lg"></i> Assign Items
+                            </button>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endwith %}
             </div>
         </div>
+        {% endfor %}
     </div>
-</div>
+    {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon"><i class="bi bi-tags"></i></div>
+            <h4>No Categories</h4>
+            <p>Create categories and stock take groups to organize your inventory.</p>
+            <button type="button" class="btn btn-primary" onclick="openModal('categoryModal')">
+                <i class="bi bi-plus-lg"></i> Add Category
+            </button>
+        </div>
+    {% endif %}
+</div> <!-- End page-content -->
 
 <!-- Category Modal -->
-<div class="modal fade" id="categoryModal" tabindex="-1">
+<div class="modal" id="categoryModal">
+    <div class="modal-overlay" onclick="closeModal('categoryModal')"></div>
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Add Category</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
             <form method="post" action="{% url 'category_create' %}">
                 {% csrf_token %}
+                <div class="modal-header">
+                    <h3>Add Category</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('categoryModal')">✕</button>
+                </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="categoryName" class="form-label">Name</label>
-                        <input type="text" class="form-control" id="categoryName" name="name" required>
+                    <div class="form-group">
+                        <label for="categoryName">Name</label>
+                        <input type="text" class="form-input" id="categoryName" name="name" required>
                     </div>
-                    <div class="mb-3">
-                        <label for="categoryDescription" class="form-label">Description</label>
-                        <textarea class="form-control" id="categoryDescription" name="description" rows="3"></textarea>
+                    <div class="form-group">
+                        <label for="categoryDescription">Description</label>
+                        <textarea class="form-textarea" id="categoryDescription" name="description" rows="3"></textarea>
                     </div>
-                    <div class="mb-3">
-                        <label for="categoryColor" class="form-label">Color</label>
-                        <input type="color" class="form-control form-control-color" id="categoryColor" name="color" value="#6c757d">
+                    <div class="form-group">
+                        <label>Color</label>
+                        <div class="color-picker-grid">
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#ef4444" required>
+                                <span class="color-swatch" style="background-color: #ef4444;"></span>
+                                <span class="color-label">Red</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#f97316">
+                                <span class="color-swatch" style="background-color: #f97316;"></span>
+                                <span class="color-label">Orange</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#f59e0b">
+                                <span class="color-swatch" style="background-color: #f59e0b;"></span>
+                                <span class="color-label">Amber</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#22c55e">
+                                <span class="color-swatch" style="background-color: #22c55e;"></span>
+                                <span class="color-label">Green</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#3b82f6">
+                                <span class="color-swatch" style="background-color: #3b82f6;"></span>
+                                <span class="color-label">Blue</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#8b5cf6">
+                                <span class="color-swatch" style="background-color: #8b5cf6;"></span>
+                                <span class="color-label">Purple</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#ec4899">
+                                <span class="color-swatch" style="background-color: #ec4899;"></span>
+                                <span class="color-label">Pink</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#6b7280" checked>
+                                <span class="color-swatch" style="background-color: #6b7280;"></span>
+                                <span class="color-label">Gray</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Category</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('categoryModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💾 Save Category</button>
                 </div>
             </form>
         </div>
@@ -253,58 +270,96 @@
 </div>
 
 <!-- Stock Take Group Modal -->
-<div class="modal fade" id="stockTakeGroupModal" tabindex="-1">
+<div class="modal" id="stockTakeGroupModal">
+    <div class="modal-overlay" onclick="closeModal('stockTakeGroupModal')"></div>
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Add/Edit Stock Take Group</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
             <form method="post" action="{% url 'stock_take_group_create' %}">
                 {% csrf_token %}
                 <input type="hidden" name="group_id" id="groupId">
                 <input type="hidden" name="category" id="groupCategoryId">
+                <div class="modal-header">
+                    <h3>Add/Edit Stock Take Group</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('stockTakeGroupModal')">✕</button>
+                </div>
                 <div class="modal-body">
                     <div class="alert alert-info">
-                        <small>Category: <strong id="groupCategoryName"></strong></small>
+                        Category: <strong id="groupCategoryName"></strong>
                     </div>
-                    <div class="mb-3">
-                        <label for="groupName" class="form-label">Group Name</label>
-                        <input type="text" class="form-control" id="groupName" name="name" required>
+                    <div class="form-group">
+                        <label for="groupName">Group Name</label>
+                        <input type="text" class="form-input" id="groupName" name="name" required>
                     </div>
-                    <div class="mb-3">
-                        <label for="groupDescription" class="form-label">Description</label>
-                        <textarea class="form-control" id="groupDescription" name="description" rows="2"></textarea>
+                    <div class="form-group">
+                        <label for="groupDescription">Description</label>
+                        <textarea class="form-textarea" id="groupDescription" name="description" rows="2"></textarea>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="groupWeighting" class="form-label">Priority Weighting</label>
-                                <select class="form-select" id="groupWeighting" name="weighting">
-                                    <option value="1">1 - Low Priority</option>
-                                    <option value="2" selected>2 - Medium Priority</option>
-                                    <option value="3">3 - High Priority</option>
-                                    <option value="4">4 - Critical Priority</option>
-                                </select>
-                                <div class="form-text">Higher weighting = more frequent stock takes</div>
-                            </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="groupWeighting">Priority Weighting</label>
+                            <select class="form-select" id="groupWeighting" name="weighting">
+                                <option value="1">1 - Low Priority</option>
+                                <option value="2" selected>2 - Medium Priority</option>
+                                <option value="3">3 - High Priority</option>
+                                <option value="4">4 - Critical Priority</option>
+                            </select>
+                            <small class="form-text">Higher weighting = more frequent stock takes</small>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="groupThreshold" class="form-label">Auto Schedule Threshold</label>
-                                <input type="number" class="form-control" id="groupThreshold" name="threshold" value="5" min="0">
-                                <div class="form-text">Create stock take when items drop below this quantity</div>
-                            </div>
+                        <div class="form-group">
+                            <label for="groupThreshold">Auto Schedule Threshold</label>
+                            <input type="number" class="form-input" id="groupThreshold" name="threshold" value="5" min="0">
+                            <small class="form-text">Create stock take when items drop below this quantity</small>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="groupColor" class="form-label">Color</label>
-                        <input type="color" class="form-control form-control-color" id="groupColor" name="color" value="#6c757d">
+                    <div class="form-group">
+                        <label>Color</label>
+                        <div class="color-picker-grid">
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#ef4444" required>
+                                <span class="color-swatch" style="background-color: #ef4444;"></span>
+                                <span class="color-label">Red</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#f97316">
+                                <span class="color-swatch" style="background-color: #f97316;"></span>
+                                <span class="color-label">Orange</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#f59e0b">
+                                <span class="color-swatch" style="background-color: #f59e0b;"></span>
+                                <span class="color-label">Amber</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#22c55e">
+                                <span class="color-swatch" style="background-color: #22c55e;"></span>
+                                <span class="color-label">Green</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#3b82f6">
+                                <span class="color-swatch" style="background-color: #3b82f6;"></span>
+                                <span class="color-label">Blue</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#8b5cf6">
+                                <span class="color-swatch" style="background-color: #8b5cf6;"></span>
+                                <span class="color-label">Purple</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#ec4899">
+                                <span class="color-swatch" style="background-color: #ec4899;"></span>
+                                <span class="color-label">Pink</span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="color" value="#6b7280" checked>
+                                <span class="color-swatch" style="background-color: #6b7280;"></span>
+                                <span class="color-label">Gray</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Stock Take Group</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('stockTakeGroupModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💾 Save Stock Take Group</button>
                 </div>
             </form>
         </div>
@@ -312,19 +367,19 @@
 </div>
 
 <!-- Item Assignment Modal -->
-<div class="modal fade" id="assignItemsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+<div class="modal" id="assignItemsModal">
+    <div class="modal-overlay" onclick="closeModal('assignItemsModal')"></div>
+    <div class="modal-dialog" style="max-width: 900px;">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Assign Items to Stock Take Group</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h3>Assign Items to Stock Take Group</h3>
+                <button type="button" class="modal-close" onclick="closeModal('assignItemsModal')">✕</button>
             </div>
             <div class="modal-body">
                 <div id="assignmentContent">
-                    <div class="text-center py-4">
-                        <div class="spinner-border" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                    <div style="text-align: center; padding: 40px;">
+                        <div style="font-size: 32px; margin-bottom: 16px;"><i class="bi bi-hourglass-split"></i></div>
+                        <p>Loading...</p>
                     </div>
                 </div>
             </div>
@@ -340,6 +395,22 @@
 let currentCategoryId = null;
 let currentGroupId = null;
 
+// Toggle category collapse
+function toggleCategory(categoryId) {
+  const categoryCard = document.querySelector('.category-card[data-category-id="' + categoryId + '"]');
+  if (categoryCard) {
+    categoryCard.classList.toggle('active');
+  }
+}
+
+// Toggle group items table
+function toggleGroupItems(groupId) {
+  const groupItems = document.getElementById('groupItems' + groupId);
+  if (groupItems) {
+    groupItems.classList.toggle('active');
+  }
+}
+
 function setGroupCategory(categoryId, categoryName) {
   currentCategoryId = categoryId;
   document.getElementById('groupCategoryId').value = categoryId;
@@ -350,149 +421,231 @@ function setGroupCategory(categoryId, categoryName) {
   document.getElementById('groupDescription').value = '';
   document.getElementById('groupWeighting').value = '2';
   document.getElementById('groupThreshold').value = '5';
-  document.getElementById('groupColor').value = '#6c757d';
+  // Reset color to gray
+  const grayColorInput = document.querySelector('#stockTakeGroupModal input[name="color"][value="#6b7280"]');
+  if (grayColorInput) grayColorInput.checked = true;
 }
 
-$(function () {
-  // --- CSRF via header (recommended) ---
-  function getCookie(name) {
-    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-    return m ? m.pop() : '';
-  }
-  $.ajaxSetup({
-    beforeSend: function (xhr, settings) {
-      if (!/^GET|HEAD|OPTIONS|TRACE$/i.test(settings.type)) {
-        xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+// Helper function to get CSRF token
+function getCookie(name) {
+  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return m ? m.pop() : '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  // --- Edit category ---
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.edit-category-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const btn = e.target.closest('.edit-category-btn');
+      const categoryId = btn.dataset.categoryId;
+      const categoryName = btn.dataset.categoryName;
+      const categoryDescription = btn.dataset.categoryDescription;
+      const categoryColor = btn.dataset.categoryColor;
+      
+      // Update modal title
+      document.querySelector('#categoryModal .modal-header h3').textContent = 'Edit Category';
+      
+      // Fill form fields
+      document.getElementById('categoryName').value = categoryName;
+      document.getElementById('categoryDescription').value = categoryDescription || '';
+      
+      // Select the color radio button
+      const colorInput = document.querySelector('#categoryModal input[name="color"][value="' + categoryColor + '"]');
+      if (colorInput) {
+        colorInput.checked = true;
       }
+      
+      // Add hidden field for category ID if editing
+      const form = document.querySelector('#categoryModal form');
+      let categoryIdInput = form.querySelector('input[name="category_id"]');
+      if (!categoryIdInput) {
+        categoryIdInput = document.createElement('input');
+        categoryIdInput.type = 'hidden';
+        categoryIdInput.name = 'category_id';
+        form.insertBefore(categoryIdInput, form.firstChild);
+      }
+      categoryIdInput.value = categoryId;
+      
+      openModal('categoryModal');
     }
   });
 
-  // Helper: show BS5 modal by id
-  function showModal(id) {
-    const el = document.getElementById(id);
-    const modal = new bootstrap.Modal(el);
-    modal.show();
-  }
-
   // --- Edit group ---
-  $('.edit-group-btn').on('click', function () {
-    const id = $(this).data('id');
-    $('#groupId').val(id);
-    $('#groupName').val($(this).data('name'));
-    $('#groupDescription').val($(this).data('description'));
-    $('#groupColor').val($(this).data('color'));
-    $('#groupWeighting').val($(this).data('weighting'));
-    $('#groupThreshold').val($(this).data('threshold'));
-    showModal('stockTakeGroupModal');
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.edit-group-btn')) {
+      e.preventDefault();
+      const btn = e.target.closest('.edit-group-btn');
+      
+      document.getElementById('groupId').value = btn.dataset.id;
+      document.getElementById('groupName').value = btn.dataset.name;
+      document.getElementById('groupDescription').value = btn.dataset.description || '';
+      document.getElementById('groupWeighting').value = btn.dataset.weighting;
+      document.getElementById('groupThreshold').value = btn.dataset.threshold;
+      
+      // Select the color radio button
+      const colorInput = document.querySelector('#stockTakeGroupModal input[name="color"][value="' + btn.dataset.color + '"]');
+      if (colorInput) colorInput.checked = true;
+      
+      openModal('stockTakeGroupModal');
+    }
   });
 
   // --- Assign items (open modal + load content) ---
-  $('.assign-items-btn').on('click', function () {
-    const groupId = $(this).data('group-id') || null;
-    const categoryId = $(this).data('category-id') || null;
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.assign-items-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const btn = e.target.closest('.assign-items-btn');
+      const groupId = btn.dataset.groupId || null;
+      const categoryId = btn.dataset.categoryId || null;
 
-    showModal('assignItemsModal');
-    $('#assignmentContent').html(`
-      <div class="text-center py-4">
-        <div class="spinner-border" role="status">
-          <span class="visually-hidden">Loading...</span>
+      openModal('assignItemsModal');
+      document.getElementById('assignmentContent').innerHTML = `
+        <div style="text-align: center; padding: 40px;">
+          <div style="font-size: 32px; margin-bottom: 16px;">⏳</div>
+          <p>Loading...</p>
         </div>
-      </div>
-    `);
+      `;
 
-    const params = {};
-    if (groupId) params.group_id = groupId;
-    if (categoryId) params.category_id = categoryId;
+      const params = new URLSearchParams();
+      if (groupId) params.append('group_id', groupId);
+      if (categoryId) params.append('category_id', categoryId);
 
-    $.get('{% url "get_unassigned_items" %}', params)
-      .done(function (response) {
-        if (!response || typeof response.html !== 'string') {
-          $('#assignmentContent').html(`
-            <div class="alert alert-danger">
-              <i class="bi bi-exclamation-triangle me-2"></i>
-              Invalid response from server.
+      fetch('{% url "get_unassigned_items" %}?' + params.toString())
+        .then(response => response.json())
+        .then(data => {
+          if (!data || typeof data.html !== 'string') {
+            document.getElementById('assignmentContent').innerHTML = `
+              <div style="padding: 20px; background: rgba(220, 53, 69, 0.1); border: 1px solid #dc3545; border-radius: 8px; color: var(--text-primary);">
+                ⚠ Invalid response from server.
+              </div>
+            `;
+            return;
+          }
+          document.getElementById('assignmentContent').innerHTML = data.html;
+
+          // If opened from a specific group, preselect it
+          if (groupId) {
+            const selectEl = document.querySelector('#assignmentContent #assignGroup');
+            if (selectEl) selectEl.value = String(groupId);
+          }
+        })
+        .catch(() => {
+          document.getElementById('assignmentContent').innerHTML = `
+            <div style="padding: 20px; background: rgba(220, 53, 69, 0.1); border: 1px solid #dc3545; border-radius: 8px; color: var(--text-primary);">
+              ⚠ Error loading items. Please try again.
             </div>
-          `);
-          return;
-        }
-        $('#assignmentContent').html(response.html);
-
-        // If opened from a specific group, preselect it
-        if (groupId) {
-          const $sel = $('#assignmentContent').find('#assignGroup');
-          if ($sel.length) $sel.val(String(groupId));
-        }
-      })
-      .fail(function () {
-        $('#assignmentContent').html(`
-          <div class="alert alert-danger">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            Error loading items. Please try again.
-          </div>
-        `);
-      });
+          `;
+        });
+    }
   });
 
   // --- Assign single item (delegated) ---
-  $('#assignmentContent').on('click', '.assign-item-btn', function () {
-    const itemId = $(this).data('item-id');
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.assign-item-btn')) {
+      const btn = e.target.closest('.assign-item-btn');
+      const itemId = btn.dataset.itemId;
 
-    // Prefer modal select; fallback to per-row data attr
-    let targetGroupId = $('#assignmentContent').find('#assignGroup').val();
-    if (!targetGroupId) targetGroupId = $(this).data('target-group-id') || '';
+      // Prefer modal select; fallback to per-row data attr
+      const selectEl = document.querySelector('#assignmentContent #assignGroup');
+      let targetGroupId = selectEl ? selectEl.value : '';
+      if (!targetGroupId) targetGroupId = btn.dataset.targetGroupId || '';
 
-    if (!targetGroupId) {
-      alert('Please select a group first.');
-      return;
+      if (!targetGroupId) {
+        alert('Please select a group first.');
+        return;
+      }
+
+      fetch('{% url "assign_item_to_group" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: new URLSearchParams({
+          item_id: itemId,
+          group_id: targetGroupId
+        })
+      })
+      .then(() => location.reload())
+      .catch(() => alert('Error assigning item to group.'));
     }
-
-    $.post('{% url "assign_item_to_group" %}', {
-      item_id: itemId,
-      group_id: targetGroupId
-    })
-    .done(function () { location.reload(); })
-    .fail(function () { alert('Error assigning item to group.'); });
   });
 
   // --- Remove from group ---
-  $('.remove-from-group-btn').on('click', function () {
-    const itemId = $(this).data('item-id');
-    const itemName = $(this).data('item-name');
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.remove-from-group-btn')) {
+      e.preventDefault();
+      const btn = e.target.closest('.remove-from-group-btn');
+      const itemId = btn.dataset.itemId;
+      const itemName = btn.dataset.itemName;
 
-    if (!confirm(`Remove "${itemName}" from this stock take group?`)) return;
+      if (!confirm(`Remove "${itemName}" from this stock take group?`)) return;
 
-    $.post('{% url "assign_item_to_group" %}', {
-      item_id: itemId,
-      group_id: '' // empty removes
-    })
-    .done(function () { location.reload(); })
-    .fail(function () { alert('Error removing item from group.'); });
+      fetch('{% url "assign_item_to_group" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: new URLSearchParams({
+          item_id: itemId,
+          group_id: ''
+        })
+      })
+      .then(() => location.reload())
+      .catch(() => alert('Error removing item from group.'));
+    }
   });
 
-  // --- Delete group (safer URL replace) ---
-  $('.delete-group-btn').on('click', function () {
-    const groupId = $(this).data('id');
-    const groupName = $(this).data('name');
-    if (!confirm(`Delete stock take group "${groupName}"? This will not affect items, but will remove group assignments.`)) return;
+  // --- Delete group ---
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.delete-group-btn')) {
+      e.preventDefault();
+      const btn = e.target.closest('.delete-group-btn');
+      const groupId = btn.dataset.id;
+      const groupName = btn.dataset.name;
+      
+      if (!confirm(`Delete stock take group "${groupName}"? This will not affect items, but will remove group assignments.`)) return;
 
-    const deleteUrl = '{% url "delete_stock_take_group" 0 %}'.replace('/0/', `/${groupId}/`);
+      const deleteUrl = '{% url "delete_stock_take_group" 0 %}'.replace('/0/', `/${groupId}/`);
 
-    $.post(deleteUrl, {})
-      .done(function () { location.reload(); })
-      .fail(function () { alert('Error deleting group.'); });
+      fetch(deleteUrl, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken')
+        }
+      })
+      .then(() => location.reload())
+      .catch(() => alert('Error deleting group.'));
+    }
   });
 
-  // --- Delete category (safer URL replace) ---
-  $('.delete-category-btn').on('click', function () {
-    const categoryId = $(this).data('category-id');
-    const categoryName = $(this).data('category-name');
-    if (!confirm(`Delete category "${categoryName}"? This will remove all items and groups in this category.`)) return;
+  // --- Delete category ---
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.delete-category-btn')) {
+      e.preventDefault();
+      const btn = e.target.closest('.delete-category-btn');
+      const categoryId = btn.dataset.categoryId;
+      const categoryName = btn.dataset.categoryName;
+      
+      if (!confirm(`Delete category "${categoryName}"? This will remove all items and groups in this category.`)) return;
 
-    const deleteUrl = '{% url "delete_category" 0 %}'.replace('/0/', `/${categoryId}/`);
+      const deleteUrl = '{% url "delete_category" 0 %}'.replace('/0/', `/${categoryId}/`);
 
-    $.post(deleteUrl, {})
-      .done(function () { location.reload(); })
-      .fail(function () { alert('Error deleting category.'); });
+      fetch(deleteUrl, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken')
+        }
+      })
+      .then(() => location.reload())
+      .catch(() => alert('Error deleting category.'));
+    }
   });
 });
 </script>

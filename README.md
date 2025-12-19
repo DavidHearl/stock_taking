@@ -130,3 +130,9 @@ For a typical small stock-taking application:
 - Use the Map page to view all order locations simultaneously
 - Click on map markers to see order details
 - Use "Fit All" to show all locations, "Reset View" to return to Northern Ireland overview
+
+
+
+## Colour Pallet
+Background Colour #272831 - 39, 40, 49
+Accent Colour #32323b - 50, 50, 59
