@@ -1,0 +1,206 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Raumplus Storage Analysis{% endblock %}
+
+{% block nav_raumplus_storage_active %}active{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/shortage.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="page-header mb-4">
+        <h1>Raumplus Storage Analysis</h1>
+        <p class="text-muted">RAU material shortages based on upcoming orders and historical usage</p>
+    </div>
+
+    <!-- Summary Statistics -->
+    <div class="stats-row">
+        <div class="stat-box">
+            <div class="stat-label">Upcoming Orders</div>
+            <div class="stat-value">{{ upcoming_orders_count }}</div>
+        </div>
+        <div class="stat-box warning">
+            <div class="stat-label">RAU Items Short (Predicted 4mo)</div>
+            <div class="stat-value">{{ total_predicted_items }}</div>
+        </div>
+        <div class="stat-box critical">
+            <div class="stat-label">Critical RAU Items</div>
+            <div class="stat-value">{{ critical_items|length }}</div>
+        </div>
+    </div>
+
+    <!-- Critical Items Section -->
+    {% if critical_items %}
+    <div class="critical-section">
+        <h3><i class="bi bi-exclamation-triangle-fill text-warning"></i> Critical RAU Items - Short in Both Upcoming & Predicted</h3>
+        <p class="text-muted text-note"><strong>Note:</strong> These items need immediate ordering as they are required for upcoming jobs AND predicted future demand.</p>
+        <div class="d-flex justify-content-end mb-2">
+            <div class="total-cost-badge">
+                <strong>Total Cost:</strong> £{{ critical_total_cost|floatformat:2 }}
+            </div>
+        </div>
+        
+        <div class="table-responsive">
+            <table class="shortage-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Material Name</th>
+                        <th class="text-end">Current Stock</th>
+                        <th class="text-end">Upcoming Shortage</th>
+                        <th class="text-end">Predicted Shortage</th>
+                        <th class="text-end">Total Shortage</th>
+                        <th class="text-end">Min Order Qty</th>
+                        <th class="text-end">Order Qty</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Line Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in critical_items %}
+                    <tr>
+                        <td><code>{{ item.sku }}</code></td>
+                        <td><strong>{{ item.name }}</strong></td>
+                        <td class="text-end">{{ item.current_stock|floatformat:0 }}</td>
+                        <td class="text-end text-danger">{{ item.upcoming_shortage|floatformat:0 }}</td>
+                        <td class="text-end text-warning">{{ item.predicted_shortage|floatformat:0 }}</td>
+                        <td class="text-end">
+                            <span class="shortage-badge high">{{ item.total_shortage|floatformat:0 }}</span>
+                        </td>
+                        <td class="text-end"><span class="badge bg-secondary">{{ item.min_order_qty|floatformat:0 }}</span></td>
+                        <td class="text-end"><strong class="text-primary">{{ item.order_qty|floatformat:0 }}</strong></td>
+                        <td class="text-end">£{{ item.cost|floatformat:2 }}</td>
+                        <td class="text-end"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Predicted 4-Month Shortage -->
+    <div class="shortage-card">
+        <div class="shortage-header">
+            <h2><i class="bi bi-bar-chart-fill"></i> Predicted 4-Month RAU Shortage (Additional Items)</h2>
+            <div class="subtitle">Based on weighted average: 70% recent usage (last 90 days) + 30% all-time historical baseline</div>
+        </div>
+        <p class="text-muted text-note"><strong>Note:</strong> These items are predicted shortages that are NOT in the critical list above. Order these in addition to critical items.</p>
+        <div class="d-flex justify-content-end mb-2">
+            <div class="total-cost-badge">
+                <strong>Total Cost:</strong> £{{ predicted_total_cost|floatformat:2 }}
+            </div>
+        </div>
+            
+            {% if predicted_shortages %}
+            <div class="table-responsive">
+                <table class="shortage-table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Material Name</th>
+                            <th class="text-end">Monthly Avg</th>
+                            <th class="text-end">In Stock</th>
+                            <th class="text-end">4-Month Need</th>
+                            <th class="text-end">Short By</th>
+                            <th class="text-end">Min Order Qty</th>
+                            <th class="text-end">Order Qty</th>
+                            <th class="text-end">Unit Cost</th>
+                            <th class="text-end">Line Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in predicted_shortages %}
+                        <tr>
+                            <td><code>{{ item.sku }}</code></td>
+                            <td><strong>{{ item.name }}</strong></td>
+                            <td class="text-end">{{ item.monthly_average|floatformat:0 }}</td>
+                            <td class="text-end">{{ item.current_stock|floatformat:0 }}</td>
+                            <td class="text-end">{{ item.predicted_4month|floatformat:0 }}</td>
+                            <td class="text-end">
+                                {% if item.predicted_shortage > 100 %}
+                                <span class="shortage-badge high">{{ item.predicted_shortage|floatformat:0 }}</span>
+                                {% elif item.predicted_shortage > 20 %}
+                                <span class="shortage-badge medium">{{ item.predicted_shortage|floatformat:0 }}</span>
+                                {% else %}
+                                <span class="shortage-badge low">{{ item.predicted_shortage|floatformat:0 }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end"><span class="badge bg-secondary">{{ item.min_order_qty|floatformat:0 }}</span></td>
+                            <td class="text-end"><strong class="text-primary">{{ item.order_qty|floatformat:0 }}</strong></td>
+                            <td class="text-end">£{{ item.cost|floatformat:2 }}</td>
+                            <td class="text-end"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-success">
+                <i class="bi bi-check-circle"></i> No predicted RAU shortages for the next 4 months based on historical usage!
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Suggested Additional Items Section -->
+    {% if suggested_items %}
+    <div class="shortage-card suggested-items-section">
+        <div class="shortage-header">
+            <h2><i class="bi bi-cart-plus-fill"></i> Suggested Additional Items to Reach £5,000 Minimum Order</h2>
+            <div class="subtitle">Add these items to your order to qualify for free shipping (£{{ min_order_value|floatformat:0 }} minimum)</div>
+        </div>
+        <div class="alert alert-info mb-3">
+            <strong>Current Order Value:</strong> £{{ current_order_value|floatformat:2 }}<br>
+            <strong>Remaining to £5,000:</strong> £{{ remaining_to_min|floatformat:2 }}<br>
+            <strong>With Suggested Items:</strong> £{{ total_order_value|floatformat:2 }}
+        </div>
+        <div class="d-flex justify-content-end mb-2">
+            <div class="total-cost-badge">
+                <strong>Suggested Items Cost:</strong> £{{ suggested_total_cost|floatformat:2 }}
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="shortage-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Material Name</th>
+                        <th class="text-end">Current Stock</th>
+                        <th class="text-end">Min Order Qty</th>
+                        <th class="text-end">Suggested Qty</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Line Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in suggested_items %}
+                    <tr>
+                        <td><code>{{ item.sku }}</code></td>
+                        <td><strong>{{ item.name }}</strong></td>
+                        <td class="text-end">{{ item.current_stock|floatformat:0 }}</td>
+                        <td class="text-end"><span class="badge bg-secondary">{{ item.min_order_qty|floatformat:0 }}</span></td>
+                        <td class="text-end"><span class="badge bg-info">{{ item.suggested_qty }}</span></td>
+                        <td class="text-end">£{{ item.cost|floatformat:2 }}</td>
+                        <td class="text-end"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Summary Section -->
+    <div class="shortage-card">
+        <h3 class="summary-title">Summary</h3>
+        <ul class="summary-list">
+            <li><strong>Critical Items:</strong> RAU items that are short for both confirmed upcoming orders AND predicted to run out based on usage trends in the next 4 months.</li>
+            <li><strong>Predicted Usage:</strong> Uses a weighted algorithm combining recent trends (70%) from the last 3 months with all-time historical baseline (30%) to provide more accurate predictions for the next 4 months.</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

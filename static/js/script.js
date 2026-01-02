@@ -119,3 +119,164 @@ $(document).ready(function() {
         });
     });
 });
+
+// Track pending tracking type changes
+const pendingChanges = new Map();
+
+// Track when a tracking type dropdown changes
+function trackChange(selectElement) {
+    const itemId = selectElement.getAttribute('data-id');
+    const originalValue = selectElement.getAttribute('data-original');
+    const newValue = selectElement.value;
+    
+    if (originalValue !== newValue) {
+        // Mark as changed
+        pendingChanges.set(itemId, newValue);
+        selectElement.style.borderColor = '#ffc107';
+        selectElement.style.borderWidth = '2px';
+    } else {
+        // Revert to original
+        pendingChanges.delete(itemId);
+        selectElement.style.borderColor = '';
+        selectElement.style.borderWidth = '';
+    }
+    
+    // Update button visibility and count
+    updateSaveButton();
+}
+
+// Update the save button visibility and count
+function updateSaveButton() {
+    const btn = document.getElementById('updateItemsBtn');
+    const countBadge = document.getElementById('changesCount');
+    
+    if (pendingChanges.size > 0) {
+        btn.style.display = 'inline-block';
+        countBadge.textContent = pendingChanges.size;
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+// Save all tracking type changes
+function saveAllTrackingChanges() {
+    if (pendingChanges.size === 0) return;
+    
+    const btn = document.getElementById('updateItemsBtn');
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    // Disable button and show loading state
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+    
+    // Create array of promises for all updates
+    const updatePromises = Array.from(pendingChanges.entries()).map(([itemId, trackingType]) => {
+        return fetch(`/update/${itemId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': csrfToken
+            },
+            body: `tracking_type=${encodeURIComponent(trackingType)}&csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}`
+        });
+    });
+    
+    // Wait for all updates to complete
+    Promise.all(updatePromises)
+        .then(responses => {
+            const allSuccessful = responses.every(r => r.ok);
+            
+            if (allSuccessful) {
+                // Show success notification
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+                alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                alertDiv.innerHTML = `
+                    <i class="bi bi-check-circle"></i> ${pendingChanges.size} item(s) updated successfully! Reloading...
+                    <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+                `;
+                document.body.appendChild(alertDiv);
+                
+                // Reload page to reflect changes
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                throw new Error('Some updates failed');
+            }
+        })
+        .catch(error => {
+            // Show error notification
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+            alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            alertDiv.innerHTML = `
+                <i class="bi bi-exclamation-triangle"></i> Error updating items. Please try again.
+                <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            
+            // Re-enable button
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-save"></i> Update Items <span id="changesCount" class="badge badge-light">' + pendingChanges.size + '</span>';
+        });
+}
+
+// Global function for tracking type updates (kept for compatibility)
+function updateTrackingType(selectElement) {
+    const itemId = selectElement.getAttribute('data-id');
+    const newTrackingType = selectElement.value;
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const originalValue = selectElement.getAttribute('data-original') || selectElement.value;
+    
+    // Store original value for rollback
+    selectElement.setAttribute('data-original', originalValue);
+    
+    // Disable select and show loading state
+    selectElement.disabled = true;
+    selectElement.style.opacity = '0.6';
+    
+    fetch(`/update/${itemId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': csrfToken
+        },
+        body: `tracking_type=${encodeURIComponent(newTrackingType)}&csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}`
+    })
+    .then(response => {
+        if (response.ok) {
+            // Show success notification
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+            alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            alertDiv.innerHTML = `
+                <i class="bi bi-check-circle"></i> Tracking type updated! Reloading...
+                <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            
+            // Update the original value
+            selectElement.setAttribute('data-original', newTrackingType);
+            
+            // Reload page to reflect changes in tabs
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            throw new Error('Update failed');
+        }
+    })
+    .catch(error => {
+        // Show error notification
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+        alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        alertDiv.innerHTML = `
+            <i class="bi bi-exclamation-triangle"></i> Error updating tracking type. Please try again.
+            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+        `;
+        document.body.appendChild(alertDiv);
+        
+        // Revert the select value
+        selectElement.value = originalValue;
+        selectElement.disabled = false;
+        selectElement.style.opacity = '1';
+    });
+}

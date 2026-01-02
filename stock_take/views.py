@@ -348,6 +348,552 @@ def material_report(request):
     })
 
 @login_required
+def material_shortage(request):
+    """Analyze material shortages based on upcoming orders and historical usage"""
+    from datetime import timedelta
+    from django.utils import timezone
+    from collections import defaultdict
+    
+    today = timezone.now().date()
+    
+    # Get upcoming orders (not completed, fit date in the future)
+    upcoming_orders = Order.objects.filter(
+        job_finished=False,
+        fit_date__gte=today
+    ).order_by('fit_date')
+    
+    # Calculate material requirements for upcoming orders
+    upcoming_requirements = defaultdict(lambda: {
+        'name': '',
+        'sku': '',
+        'required_qty': 0,
+        'current_stock': 0,
+        'shortage': 0,
+        'orders': []
+    })
+    
+    # Process accessories from upcoming orders (exclude RAU items)
+    for order in upcoming_orders:
+        for accessory in order.accessories.all():
+            # Skip RAU items
+            if 'RAU' in accessory.sku.upper():
+                continue
+                
+            key = accessory.sku
+            if not upcoming_requirements[key]['name']:
+                upcoming_requirements[key]['name'] = accessory.name
+                upcoming_requirements[key]['sku'] = accessory.sku
+                if accessory.stock_item:
+                    upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
+            
+            upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
+            upcoming_requirements[key]['orders'].append({
+                'sale_number': order.sale_number,
+                'fit_date': order.fit_date,
+                'quantity': float(accessory.quantity)
+            })
+    
+    # Calculate shortage for each material
+    for key, data in upcoming_requirements.items():
+        data['shortage'] = max(0, data['required_qty'] - data['current_stock'])
+    
+    # Historical usage analysis - Recent (last 3 months)
+    three_months_ago = today - timedelta(days=90)
+    recent_orders = Order.objects.filter(
+        order_date__gte=three_months_ago,
+        order_date__lte=today
+    )
+    
+    # Historical usage analysis - All time
+    all_time_orders = Order.objects.all()
+    
+    # Calculate all-time usage for baseline
+    all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
+    
+    for order in all_time_orders:
+        for accessory in order.accessories.all():
+            # Skip RAU items
+            if 'RAU' in accessory.sku.upper():
+                continue
+                
+            key = accessory.sku
+            all_time_usage[key]['total_used'] += float(accessory.quantity)
+            all_time_usage[key]['order_count'] += 1
+            
+            # Track date range
+            if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                all_time_usage[key]['first_order'] = order.order_date
+            if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                all_time_usage[key]['last_order'] = order.order_date
+    
+    # Calculate historical usage combining recent and all-time data
+    historical_usage = defaultdict(lambda: {
+        'name': '',
+        'sku': '',
+        'total_used': 0,
+        'monthly_average': 0,
+        'all_time_monthly_avg': 0,
+        'weighted_monthly_avg': 0,
+        'predicted_2month': 0,
+        'current_stock': 0,
+        'predicted_shortage': 0,
+        'order_count': 0
+    })
+    
+    for order in recent_orders:
+        for accessory in order.accessories.all():
+            # Skip RAU items
+            if 'RAU' in accessory.sku.upper():
+                continue
+                
+            key = accessory.sku
+            if not historical_usage[key]['name']:
+                historical_usage[key]['name'] = accessory.name
+                historical_usage[key]['sku'] = accessory.sku
+                if accessory.stock_item:
+                    historical_usage[key]['current_stock'] = accessory.stock_item.quantity
+            
+            historical_usage[key]['total_used'] += float(accessory.quantity)
+            historical_usage[key]['order_count'] += 1
+    
+    # Calculate predictions combining recent and all-time averages
+    for key, data in historical_usage.items():
+        # Recent average monthly usage (last 3 months)
+        recent_monthly_avg = data['total_used'] / 3
+        data['monthly_average'] = recent_monthly_avg
+        
+        # All-time average monthly usage
+        if key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
+            months_span = max(1, ((all_time_usage[key]['last_order'] - all_time_usage[key]['first_order']).days / 30.44))
+            all_time_monthly_avg = all_time_usage[key]['total_used'] / months_span
+            data['all_time_monthly_avg'] = all_time_monthly_avg
+            
+            # Weighted average: 70% recent trend, 30% historical baseline
+            data['weighted_monthly_avg'] = (recent_monthly_avg * 0.7) + (all_time_monthly_avg * 0.3)
+        else:
+            data['all_time_monthly_avg'] = recent_monthly_avg
+            data['weighted_monthly_avg'] = recent_monthly_avg
+        
+        # Predicted usage for next 2 months using weighted average
+        data['predicted_2month'] = data['weighted_monthly_avg'] * 2
+        # Predicted shortage
+        data['predicted_shortage'] = max(0, data['predicted_2month'] - data['current_stock'])
+    
+    # Convert to lists and sort by shortage
+    upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
+    upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
+    
+    predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] > 0]
+    predicted_list.sort(key=lambda x: x['predicted_shortage'], reverse=True)
+    
+    # Calculate totals
+    total_upcoming_items = len(upcoming_list)
+    total_predicted_items = len(predicted_list)
+    total_upcoming_shortage = sum(item['shortage'] for item in upcoming_list)
+    total_predicted_shortage = sum(item['predicted_shortage'] for item in predicted_list)
+    
+    # Get materials that appear in both lists (critical items)
+    critical_items = []
+    upcoming_skus = {item['sku'] for item in upcoming_list}
+    for item in predicted_list:
+        if item['sku'] in upcoming_skus:
+            # Find the corresponding upcoming item
+            upcoming_item = next((u for u in upcoming_list if u['sku'] == item['sku']), None)
+            if upcoming_item:
+                critical_items.append({
+                    'sku': item['sku'],
+                    'name': item['name'],
+                    'current_stock': item['current_stock'],
+                    'upcoming_shortage': upcoming_item['shortage'],
+                    'predicted_shortage': item['predicted_shortage'],
+                    'total_shortage': upcoming_item['shortage'] + item['predicted_shortage']
+                })
+    
+    # Filter out any critical items where total_shortage is 0 or negative
+    critical_items = [item for item in critical_items if item['total_shortage'] > 0]
+    critical_items.sort(key=lambda x: x['total_shortage'], reverse=True)
+    
+    # Get set of critical SKUs for template filtering
+    critical_skus = {item['sku'] for item in critical_items}
+    
+    return render(request, 'stock_take/material_shortage.html', {
+        'upcoming_shortages': upcoming_list,
+        'predicted_shortages': predicted_list,
+        'critical_items': critical_items,
+        'critical_skus': critical_skus,
+        'total_upcoming_items': total_upcoming_items,
+        'total_predicted_items': total_predicted_items,
+        'total_upcoming_shortage': total_upcoming_shortage,
+        'total_predicted_shortage': total_predicted_shortage,
+        'upcoming_orders_count': upcoming_orders.count(),
+        'historical_period_days': 90,
+    })
+
+def round_to_min_order_qty(quantity, min_order_qty):
+    """Round up quantity to nearest multiple of minimum order quantity"""
+    import math
+    if not min_order_qty or min_order_qty <= 0:
+        return quantity
+    return math.ceil(quantity / min_order_qty) * min_order_qty
+
+@login_required
+def raumplus_storage(request):
+    """Analyze RAU (Raumplus) material shortages based on upcoming orders and historical usage"""
+    from datetime import timedelta
+    from django.utils import timezone
+    from collections import defaultdict
+    from decimal import Decimal
+    
+    today = timezone.now().date()
+    MIN_ORDER_VALUE = Decimal('5000.00')  # £5000 minimum order for free shipping
+    
+    # Get upcoming orders (not completed, fit date in the future)
+    upcoming_orders = Order.objects.filter(
+        job_finished=False,
+        fit_date__gte=today
+    ).order_by('fit_date')
+    
+    # Calculate material requirements for upcoming orders (RAU items only)
+    upcoming_requirements = defaultdict(lambda: {
+        'name': '',
+        'sku': '',
+        'required_qty': 0,
+        'current_stock': 0,
+        'shortage': 0,
+        'cost': Decimal('0.00'),
+        'orders': []
+    })
+    
+    # Process accessories from upcoming orders (RAU items only)
+    for order in upcoming_orders:
+        for accessory in order.accessories.all():
+            # Only process RAU items
+            if 'RAU' not in accessory.sku.upper():
+                continue
+                
+            key = accessory.sku
+            if not upcoming_requirements[key]['name']:
+                upcoming_requirements[key]['name'] = accessory.name
+                upcoming_requirements[key]['sku'] = accessory.sku
+                if accessory.stock_item:
+                    upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
+                    upcoming_requirements[key]['cost'] = accessory.stock_item.cost
+            
+            upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
+            upcoming_requirements[key]['orders'].append({
+                'sale_number': order.sale_number,
+                'fit_date': order.fit_date,
+                'quantity': float(accessory.quantity)
+            })
+    
+    # Calculate shortage for each material
+    for key, data in upcoming_requirements.items():
+        data['shortage'] = max(0, data['required_qty'] - data['current_stock'])
+        data['line_cost'] = Decimal(str(data['shortage'])) * data['cost']
+    
+    # Historical usage analysis - Recent (last 3 months, RAU items only)
+    three_months_ago = today - timedelta(days=90)
+    recent_orders = Order.objects.filter(
+        order_date__gte=three_months_ago,
+        order_date__lte=today
+    )
+    
+    # Historical usage analysis - All time (RAU items only)
+    all_time_orders = Order.objects.all()
+    
+    # Calculate all-time usage for baseline
+    all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
+    
+    for order in all_time_orders:
+        for accessory in order.accessories.all():
+            # Only process RAU items
+            if 'RAU' not in accessory.sku.upper():
+                continue
+                
+            key = accessory.sku
+            all_time_usage[key]['total_used'] += float(accessory.quantity)
+            all_time_usage[key]['order_count'] += 1
+            
+            # Track date range
+            if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                all_time_usage[key]['first_order'] = order.order_date
+            if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                all_time_usage[key]['last_order'] = order.order_date
+    
+    # Calculate historical usage combining recent and all-time data
+    historical_usage = defaultdict(lambda: {
+        'name': '',
+        'sku': '',
+        'total_used': 0,
+        'monthly_average': 0,
+        'all_time_monthly_avg': 0,
+        'weighted_monthly_avg': 0,
+        'predicted_4month': 0,
+        'current_stock': 0,
+        'predicted_shortage': 0,
+        'order_count': 0,
+        'cost': Decimal('0.00')
+    })
+    
+    for order in recent_orders:
+        for accessory in order.accessories.all():
+            # Only process RAU items
+            if 'RAU' not in accessory.sku.upper():
+                continue
+                
+            key = accessory.sku
+            if not historical_usage[key]['name']:
+                historical_usage[key]['name'] = accessory.name
+                historical_usage[key]['sku'] = accessory.sku
+                if accessory.stock_item:
+                    historical_usage[key]['current_stock'] = accessory.stock_item.quantity
+                    historical_usage[key]['cost'] = accessory.stock_item.cost
+            
+            historical_usage[key]['total_used'] += float(accessory.quantity)
+            historical_usage[key]['order_count'] += 1
+    
+    # Calculate predictions combining recent and all-time averages
+    for key, data in historical_usage.items():
+        # Recent average monthly usage (last 3 months)
+        recent_monthly_avg = data['total_used'] / 3
+        data['monthly_average'] = recent_monthly_avg
+        
+        # All-time average monthly usage
+        if key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
+            months_span = max(1, ((all_time_usage[key]['last_order'] - all_time_usage[key]['first_order']).days / 30.44))
+            all_time_monthly_avg = all_time_usage[key]['total_used'] / months_span
+            data['all_time_monthly_avg'] = all_time_monthly_avg
+            
+            # Weighted average: 70% recent trend, 30% historical baseline
+            data['weighted_monthly_avg'] = (recent_monthly_avg * 0.7) + (all_time_monthly_avg * 0.3)
+        else:
+            data['all_time_monthly_avg'] = recent_monthly_avg
+            data['weighted_monthly_avg'] = recent_monthly_avg
+        
+        # Predicted usage for next 4 months using weighted average
+        data['predicted_4month'] = data['weighted_monthly_avg'] * 4
+        # Predicted shortage
+        data['predicted_shortage'] = max(0, data['predicted_4month'] - data['current_stock'])
+        data['line_cost'] = Decimal(str(data['predicted_shortage'])) * data['cost']
+    
+    # Convert to lists and sort by shortage
+    upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
+    upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
+    
+    predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] > 0]
+    predicted_list.sort(key=lambda x: x['predicted_shortage'], reverse=True)
+    
+    # Calculate totals
+    total_upcoming_items = len(upcoming_list)
+    total_predicted_items = len(predicted_list)
+    total_upcoming_shortage = sum(item['shortage'] for item in upcoming_list)
+    total_predicted_shortage = sum(item['predicted_shortage'] for item in predicted_list)
+    
+    # Helper function to get style prefix
+    def get_style_prefix(sku, name=''):
+        # Check both SKU and name for style codes
+        text_to_check = (sku + ' ' + name).upper()
+        if 'S150' in text_to_check:
+            return 'S150'
+        elif 'S750' in text_to_check:
+            return 'S750'
+        elif 'S751' in text_to_check:
+            return 'S751'
+        elif 'S753' in text_to_check:
+            return 'S753'
+        return None
+    
+    MIN_STYLE_BUFFER = 8  # Always maintain at least 8 styles in stock after orders
+    
+    # Get materials that appear in both lists (critical items)
+    critical_items = []
+    upcoming_skus = {item['sku'] for item in upcoming_list}
+    from stock_take.models import StockItem
+    
+    for item in predicted_list:
+        if item['sku'] in upcoming_skus:
+            # Find the corresponding upcoming item
+            upcoming_item = next((u for u in upcoming_list if u['sku'] == item['sku']), None)
+            if upcoming_item:
+                # Get stock item for min_order_qty
+                stock_item = StockItem.objects.filter(sku=item['sku']).first()
+                min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
+                
+                total_shortage = upcoming_item['shortage'] + item['predicted_shortage']
+                
+                # For style items, add buffer to ensure 8 remain in stock
+                is_style = get_style_prefix(item['sku'], item['name']) is not None
+                if is_style:
+                    order_qty = round_to_min_order_qty(total_shortage + MIN_STYLE_BUFFER, min_order_qty)
+                else:
+                    order_qty = round_to_min_order_qty(total_shortage, min_order_qty)
+                
+                critical_items.append({
+                    'sku': item['sku'],
+                    'name': item['name'],
+                    'current_stock': item['current_stock'],
+                    'upcoming_shortage': upcoming_item['shortage'],
+                    'predicted_shortage': item['predicted_shortage'],
+                    'total_shortage': total_shortage,
+                    'min_order_qty': min_order_qty,
+                    'order_qty': order_qty,
+                    'cost': item['cost'],
+                    'line_cost': Decimal(str(order_qty)) * item['cost'],
+                    'is_style': is_style
+                })
+    
+    # Filter out any critical items where total_shortage is 0 or negative
+    critical_items = [item for item in critical_items if item['total_shortage'] > 0]
+    critical_items.sort(key=lambda x: x['total_shortage'], reverse=True)
+    
+    # Calculate total costs
+    critical_total_cost = sum(item['line_cost'] for item in critical_items)
+    predicted_total_cost = sum(item['line_cost'] for item in predicted_list)
+    
+    # Calculate items only in predicted (not in critical) with min order qty
+    predicted_only_list = []
+    for item in predicted_list:
+        if item['sku'] not in upcoming_skus:
+            stock_item = StockItem.objects.filter(sku=item['sku']).first()
+            min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
+            
+            # For style items, add buffer to ensure 8 remain in stock
+            is_style = get_style_prefix(item['sku'], item['name']) is not None
+            if is_style:
+                order_qty = round_to_min_order_qty(item['predicted_shortage'] + MIN_STYLE_BUFFER, min_order_qty)
+            else:
+                order_qty = round_to_min_order_qty(item['predicted_shortage'], min_order_qty)
+            
+            predicted_only_list.append({
+                **item,
+                'min_order_qty': min_order_qty,
+                'order_qty': order_qty,
+                'line_cost': Decimal(str(order_qty)) * item['cost'],
+                'is_style': is_style
+            })
+    
+    predicted_only_cost = sum(item['line_cost'] for item in predicted_only_list)
+    
+    # Get set of critical SKUs for template filtering
+    critical_skus = {item['sku'] for item in critical_items}
+    
+    # Suggest additional items to reach £5000 minimum order
+    suggested_items = []
+    current_order_value = critical_total_cost + predicted_only_cost
+    
+    # Check stock levels for each style variant
+    from django.db.models import Q
+    
+    MIN_STYLES_PER_VARIANT = 8
+    style_prefixes = ['S150', 'S750', 'S751', 'S753']
+    styles_to_order = []
+    style_stock_status = {}
+    
+    for prefix in style_prefixes:
+        # Get all items with this prefix that are RAU items
+        all_styles = StockItem.objects.filter(
+            Q(sku__istartswith=prefix) & Q(sku__icontains='RAU')
+        )
+        
+        # Count how many are currently in stock (quantity > 0)
+        in_stock_count = all_styles.filter(quantity__gt=0).count()
+        style_stock_status[prefix] = {
+            'in_stock': in_stock_count,
+            'needed': max(0, MIN_STYLES_PER_VARIANT - in_stock_count)
+        }
+        
+        # If we need more styles, find out-of-stock items to suggest
+        if in_stock_count < MIN_STYLES_PER_VARIANT:
+            out_of_stock = all_styles.filter(quantity=0).exclude(
+                sku__in=[item['sku'] for item in critical_items + predicted_only_list]
+            )[:MIN_STYLES_PER_VARIANT - in_stock_count]
+            
+            for stock_item in out_of_stock:
+                min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+                suggested_qty = max(min_order_qty, 1)  # Order at least 1 or min qty
+                item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+                
+                styles_to_order.append({
+                    'sku': stock_item.sku,
+                    'name': stock_item.name,
+                    'current_stock': stock_item.quantity,
+                    'min_order_qty': min_order_qty,
+                    'suggested_qty': suggested_qty,
+                    'cost': stock_item.cost,
+                    'line_cost': item_cost,
+                    'is_style': True,
+                    'variant': prefix,
+                    'reason': f'Stock variant {prefix} below minimum'
+                })
+    
+    # Add style items first
+    suggested_items.extend(styles_to_order)
+    accumulated_value = sum(item['line_cost'] for item in styles_to_order)
+    
+    # Now check if we need more items to reach minimum order value
+    remaining_value = MIN_ORDER_VALUE - (current_order_value + accumulated_value)
+    
+    if remaining_value > 0:
+        # Get all RAU stock items that are not already in shortages or suggested styles
+        all_rau_items = StockItem.objects.filter(
+            sku__icontains='RAU'
+        ).exclude(
+            sku__in=[item['sku'] for item in critical_items + predicted_only_list + suggested_items]
+        ).order_by('-quantity')  # Prioritize items we have most of (frequently used)
+        
+        for stock_item in all_rau_items:
+            if accumulated_value >= remaining_value:
+                break
+                
+            # Suggest ordering based on min order quantity or reasonable default
+            min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+            base_qty = max(min_order_qty, min(5, max(2, int(stock_item.quantity * 0.1))))
+            suggested_qty = round_to_min_order_qty(base_qty, min_order_qty)
+            item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+            
+            suggested_items.append({
+                'sku': stock_item.sku,
+                'name': stock_item.name,
+                'current_stock': stock_item.quantity,
+                'min_order_qty': min_order_qty,
+                'suggested_qty': suggested_qty,
+                'cost': stock_item.cost,
+                'line_cost': item_cost,
+                'is_style': get_style_prefix(stock_item.sku, stock_item.name) is not None,
+                'reason': 'To reach minimum order value'
+            })
+            
+            accumulated_value += item_cost
+    
+    suggested_total_cost = sum(item['line_cost'] for item in suggested_items)
+    
+    total_order_value = critical_total_cost + predicted_only_cost + suggested_total_cost
+    current_order_value = critical_total_cost + predicted_only_cost
+    remaining_to_min = max(Decimal('0.00'), MIN_ORDER_VALUE - current_order_value)
+    
+    return render(request, 'stock_take/raumplus_storage.html', {
+        'upcoming_shortages': upcoming_list,
+        'predicted_shortages': predicted_only_list,
+        'critical_items': critical_items,
+        'suggested_items': suggested_items,
+        'critical_skus': critical_skus,
+        'total_upcoming_items': total_upcoming_items,
+        'total_predicted_items': len(predicted_only_list),
+        'total_upcoming_shortage': total_upcoming_shortage,
+        'total_predicted_shortage': total_predicted_shortage,
+        'upcoming_orders_count': upcoming_orders.count(),
+        'historical_period_days': 90,
+        'critical_total_cost': critical_total_cost,
+        'predicted_total_cost': predicted_only_cost,
+        'suggested_total_cost': suggested_total_cost,
+        'total_order_value': total_order_value,
+        'current_order_value': current_order_value,
+        'remaining_to_min': remaining_to_min,
+        'min_order_value': MIN_ORDER_VALUE,
+        'style_stock_status': style_stock_status,
+    })
+
+@login_required
 def substitutions(request):
     """Display and manage substitutions and skip items"""
     substitutions = Substitution.objects.all()
@@ -871,6 +1417,8 @@ def import_csv(request):
 
             items_created = 0
             items_updated = 0
+            csv_skus = set()  # Track SKUs from CSV for orphan detection
+            
             for row in reader:
                 sku = row.get('Sku', '').strip()
                 name = row.get('Name', '').strip()
@@ -879,6 +1427,10 @@ def import_csv(request):
                 quantity_str = row.get('Quantity', '0')
                 serial_or_batch = row.get('SerialOrBatch', '').strip()
                 category_name = row.get('Category', '').strip()
+
+                # Add SKU to tracking set
+                if sku:
+                    csv_skus.add(sku)
 
                 try:
                     quantity = int(float(quantity_str)) if quantity_str else 0
@@ -908,37 +1460,88 @@ def import_csv(request):
                         'category_name': category_name,
                         'location': location,
                         'quantity': quantity,
-                        'serial_or_batch': serial_or_batch
+                        'serial_or_batch': serial_or_batch,
+                        'tracking_type': 'not-classified'  # Default for new items
                     }
                 )
                 if not created:
-                    # Update fields
+                    # Update fields but preserve tracking_type
                     item.name = name
                     item.cost = cost
                     item.category = category
                     item.category_name = category_name
                     item.location = location
-                    item.quantity = quantity
+                    item.quantity = quantity  # Always update quantity on re-import
                     item.serial_or_batch = serial_or_batch
+                    # Note: tracking_type is NOT updated on re-import to preserve user settings
                     item.save()
                     items_updated += 1
                 else:
                     items_created += 1
 
+            # Find items in DB that are NOT in the CSV (orphaned items)
+            orphaned_items = StockItem.objects.exclude(sku__in=csv_skus)
+            orphaned_count = orphaned_items.count()
+            
             # Record import history
             ImportHistory.objects.create(
                 filename=csv_file.name,
                 record_count=items_created + items_updated
             )
+            
+            # Clear cache after import
+            from django.core.cache import cache
+            cache.clear()
 
             # Reset pending schedules and re-populate
             reset_and_populate_schedules()
 
-            messages.success(request, f'Imported {items_created} new items, updated {items_updated} items from {csv_file.name}')
+            if orphaned_count > 0:
+                # Store orphaned items in session for review
+                request.session['orphaned_item_ids'] = list(orphaned_items.values_list('id', flat=True))
+                request.session['last_import_file'] = csv_file.name
+                messages.warning(request, f'Imported {items_created} new items, updated {items_updated} items. {orphaned_count} items in database not found in CSV.')
+                return redirect('review_orphaned_items')
+            else:
+                messages.success(request, f'Imported {items_created} new items, updated {items_updated} items from {csv_file.name}')
         except Exception as e:
             messages.error(request, f'Error importing CSV: {str(e)}')
 
     return redirect('stock_list')
+
+def review_orphaned_items(request):
+    """Review items in DB that were not in the last CSV import"""
+    orphaned_item_ids = request.session.get('orphaned_item_ids', [])
+    last_import_file = request.session.get('last_import_file', 'Unknown')
+    
+    if not orphaned_item_ids:
+        messages.info(request, 'No orphaned items to review.')
+        return redirect('stock_list')
+    
+    if request.method == 'POST':
+        # Handle deletion of selected items
+        items_to_delete = request.POST.getlist('delete_items')
+        if items_to_delete:
+            deleted_count = StockItem.objects.filter(id__in=items_to_delete).delete()[0]
+            messages.success(request, f'Deleted {deleted_count} item(s)')
+            
+            # Clear cache after deletion
+            from django.core.cache import cache
+            cache.clear()
+        
+        # Clear session
+        request.session.pop('orphaned_item_ids', None)
+        request.session.pop('last_import_file', None)
+        
+        return redirect('stock_list')
+    
+    orphaned_items = StockItem.objects.filter(id__in=orphaned_item_ids).select_related('category')
+    
+    return render(request, 'stock_take/review_orphaned_items.html', {
+        'orphaned_items': orphaned_items,
+        'last_import_file': last_import_file,
+        'orphaned_count': len(orphaned_item_ids),
+    })
 
 def category_edit(request, category_id):
     category = get_object_or_404(Category, id=category_id)
@@ -1172,16 +1775,42 @@ def auto_create_stock_take_schedules():
 
 def stock_list(request):
     """Display all stock items in a table"""
-    # Auto-create schedules first
-    auto_create_stock_take_schedules()
+    import time
+    from django.core.cache import cache
+    from django.db.models import Max
     
-    items = StockItem.objects.select_related('category', 'stock_take_group').all()
+    start_time = time.time()
     
-    # Apply filters
+    # Create cache key based on filters and last modification time
     search = request.GET.get('search', '')
     category_filter = request.GET.get('category', '')
     stock_take_group_filter = request.GET.get('stock_take_group', '')
+    tracking_type_filter = request.GET.get('tracking_type', '')
     
+    # Get last modification time for cache invalidation
+    last_import = ImportHistory.objects.aggregate(Max('imported_at'))['imported_at__max']
+    last_update = StockItem.objects.aggregate(Max('id'))['id__max'] or 0
+    cache_version = f"{last_import}_{last_update}"
+    
+    cache_key = f"stock_list_{search}_{category_filter}_{stock_take_group_filter}_{tracking_type_filter}_{cache_version}"
+    
+    # Try to get cached data
+    cached_data = cache.get(cache_key)
+    if cached_data and not request.GET.get('nocache'):
+        cached_data['query_time'] = f"{time.time() - start_time:.3f} (cached)"
+        return render(request, 'stock_take/stock_list.html', cached_data)
+    
+    # Don't auto-create schedules on every page load - too slow
+    # auto_create_stock_take_schedules()
+    
+    # Use only() to limit fields loaded from database
+    items = StockItem.objects.select_related('category', 'stock_take_group').only(
+        'id', 'sku', 'name', 'cost', 'quantity', 'tracking_type', 
+        'location', 'serial_or_batch', 'category__name', 'category__color',
+        'stock_take_group__name'
+    ).all()
+    
+    # Apply filters (already defined above for cache key)
     if search:
         items = items.filter(
             Q(sku__icontains=search) | 
@@ -1195,42 +1824,65 @@ def stock_list(request):
     if stock_take_group_filter:
         items = items.filter(stock_take_group_id=stock_take_group_filter)
     
+    if tracking_type_filter:
+        items = items.filter(tracking_type=tracking_type_filter)
+    
     latest_import = ImportHistory.objects.first()
     import_history = ImportHistory.objects.all()[:10]  # Last 10 imports
     
-    # Calculate statistics
-    all_items = StockItem.objects.select_related('category', 'stock_take_group').all()
-    total_value = all_items.aggregate(
-        total=Sum(F('cost') * F('quantity'))
-    )['total'] or Decimal('0')
+    # Calculate statistics - use count() to avoid loading all items
+    all_items_query = StockItem.objects.all()
     
-    # Separate items by stock status
-    in_stock_items = items.filter(quantity__gte=10).select_related('category', 'stock_take_group')
-    low_stock_items = items.filter(quantity__gte=1, quantity__lt=10).select_related('category', 'stock_take_group')
-    zero_quantity_items = items.filter(quantity=0).select_related('category', 'stock_take_group')
+    # Separate items by stock status (exclude non-stock items from low/zero)
+    in_stock_items = list(items.filter(
+        quantity__gte=10
+    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group'))
     
-    # Items needing stock takes
-    items_needing_stock_take = items.filter(
+    low_stock_items = list(items.filter(
+        quantity__gte=1, 
+        quantity__lt=10
+    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group'))
+    
+    zero_quantity_items = list(items.filter(
+        quantity=0
+    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group'))
+    
+    # Non-stock items (separate tab)
+    non_stock_items = list(items.filter(
+        tracking_type='non-stock'
+    ).select_related('category', 'stock_take_group'))
+    
+    # Calculate total value from the items we already have
+    total_value = sum(item.cost * item.quantity for item in in_stock_items + low_stock_items + zero_quantity_items + non_stock_items)
+    
+    # Use counts from the lists we already have
+    total_items_count = len(in_stock_items) + len(low_stock_items) + len(zero_quantity_items) + len(non_stock_items)
+    zero_quantity_count = len(zero_quantity_items)
+    low_stock_count = len(low_stock_items)
+    in_stock_count = len(in_stock_items)
+    non_stock_count = len(non_stock_items)
+    
+    # Items needing stock takes (convert to list for caching)
+    items_needing_stock_take = list(items.filter(
         stock_take_group__isnull=False
     ).filter(
         Q(quantity__lte=F('stock_take_group__auto_schedule_threshold')) |
         Q(last_checked__lt=timezone.now() - timezone.timedelta(days=30))
-    ).select_related('category', 'stock_take_group')
+    ).select_related('category', 'stock_take_group')[:100])  # Limit to 100
     
-    # Get counts for all items (not just filtered)
-    total_items_count = all_items.count()
-    zero_quantity_count = all_items.filter(quantity=0).count()
-    low_stock_count = all_items.filter(quantity__lt=10, quantity__gt=0).count()
-    in_stock_count = all_items.filter(quantity__gt=5).count()
+    # Get filter options and convert to list for caching
+    categories = list(Category.objects.all())
+    stock_take_groups = list(StockTakeGroup.objects.select_related('category').all())
     
-    # Get filter options
-    categories = Category.objects.all()
-    stock_take_groups = StockTakeGroup.objects.select_related('category').all()
+    # Add performance timing
+    end_time = time.time()
+    query_time = end_time - start_time
     
-    return render(request, 'stock_take/stock_list.html', {
+    context = {
         'in_stock_items': in_stock_items,
         'low_stock_items': low_stock_items,
         'zero_quantity_items': zero_quantity_items,
+        'non_stock_items': non_stock_items,
         'items_needing_stock_take': items_needing_stock_take,
         'latest_import': latest_import,
         'import_history': import_history,
@@ -1239,14 +1891,22 @@ def stock_list(request):
         'zero_quantity_count': zero_quantity_count,
         'low_stock_count': low_stock_count,
         'in_stock_count': in_stock_count,
+        'non_stock_count': non_stock_count,
         'categories': categories,
         'stock_take_groups': stock_take_groups,
+        'query_time': f'{query_time:.3f}',
         'current_filters': {
             'search': search,
             'category': category_filter,
             'stock_take_group': stock_take_group_filter,
+            'tracking_type': tracking_type_filter,
         }
-    })
+    }
+    
+    # Cache the context for next time
+    cache.set(cache_key, context, timeout=60*60*24)  # Cache for 24 hours
+    
+    return render(request, 'stock_take/stock_list.html', context)
 
 def category_list(request):
     """Display all categories with stock take groups"""
@@ -1431,7 +2091,16 @@ def update_item(request, item_id):
             
             item.serial_or_batch = request.POST.get('serial_or_batch', item.serial_or_batch)
             
+            # Handle tracking_type if provided
+            tracking_type = request.POST.get('tracking_type')
+            if tracking_type and tracking_type in ['stock', 'non-stock', 'not-classified']:
+                item.tracking_type = tracking_type
+            
             item.save()
+            
+            # Clear cache after updating item
+            from django.core.cache import cache
+            cache.clear()
             
             # Auto-create schedules if needed
             auto_create_stock_take_schedules()
@@ -2568,3 +3237,105 @@ def os_doors_summary(request):
         'total_orders': total_orders,
     })
 
+@login_required
+def stock_items_manager(request):
+    """Manage stock items - view and edit multiple items at once"""
+    # Get filter parameters
+    search = request.GET.get('search', '')
+    category_id = request.GET.get('category', '')
+    tracking_type = request.GET.get('tracking_type', '')
+    
+    # Build query
+    items = StockItem.objects.select_related('category', 'stock_take_group').all()
+    
+    if search:
+        items = items.filter(
+            Q(sku__icontains=search) | 
+            Q(name__icontains=search) |
+            Q(location__icontains=search)
+        )
+    
+    if category_id:
+        items = items.filter(category_id=category_id)
+    
+    if tracking_type:
+        items = items.filter(tracking_type=tracking_type)
+    
+    # Order by SKU
+    items = items.order_by('sku')
+    
+    # Get categories for filter dropdown
+    categories = Category.objects.all().order_by('name')
+    stock_take_groups = StockTakeGroup.objects.all().order_by('name')
+    
+    return render(request, 'stock_take/stock_items_manager.html', {
+        'items': items,
+        'categories': categories,
+        'stock_take_groups': stock_take_groups,
+        'search': search,
+        'selected_category': category_id,
+        'selected_tracking_type': tracking_type,
+        'tracking_choices': StockItem.TRACKING_CHOICES,
+    })
+
+@login_required
+def update_stock_items_batch(request):
+    """Update multiple stock items at once via AJAX"""
+    if request.method == 'POST':
+        try:
+            import json
+            data = json.loads(request.body)
+            items_data = data.get('items', [])
+            
+            updated_count = 0
+            errors = []
+            
+            for item_data in items_data:
+                try:
+                    item_id = item_data.get('id')
+                    item = StockItem.objects.get(id=item_id)
+                    
+                    # Update fields
+                    if 'sku' in item_data:
+                        item.sku = item_data['sku']
+                    if 'name' in item_data:
+                        item.name = item_data['name']
+                    if 'cost' in item_data:
+                        item.cost = Decimal(str(item_data['cost']))
+                    if 'location' in item_data:
+                        item.location = item_data['location']
+                    if 'quantity' in item_data:
+                        item.quantity = int(item_data['quantity'])
+                    if 'tracking_type' in item_data:
+                        item.tracking_type = item_data['tracking_type']
+                    if 'min_order_qty' in item_data:
+                        value = item_data['min_order_qty']
+                        item.min_order_qty = int(value) if value else None
+                    if 'category_id' in item_data:
+                        value = item_data['category_id']
+                        item.category_id = int(value) if value else None
+                    if 'stock_take_group_id' in item_data:
+                        value = item_data['stock_take_group_id']
+                        item.stock_take_group_id = int(value) if value else None
+                    
+                    item.save()
+                    updated_count += 1
+                    
+                except StockItem.DoesNotExist:
+                    errors.append(f"Item {item_id} not found")
+                except Exception as e:
+                    errors.append(f"Error updating item {item_id}: {str(e)}")
+            
+            return JsonResponse({
+                'success': True,
+                'updated_count': updated_count,
+                'errors': errors
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=400)
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)

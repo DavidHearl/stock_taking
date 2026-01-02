@@ -19,10 +19,10 @@
             <p class="header-subtitle">Track boards purchase orders and receiving status</p>
         </div>
         <div class="header-actions">
-            <button id="save-changes-btn" class="btn btn-success" style="display: none;">
+            <button id="save-changes-btn" class="btn btn-success hidden">
                 <i class="bi bi-save"></i> Save Changes
             </button>
-            <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#createPOModal">
+            <button type="button" class="btn btn-primary">
                 <i class="bi bi-plus-lg"></i> Create New PO
             </button>
         </div>
@@ -104,7 +104,7 @@
                 </thead>
                 <tbody>
                     {% for boards_po in boards_pos %}
-                    <tr class="po-row" onclick="toggleDetails('details-{{ boards_po.id }}', event)" style="cursor: pointer;">
+                    <tr class="po-row" onclick="toggleDetails('details-{{ boards_po.id }}', event)">
                         <td>
                             <div class="po-number-cell">
                                 <strong>{{ boards_po.po_number }}</strong>
@@ -139,7 +139,7 @@
                                 <span class="received-text">{{ boards_po.received_pnx_items }} / {{ boards_po.total_pnx_items }}</span>
                                 {% if boards_po.total_pnx_items > 0 %}
                                 <div class="progress-bar-mini">
-                                    <div class="progress-fill" style="width: {% widthratio boards_po.received_pnx_items boards_po.total_pnx_items 100 %}%;"></div>
+                                    <div class="progress-fill" data-width="{% widthratio boards_po.received_pnx_items boards_po.total_pnx_items 100 %}"></div>
                                 </div>
                                 {% endif %}
                             </div>
@@ -163,7 +163,7 @@
                     </tr>
 
                     
-                    <tr class="detail-row" id="details-{{ boards_po.id }}" style="display: none;">
+                    <tr class="detail-row hidden" id="details-{{ boards_po.id }}">
                         <td colspan="6">
                             <div class="details-container">
                                 <div class="details-header">
@@ -306,6 +306,14 @@ let changes = {};
 
 // Live search functionality
 document.addEventListener('DOMContentLoaded', function() {
+    // Set progress bar widths from data attributes
+    document.querySelectorAll('.progress-fill').forEach(function(bar) {
+        const width = bar.getAttribute('data-width');
+        if (width) {
+            bar.style.width = width + '%';
+        }
+    });
+
     const searchInput = document.getElementById('search');
     if (searchInput) {
         searchInput.addEventListener('input', function() {
@@ -324,7 +332,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     row.style.display = 'none';
                     // Close detail row if parent is hidden
                     if (detailRow && detailRow.classList.contains('detail-row')) {
-                        detailRow.style.display = 'none';
+                        detailRow.classList.add('hidden');
                         const icon = row.querySelector('.expand-icon');
                         if (icon) icon.textContent = '▶';
                     }
@@ -346,13 +354,13 @@ function toggleDetails(detailRowId, event) {
     
     const detailRow = document.getElementById(detailRowId);
     const icon = document.getElementById('icon-' + detailRowId);
-    const isVisible = detailRow.style.display === 'table-row';
+    const isVisible = !detailRow.classList.contains('hidden');
     
     if (isVisible) {
-        detailRow.style.display = 'none';
+        detailRow.classList.add('hidden');
         if (icon) icon.textContent = '▶';
     } else {
-        detailRow.style.display = 'table-row';
+        detailRow.classList.remove('hidden');
         if (icon) icon.textContent = '▼';
     }
 }
@@ -440,10 +448,10 @@ function saveChanges() {
 function updateSaveButtonVisibility() {
     const saveBtn = document.getElementById('save-changes-btn');
     if (Object.keys(changes).length > 0) {
-        saveBtn.style.display = 'block';
+        saveBtn.classList.remove('hidden');
         saveBtn.textContent = `Save Changes (${Object.keys(changes).length})`;
     } else {
-        saveBtn.style.display = 'none';
+        saveBtn.classList.add('hidden');
     }
 }
 

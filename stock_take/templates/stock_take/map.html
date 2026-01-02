@@ -6,56 +6,24 @@
 {% block nav_map_active %}active{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/map.css' %}">
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<style>
-    #map-container {
-        height: 800px;
-        width: 100%;
-        position: relative;
-    }
-
-    .leaflet-popup-content {
-        font-size: 14px;
-    }
-
-    .legend {
-        background: white;
-        padding: 10px;
-        border-radius: 5px;
-        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-    }
-
-    .legend-item {
-        display: flex;
-        align-items: center;
-        margin-bottom: 5px;
-    }
-
-    .legend-color {
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        margin-right: 8px;
-        border: 2px solid white;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    }
-</style>
 {% endblock %}
 
 {% block content %}
-<div class="container mt-4 pb-5">
+<div class="container">
     <div class="row">
         <div class="col-12">
             <div class="card">
-                <div class="card-body p-0">
+                <div class="card-body">
                     <!-- Map Controls -->
                     <div class="p-3 border-bottom">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <h6 class="mb-1">Map Controls</h6>
+                                <h6>Map Controls</h6>
                                 <small class="text-muted">Using OpenStreetMap - Free geocoding service</small>
-                                <div class="mt-1">
+                                <div>
                                     <small class="text-muted">
                                         <strong>Legend:</strong>
                                         <span class="badge bg-success me-1">Sale</span>
@@ -63,7 +31,7 @@
                                         <span class="badge bg-warning me-1">Warranty</span>
                                     </small>
                                 </div>
-                                <div class="mt-1">
+                                <div>
                                     <small class="text-info">
                                         <i class="bi bi-info-circle"></i> Some locations may be approximate based on postcode area
                                     </small>
@@ -84,13 +52,11 @@
                     </div>
                     <!-- Leaflet Map Container -->
                     <div id="map-container">
-                        <div id="map-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                            <div class="text-center">
-                                <div class="spinner-border text-primary" role="status">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
-                                <p class="mt-2 mb-0">Loading map...</p>
-                                <small class="text-muted">Using OpenStreetMap tiles</small>
+                        <div id="map-loading" class="map-loading">
+                            <div>
+                                <div class="spinner"></div>
+                                <p>Loading map...</p>
+                                <small>Using OpenStreetMap tiles</small>
                             </div>
                         </div>
                     </div>
@@ -100,12 +66,12 @@
     </div>
 
     <!-- Orders Table -->
-    <div class="row mt-4">
+    <div class="row">
         <div class="col-12">
             <div class="card">
                 <div class="card-header">
                     <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Order Details</h5>
+                        <h5>Order Details</h5>
                         <a href="{% url 'ordering' %}" class="btn btn-outline-success btn-sm">
                             <i class="bi bi-plus-circle"></i> New Order
                         </a>
@@ -225,15 +191,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const div = L.DomUtil.create('div', 'legend');
         div.innerHTML = `
             <div class="legend-item">
-                <div class="legend-color" style="background: #28a745;"></div>
+                <div class="legend-color sale"></div>
                 <span>Sale</span>
             </div>
             <div class="legend-item">
-                <div class="legend-color" style="background: #dc3545;"></div>
+                <div class="legend-color remedial"></div>
                 <span>Remedial</span>
             </div>
             <div class="legend-item">
-                <div class="legend-color" style="background: #ffc107;"></div>
+                <div class="legend-color warranty"></div>
                 <span>Warranty</span>
             </div>
         `;
@@ -450,24 +416,24 @@ function geocodeWithNominatim(address, callback) {
 }
 
 function createMarker(position, fullAddress, saleNumber, customerName, orderType, jobFinished, isFallback = false) {
-    // Determine marker color based on order type
-    let markerColor;
+    // Determine marker type class based on order type
+    let markerClass;
     let orderTypeLower = orderType.toLowerCase();
 
     if (orderTypeLower.includes('sale')) {
-        markerColor = '#28a745'; // Green for Sale
+        markerClass = 'sale';
     } else if (orderTypeLower.includes('remedial')) {
-        markerColor = '#dc3545'; // Red for Remedial
+        markerClass = 'remedial';
     } else if (orderTypeLower.includes('warranty') || orderTypeLower.includes('warrant')) {
-        markerColor = '#ffc107'; // Yellow/Orange for Warranty
+        markerClass = 'warranty';
     } else {
-        markerColor = '#007bff'; // Blue for other types
+        markerClass = 'sale'; // Default
     }
 
     // Create custom icon
     const customIcon = L.divIcon({
-        html: `<div style="background-color: ${markerColor}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${orderType.charAt(0).toUpperCase()}</div>`,
-        className: 'custom-marker',
+        html: `<div class="custom-marker ${markerClass}">${orderType.charAt(0).toUpperCase()}</div>`,
+        className: '',
         iconSize: [24, 24],
         iconAnchor: [12, 12]
     });
@@ -476,14 +442,15 @@ function createMarker(position, fullAddress, saleNumber, customerName, orderType
     const marker = L.marker(position, {icon: customIcon}).addTo(markerGroup);
 
     // Create popup
+    const statusClass = jobFinished ? 'status-completed' : 'status-in-progress';
     const popupContent = `
-        <div style="max-width: 200px; font-size: 14px;">
-            <h6 style="margin: 0 0 8px 0; font-size: 16px;">Order ${saleNumber}</h6>
-            <p style="margin: 0 0 4px 0;"><strong>Customer:</strong> ${customerName}</p>
-            <p style="margin: 0 0 4px 0;"><strong>Address:</strong> ${fullAddress}</p>
-            <p style="margin: 0 0 4px 0;"><strong>Type:</strong> ${orderType}</p>
-            <p style="margin: 0;"><strong>Status:</strong> <span style="color: ${jobFinished ? '#28a745' : '#6c757d'};">${jobFinished ? 'Completed' : 'In Progress'}</span></p>
-            ${isFallback ? '<p style="margin: 4px 0; color: #856404; font-size: 12px;"><i class="bi bi-info-circle"></i> Approximate location (postcode area)</small></p>' : ''}
+        <div class="marker-popup">
+            <h6>Order ${saleNumber}</h6>
+            <p><strong>Customer:</strong> ${customerName}</p>
+            <p><strong>Address:</strong> ${fullAddress}</p>
+            <p><strong>Type:</strong> ${orderType}</p>
+            <p><strong>Status:</strong> <span class="${statusClass}">${jobFinished ? 'Completed' : 'In Progress'}</span></p>
+            ${isFallback ? '<p class="approximate-location"><i class="bi bi-info-circle"></i> Approximate location (postcode area)</p>' : ''}
         </div>
     `;
 

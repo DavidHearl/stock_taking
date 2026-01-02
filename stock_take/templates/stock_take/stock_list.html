@@ -14,10 +14,15 @@
 
 <!-- Page Header -->
 <div class="page-header">
-    <h1>Stock Management</h1>
-    <button type="button" class="btn btn-primary" onclick="openModal('importModal')">
-        📤 Import CSV
-    </button>
+    <h1>Stock Management {% if query_time %}<small style="font-size: 0.5em; color: #6c757d;">Loaded in {{ query_time }}s</small>{% endif %}</h1>
+    <div class="btn-group-inline">
+        <button type="button" id="updateItemsBtn" class="btn btn-success" onclick="saveAllTrackingChanges()" style="display: none;">
+            <i class="bi bi-save"></i> Update Items <span id="changesCount" class="badge badge-light">0</span>
+        </button>
+        <button type="button" class="btn btn-primary" onclick="openModal('importModal')">
+            📤 Import CSV
+        </button>
+    </div>
 </div>
 
 <!-- Recent Import Alert -->
@@ -56,10 +61,10 @@
         <div class="stats-icon">✗</div>
     </div>
     
-    <div class="stats-card stats-card-info">
+    <div class="stats-card stats-card-primary">
         <div class="stats-content">
             <div class="stats-label">Non-Stock</div>
-            <div class="stats-number" id="non-stock-count">0</div>
+            <div class="stats-number" id="non-stock-count">{{ non_stock_count }}</div>
         </div>
         <div class="stats-icon"><i class="bi bi-box-seam"></i></div>
     </div>
@@ -75,7 +80,14 @@
 <!-- Filters -->
 <div class="card">
     <div class="card-header">
-        <i class="bi bi-funnel"></i> Filters
+        <i class="bi bi-funnel"></i>
+        <span>Filters</span>
+        <div class="form-group form-actions">
+            <div class="btn-group-inline">
+                <a href="{% url 'stock_list' %}" class="btn btn-secondary">Clear</a>
+                <button type="submit" class="btn btn-primary">Filter</button>
+            </div>
+        </div>
     </div>
     <div class="card-body">
         <form method="get" class="filter-form">
@@ -96,7 +108,7 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="form-group">
+                <!-- <div class="form-group">
                     <label for="stock_take_group">Stock Take Group</label>
                     <select id="stock_take_group" name="stock_take_group">
                         <option value="">All Groups</option>
@@ -106,13 +118,15 @@
                             </option>
                         {% endfor %}
                     </select>
-                </div>
-                <div class="form-group form-actions">
-                    <label>&nbsp;</label>
-                    <div class="btn-group-inline">
-                        <button type="submit" class="btn btn-primary">Filter</button>
-                        <a href="{% url 'stock_list' %}" class="btn btn-secondary">Clear</a>
-                    </div>
+                </div> -->
+                <div class="form-group">
+                    <label for="tracking_type">Tracking Type</label>
+                    <select id="tracking_type" name="tracking_type">
+                        <option value="">All Types</option>
+                        <option value="stock" {% if current_filters.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                        <option value="non-stock" {% if current_filters.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                        <option value="not-classified" {% if current_filters.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                    </select>
                 </div>
             </div>
         </form>
@@ -143,7 +157,9 @@
             </button>
             <button class="tab-button" onclick="switchTab('non-stock')">
                 <i class="bi bi-box-seam"></i> Non-Stock
-                <span class="badge badge-info" id="non-stock-tab-count">0</span>
+                {% if non_stock_count %}
+                    <span class="badge badge-info" id="non-stock-tab-count">{{ non_stock_count }}</span>
+                {% endif %}
             </button>
         </div>
 
@@ -158,6 +174,7 @@
                                 <th>Name</th>
                                 <th>Cost</th>
                                 <th>Category</th>
+                                <th>Tracking</th>
                                 <th>Qty</th>
                                 <th>Value</th>
                             </tr>
@@ -177,6 +194,13 @@
                                         <span class="uncategorized">{{ item.category_name|default:"Uncategorized" }}</span>
                                     {% endif %}
                                 </td>
+                                <td>
+                                    <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}" >
+                                        <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                                        <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                                        <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                                    </select>
+                                </td>
                                 <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
                                 <td class="text-right currency">£{{ item.total_value|floatformat:2 }}</td>
                             </tr>
@@ -186,7 +210,10 @@
                 {% else %}
                     <div class="empty-state">
                         <div class="empty-icon">✓</div>
-                        <p>All items are in stock!</p>
+                        <p>No items with 10+ quantity found.</p>
+                        {% if non_stock_items %}
+                            <p class="text-muted">Some items matching your filter are in the Non-Stock tab.</p>
+                        {% endif %}
                     </div>
                 {% endif %}
             </div>
@@ -201,6 +228,7 @@
                                 <th>Name</th>
                                 <th>Cost</th>
                                 <th>Category</th>
+                                <th>Tracking</th>
                                 <th>Qty</th>
                                 <th>Value</th>
                             </tr>
@@ -220,6 +248,13 @@
                                         <span class="uncategorized">{{ item.category_name|default:"Uncategorized" }}</span>
                                     {% endif %}
                                 </td>
+                                <td>
+                                    <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}" >
+                                        <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                                        <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                                        <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                                    </select>
+                                </td>
                                 <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
                                 <td class="text-right currency">£{{ item.total_value|floatformat:2 }}</td>
                             </tr>
@@ -229,7 +264,10 @@
                 {% else %}
                     <div class="empty-state">
                         <div class="empty-icon">⚠</div>
-                        <p>No low stock items!</p>
+                        <p>No low stock items found.</p>
+                        {% if non_stock_items %}
+                            <p class="text-muted">Some items matching your filter are in the Non-Stock tab.</p>
+                        {% endif %}
                     </div>
                 {% endif %}
             </div>
@@ -244,6 +282,7 @@
                                 <th>Name</th>
                                 <th>Cost</th>
                                 <th>Category</th>
+                                <th>Tracking</th>
                                 <th>Qty</th>
                                 <th>Value</th>
                             </tr>
@@ -263,6 +302,13 @@
                                         <span class="uncategorized">{{ item.category_name|default:"Uncategorized" }}</span>
                                     {% endif %}
                                 </td>
+                                <td>
+                                    <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}" >
+                                        <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                                        <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                                        <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                                    </select>
+                                </td>
                                 <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
                                 <td class="text-right currency">£{{ item.total_value|floatformat:2 }}</td>
                             </tr>
@@ -272,24 +318,70 @@
                 {% else %}
                     <div class="empty-state">
                         <div class="empty-icon">✗</div>
-                        <p>No out of stock items!</p>
+                        <p>No out of stock items found.</p>
+                        {% if non_stock_items %}
+                            <p class="text-muted">Some items matching your filter are in the Non-Stock tab.</p>
+                        {% endif %}
                     </div>
                 {% endif %}
             </div>
 
             <!-- Non-Stock Tab -->
             <div class="tab-panel" id="non-stock">
-                <div class="empty-state">
-                    <div class="empty-icon"><i class="bi bi-inbox"></i></div>
-                    <p>Non-stock items feature coming soon!</p>
-                </div>
+                {% if non_stock_items %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Cost</th>
+                                <th>Category</th>
+                                <th>Tracking</th>
+                                <th>Qty</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in non_stock_items %}
+                            <tr>
+                                <td class="sku-cell" data-field="sku" data-id="{{ item.id }}">{{ item.sku }}</td>
+                                <td data-field="name" data-id="{{ item.id }}">{{ item.name }}</td>
+                                <td class="text-right currency" data-field="cost" data-id="{{ item.id }}">£{{ item.cost|floatformat:2 }}</td>
+                                <td>
+                                    {% if item.category %}
+                                        <span class="category-badge" style="background-color: {{ item.category.color }};">
+                                            {{ item.category.name }}
+                                        </span>
+                                    {% else %}
+                                        <span class="uncategorized">{{ item.category_name|default:"Uncategorized" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}" >
+                                        <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                                        <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                                        <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                                    </select>
+                                </td>
+                                <td class="text-center" data-field="quantity" data-id="{{ item.id }}">{{ item.quantity }}</td>
+                                <td class="text-right currency">£{{ item.total_value|floatformat:2 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-state">
+                        <div class="empty-icon"><i class="bi bi-inbox"></i></div>
+                        <p>No non-stock items found. Use the tracking dropdown to classify items as non-stock.</p>
+                    </div>
+                {% endif %}
             </div>
         </div>
     </div>
 </div>
 
 <!-- Empty State -->
-{% if not in_stock_items and not low_stock_items and not zero_quantity_items %}
+{% if not in_stock_items and not low_stock_items and not zero_quantity_items and not non_stock_items %}
 <div class="empty-state-large">
     <div class="empty-icon">📦</div>
     <h3>No Items Found</h3>
@@ -359,6 +451,106 @@
 
 {% block extra_js %}
 <script>
+// Track pending tracking type changes
+const pendingChanges = new Map();
+
+// Track when a tracking type dropdown changes
+function trackChange(selectElement) {
+    const itemId = selectElement.getAttribute('data-id');
+    const originalValue = selectElement.getAttribute('data-original');
+    const newValue = selectElement.value;
+    
+    if (originalValue !== newValue) {
+        // Mark as changed
+        pendingChanges.set(itemId, newValue);
+        selectElement.style.borderColor = '#ffc107';
+        selectElement.style.borderWidth = '2px';
+    } else {
+        // Revert to original
+        pendingChanges.delete(itemId);
+        selectElement.style.borderColor = '';
+        selectElement.style.borderWidth = '';
+    }
+    
+    // Update button visibility and count
+    updateSaveButton();
+}
+
+// Update the save button visibility and count
+function updateSaveButton() {
+    const btn = document.getElementById('updateItemsBtn');
+    const countBadge = document.getElementById('changesCount');
+    
+    if (pendingChanges.size > 0) {
+        btn.style.display = 'inline-block';
+        countBadge.textContent = pendingChanges.size;
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+// Save all tracking type changes
+function saveAllTrackingChanges() {
+    if (pendingChanges.size === 0) return;
+    
+    const btn = document.getElementById('updateItemsBtn');
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    // Disable button and show loading state
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+    
+    // Create array of promises for all updates
+    const updatePromises = Array.from(pendingChanges.entries()).map(([itemId, trackingType]) => {
+        return fetch(`/update/${itemId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': csrfToken
+            },
+            body: `tracking_type=${encodeURIComponent(trackingType)}&csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}`
+        });
+    });
+    
+    // Wait for all updates to complete
+    Promise.all(updatePromises)
+        .then(responses => {
+            const allSuccessful = responses.every(r => r.ok);
+            
+            if (allSuccessful) {
+                // Show success notification
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+                alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                alertDiv.innerHTML = `
+                    <i class="bi bi-check-circle"></i> ${pendingChanges.size} item(s) updated successfully! Reloading...
+                    <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+                `;
+                document.body.appendChild(alertDiv);
+                
+                // Reload page to reflect changes
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                throw new Error('Some updates failed');
+            }
+        })
+        .catch(error => {
+            // Show error notification
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+            alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            alertDiv.innerHTML = `
+                <i class="bi bi-exclamation-triangle"></i> Error updating items. Please try again.
+                <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            
+            // Re-enable button
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-save"></i> Update Items <span id="changesCount" class="badge badge-light">' + pendingChanges.size + '</span>';
+        });
+}
+
 // Tab switching functionality
 function switchTab(tabId) {
     // Hide all tab panels
@@ -378,22 +570,66 @@ function switchTab(tabId) {
     event.target.closest('.tab-button').classList.add('active');
 }
 
-// Update tab counts based on visible filtered items
-function updateTabCounts() {
-    const inStockRows = document.querySelectorAll('#in-stock tbody tr').length;
-    const lowStockRows = document.querySelectorAll('#low-stock tbody tr').length;
-    const outOfStockRows = document.querySelectorAll('#out-of-stock tbody tr').length;
-    const nonStockRows = document.querySelectorAll('#non-stock tbody tr').length;
+// Update stats based on visible items after filtering
+function updateStats() {
+    // Count visible items in each tab
+    const inStockCount = document.querySelectorAll('#in-stock tbody tr').length;
+    const lowStockCount = document.querySelectorAll('#low-stock tbody tr').length;
+    const outOfStockCount = document.querySelectorAll('#out-of-stock tbody tr').length;
+    const nonStockCount = document.querySelectorAll('#non-stock tbody tr').length;
     
-    document.getElementById('in-stock-tab-count').textContent = inStockRows;
-    document.getElementById('low-stock-tab-count').textContent = lowStockRows;
-    document.getElementById('out-of-stock-tab-count').textContent = outOfStockRows;
-    document.getElementById('non-stock-tab-count').textContent = nonStockRows;
+    // Update stats cards
+    document.getElementById('in-stock-count').textContent = inStockCount;
+    document.getElementById('low-stock-count').textContent = lowStockCount;
+    document.getElementById('out-of-stock-count').textContent = outOfStockCount;
+    document.getElementById('non-stock-count').textContent = nonStockCount;
+    
+    // Update tab badges
+    const inStockBadge = document.getElementById('in-stock-tab-count');
+    const lowStockBadge = document.getElementById('low-stock-tab-count');
+    const outOfStockBadge = document.getElementById('out-of-stock-tab-count');
+    const nonStockBadge = document.getElementById('non-stock-tab-count');
+    
+    if (inStockBadge) inStockBadge.textContent = inStockCount;
+    if (lowStockBadge) lowStockBadge.textContent = lowStockCount;
+    if (outOfStockBadge) outOfStockBadge.textContent = outOfStockCount;
+    if (nonStockBadge) nonStockBadge.textContent = nonStockCount;
+    
+    // Calculate total value from visible items
+    let totalValue = 0;
+    document.querySelectorAll('.tab-panel tbody tr').forEach(row => {
+        const valueCell = row.querySelector('.currency:last-child');
+        if (valueCell) {
+            const value = parseFloat(valueCell.textContent.replace('£', '').replace(',', ''));
+            if (!isNaN(value)) {
+                totalValue += value;
+            }
+        }
+    });
+    
+    document.getElementById('total-value').textContent = '£' + totalValue.toFixed(2);
 }
 
-// Update counts on page load
+// Update counts on page load and convert tracking selects to manual save mode
 document.addEventListener('DOMContentLoaded', function() {
-    updateTabCounts();
+    // Convert all tracking selects to use trackChange instead of updateTrackingType
+    document.querySelectorAll('.tracking-select').forEach(select => {
+        // Store original value
+        select.setAttribute('data-original', select.value);
+        // Add change event listener
+        select.addEventListener('change', function() {
+            trackChange(this);
+        });
+    });
+    
+    // Update stats initially
+    updateStats();
+    
+    // Watch for filter form submission
+    const filterForm = document.querySelector('.filter-form');
+    if (filterForm) {
+        // Stats will update on page reload after filter submit
+    }
 });
 </script>
 {% endblock %}

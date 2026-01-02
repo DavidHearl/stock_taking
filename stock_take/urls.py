@@ -12,6 +12,7 @@ urlpatterns = [
     # Import management
     path('import-history/', views.import_history, name='import_history'),
     path('import/delete/<int:import_id>/', views.delete_import, name='delete_import'),
+    path('review-orphaned-items/', views.review_orphaned_items, name='review_orphaned_items'),
     
     # Category management
     path('categories/', views.category_list, name='category_list'),
@@ -44,6 +45,8 @@ urlpatterns = [
     path('ordering/', views.ordering, name='ordering'),
     path('search/', views.search_orders, name='search_orders'),
     path('material-report/', views.material_report, name='material_report'),
+    path('material-shortage/', views.material_shortage, name='material_shortage'),
+    path('raumplus-storage/', views.raumplus_storage, name='raumplus_storage'),
     path('substitutions/', views.substitutions, name='substitutions'),
     path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),
     path('substitution/edit/<int:substitution_id>/', views.edit_substitution, name='edit_substitution'),
@@ -66,6 +69,10 @@ urlpatterns = [
     path('skip-item/delete/<int:skip_item_id>/', views.delete_skip_item, name='delete_skip_item'),
     path('boards-summary/', views.boards_summary, name='boards_summary'),
     path('os-doors-summary/', views.os_doors_summary, name='os_doors_summary'),
+    
+    # Stock items manager
+    path('stock-items-manager/', views.stock_items_manager, name='stock_items_manager'),
+    path('stock-items/update-batch/', views.update_stock_items_batch, name='update_stock_items_batch'),
     
     # Map page
     path('map/', views.map_view, name='map'),

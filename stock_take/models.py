@@ -277,17 +277,31 @@ class StockTakeGroup(models.Model):
 
 
 class StockItem(models.Model):
-    sku = models.CharField(max_length=100)
-    name = models.CharField(max_length=200)
+    TRACKING_CHOICES = [
+        ('stock', 'Stock'),
+        ('non-stock', 'Non-Stock'),
+        ('not-classified', 'Not-Classified'),
+    ]
+
+    sku = models.CharField(max_length=100, db_index=True)
+    name = models.CharField(max_length=200, db_index=True)
     cost = models.DecimalField(max_digits=10, decimal_places=2)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     stock_take_group = models.ForeignKey(StockTakeGroup, on_delete=models.SET_NULL, 
                                        null=True, blank=True, related_name='stock_items')
     category_name = models.CharField(max_length=100, blank=True)  # For CSV compatibility
     location = models.CharField(max_length=100)
-    quantity = models.IntegerField()
+    quantity = models.IntegerField(db_index=True)
     serial_or_batch = models.CharField(max_length=100, blank=True, null=True)
     last_checked = models.DateTimeField(null=True, blank=True)
+    tracking_type = models.CharField(max_length=30, choices=TRACKING_CHOICES, default='not-classified', db_index=True)
+    min_order_qty = models.IntegerField(blank=True, null=True)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['tracking_type', 'quantity']),
+            models.Index(fields=['category', 'tracking_type']),
+        ]
     
     @property
     def total_value(self):
