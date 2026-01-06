@@ -318,6 +318,81 @@ class StockItem(models.Model):
         return f"{self.sku} - {self.name}"
 
 
+class Remedial(models.Model):
+    """Remedial work orders linked to original orders"""
+    original_order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='remedials')
+    remedial_number = models.CharField(max_length=20, unique=True, help_text='Unique remedial reference number')
+    reason = models.TextField(help_text='Reason for remedial work')
+    notes = models.TextField(blank=True, help_text='Additional notes')
+    
+    # Order details (can override original order details)
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    customer_number = models.CharField(max_length=6)
+    address = models.CharField(max_length=255, blank=True)
+    postcode = models.CharField(max_length=20, blank=True)
+    
+    # Scheduling
+    created_date = models.DateField(auto_now_add=True)
+    scheduled_date = models.DateField(null=True, blank=True, help_text='Date remedial work is scheduled')
+    completed_date = models.DateField(null=True, blank=True, help_text='Date remedial was completed')
+    
+    # Materials
+    boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='remedials')
+    os_doors_required = models.BooleanField(default=False)
+    os_doors_po = models.CharField(max_length=50, blank=True)
+    
+    # Status
+    is_completed = models.BooleanField(default=False)
+    all_items_ordered = models.BooleanField(default=False)
+    
+    # External IDs
+    anthill_id = models.CharField(max_length=20, blank=True)
+    workguru_id = models.CharField(max_length=20, blank=True)
+    
+    class Meta:
+        ordering = ['-created_date']
+    
+    def __str__(self):
+        return f"{self.remedial_number} - {self.first_name} {self.last_name}"
+    
+    @property
+    def days_since_created(self):
+        """Calculate days since remedial was created"""
+        if self.created_date:
+            return (timezone.now().date() - self.created_date).days
+        return 0
+    
+    @property
+    def is_overdue(self):
+        """Check if scheduled date has passed and not completed"""
+        if self.scheduled_date and not self.is_completed:
+            return timezone.now().date() > self.scheduled_date
+        return False
+
+
+class RemedialAccessory(models.Model):
+    """Accessories needed for remedial work"""
+    remedial = models.ForeignKey(Remedial, on_delete=models.CASCADE, related_name='accessories')
+    sku = models.CharField(max_length=100)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    stock_item = models.ForeignKey(StockItem, on_delete=models.SET_NULL, null=True, blank=True)
+    ordered = models.BooleanField(default=False)
+    received = models.BooleanField(default=False)
+    
+    def __str__(self):
+        return f"{self.sku} - {self.name} (Remedial: {self.remedial.remedial_number})"
+    
+    @property
+    def available_quantity(self):
+        """Get available quantity from linked stock item"""
+        if self.stock_item:
+            return self.stock_item.quantity
+        return 0
+
+
 class Schedule(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),

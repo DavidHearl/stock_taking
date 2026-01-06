@@ -43,6 +43,8 @@ urlpatterns = [
     
     # Ordering page
     path('ordering/', views.ordering, name='ordering'),
+    path('ordering/load-order-details/<str:sale_number>/', views.load_order_details_ajax, name='load_order_details_ajax'),
+    path('ordering/load-indicators/', views.load_order_indicators_ajax, name='load_order_indicators_ajax'),
     path('search/', views.search_orders, name='search_orders'),
     path('material-report/', views.material_report, name='material_report'),
     path('material-shortage/', views.material_shortage, name='material_shortage'),
@@ -69,6 +71,8 @@ urlpatterns = [
     path('skip-item/delete/<int:skip_item_id>/', views.delete_skip_item, name='delete_skip_item'),
     path('boards-summary/', views.boards_summary, name='boards_summary'),
     path('os-doors-summary/', views.os_doors_summary, name='os_doors_summary'),
+    path('remedials/', views.remedials, name='remedials'),
+    path('remedial-report/', views.remedial_report, name='remedial_report'),
     
     # Stock items manager
     path('stock-items-manager/', views.stock_items_manager, name='stock_items_manager'),

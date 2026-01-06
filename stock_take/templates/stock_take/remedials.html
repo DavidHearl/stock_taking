@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Remedials{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
+<link href="{% static 'css/remedials.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="remedials-container">
+    <div class="remedials-header">
+        <h1>Remedial Orders</h1>
+        <a href="{% url 'remedial_report' %}" class="btn btn-secondary">
+            <i class="bi bi-file-text"></i> View Report
+        </a>
+    </div>
+
+    <!-- Create New Remedial Section -->
+    <div class="create-remedial-section">
+        <h3>Create New Remedial</h3>
+        <form method="post" class="remedial-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="original_order_id">Select Original Order:</label>
+                <select name="original_order_id" id="original_order_id" required>
+                    <option value="">-- Select an order --</option>
+                    {% for order in available_orders %}
+                    <option class="order-value" value="{{ order.id }}">
+                        {{ order.sale_number }} - {{ order.first_name }} {{ order.last_name }} ({{ order.order_date }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="remedial_notes">Notes (Optional):</label>
+                <textarea name="remedial_notes" id="remedial_notes" placeholder="Enter any notes about this remedial..."></textarea>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Create Remedial</button>
+        </form>
+    </div>
+
+    <!-- Search Box -->
+    <div class="search-box">
+        <input type="text" id="remedialSearch" placeholder="🔍 Search remedial orders...">
+    </div>
+
+    <!-- Remedial Orders List -->
+    <div class="card">
+        <table class="table orders-table" id="remedial-table">
+            <thead>
+                <tr>
+                    <th>Remedial #</th>
+                    <th>Original Order</th>
+                    <th>Customer</th>
+                    <th>Customer #</th>
+                    <th>Created Date</th>
+                    <th>Scheduled Date</th>
+                    <th>Boards PO</th>
+                    <th>Status</th>
+                    <th>Days Open</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for remedial in remedial_orders %}
+                <tr class="remedial-row">
+                    <td><span class="remedial-badge">{{ remedial.remedial_number }}</span></td>
+                    <td>{{ remedial.original_order.sale_number }}</td>
+                    <td>{{ remedial.first_name }} {{ remedial.last_name }}</td>
+                    <td>{{ remedial.customer_number }}</td>
+                    <td>{{ remedial.created_date }}</td>
+                    <td>
+                        {% if remedial.scheduled_date %}
+                            {{ remedial.scheduled_date }}
+                        {% else %}
+                            <span class="text-muted">Not scheduled</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if remedial.boards_po %}
+                            {{ remedial.boards_po.po_number }}
+                            {% if remedial.boards_po.boards_ordered %}
+                                <span class="status-icon success" title="Ordered">✓</span>
+                            {% else %}
+                                <span class="status-icon danger" title="Not Ordered">✗</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted">Not assigned</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if remedial.is_completed %}
+                            <span class="badge badge-success">Completed</span>
+                        {% else %}
+                            <span class="badge badge-warning">In Progress</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ remedial.days_since_created }}</td>
+                    <td>
+                        <a href="{% url 'order_details' remedial.original_order.id %}" class="btn btn-sm btn-primary">View Order</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 40px;">
+                        <p class="text-muted">No remedial orders found. Create one above.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Search functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('remedialSearch');
+        const tableBody = document.querySelector('#remedial-table tbody');
+        
+        searchInput.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase();
+            const rows = tableBody.querySelectorAll('tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                const shouldShow = text.includes(searchTerm);
+                row.style.display = shouldShow ? '' : 'none';
+            });
+        });
+    });
+</script>
+{% endblock %}

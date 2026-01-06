@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory
 
 import csv
 import io
@@ -62,23 +62,21 @@ def ordering(request):
         ordering = ['job_finished', f'-{order_field}', models.F('boards_po__po_number').asc(nulls_last=True)]
     
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by selected field
-    orders = Order.objects.all().order_by(*ordering)
-    boards_pos = BoardsPO.objects.all().order_by('po_number')
+    # OPTIMIZATION: Don't load PNX items upfront - they'll be loaded via AJAX when row is clicked
+    # OPTIMIZATION: Removed prefetch and annotations - will lazy load indicators via AJAX
+    from django.db.models import Exists, OuterRef, Q
+    
+    orders = Order.objects.select_related('boards_po').all().order_by(*ordering)
+    
+    # OPTIMIZATION: Don't load BoardsPO details upfront - only load basic list for the edit section
+    # Annotate with orders count to avoid per-row queries
+    boards_pos = BoardsPO.objects.only('id', 'po_number', 'file', 'boards_ordered').annotate(
+        orders_count=Count('orders')
+    ).order_by('po_number')
+    
     form = OrderForm(request.POST or None, initial={'order_type': 'sale'})
     po_form = BoardsPOForm()
     accessories_csv_form = AccessoryCSVForm()
-    
-    # Add PNX items to each order object for template access
-    for order in orders:
-        if order.boards_po:
-            order.order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
-            # Calculate cost for each item and total
-            for item in order.order_pnx_items:
-                item.calculated_cost = item.get_cost(price_per_sqm)
-            order.pnx_total_cost = sum(item.calculated_cost for item in order.order_pnx_items)
-        else:
-            order.order_pnx_items = []
-            order.pnx_total_cost = 0
     
     if request.method == 'POST' and form.is_valid():
         form.save()
@@ -94,6 +92,71 @@ def ordering(request):
         'current_sort': sort_by,
         'current_order': sort_order,
     })
+
+@login_required
+def load_order_details_ajax(request, sale_number):
+    """AJAX endpoint to load order details on demand"""
+    from django.http import JsonResponse
+    from django.template.loader import render_to_string
+    
+    # Get price per square meter from session
+    price_per_sqm_str = request.session.get('price_per_sqm', '12')
+    price_per_sqm = float(price_per_sqm_str)
+    
+    try:
+        order = Order.objects.select_related('boards_po').prefetch_related(
+            'accessories__stock_item',
+            'boards_po__pnx_items',
+            'os_doors'
+        ).get(sale_number=sale_number)
+        
+        # Load PNX items if boards_po exists
+        if order.boards_po:
+            order.order_pnx_items = list(order.boards_po.pnx_items.filter(customer__icontains=order.sale_number))
+            # Calculate cost for each item and total
+            for item in order.order_pnx_items:
+                item.calculated_cost = item.get_cost(price_per_sqm)
+            order.pnx_total_cost = sum(item.calculated_cost for item in order.order_pnx_items)
+        else:
+            order.order_pnx_items = []
+            order.pnx_total_cost = 0
+        
+        # Render the detail row HTML
+        html = render_to_string('stock_take/partials/order_detail_row.html', {
+            'order': order,
+            'price_per_sqm': price_per_sqm
+        })
+        
+        return JsonResponse({'success': True, 'html': html})
+    except Order.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Order not found'})
+
+@login_required
+def load_order_indicators_ajax(request):
+    """AJAX endpoint to load order indicators (has_missing, has_accessories, has_remedials) in background"""
+    from django.http import JsonResponse
+    from django.db.models import Exists, OuterRef
+    
+    sale_numbers = request.GET.get('sale_numbers', '').split(',')
+    if not sale_numbers or sale_numbers == ['']:
+        return JsonResponse({'success': False, 'error': 'No sale numbers provided'})
+    
+    # Get indicators for all requested orders in one query
+    orders = Order.objects.filter(sale_number__in=sale_numbers).annotate(
+        has_missing=Exists(
+            Accessory.objects.filter(order_id=OuterRef('pk'), missing=True)
+        ),
+        has_accessories=Exists(
+            Accessory.objects.filter(order_id=OuterRef('pk'))
+        ),
+        has_remedials=Exists(
+            Remedial.objects.filter(original_order_id=OuterRef('pk'))
+        )
+    ).values('sale_number', 'has_missing', 'has_accessories', 'has_remedials')
+    
+    indicators = {order['sale_number']: order for order in orders}
+    
+    return JsonResponse({'success': True, 'indicators': indicators})
 
 @login_required
 def search_orders(request):
@@ -356,10 +419,12 @@ def material_shortage(request):
     
     today = timezone.now().date()
     
-    # Get upcoming orders (not completed, fit date in the future)
+    # Get upcoming orders with prefetched accessories and stock items (OPTIMIZATION)
     upcoming_orders = Order.objects.filter(
         job_finished=False,
         fit_date__gte=today
+    ).prefetch_related(
+        'accessories__stock_item'
     ).order_by('fit_date')
     
     # Calculate material requirements for upcoming orders
@@ -369,7 +434,8 @@ def material_shortage(request):
         'required_qty': 0,
         'current_stock': 0,
         'shortage': 0,
-        'orders': []
+        'orders': [],
+        'is_stock': True  # Default to stock item
     })
     
     # Process accessories from upcoming orders (exclude RAU items)
@@ -385,6 +451,8 @@ def material_shortage(request):
                 upcoming_requirements[key]['sku'] = accessory.sku
                 if accessory.stock_item:
                     upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
+                    # Check if this is a non-stock item
+                    upcoming_requirements[key]['is_stock'] = accessory.stock_item.tracking_type == 'stock'
             
             upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
             upcoming_requirements[key]['orders'].append({
@@ -397,15 +465,22 @@ def material_shortage(request):
     for key, data in upcoming_requirements.items():
         data['shortage'] = max(0, data['required_qty'] - data['current_stock'])
     
-    # Historical usage analysis - Recent (last 3 months)
+    # Historical usage analysis - Recent (last 3 months) - OPTIMIZED
     three_months_ago = today - timedelta(days=90)
     recent_orders = Order.objects.filter(
+        job_finished=False,
         order_date__gte=three_months_ago,
         order_date__lte=today
+    ).prefetch_related(
+        'accessories__stock_item'
     )
     
-    # Historical usage analysis - All time
-    all_time_orders = Order.objects.all()
+    # Historical usage analysis - All time - OPTIMIZED
+    all_time_orders = Order.objects.filter(
+        job_finished=False
+    ).prefetch_related(
+        'accessories__stock_item'
+    ).all()
     
     # Calculate all-time usage for baseline
     all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
@@ -437,7 +512,8 @@ def material_shortage(request):
         'predicted_2month': 0,
         'current_stock': 0,
         'predicted_shortage': 0,
-        'order_count': 0
+        'order_count': 0,
+        'is_stock': True  # Default to stock item
     })
     
     for order in recent_orders:
@@ -452,6 +528,8 @@ def material_shortage(request):
                 historical_usage[key]['sku'] = accessory.sku
                 if accessory.stock_item:
                     historical_usage[key]['current_stock'] = accessory.stock_item.quantity
+                    # Check if this is a non-stock item
+                    historical_usage[key]['is_stock'] = accessory.stock_item.tracking_type == 'stock'
             
             historical_usage[key]['total_used'] += float(accessory.quantity)
             historical_usage[key]['order_count'] += 1
@@ -483,7 +561,9 @@ def material_shortage(request):
     upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
     upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
     
-    predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] > 0]
+    # Filter predicted list to only include stock items with meaningful shortage (at least 1 unit)
+    predicted_list = [data for data in historical_usage.values() 
+                     if data['predicted_shortage'] >= 1 and data['is_stock']]
     predicted_list.sort(key=lambda x: x['predicted_shortage'], reverse=True)
     
     # Calculate totals
@@ -530,10 +610,17 @@ def material_shortage(request):
     })
 
 def round_to_min_order_qty(quantity, min_order_qty):
-    """Round up quantity to nearest multiple of minimum order quantity"""
+    """Round up quantity to nearest multiple of minimum order quantity
+    If min_order_qty is 1, round up to nearest 10 for cleaner ordering
+    """
     import math
     if not min_order_qty or min_order_qty <= 0:
         return quantity
+    
+    # For items with min_order_qty of 1, round to nearest 10
+    if min_order_qty == 1:
+        return math.ceil(quantity / 10) * 10
+    
     return math.ceil(quantity / min_order_qty) * min_order_qty
 
 @login_required
@@ -545,12 +632,16 @@ def raumplus_storage(request):
     from decimal import Decimal
     
     today = timezone.now().date()
-    MIN_ORDER_VALUE = Decimal('5000.00')  # £5000 minimum order for free shipping
+    MIN_ORDER_VALUE = Decimal('5000.00')  # £5000 minimum order for free shipping (inc VAT)
+    MIN_LINE_COST = Decimal('100.00')  # £100 minimum per line item
+    VAT_RATE = Decimal('1.20')  # 20% VAT
     
-    # Get upcoming orders (not completed, fit date in the future)
+    # Get upcoming orders with prefetched accessories and stock items (OPTIMIZATION)
     upcoming_orders = Order.objects.filter(
         job_finished=False,
         fit_date__gte=today
+    ).prefetch_related(
+        'accessories__stock_item'
     ).order_by('fit_date')
     
     # Calculate material requirements for upcoming orders (RAU items only)
@@ -591,15 +682,19 @@ def raumplus_storage(request):
         data['shortage'] = max(0, data['required_qty'] - data['current_stock'])
         data['line_cost'] = Decimal(str(data['shortage'])) * data['cost']
     
-    # Historical usage analysis - Recent (last 3 months, RAU items only)
+    # Historical usage analysis - Recent (last 3 months, RAU items only) - OPTIMIZED
     three_months_ago = today - timedelta(days=90)
     recent_orders = Order.objects.filter(
         order_date__gte=three_months_ago,
         order_date__lte=today
+    ).prefetch_related(
+        'accessories__stock_item'
     )
     
-    # Historical usage analysis - All time (RAU items only)
-    all_time_orders = Order.objects.all()
+    # Historical usage analysis - All time (RAU items only) - OPTIMIZED
+    all_time_orders = Order.objects.prefetch_related(
+        'accessories__stock_item'
+    ).all()
     
     # Calculate all-time usage for baseline
     all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
@@ -670,10 +765,17 @@ def raumplus_storage(request):
             data['all_time_monthly_avg'] = recent_monthly_avg
             data['weighted_monthly_avg'] = recent_monthly_avg
         
-        # Predicted usage for next 4 months using weighted average
-        data['predicted_4month'] = data['weighted_monthly_avg'] * 4
-        # Predicted shortage
-        data['predicted_shortage'] = max(0, data['predicted_4month'] - data['current_stock'])
+        # Predicted usage for next 4 months using weighted average with 20% buffer
+        data['predicted_4month'] = data['weighted_monthly_avg'] * 4 * 1.2  # Add 20% buffer
+        
+        # Special handling for 4mm gasket - maintain target stock of 800
+        if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
+            target_stock = 800
+            data['predicted_shortage'] = max(0, max(data['predicted_4month'], target_stock) - data['current_stock'])
+        else:
+            # Predicted shortage with buffer
+            data['predicted_shortage'] = max(0, data['predicted_4month'] - data['current_stock'])
+        
         data['line_cost'] = Decimal(str(data['predicted_shortage'])) * data['cost']
     
     # Convert to lists and sort by shortage
@@ -710,13 +812,17 @@ def raumplus_storage(request):
     upcoming_skus = {item['sku'] for item in upcoming_list}
     from stock_take.models import StockItem
     
+    # OPTIMIZATION: Fetch all needed stock items in one query
+    critical_skus_list = [item['sku'] for item in predicted_list if item['sku'] in upcoming_skus]
+    stock_items_dict = {si.sku: si for si in StockItem.objects.filter(sku__in=critical_skus_list)}
+    
     for item in predicted_list:
         if item['sku'] in upcoming_skus:
             # Find the corresponding upcoming item
             upcoming_item = next((u for u in upcoming_list if u['sku'] == item['sku']), None)
             if upcoming_item:
-                # Get stock item for min_order_qty
-                stock_item = StockItem.objects.filter(sku=item['sku']).first()
+                # Get stock item for min_order_qty from pre-fetched dict
+                stock_item = stock_items_dict.get(item['sku'])
                 min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
                 
                 total_shortage = upcoming_item['shortage'] + item['predicted_shortage']
@@ -728,6 +834,14 @@ def raumplus_storage(request):
                 else:
                     order_qty = round_to_min_order_qty(total_shortage, min_order_qty)
                 
+                # Ensure minimum line cost of 100 pounds
+                line_cost = Decimal(str(order_qty)) * item['cost']
+                if line_cost < MIN_LINE_COST and item['cost'] > 0:
+                    min_qty_for_cost = int((MIN_LINE_COST / item['cost']).to_integral_value() + 1)
+                    order_qty = max(order_qty, min_qty_for_cost)
+                    order_qty = round_to_min_order_qty(order_qty, min_order_qty)
+                    line_cost = Decimal(str(order_qty)) * item['cost']
+                
                 critical_items.append({
                     'sku': item['sku'],
                     'name': item['name'],
@@ -738,7 +852,7 @@ def raumplus_storage(request):
                     'min_order_qty': min_order_qty,
                     'order_qty': order_qty,
                     'cost': item['cost'],
-                    'line_cost': Decimal(str(order_qty)) * item['cost'],
+                    'line_cost': line_cost,
                     'is_style': is_style
                 })
     
@@ -750,11 +864,15 @@ def raumplus_storage(request):
     critical_total_cost = sum(item['line_cost'] for item in critical_items)
     predicted_total_cost = sum(item['line_cost'] for item in predicted_list)
     
+    # OPTIMIZATION: Fetch all predicted stock items in one query
+    predicted_skus_list = [item['sku'] for item in predicted_list if item['sku'] not in upcoming_skus]
+    predicted_stock_items_dict = {si.sku: si for si in StockItem.objects.filter(sku__in=predicted_skus_list)}
+    
     # Calculate items only in predicted (not in critical) with min order qty
     predicted_only_list = []
     for item in predicted_list:
         if item['sku'] not in upcoming_skus:
-            stock_item = StockItem.objects.filter(sku=item['sku']).first()
+            stock_item = predicted_stock_items_dict.get(item['sku'])
             min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
             
             # For style items, add buffer to ensure 8 remain in stock
@@ -764,11 +882,19 @@ def raumplus_storage(request):
             else:
                 order_qty = round_to_min_order_qty(item['predicted_shortage'], min_order_qty)
             
+            # Ensure minimum line cost of 100 pounds
+            line_cost = Decimal(str(order_qty)) * item['cost']
+            if line_cost < MIN_LINE_COST and item['cost'] > 0:
+                min_qty_for_cost = int((MIN_LINE_COST / item['cost']).to_integral_value() + 1)
+                order_qty = max(order_qty, min_qty_for_cost)
+                order_qty = round_to_min_order_qty(order_qty, min_order_qty)
+                line_cost = Decimal(str(order_qty)) * item['cost']
+            
             predicted_only_list.append({
                 **item,
                 'min_order_qty': min_order_qty,
                 'order_qty': order_qty,
-                'line_cost': Decimal(str(order_qty)) * item['cost'],
+                'line_cost': line_cost,
                 'is_style': is_style
             })
     
@@ -790,27 +916,39 @@ def raumplus_storage(request):
     style_stock_status = {}
     
     for prefix in style_prefixes:
-        # Get all items with this prefix that are RAU items
+        # Get all unique items (colors) with this prefix that are RAU items
         all_styles = StockItem.objects.filter(
             Q(sku__istartswith=prefix) & Q(sku__icontains='RAU')
         )
         
-        # Count how many are currently in stock (quantity > 0)
+        # Get all unique color variants (each unique SKU is a color)
+        total_variants = all_styles.count()
         in_stock_count = all_styles.filter(quantity__gt=0).count()
+        out_of_stock_count = total_variants - in_stock_count
+        
         style_stock_status[prefix] = {
             'in_stock': in_stock_count,
-            'needed': max(0, MIN_STYLES_PER_VARIANT - in_stock_count)
+            'out_of_stock': out_of_stock_count,
+            'total_variants': total_variants
         }
         
-        # If we need more styles, find out-of-stock items to suggest
-        if in_stock_count < MIN_STYLES_PER_VARIANT:
+        # Order any out-of-stock color variants to maintain all colors
+        if out_of_stock_count > 0:
             out_of_stock = all_styles.filter(quantity=0).exclude(
                 sku__in=[item['sku'] for item in critical_items + predicted_only_list]
-            )[:MIN_STYLES_PER_VARIANT - in_stock_count]
+            )
             
             for stock_item in out_of_stock:
                 min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
-                suggested_qty = max(min_order_qty, 1)  # Order at least 1 or min qty
+                
+                # Calculate quantity to meet minimum line cost
+                if stock_item.cost > 0:
+                    min_qty_for_cost = int((MIN_LINE_COST / stock_item.cost).to_integral_value() + 1)
+                    suggested_qty = max(min_order_qty, min_qty_for_cost)
+                    suggested_qty = round_to_min_order_qty(suggested_qty, min_order_qty)
+                else:
+                    suggested_qty = max(min_order_qty, 1)
+                
                 item_cost = Decimal(str(suggested_qty)) * stock_item.cost
                 
                 styles_to_order.append({
@@ -828,28 +966,86 @@ def raumplus_storage(request):
     
     # Add style items first
     suggested_items.extend(styles_to_order)
-    accumulated_value = sum(item['line_cost'] for item in styles_to_order)
+    accumulated_value = sum(item['line_cost'] * VAT_RATE for item in styles_to_order)
     
-    # Now check if we need more items to reach minimum order value
-    remaining_value = MIN_ORDER_VALUE - (current_order_value + accumulated_value)
+    # Now check if we need more items to reach minimum order value (inc VAT)
+    current_order_value_inc_vat = (critical_total_cost + predicted_only_cost) * VAT_RATE
+    remaining_value = MIN_ORDER_VALUE - (current_order_value_inc_vat + accumulated_value)
     
     if remaining_value > 0:
+        # Priority items that are always needed (higher weighting)
+        PRIORITY_KEYWORDS = {
+            'TOP ROLLER': 3.0,          # Triple priority
+            'BOTTOM ROLLER': 2.5,       # 2.5x priority
+            'FRAME SCREW': 2.5,         # 2.5x priority
+            'GASKET - 4MM': 2.0,        # Double priority - frequently used
+            'GASKET - 6MM': 0.5,        # Low priority - hardly used
+            'GASKET - 8MM': 0.5,        # Low priority - very rarely used
+        }
+        
+        # Items to exclude from suggestions (we have plenty)
+        EXCLUDE_KEYWORDS = [
+            'DUST BRUSH CLIP',
+            'DUST EXCLUDING BRUSH',
+        ]
+        
         # Get all RAU stock items that are not already in shortages or suggested styles
         all_rau_items = StockItem.objects.filter(
             sku__icontains='RAU'
         ).exclude(
             sku__in=[item['sku'] for item in critical_items + predicted_only_list + suggested_items]
-        ).order_by('-quantity')  # Prioritize items we have most of (frequently used)
+        )
         
+        # Filter out excluded items
+        filtered_items = []
         for stock_item in all_rau_items:
+            item_name_upper = stock_item.name.upper()
+            # Skip if matches any exclude keyword
+            if any(keyword in item_name_upper for keyword in EXCLUDE_KEYWORDS):
+                continue
+            
+            # Calculate priority score
+            priority_multiplier = 1.0
+            for keyword, multiplier in PRIORITY_KEYWORDS.items():
+                if keyword in item_name_upper:
+                    priority_multiplier = multiplier
+                    break
+            
+            # Calculate score: priority * quantity (items we use frequently get higher score)
+            score = stock_item.quantity * priority_multiplier
+            filtered_items.append((stock_item, score, priority_multiplier))
+        
+        # Sort by score (descending) - prioritizes frequently used items and priority items
+        filtered_items.sort(key=lambda x: x[1], reverse=True)
+        
+        for stock_item, score, priority_multiplier in filtered_items:
             if accumulated_value >= remaining_value:
                 break
                 
             # Suggest ordering based on min order quantity or reasonable default
             min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
-            base_qty = max(min_order_qty, min(5, max(2, int(stock_item.quantity * 0.1))))
+            
+            # For priority items, suggest more quantity
+            if priority_multiplier > 1.0:
+                base_qty = max(min_order_qty, min(10, max(5, int(stock_item.quantity * 0.2))))
+            else:
+                base_qty = max(min_order_qty, min(5, max(2, int(stock_item.quantity * 0.1))))
+            
             suggested_qty = round_to_min_order_qty(base_qty, min_order_qty)
             item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+            
+            # Ensure minimum line cost of 100 pounds
+            if item_cost < MIN_LINE_COST and stock_item.cost > 0:
+                min_qty_for_cost = int((MIN_LINE_COST / stock_item.cost).to_integral_value() + 1)
+                suggested_qty = max(suggested_qty, min_qty_for_cost)
+                suggested_qty = round_to_min_order_qty(suggested_qty, min_order_qty)
+                item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+            
+            # Determine reason
+            if priority_multiplier > 1.0:
+                reason = 'High priority item - frequently needed'
+            else:
+                reason = 'To reach minimum order value'
             
             suggested_items.append({
                 'sku': stock_item.sku,
@@ -860,16 +1056,88 @@ def raumplus_storage(request):
                 'cost': stock_item.cost,
                 'line_cost': item_cost,
                 'is_style': get_style_prefix(stock_item.sku, stock_item.name) is not None,
-                'reason': 'To reach minimum order value'
+                'reason': reason
             })
             
-            accumulated_value += item_cost
+            accumulated_value += item_cost * VAT_RATE
     
     suggested_total_cost = sum(item['line_cost'] for item in suggested_items)
     
+    # Calculate totals (pre-VAT)
     total_order_value = critical_total_cost + predicted_only_cost + suggested_total_cost
     current_order_value = critical_total_cost + predicted_only_cost
-    remaining_to_min = max(Decimal('0.00'), MIN_ORDER_VALUE - current_order_value)
+    
+    # Calculate totals (inc VAT)
+    total_order_value_inc_vat = total_order_value * VAT_RATE
+    current_order_value_inc_vat = current_order_value * VAT_RATE
+    suggested_total_cost_inc_vat = suggested_total_cost * VAT_RATE
+    
+    remaining_to_min = max(Decimal('0.00'), MIN_ORDER_VALUE - current_order_value_inc_vat)
+    
+    # Define ordering rules for display
+    ordering_rules = [
+        {
+            'category': 'Minimum Order Values',
+            'rules': [
+                f'Minimum total order value: £{MIN_ORDER_VALUE:,.2f} (inc VAT for free shipping)',
+                f'Minimum line item cost: £{MIN_LINE_COST:,.2f} per SKU (pre-VAT)',
+                'All prices shown are pre-VAT; 20% VAT applied when calculating order totals',
+            ]
+        },
+        {
+            'category': 'Style Variants',
+            'rules': [
+                'Maintain all style color variants in stock for each type (S150, S750, S751, S753)',
+                f'Add buffer of {MIN_STYLE_BUFFER} units when ordering styles to ensure stock after orders',
+                'Any out-of-stock color variant will be suggested for reordering',
+            ]
+        },
+        {
+            'category': 'Priority Items (Higher Weighting)',
+            'rules': [
+                'Top Rollers: 3.0x priority (frequently needed)',
+                'Bottom Rollers: 2.5x priority (frequently needed)',
+                'Frame Screws: 2.5x priority (frequently needed)',
+                'Gasket - 4mm: 2.0x priority (high usage)',
+            ]
+        },
+        {
+            'category': 'Low Priority Items (Lower Weighting)',
+            'rules': [
+                'Gasket - 6mm: 0.5x priority (hardly used)',
+                'Gasket - 8mm: 0.5x priority (very rarely used)',
+            ]
+        },
+        {
+            'category': 'Excluded Items',
+            'rules': [
+                'Dust Brush Clip: Excluded from suggestions (not used)',
+                'Dust Excluding Brush: Excluded from suggestions (sufficient stock)',
+            ]
+        },
+        {
+            'category': 'Rounding Rules',
+            'rules': [
+                'Items with minimum order quantity of 1: Rounded to nearest 10 (e.g., 257 → 260)',
+                'Items with other minimum order quantities: Rounded to nearest multiple of min qty',
+            ]
+        },
+        {
+            'category': 'Prediction Model',
+            'rules': [
+                'Historical period: Last 90 days of orders',
+                'Prediction window: Next 4 months + 20% buffer',
+                'Weighted average: 70% recent trend + 30% historical baseline',
+            ]
+        },
+        {
+            'category': 'Target Stock Levels',
+            'rules': [
+                'Gasket - 4mm: Minimum target stock of 800 units (high usage item)',
+                'All other items: Predicted 4-month usage with 20% safety buffer',
+            ]
+        },
+    ]
     
     return render(request, 'stock_take/raumplus_storage.html', {
         'upcoming_shortages': upcoming_list,
@@ -887,10 +1155,16 @@ def raumplus_storage(request):
         'predicted_total_cost': predicted_only_cost,
         'suggested_total_cost': suggested_total_cost,
         'total_order_value': total_order_value,
+        'total_order_value_inc_vat': total_order_value_inc_vat,
         'current_order_value': current_order_value,
+        'current_order_value_inc_vat': current_order_value_inc_vat,
+        'suggested_total_cost_inc_vat': suggested_total_cost_inc_vat,
         'remaining_to_min': remaining_to_min,
         'min_order_value': MIN_ORDER_VALUE,
+        'min_line_cost': MIN_LINE_COST,
+        'vat_rate': VAT_RATE,
         'style_stock_status': style_stock_status,
+        'ordering_rules': ordering_rules,
     })
 
 @login_required
@@ -3339,3 +3613,98 @@ def update_stock_items_batch(request):
             }, status=400)
     
     return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)
+
+@login_required
+def remedials(request):
+    """View to manage remedial orders - create and view remedials"""
+    
+    # Get all remedial orders
+    remedial_orders = Remedial.objects.select_related('original_order', 'boards_po').prefetch_related('accessories').order_by('-created_date')
+    
+    # Get all orders for selection (to create remedials from)
+    available_orders = Order.objects.exclude(
+        job_finished=True
+    ).select_related('boards_po').order_by('-order_date')[:100]  # Limit to recent 100
+    
+    if request.method == 'POST':
+        # Handle creating a new remedial order
+        try:
+            original_order_id = request.POST.get('original_order_id')
+            remedial_reason = request.POST.get('remedial_notes', '')  # Using 'remedial_notes' from form
+            
+            if not original_order_id:
+                messages.error(request, 'Please select an order to create a remedial for.')
+                return redirect('remedials')
+            
+            original_order = Order.objects.get(id=original_order_id)
+            
+            # Generate unique remedial number
+            latest_remedial = Remedial.objects.order_by('-id').first()
+            if latest_remedial and latest_remedial.remedial_number:
+                # Extract number from REM-001 format
+                try:
+                    last_num = int(latest_remedial.remedial_number.split('-')[1])
+                    new_num = last_num + 1
+                except (IndexError, ValueError):
+                    new_num = 1
+            else:
+                new_num = 1
+            
+            remedial_number = f"REM-{new_num:03d}"
+            
+            # Create new remedial order
+            remedial = Remedial.objects.create(
+                original_order=original_order,
+                remedial_number=remedial_number,
+                reason=remedial_reason,
+                first_name=original_order.first_name,
+                last_name=original_order.last_name,
+                customer_number=original_order.customer_number,
+                address=original_order.address,
+                postcode=original_order.postcode,
+            )
+            
+            messages.success(request, f'Remedial {remedial_number} created for {original_order.first_name} {original_order.last_name} (Order: {original_order.sale_number})')
+            return redirect('remedials')
+            
+        except Order.DoesNotExist:
+            messages.error(request, 'Original order not found.')
+            return redirect('remedials')
+        except Exception as e:
+            messages.error(request, f'Error creating remedial: {str(e)}')
+            return redirect('remedials')
+    
+    return render(request, 'stock_take/remedials.html', {
+        'remedial_orders': remedial_orders,
+        'available_orders': available_orders,
+    })
+
+@login_required
+def remedial_report(request):
+    """Generate a report of all remedial orders with statistics"""
+    from django.db.models import Count, Q
+    
+    # Get all remedial orders
+    remedial_orders = Remedial.objects.select_related('original_order', 'boards_po').prefetch_related('accessories').order_by('-created_date')
+    
+    # Statistics
+    total_remedials = remedial_orders.count()
+    completed_remedials = remedial_orders.filter(is_completed=True).count()
+    in_progress_remedials = total_remedials - completed_remedials
+    
+    # Remedials with boards ordered
+    boards_ordered_count = remedial_orders.filter(boards_po__boards_ordered=True).count()
+    
+    # Remedials by month (last 12 months)
+    from datetime import datetime, timedelta
+    twelve_months_ago = datetime.now().date() - timedelta(days=365)
+    recent_remedials = remedial_orders.filter(created_date__gte=twelve_months_ago)
+    
+    return render(request, 'stock_take/remedial_report.html', {
+        'remedial_orders': remedial_orders,
+        'total_remedials': total_remedials,
+        'completed_remedials': completed_remedials,
+        'in_progress_remedials': in_progress_remedials,
+        'boards_ordered_count': boards_ordered_count,
+        'recent_remedials': recent_remedials,
+    })

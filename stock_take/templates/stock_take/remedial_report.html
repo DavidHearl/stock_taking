@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Remedial Report{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/shortage.css' %}" rel="stylesheet">
+<link href="{% static 'css/remedials.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Remedial Orders Report</h1>
+    <div class="header-actions">
+        <a href="{% url 'remedials' %}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Remedials
+        </a>
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="stats-grid">
+    <div class="stat-card remedial">
+        <div class="stat-label">Total Remedials</div>
+        <div class="stat-value">{{ total_remedials }}</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-label">In Progress</div>
+        <div class="stat-value" style="color: #ff9800;">{{ in_progress_remedials }}</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-label">Completed</div>
+        <div class="stat-value" style="color: #10b981;">{{ completed_remedials }}</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-label">Boards Ordered</div>
+        <div class="stat-value" style="color: #3b82f6;">{{ boards_ordered_count }}</div>
+    </div>
+</div>
+
+<!-- Remedial Orders Table -->
+<div class="card">
+    <div class="card-header">
+        <h3>All Remedial Orders</h3>
+    </div>
+    <div class="card-body">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Remedial #</th>
+                    <th>Original Order</th>
+                    <th>Customer Name</th>
+                    <th>Customer #</th>
+                    <th>Created Date</th>
+                    <th>Scheduled Date</th>
+                    <th>Completed Date</th>
+                    <th>Days Open</th>
+                    <th>Boards PO</th>
+                    <th>Boards Status</th>
+                    <th>Job Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for remedial in remedial_orders %}
+                <tr class="remedial-table-row">
+                    <td><span class="remedial-badge">{{ remedial.remedial_number }}</span></td>
+                    <td>{{ remedial.original_order.sale_number }}</td>
+                    <td>{{ remedial.first_name }} {{ remedial.last_name }}</td>
+                    <td>{{ remedial.customer_number }}</td>
+                    <td>{{ remedial.created_date|date:"d M Y" }}</td>
+                    <td>
+                        {% if remedial.scheduled_date %}
+                            {{ remedial.scheduled_date|date:"d M Y" }}
+                        {% else %}
+                            <span class="text-muted">Not scheduled</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if remedial.completed_date %}
+                            {{ remedial.completed_date|date:"d M Y" }}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ remedial.days_since_created }}</td>
+                    <td>
+                        {% if remedial.boards_po %}
+                            {{ remedial.boards_po.po_number }}
+                        {% else %}
+                            <span class="text-muted">Not assigned</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if remedial.boards_po %}
+                            {% if remedial.boards_po.boards_ordered %}
+                                <span class="badge badge-success">Ordered</span>
+                            {% else %}
+                                <span class="badge badge-danger">Not Ordered</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge badge-secondary">N/A</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if remedial.is_completed %}
+                            <span class="badge badge-success">Completed</span>
+                        {% else %}
+                            <span class="badge badge-warning">In Progress</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'order_details' remedial.original_order.id %}" class="btn btn-sm btn-primary">View Order</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 40px;">
+                        <p class="text-muted">No remedial orders found.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

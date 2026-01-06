@@ -67,15 +67,10 @@
                                     <span class="status-icon danger" title="Not Ordered">✗</span>
                                     <span class="badge badge-danger">Not Ordered</span>
                                 {% endif %}
-                                {% if po.boards_received %}
-                                    <span class="status-icon success" title="Received">✓</span>
-                                {% else %}
-                                    <span class="status-icon danger" title="Not Received">✗</span>
-                                {% endif %}
                             </div>
                         </td>
                         <td>
-                            <span class="badge badge-primary">{{ po.orders.count }}</span>
+                            <span class="badge badge-primary">{{ po.orders_count }}</span>
                         </td>
                         <td class="file-cell">
                             {% if po.file %}
@@ -193,9 +188,10 @@
         <tbody>
             {% for order in orders %}
             <tr 
-                class="clickable-row {% if order.job_finished %}row-finished{% endif %} {% if order.has_missing_accessories %}row-missing{% endif %}" 
+                class="clickable-row {% if order.job_finished %}row-finished{% endif %} {% if order.order_type == 'remedial' %}row-remedial{% endif %}" 
                 onclick="toggleDetails('details-{{ order.sale_number }}', this)"
                 id="main-{{ order.sale_number }}"
+                data-sale-number="{{ order.sale_number }}"
             >
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
@@ -216,11 +212,6 @@
                             {% else %}
                                 <span class="status-icon danger" title="Not Ordered">✗</span>
                             {% endif %}
-                            {% if order.order_boards_received %}
-                                <span class="status-icon success" title="Order Boards Received">✓</span>
-                            {% else %}
-                                <span class="status-icon danger" title="Order Boards Not Received">✗</span>
-                            {% endif %}
                         </div>
                     {% else %}
                         <a href="{% url 'order_details' order.id %}" class="text-muted">
@@ -240,11 +231,6 @@
                             {% else %}
                                 <span class="status-icon danger" title="OS Doors Not Ordered">✗</span>
                             {% endif %}
-                            {% if order.os_doors_received %}
-                                <span class="status-icon success" title="OS Doors Received">✓</span>
-                            {% else %}
-                                <span class="status-icon danger" title="OS Doors Not Received">✗</span>
-                            {% endif %}
                         </div>
                     {% else %}
                         <span class="text-muted">-</span>
@@ -259,10 +245,8 @@
                     {% endif %}
                 </td>
                 <!-- Accessories Check -->
-                <td class="text-center">
-                    {% if order.accessories.exists %}
-                        <span class="status-icon success" title="Has Accessories">✓</span>
-                    {% endif %}
+                <td class="text-center" data-indicator="accessories">
+                    <!-- Loaded via AJAX -->
                 </td>
                 <!-- Items ordered Check -->
                 <td class="text-center">
@@ -291,156 +275,9 @@
                 </td>
             </tr>
 
-            <tr class="detail-row hidden" id="details-{{ order.sale_number }}">
+            <tr class="detail-row hidden" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
                 <td colspan="15" class="detail-cell">
-                    <div class="detail-content">
-                        <div class="copy-controls">
-                            <span class="copy-label">Sale:</span>
-                            <input type="text" class="copy-input" value="{{ order.sale_number }}" readonly>
-                            <button class="btn btn-sm btn-secondary copy-detail-btn" data-text="{{ order.sale_number }}" title="Copy Sale Number">
-                                📋
-                            </button>
-                            <span class="copy-label">Customer:</span>
-                            <input type="text" class="copy-input" value="{{ order.customer_number }}" readonly>
-                            <button class="btn btn-sm btn-secondary copy-detail-btn" data-text="{{ order.customer_number }}" title="Copy Customer Number">
-                                📋
-                            </button>
-                        </div>
-                        
-                        {% if order.order_pnx_items %}
-                        <div class="detail-section">
-                            <h4>PNX Items ({{ order.order_pnx_items|length }} items)</h4>
-                            <table class="table detail-table">
-                                <thead>
-                                    <tr>
-                                        <th>Barcode</th>
-                                        <th>Material</th>
-                                        <th>Dimensions</th>
-                                        <th>Count</th>
-                                        <th>Cost</th>
-                                        <th>Received</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for item in order.order_pnx_items %}
-                                    <tr>
-                                        <td>{{ item.barcode }}</td>
-                                        <td>{{ item.matname }}</td>
-                                        <td>{{ item.cleng }} x {{ item.cwidth }}</td>
-                                        <td>{{ item.cnt|floatformat:0 }}</td>
-                                        <td>£{{ item.calculated_cost|floatformat:2 }}</td>
-                                        <td>
-                                            {% if item.is_fully_received %}
-                                                <span class="status-icon success" title="Fully Received">✓</span>
-                                            {% elif item.is_partially_received %}
-                                                <span class="status-icon warning" title="Partially Received ({{ item.received_quantity|floatformat:0 }}/{{ item.cnt|floatformat:0 }})">⚠</span>
-                                            {% else %}
-                                                <span class="status-icon danger" title="Not Received">✗</span>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                    <tr class="total-row">
-                                        <td colspan="5"><strong>Total Cost:</strong></td>
-                                        <td><strong>£{{ order.pnx_total_cost|floatformat:2 }}</strong></td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <div class="detail-section">
-                            <p><strong>PNX Items:</strong> No items found for this order.</p>
-                        </div>
-                        {% endif %}                        {% if order.os_doors.all %}
-                        <div class="detail-section">
-                            <h4>OS Doors ({{ order.os_doors.count }} items)</h4>
-                            <table class="table detail-table">
-                                <thead>
-                                    <tr>
-                                        <th>Door Style</th>
-                                        <th>Style Colour</th>
-                                        <th>Dimensions</th>
-                                        <th>Colour</th>
-                                        <th>Qty</th>
-                                        <th>Ordered</th>
-                                        <th>Received</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for os_door in order.os_doors.all %}
-                                    <tr>
-                                        <td>{{ os_door.door_style }}</td>
-                                        <td>{{ os_door.style_colour }}</td>
-                                        <td>{{ os_door.height }} x {{ os_door.width }}</td>
-                                        <td>{{ os_door.colour }}</td>
-                                        <td>{{ os_door.quantity|floatformat:0 }}</td>
-                                        <td>
-                                            {% if os_door.ordered %}
-                                                <span class="status-icon success">✓</span>
-                                            {% else %}
-                                                <span class="status-icon danger">✗</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if os_door.received %}
-                                                <span class="status-icon success">✓</span>
-                                            {% else %}
-                                                <span class="status-icon danger">✗</span>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% endif %}
-                        
-                        {% if order.accessories.all %}
-                        <div class="detail-section">
-                            <h4>Accessories ({{ order.accessories.count }} items)</h4>
-                            <table class="table detail-table">
-                                <thead>
-                                    <tr>
-                                        <th>SKU</th>
-                                        <th>Name</th>
-                                        <th>Qty</th>
-                                        <th>Available</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for accessory in order.accessories.all %}
-                                    <tr>
-                                        <td>{{ accessory.sku }}</td>
-                                        <td>{{ accessory.name|truncatechars:20 }}</td>
-                                        <td>{{ accessory.quantity|floatformat:0 }}</td>
-                                        <td>
-                                            {% if accessory.stock_item %}
-                                                {{ accessory.available_quantity|floatformat:0 }}
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if accessory.missing %}
-                                                <span class="badge badge-warning">Missing</span>
-                                            {% elif accessory.stock_item %}
-                                                {% if accessory.available_quantity >= accessory.quantity %}
-                                                    <span class="badge badge-success">In Stock</span>
-                                                {% else %}
-                                                    <span class="badge badge-danger">Low Stock</span>
-                                                {% endif %}
-                                            {% else %}
-                                                <span class="badge badge-info">No Stock Link</span>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% endif %}
-                    </div>
+                    <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
         {% endfor %}
@@ -608,15 +445,54 @@
         // Get the detail row element using the unique ID
         var detailRow = document.getElementById(detailRowId);
         
-        if (!detailRow) return;
+        if (!detailRow) {
+            console.error('Detail row not found:', detailRowId);
+            return;
+        }
         
-        // Toggle the display style
-        if (detailRow.style.display === 'none' || detailRow.style.display === '') {
-            detailRow.style.display = 'table-row';
-            clickedRowElement.classList.add('expanded');
-        } else {
-            detailRow.style.display = 'none';
+        // Check if row is currently expanded (check for hidden class)
+        const isExpanded = !detailRow.classList.contains('hidden');
+        
+        if (isExpanded) {
+            // Collapse the row
+            detailRow.classList.add('hidden');
             clickedRowElement.classList.remove('expanded');
+        } else {
+            // Expand the row
+            detailRow.classList.remove('hidden');
+            clickedRowElement.classList.add('expanded');
+            
+            // Check if content has already been loaded (data-loaded attribute)
+            if (!detailRow.hasAttribute('data-loaded')) {
+                // Get the sale number from the data attribute
+                const saleNumber = detailRow.getAttribute('data-sale-number');
+                
+                // Show loading spinner
+                const detailCell = detailRow.querySelector('.detail-cell');
+                detailCell.innerHTML = '<div class="loading-spinner">Loading order details...</div>';
+                
+                // Load the content via AJAX
+                fetch(`/ordering/load-order-details/${saleNumber}/`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            detailCell.innerHTML = data.html;
+                            // Mark as loaded
+                            detailRow.setAttribute('data-loaded', 'true');
+                        } else {
+                            detailCell.innerHTML = '<div class="alert alert-danger">Error loading order details: ' + (data.error || 'Unknown error') + '</div>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading order details:', error);
+                        detailCell.innerHTML = '<div class="alert alert-danger">Error loading order details: ' + error.message + '</div>';
+                    });
+            }
         }
     }
 
@@ -840,6 +716,52 @@
             window.location.href = url.toString();
         });
     });
+
+    // Background load order indicators (has_accessories, has_missing, has_remedials)
+    // Load in batches after page displays to avoid blocking initial render
+    function loadOrderIndicators() {
+        const rows = document.querySelectorAll('.clickable-row');
+        const saleNumbers = Array.from(rows).map(row => row.dataset.saleNumber);
+        
+        if (saleNumbers.length === 0) return;
+        
+        // Load indicators in batches of 50
+        const batchSize = 50;
+        for (let i = 0; i < saleNumbers.length; i += batchSize) {
+            const batch = saleNumbers.slice(i, i + batchSize);
+            
+            setTimeout(() => {
+                fetch(`/ordering/load-indicators/?sale_numbers=${batch.join(',')}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            Object.entries(data.indicators).forEach(([saleNumber, indicators]) => {
+                                const row = document.getElementById(`main-${saleNumber}`);
+                                if (!row) return;
+                                
+                                // Update row classes
+                                if (indicators.has_missing) {
+                                    row.classList.add('row-missing');
+                                }
+                                if (indicators.has_remedials) {
+                                    row.classList.add('row-has-remedials');
+                                }
+                                
+                                // Update accessories cell
+                                const accessoriesCell = row.querySelector('[data-indicator="accessories"]');
+                                if (accessoriesCell && indicators.has_accessories) {
+                                    accessoriesCell.innerHTML = '<span class="status-icon success" title="Has Accessories">✓</span>';
+                                }
+                            });
+                        }
+                    })
+                    .catch(error => console.error('Error loading indicators:', error));
+            }, i * 100); // Stagger batch requests by 100ms
+        }
+    }
+    
+    // Load indicators after a short delay to let page render first
+    setTimeout(loadOrderIndicators, 100);
 </script>
 
 {% endblock %}

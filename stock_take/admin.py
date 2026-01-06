@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.db.models import F, ExpressionWrapper, DecimalField
-from .models import BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory
+from .models import BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, Remedial, RemedialAccessory
 
 @admin.register(BoardsPO)
 class BoardsPOAdmin(admin.ModelAdmin):
@@ -96,3 +96,20 @@ class StockItemAdmin(admin.ModelAdmin):
     def mark_as_not_classified(self, request, queryset):
         updated = queryset.update(tracking_type='not-classified')
         self.message_user(request, f'{updated} items marked as Not Classified')
+
+@admin.register(Remedial)
+class RemedialAdmin(admin.ModelAdmin):
+    list_display = ['remedial_number', 'original_order', 'customer_name', 'reason', 'created_date', 'scheduled_date', 'is_completed']
+    search_fields = ['remedial_number', 'original_order__sale_number', 'first_name', 'last_name', 'customer_number']
+    list_filter = ['is_completed', 'created_date', 'scheduled_date', 'boards_po']
+    readonly_fields = ['created_date', 'days_since_created']
+    
+    def customer_name(self, obj):
+        return f"{obj.first_name} {obj.last_name}"
+    customer_name.short_description = 'Customer'
+
+@admin.register(RemedialAccessory)
+class RemedialAccessoryAdmin(admin.ModelAdmin):
+    list_display = ['remedial', 'sku', 'name', 'quantity', 'ordered', 'received']
+    search_fields = ['remedial__remedial_number', 'sku', 'name']
+    list_filter = ['ordered', 'received']

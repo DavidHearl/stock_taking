@@ -1,0 +1,150 @@
+<div class="detail-content">
+    <div class="copy-controls">
+        <span class="copy-label">Sale:</span>
+        <input type="text" class="copy-input" value="{{ order.sale_number }}" readonly>
+        <button class="btn btn-sm btn-secondary copy-detail-btn" data-text="{{ order.sale_number }}" title="Copy Sale Number">
+            📋
+        </button>
+        <span class="copy-label">Customer:</span>
+        <input type="text" class="copy-input" value="{{ order.customer_number }}" readonly>
+        <button class="btn btn-sm btn-secondary copy-detail-btn" data-text="{{ order.customer_number }}" title="Copy Customer Number">
+            📋
+        </button>
+    </div>
+    
+    {% if order.order_pnx_items %}
+    <div class="detail-section">
+        <h4>PNX Items ({{ order.order_pnx_items|length }} items)</h4>
+        <table class="table detail-table">
+            <thead>
+                <tr>
+                    <th>Barcode</th>
+                    <th>Material</th>
+                    <th>Dimensions</th>
+                    <th>Count</th>
+                    <th>Cost</th>
+                    <th>Received</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in order.order_pnx_items %}
+                <tr>
+                    <td>{{ item.barcode }}</td>
+                    <td>{{ item.matname }}</td>
+                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
+                    <td>{{ item.cnt|floatformat:0 }}</td>
+                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
+                    <td>
+                        {% if item.is_fully_received %}
+                            <span class="status-icon success" title="Fully Received">✓</span>
+                        {% elif item.is_partially_received %}
+                            <span class="status-icon warning" title="Partially Received ({{ item.received_quantity|floatformat:0 }}/{{ item.cnt|floatformat:0 }})">⚠</span>
+                        {% else %}
+                            <span class="status-icon danger" title="Not Received">✗</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                <tr class="total-row">
+                    <td colspan="5"><strong>Total Cost:</strong></td>
+                    <td><strong>£{{ order.pnx_total_cost|floatformat:2 }}</strong></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="detail-section">
+        <p><strong>PNX Items:</strong> No items found for this order.</p>
+    </div>
+    {% endif %}
+    
+    {% if order.os_doors.all %}
+    <div class="detail-section">
+        <h4>OS Doors ({{ order.os_doors.count }} items)</h4>
+        <table class="table detail-table">
+            <thead>
+                <tr>
+                    <th>Door Style</th>
+                    <th>Style Colour</th>
+                    <th>Dimensions</th>
+                    <th>Colour</th>
+                    <th>Qty</th>
+                    <th>Ordered</th>
+                    <th>Received</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for os_door in order.os_doors.all %}
+                <tr>
+                    <td>{{ os_door.door_style }}</td>
+                    <td>{{ os_door.style_colour }}</td>
+                    <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                    <td>{{ os_door.colour }}</td>
+                    <td>{{ os_door.quantity|floatformat:0 }}</td>
+                    <td>
+                        {% if os_door.ordered %}
+                            <span class="status-icon success">✓</span>
+                        {% else %}
+                            <span class="status-icon danger">✗</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if os_door.received %}
+                            <span class="status-icon success">✓</span>
+                        {% else %}
+                            <span class="status-icon danger">✗</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if order.accessories.all %}
+    <div class="detail-section">
+        <h4>Accessories ({{ order.accessories.count }} items)</h4>
+        <table class="table detail-table">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Name</th>
+                    <th>Qty</th>
+                    <th>Available</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for accessory in order.accessories.all %}
+                <tr>
+                    <td>{{ accessory.sku }}</td>
+                    <td>{{ accessory.name|truncatechars:20 }}</td>
+                    <td>{{ accessory.quantity|floatformat:0 }}</td>
+                    <td>
+                        {% if accessory.stock_item %}
+                            {{ accessory.available_quantity|floatformat:0 }}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if accessory.missing %}
+                            <span class="badge badge-warning">Missing</span>
+                        {% elif accessory.stock_item %}
+                            {% if accessory.available_quantity >= accessory.quantity %}
+                                <span class="badge badge-success">In Stock</span>
+                            {% else %}
+                                <span class="badge badge-danger">Low Stock</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge badge-info">No Stock Link</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
