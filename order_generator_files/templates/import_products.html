@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Import Products from WorkGuru</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <!-- Navigation Bar -->
+    <nav class="bg-white shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex">
+                    <div class="flex-shrink-0 flex items-center"><h1 class="text-xl font-bold text-gray-800">Production Tools</h1></div>
+                    <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                        <a href="{{ url_for('index') }}" class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">Order Generators</a>
+                        <a href="{{ url_for('list_products') }}" class="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" aria-current="page">Manage Products</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <h1 class="text-3xl font-bold text-gray-900 mb-6">Import Products from WorkGuru</h1>
+
+        {% if new_products == None %}
+            <!-- STATE 1: Initial view before fetching -->
+            <div class="bg-white shadow sm:rounded-lg p-6 text-center">
+                <p class="text-gray-600 mb-4">Click the button below to fetch all products from the WorkGuru API and compare them against your local database.</p>
+                <form action="{{ url_for('import_products_from_wg') }}" method="POST">
+                    <button type="submit" class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        Fetch New Products
+                    </button>
+                </form>
+            </div>
+
+        {% elif new_products %}
+            <!-- STATE 2: Displaying the editable list of new products -->
+            <form action="{{ url_for('batch_add_products') }}" method="POST">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-700">Found {{ new_products|length }} new products.</h2>
+                    <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700">
+                        Add Selected Products to Database
+                    </button>
+                </div>
+                
+                <div class="bg-white shadow overflow-hidden sm:rounded-lg">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3"><input type="checkbox" id="select-all" class="h-4 w-4 text-indigo-600 border-gray-300 rounded"></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CAD SKU</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cost Price</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sell Price</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            {% for product in new_products %}
+                            <tr>
+                                <td class="px-4 py-2"><input type="checkbox" name="include_{{ loop.index0 }}" class="h-4 w-4 text-indigo-600 border-gray-300 rounded include-checkbox" checked></td>
+                                <td class="px-4 py-2"><input type="text" name="sku_{{ loop.index0 }}" value="{{ product.sku }}" class="w-full border-gray-300 rounded-md text-sm" readonly></td>
+                                <td class="px-4 py-2"><input type="text" name="name_{{ loop.index0 }}" value="{{ product.name }}" class="w-full border-gray-300 rounded-md text-sm"></td>
+                                <td class="px-4 py-2"><input type="text" name="cad_sku_{{ loop.index0 }}" value="" placeholder="Enter CAD SKU" class="w-full border-gray-300 rounded-md text-sm"></td>
+                                <td class="px-4 py-2"><input type="number" step="0.01" name="cost_price_{{ loop.index0 }}" value="{{ product.costPrice }}" class="w-24 border-gray-300 rounded-md text-sm"></td>
+                                <td class="px-4 py-2"><input type="number" step="0.01" name="sell_price_{{ loop.index0 }}" value="{{ product.sellPrice }}" class="w-24 border-gray-300 rounded-md text-sm"></td>
+                                <!-- Hidden fields for other data we want to save -->
+                                <input type="hidden" name="description_{{ loop.index0 }}" value="{{ product.description }}">
+                                <input type="hidden" name="supplier_{{ loop.index0 }}" value="{{ product.supplier }}">
+                                <input type="hidden" name="brand_{{ loop.index0 }}" value="{{ product.brand }}">
+                                <input type="hidden" name="category_{{ loop.index0 }}" value="{{ product.category }}">
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </form>
+        {% else %}
+            <!-- STATE 3: No new products found -->
+            <div class="bg-white shadow sm:rounded-lg p-6 text-center">
+                <h2 class="text-xl font-semibold text-green-600">Database is up to date!</h2>
+                <p class="text-gray-600 mt-2">No new products were found in WorkGuru that aren't already in your local database.</p>
+                <a href="{{ url_for('list_products') }}" class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                    Back to Product List
+                </a>
+            </div>
+        {% endif %}
+    </div>
+    <script>
+        // Simple script to handle the "select all" checkbox
+        const selectAll = document.getElementById('select-all');
+        if (selectAll) {
+            selectAll.addEventListener('change', (event) => {
+                document.querySelectorAll('.include-checkbox').forEach(checkbox => {
+                    checkbox.checked = event.target.checked;
+                });
+            });
+        }
+    </script>
+</body>
+</html>

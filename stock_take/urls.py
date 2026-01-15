@@ -61,6 +61,8 @@ urlpatterns = [
     path('ordering/upload-accessories-csv/', views.upload_accessories_csv, name='upload_accessories_csv'),
     path('order/<int:order_id>/', views.order_details, name='order_details'),
     path('order/<int:order_id>/download-processed-csv/', views.download_processed_csv, name='download_processed_csv'),
+    path('order/<int:order_id>/generate-pnx/', views.generate_and_attach_pnx, name='generate_and_attach_pnx'),
+    path('order/<int:order_id>/generate-accessories-csv/', views.generate_and_upload_accessories_csv, name='generate_and_upload_accessories_csv'),
     path('accessory/delete/<int:accessory_id>/', views.delete_accessory, name='delete_accessory'),
     path('order/<int:order_id>/update-os-doors-po/', views.update_os_doors_po, name='update_os_doors_po'),
     path('order/<int:order_id>/delete-all-accessories/', views.delete_all_accessories, name='delete_all_accessories'),
@@ -69,6 +71,11 @@ urlpatterns = [
     path('order/<int:order_id>/add-substitution/', views.add_substitution, name='add_substitution'),
     path('order/<int:order_id>/add-skip-item/', views.add_skip_item, name='add_skip_item'),
     path('skip-item/delete/<int:skip_item_id>/', views.delete_skip_item, name='delete_skip_item'),
+    path('stock-take/search-stock-items/', views.search_stock_items, name='search_stock_items'),
+    path('stock-take/swap-accessory/<int:accessory_id>/', views.swap_accessory, name='swap_accessory'),
+    path('stock-take/update-accessory-quantities/', views.update_accessory_quantities, name='update_accessory_quantities'),
+    path('stock-take/add-accessory-item/<int:order_id>/', views.add_accessory_item, name='add_accessory_item'),
+    path('stock-take/regenerate-csv/<int:order_id>/', views.regenerate_csv, name='regenerate_csv'),
     path('boards-summary/', views.boards_summary, name='boards_summary'),
     path('os-doors-summary/', views.os_doors_summary, name='os_doors_summary'),
     path('remedials/', views.remedials, name='remedials'),
@@ -77,6 +84,34 @@ urlpatterns = [
     # Stock items manager
     path('stock-items-manager/', views.stock_items_manager, name='stock_items_manager'),
     path('stock-items/update-batch/', views.update_stock_items_batch, name='update_stock_items_batch'),
+    
+    # Fit board
+    path('fit-board/', views.fit_board, name='fit_board'),
+    path('fit-board/add-appointment/', views.add_fit_appointment, name='add_fit_appointment'),
+    path('fit-board/update-status/<int:appointment_id>/', views.update_fit_status, name='update_fit_status'),
+    path('fit-board/update-order-status/<int:order_id>/', views.update_order_fit_status, name='update_order_fit_status'),
+    path('fit-board/delete-appointment/<int:appointment_id>/', views.delete_fit_appointment, name='delete_fit_appointment'),
+    path('fit-board/move-appointment/<int:appointment_id>/', views.move_fit_appointment, name='move_fit_appointment'),
+    path('fit-board/bulk-import/', views.bulk_import_fit_dates, name='bulk_import_fit_dates'),
+    
+    # Search APIs
+    path('search-orders-api/', views.search_orders_api, name='search_orders_api'),
+    path('search-remedials-api/', views.search_remedials_api, name='search_remedials_api'),
+    
+    # Workflow page
+    path('workflow/', views.workflow, name='workflow'),
+    path('workflow/stage/save/', views.save_workflow_stage, name='save_workflow_stage'),
+    path('workflow/stage/<int:stage_id>/', views.get_workflow_stage, name='get_workflow_stage'),
+    path('workflow/stage/<int:stage_id>/delete/', views.delete_workflow_stage, name='delete_workflow_stage'),
+    path('workflow/stage/<int:stage_id>/move/', views.move_workflow_stage, name='move_workflow_stage'),
+    path('workflow/task/save/', views.save_workflow_task, name='save_workflow_task'),
+    path('workflow/task/<int:task_id>/delete/', views.delete_workflow_task, name='delete_workflow_task'),
+    
+    # Order workflow operations
+    path('order/<int:order_id>/update-workflow-stage/', views.update_order_workflow_stage, name='update_order_workflow_stage'),
+    path('order/<int:order_id>/task/<int:task_id>/update/', views.update_task_completion, name='update_task_completion'),
+    path('order/<int:order_id>/workflow/progress/', views.progress_to_next_stage, name='progress_to_next_stage'),
+    path('order/<int:order_id>/workflow/revert/', views.revert_to_previous_stage, name='revert_to_previous_stage'),
     
     # Map page
     path('map/', views.map_view, name='map'),

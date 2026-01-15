@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load custom_filters %}
 
 {% block title %}Order Details - {{ order.sale_number }}{% endblock %}
 
@@ -32,6 +33,124 @@
 
     <div class="order-details-grid">
         <div class="main-column">
+            <!-- Workflow Stage Card -->
+            <div class="card workflow-stage-card">
+                <div class="card-header">
+                    <h3>Workflow Stage</h3>
+                    <button class="btn btn-secondary btn-sm" onclick="openWorkflowModal()">
+                        <i class="bi bi-diagram-3"></i> View Full Workflow
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="workflow-current-stage">
+                        {% if workflow_progress.current_stage %}
+                        <div class="stage-info {{ workflow_progress.current_stage.role }}">
+                            <div class="stage-meta">
+                                <h4>{{ workflow_progress.current_stage.name }}</h4>
+                                <span class="stage-role-badge">{{ workflow_progress.current_stage.get_role_display }}</span>
+                                <span class="stage-phase-badge">{{ workflow_progress.current_stage.get_phase_display }}</span>
+                                {% if workflow_progress.current_stage.expected_days %}
+                                <span class="stage-days">{{ workflow_progress.current_stage.expected_days }} day{{ workflow_progress.current_stage.expected_days|pluralize }}</span>
+                                {% endif %}
+                            </div>
+                            <p class="stage-description">{{ workflow_progress.current_stage.description }}</p>
+                        </div>
+                        
+                        <!-- Tasks for Current Stage -->
+                        {% if workflow_progress.current_stage.tasks.all %}
+                        <div class="stage-tasks">
+                            <h4>Tasks for This Stage:</h4>
+                            {% for task in workflow_progress.current_stage.tasks.all %}
+                            {% with completion=task_completions|get_item:task.id %}
+                            <div class="task-item task-type-{{ task.task_type }}">
+                                {% if task.task_type == 'decision_matrix' %}
+                                    <div class="task-decision-matrix">
+                                        <strong>{{ task.description }}</strong>
+                                        <div class="decision-options">
+                                            <button class="decision-btn decision-proceed {% if completion.selected_option == 'proceed' %}active{% endif %}" 
+                                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">
+                                                <i class="bi bi-arrow-right-circle"></i> Proceed to Next Step
+                                            </button>
+                                            <button class="decision-btn decision-postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
+                                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">
+                                                <i class="bi bi-clock-history"></i> Postpone
+                                            </button>
+                                            <button class="decision-btn decision-dead {% if completion.selected_option == 'dead' %}active{% endif %}"
+                                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">
+                                                <i class="bi bi-x-circle"></i> Mark as Dead/Inactive
+                                            </button>
+                                        </div>
+                                    </div>
+                                {% elif task.task_type == 'radio' %}
+                                    <div class="task-radio-group">
+                                        <strong>{{ task.description }}</strong>
+                                        {% if task.options %}
+                                        {% for option in task.options|split_options %}
+                                        <label class="radio-option">
+                                            <input type="radio" name="task_{{ task.id }}" value="{{ option }}"
+                                                   {% if completion.selected_option == option %}checked{% endif %}
+                                                   onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/>
+                                            {{ option }}
+                                        </label>
+                                        {% endfor %}
+                                        {% endif %}
+                                    </div>
+                                {% elif task.task_type == 'dropdown' %}
+                                    <div class="task-dropdown-group">
+                                        <label>
+                                            <strong>{{ task.description }}</strong>
+                                            <select class="task-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
+                                                <option value="">Select...</option>
+                                                {% if task.options %}
+                                                {% for option in task.options|split_options %}
+                                                <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
+                                                {% endfor %}
+                                                {% endif %}
+                                            </select>
+                                        </label>
+                                    </div>
+                                {% elif task.task_type == 'attachment' %}
+                                    <label class="task-attachment">
+                                        <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                               onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
+                                        {{ task.description }}
+                                        <span class="badge-attachment"><i class="bi bi-paperclip"></i></span>
+                                        {% if completion.attachment %}
+                                        <a href="{{ completion.attachment.url }}" target="_blank" class="attachment-link">View File</a>
+                                        {% endif %}
+                                    </label>
+                                    <input type="file" id="attachment_{{ task.id }}" class="attachment-input" 
+                                           onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
+                                {% else %}
+                                    <label class="required-label">
+                                        <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                               onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
+                                        {{ task.description }}
+                                        {% if task.task_type == 'requirement' %}
+                                        <span class="badge-required">Required</span>
+                                        {% endif %}
+                                    </label>
+                                {% endif %}
+                            </div>
+                            {% endwith %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Stage Navigation Buttons -->
+                        <div class="stage-navigation">
+                            <button class="btn-stage-nav btn-previous" onclick="revertToPreviousStage({{ order.id }})">
+                                <i class="bi bi-arrow-left-circle"></i> Revert to Previous Stage
+                            </button>
+                            <button class="btn-stage-nav btn-next" onclick="progressToNextStage({{ order.id }})">
+                                <i class="bi bi-arrow-right-circle"></i> Progress to Next Stage
+                            </button>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
             <div class="card">
                 <div class="card-header">
                     <h3>Edit Order Information</h3>
@@ -252,9 +371,14 @@
             <div class="card-header">
                 <h3>Boards PO Details</h3>
                 <div class="header-actions">
+                    {% if order.customer_number %}
+                        <a href="{% url 'generate_and_attach_pnx' order.id %}" class="btn btn-info btn-sm">
+                            <i class="bi bi-file-earmark-plus"></i> Generate PNX
+                        </a>
+                    {% endif %}
                     {% if order.boards_po.file %}
                         <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary btn-sm download-pnx">
-                            📄 Download PNX
+                            <i class="bi bi-download"></i> Download
                         </a>
                     {% endif %}
                     <div class="section-actions">
@@ -474,10 +598,29 @@
                 <div class="card-header">
                     <h3>Accessories</h3>
                     <div class="header-actions">
-                        <button class="btn btn-primary" type="button" onclick="openModal('uploadAccessoriesModal')">
-                            📤 Upload CSV
+                        <button class="btn btn-success" type="button" onclick="openModal('addItemModal')">
+                            <i class="bi bi-plus-lg"></i> Add Item
                         </button>
+                        <button class="btn btn-primary" type="button" onclick="openModal('uploadAccessoriesModal')">
+                            Upload CSV
+                        </button>
+                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-info">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV
+                        </a>
+                        {% if order.processed_csv %}
+                        <a href="{% url 'download_processed_csv' order.id %}" class="btn btn-secondary">
+                            <i class="bi bi-download"></i> Download CSV
+                        </a>
+                        {% endif %}
+                        {% if order.original_csv %}
+                        <button class="btn btn-warning" type="button" onclick="regenerateCSV({{ order.id }})">
+                            <i class="bi bi-arrow-repeat"></i> Regenerate CSV
+                        </button>
+                        {% endif %}
                         {% if order.accessories.exists %}
+                        <button type="button" class="btn btn-success" id="save-accessory-changes" style="display: none;">
+                            <i class="bi bi-save"></i> Save Changes
+                        </button>
                         <form method="POST" action="{% url 'delete_all_accessories' order.id %}" style="display: inline;" 
                             onsubmit="return confirm('Are you sure you want to remove ALL accessories from this order? This action cannot be undone.');">
                             {% csrf_token %}
@@ -515,7 +658,7 @@
                                     {% endif %}
                                     <div class="button-group" style="margin-top: 12px;">
                                         <a href="{{ order.original_csv.url }}" class="btn btn-primary" target="_blank">
-                                            📥 Download
+                                            <i class="bi bi-download"></i> Download
                                         </a>
                                         {% if order.csv_has_missing_items %}
                                         <form method="POST" action="{% url 'resolve_missing_items' order.id %}" style="display: inline;">
@@ -592,7 +735,7 @@
                                     <th>Name</th>
                                     <th>Description</th>
                                     <th>Qty</th>
-                                    <th>Available</th>
+                                    <th>Stock/Allocated/Remaining</th>
                                     <th>Status</th>
                                     {% if has_os_door_accessories %}
                                     <th>Required</th>
@@ -607,10 +750,24 @@
                                     <td>{{ accessory.sku }}</td>
                                     <td>{{ accessory.name }}</td>
                                     <td>{{ accessory.description|truncatechars:30 }}</td>
-                                    <td>{{ accessory.quantity|floatformat:0 }}</td>
+                                    <td>
+                                        <input type="number" class="quantity-input accessory-quantity" 
+                                               value="{{ accessory.quantity|floatformat:0 }}" 
+                                               data-accessory-id="{{ accessory.id }}"
+                                               data-original-quantity="{{ accessory.quantity|floatformat:0 }}"
+                                               min="0" step="1">
+                                    </td>
                                     <td>
                                         {% if accessory.stock_item %}
-                                            {{ accessory.available_quantity|floatformat:0 }}
+                                            {% with remaining=accessory|calculate_remaining %}
+                                                <div style="font-size: 0.85em;">
+                                                    <div>Stock: {{ accessory.available_quantity|floatformat:0 }}</div>
+                                                    <div>Allocated: {{ accessory.allocated_quantity|floatformat:0 }}</div>
+                                                    <div style="font-weight: bold; {% if remaining < 0 %}color: #dc3545;{% else %}color: #28a745;{% endif %}">
+                                                        Remaining: {{ remaining|floatformat:0 }}
+                                                    </div>
+                                                </div>
+                                            {% endwith %}
                                         {% else %}
                                             <span class="text-muted">-</span>
                                         {% endif %}
@@ -619,11 +776,13 @@
                                         {% if accessory.missing %}
                                             <span class="badge badge-warning">Missing</span>
                                         {% elif accessory.stock_item %}
-                                            {% if accessory.available_quantity >= accessory.quantity %}
-                                                <span class="badge badge-success">In Stock</span>
-                                            {% else %}
-                                                <span class="badge badge-danger">Low Stock</span>
-                                            {% endif %}
+                                            {% with remaining=accessory|calculate_remaining %}
+                                                {% if remaining >= 0 %}
+                                                    <span class="badge badge-success">In Stock</span>
+                                                {% else %}
+                                                    <span class="badge badge-danger">Out of Stock</span>
+                                                {% endif %}
+                                            {% endwith %}
                                         {% else %}
                                             <span class="badge badge-info">No Stock Link</span>
                                         {% endif %}
@@ -645,10 +804,14 @@
                                     </td>
                                     {% endif %}
                                     <td>
+                                        <button type="button" class="btn btn-primary btn-sm" title="Swap Item" 
+                                            onclick="openSwapModal({{ accessory.id }}, '{{ accessory.sku }}', '{{ accessory.name|escapejs }}')">
+                                            <i class="bi bi-arrow-repeat"></i>
+                                        </button>
                                         <form method="POST" action="{% url 'delete_accessory' accessory.id %}" style="display: inline;" 
                                             onsubmit="return confirm('Are you sure you want to remove this accessory?');">
                                             {% csrf_token %}
-                                            <button type="submit" class="btn btn-danger" title="Remove Accessory">
+                                            <button type="submit" class="btn btn-danger btn-sm" title="Remove Accessory">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                         </form>
@@ -724,6 +887,134 @@
     </div>
 </div>
 
+<!-- Modal for Swapping Accessory Item -->
+<div class="modal" id="swapItemModal">
+    <div class="modal-overlay" onclick="closeModal('swapItemModal')"></div>
+    <div class="modal-dialog" style="max-width: 800px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Swap Accessory Item</h3>
+                <button type="button" class="modal-close" onclick="closeModal('swapItemModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label><strong>Current Item:</strong></label>
+                    <p id="current-item-info" class="text-muted"></p>
+                </div>
+                <div class="form-group">
+                    <label for="swap-search">Search for Replacement Item</label>
+                    <input type="text" class="form-input" id="swap-search" 
+                           placeholder="Search by SKU or Name..." onkeyup="searchStockItems()">
+                </div>
+                <div id="search-results" style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                    <p class="text-muted">Type to search for items...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('swapItemModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Adding New Accessory Item -->
+<div class="modal" id="addItemModal">
+    <div class="modal-overlay" onclick="closeModal('addItemModal')"></div>
+    <div class="modal-dialog" style="max-width: 800px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Accessory Item</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addItemModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="add-item-search">Search for Item</label>
+                    <input type="text" class="form-input" id="add-item-search" 
+                           placeholder="Search by SKU or Name..." onkeyup="searchItemsToAdd()">
+                </div>
+                <div id="add-item-results" style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                    <p class="text-muted">Type to search for items...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addItemModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Workflow Modal -->
+<div class="modal" id="workflowModal">
+    <div class="modal-overlay" onclick="closeModal('workflowModal')"></div>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Full Workflow Overview</h3>
+                <button type="button" class="modal-close" onclick="closeModal('workflowModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Department Color Key -->
+                <div class="workflow-color-key">
+                    <div class="color-key-item">
+                        <span class="color-indicator sales"></span>
+                        <span class="color-label">Sales</span>
+                    </div>
+                    <div class="color-key-item">
+                        <span class="color-indicator admin"></span>
+                        <span class="color-label">Admin</span>
+                    </div>
+                    <div class="color-key-item">
+                        <span class="color-indicator factory"></span>
+                        <span class="color-label">Factory</span>
+                    </div>
+                    <div class="color-key-item">
+                        <span class="color-indicator installation"></span>
+                        <span class="color-label">Installation</span>
+                    </div>
+                </div>
+                
+                <div class="workflow-modal-container">
+                    {% for phase, phase_display in phases %}
+                        <div class="workflow-phase-section">
+                            <div class="phase-header">
+                                <h4>{{ phase_display }}</h4>
+                            </div>
+                            
+                            {% for stage in stages_by_phase|get_item:phase %}
+                            <div class="workflow-stage-box {{ stage.role }} {% if workflow_progress.current_stage.id == stage.id %}current-stage{% endif %}" 
+                                 onclick="selectWorkflowStage({{ order.id }}, {{ stage.id }})">
+                                <div class="stage-box-header">
+                                    <h5>{{ stage.name }}</h5>
+                                    {% if workflow_progress.current_stage.id == stage.id %}
+                                    <span class="current-badge"><i class="bi bi-check-circle-fill"></i> Current</span>
+                                    {% endif %}
+                                </div>
+                                <div class="stage-box-meta">
+                                    <span class="stage-role-tag">{{ stage.get_role_display }}</span>
+                                    {% if stage.expected_days %}
+                                    <span class="stage-duration-tag">{{ stage.expected_days }}d</span>
+                                    {% endif %}
+                                </div>
+                                <p class="stage-box-description">{{ stage.description }}</p>
+                            </div>
+                            
+                            {% if not forloop.last %}
+                            <div class="stage-connector">
+                                <i class="bi bi-arrow-down"></i>
+                            </div>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('workflowModal')">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Auto-dismiss alerts after 5 seconds
 document.addEventListener('DOMContentLoaded', function() {
@@ -753,6 +1044,78 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+
+    // Track Accessory quantity changes
+    let accessoryChanges = {};
+    
+    document.querySelectorAll('.accessory-quantity').forEach(function(input) {
+        input.addEventListener('input', function() {
+            const accessoryId = this.getAttribute('data-accessory-id');
+            const quantity = parseFloat(this.value) || 0;
+            const originalQuantity = parseFloat(this.getAttribute('data-original-quantity')) || 0;
+            
+            if (quantity !== originalQuantity) {
+                accessoryChanges[accessoryId] = quantity;
+                // Show save button
+                document.getElementById('save-accessory-changes').style.display = 'inline-block';
+            } else {
+                delete accessoryChanges[accessoryId];
+                // Hide save button if no changes
+                if (Object.keys(accessoryChanges).length === 0) {
+                    document.getElementById('save-accessory-changes').style.display = 'none';
+                }
+            }
+        });
+    });
+
+    // Handle save accessory changes button click
+    const saveAccessoryBtn = document.getElementById('save-accessory-changes');
+    if (saveAccessoryBtn) {
+        saveAccessoryBtn.addEventListener('click', function() {
+            if (Object.keys(accessoryChanges).length === 0) {
+                showAlert('No changes to save.', 'info');
+                return;
+            }
+
+            this.disabled = true;
+            this.innerHTML = '<i class=\"bi bi-hourglass\"></i> Saving...';
+
+            fetch('/stock-take/update-accessory-quantities/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ changes: accessoryChanges })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert('Accessory quantities updated successfully!', 'success');
+                    accessoryChanges = {};
+                    this.style.display = 'none';
+                    // Update original quantities
+                    document.querySelectorAll('.accessory-quantity').forEach(function(input) {
+                        input.setAttribute('data-original-quantity', input.value);
+                    });
+                    // Regenerate CSV automatically
+                    if (data.csv_regenerated) {
+                        showAlert('Processed CSV regenerated with new quantities.', 'info');
+                        setTimeout(() => location.reload(), 1500);
+                    }
+                } else {
+                    showAlert('Error saving quantities: ' + data.error, 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class=\"bi bi-save\"></i> Save Changes';
+                }
+            })
+            .catch(error => {
+                showAlert('Error saving quantities', 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class=\"bi bi-save\"></i> Save Changes';
+            });
+        });
+    }
 
     // Handle save button click
     document.getElementById('save-pnx-changes').addEventListener('click', function() {
@@ -861,17 +1224,31 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
-
-    function showAlert(message, type) {
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-        alertDiv.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
-        `;
-        document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.container').firstChild);
-    }
 });
+
+// Alert functions (global scope so they can be used by all functions)
+function showAlert(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type}`;
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="alert-close" onclick="this.parentElement.remove()">✕</button>
+    `;
+    const pageContent = document.querySelector('.page-content');
+    if (pageContent) {
+        const messagesContainer = document.querySelector('.messages-container') || createMessagesContainer();
+        messagesContainer.appendChild(alertDiv);
+    }
+}
+
+function createMessagesContainer() {
+    const container = document.createElement('div');
+    container.className = 'messages-container';
+    const pageContent = document.querySelector('.page-content');
+    const pageHeader = document.querySelector('.page-header');
+    pageContent.insertBefore(container, pageHeader.nextSibling);
+    return container;
+}
 
 // Toggle collapse function for forms (global scope)
 function toggleCollapse(elementId) {
@@ -896,18 +1273,509 @@ function openModal(modalId) {
 function closeModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
-        modal.classList.remove('active');
+        modal.classList.remove('show');
+        document.body.classList.remove('modal-open');
     }
 }
 
 // Close modals on Escape key
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-        document.querySelectorAll('.modal.active').forEach(function(modal) {
-            modal.classList.remove('active');
+        document.querySelectorAll('.modal.show').forEach(function(modal) {
+            modal.classList.remove('show');
         });
+        document.body.classList.remove('modal-open');
     }
 });
+
+// Swap item functionality
+let currentAccessoryId = null;
+let searchTimeout = null;
+
+function openSwapModal(accessoryId, currentSku, currentName) {
+    currentAccessoryId = accessoryId;
+    document.getElementById('current-item-info').textContent = `${currentSku} - ${currentName}`;
+    document.getElementById('swap-search').value = '';
+    document.getElementById('search-results').innerHTML = '<p class="text-muted">Type to search for items...</p>';
+    openModal('swapItemModal');
+}
+
+function searchStockItems() {
+    const searchTerm = document.getElementById('swap-search').value.trim();
+    
+    // Clear previous timeout
+    if (searchTimeout) {
+        clearTimeout(searchTimeout);
+    }
+    
+    // Don't search if less than 2 characters
+    if (searchTerm.length < 2) {
+        document.getElementById('search-results').innerHTML = '<p class="text-muted">Type at least 2 characters to search...</p>';
+        return;
+    }
+    
+    // Debounce search
+    searchTimeout = setTimeout(function() {
+        fetch(`/stock-take/search-stock-items/?q=${encodeURIComponent(searchTerm)}`)
+            .then(response => response.json())
+            .then(data => {
+                displaySearchResults(data.results);
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                document.getElementById('search-results').innerHTML = '<p class="text-danger">Error searching items</p>';
+            });
+    }, 300); // Wait 300ms after user stops typing
+}
+
+function displaySearchResults(results) {
+    const container = document.getElementById('search-results');
+    
+    if (results.length === 0) {
+        container.innerHTML = '<p class="text-muted">No items found</p>';
+        return;
+    }
+    
+    let html = '<table class="table table-hover"><thead><tr><th>SKU</th><th>Name</th><th>Stock</th><th>Action</th></tr></thead><tbody>';
+    
+    results.forEach(item => {
+        const stockBadge = item.quantity > 0 
+            ? `<span class="badge badge-success">${item.quantity}</span>` 
+            : `<span class="badge badge-danger">0</span>`;
+        
+        html += `
+            <tr>
+                <td>${item.sku}</td>
+                <td>${item.name}</td>
+                <td>${stockBadge}</td>
+                <td>
+                    <button type="button" class="btn btn-primary btn-sm" 
+                            onclick="performSwap(${item.id}, '${item.sku}', '${item.name.replace(/'/g, "\\'")}')">
+                        Select
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function performSwap(newStockItemId, newSku, newName) {
+    if (!confirm(`Swap to ${newSku} - ${newName}?\n\nThis will update the accessory and regenerate the processed CSV.`)) {
+        return;
+    }
+    
+    fetch(`/stock-take/swap-accessory/${currentAccessoryId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ 
+            new_stock_item_id: newStockItemId 
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('swapItemModal');
+            showAlert(data.message, 'success');
+            // Reload page to show updated accessory
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Swap error:', error);
+        showAlert('Error swapping item', 'danger');
+    });
+}
+
+// Add new item functionality
+let addItemSearchTimeout = null;
+
+function searchItemsToAdd() {
+    const searchTerm = document.getElementById('add-item-search').value.trim();
+    
+    if (addItemSearchTimeout) {
+        clearTimeout(addItemSearchTimeout);
+    }
+    
+    if (searchTerm.length < 2) {
+        document.getElementById('add-item-results').innerHTML = '<p class="text-muted">Type at least 2 characters to search...</p>';
+        return;
+    }
+    
+    addItemSearchTimeout = setTimeout(function() {
+        fetch(`/stock-take/search-stock-items/?q=${encodeURIComponent(searchTerm)}`)
+            .then(response => response.json())
+            .then(data => {
+                displayAddItemResults(data.results);
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                document.getElementById('add-item-results').innerHTML = '<p class="text-danger">Error searching items</p>';
+            });
+    }, 300);
+}
+
+function displayAddItemResults(results) {
+    const container = document.getElementById('add-item-results');
+    
+    if (results.length === 0) {
+        container.innerHTML = '<p class="text-muted">No items found</p>';
+        return;
+    }
+    
+    let html = '<table class="table table-hover"><thead><tr><th>SKU</th><th>Name</th><th>Stock</th><th>Action</th></tr></thead><tbody>';
+    
+    results.forEach(item => {
+        const stockBadge = item.quantity > 0 
+            ? `<span class="badge badge-success">${item.quantity}</span>` 
+            : `<span class="badge badge-danger">0</span>`;
+        
+        html += `
+            <tr>
+                <td>${item.sku}</td>
+                <td>${item.name}</td>
+                <td>${stockBadge}</td>
+                <td>
+                    <button type="button" class="btn btn-primary btn-sm" 
+                            onclick="addItemToOrder(${item.id}, '${item.sku}', '${item.name.replace(/'/g, "\\'")}')">
+                        Add
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function addItemToOrder(stockItemId, sku, name) {
+    const quantity = prompt(`How many ${sku} do you want to add?`, '1');
+    
+    if (quantity === null || quantity === '') {
+        return;
+    }
+    
+    const qty = parseFloat(quantity);
+    if (isNaN(qty) || qty <= 0) {
+        showAlert('Please enter a valid quantity', 'danger');
+        return;
+    }
+    
+    fetch(`/stock-take/add-accessory-item/{{ order.id }}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ 
+            stock_item_id: stockItemId,
+            quantity: qty
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('addItemModal');
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Add item error:', error);
+        showAlert('Error adding item', 'danger');
+    });
+}
+
+// Regenerate CSV function
+function regenerateCSV(orderId) {
+    if (!confirm('Regenerate the processed CSV with current accessory data?\n\nAny unsaved quantity changes will be saved automatically.')) {
+        return;
+    }
+    
+    // First, save any pending accessory quantity changes
+    const accessoryChangesEl = document.querySelector('.accessory-quantity');
+    if (accessoryChangesEl) {
+        // Get accessoryChanges from the DOMContentLoaded scope
+        let pendingChanges = {};
+        document.querySelectorAll('.accessory-quantity').forEach(function(input) {
+            const accessoryId = input.getAttribute('data-accessory-id');
+            const quantity = parseFloat(input.value) || 0;
+            const originalQuantity = parseFloat(input.getAttribute('data-original-quantity')) || 0;
+            
+            if (quantity !== originalQuantity) {
+                pendingChanges[accessoryId] = quantity;
+            }
+        });
+        
+        // If there are pending changes, save them first
+        if (Object.keys(pendingChanges).length > 0) {
+            showAlert('Saving quantity changes before regenerating CSV...', 'info');
+            
+            fetch('/stock-take/update-accessory-quantities/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ changes: pendingChanges })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Now regenerate the CSV
+                    performCSVRegeneration(orderId);
+                } else {
+                    showAlert('Error saving quantities: ' + data.error, 'danger');
+                }
+            })
+            .catch(error => {
+                console.error('Save error:', error);
+                showAlert('Error saving quantities', 'danger');
+            });
+        } else {
+            // No pending changes, just regenerate
+            performCSVRegeneration(orderId);
+        }
+    } else {
+        // No accessories or no changes, just regenerate
+        performCSVRegeneration(orderId);
+    }
+}
+
+function performCSVRegeneration(orderId) {
+    fetch(`/stock-take/regenerate-csv/${orderId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Regenerate error:', error);
+        showAlert('Error regenerating CSV', 'danger');
+    });
+}
+
+// Workflow functions
+function updateWorkflowStage(orderId, stageId) {
+    fetch(`/order/${orderId}/update-workflow-stage/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: `stage_id=${stageId}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating stage:', error);
+        showAlert('Error updating workflow stage', 'danger');
+    });
+}
+
+function updateTaskCheckbox(orderId, taskId, checked) {
+    fetch(`/order/${orderId}/task/${taskId}/update/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: `action=checkbox&completed=${checked}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => console.error('Error updating task:', error));
+}
+
+function updateTaskRadio(orderId, taskId, option) {
+    fetch(`/order/${orderId}/task/${taskId}/update/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: `action=radio&selected_option=${encodeURIComponent(option)}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => console.error('Error updating task:', error));
+}
+
+function updateTaskDropdown(orderId, taskId, option) {
+    fetch(`/order/${orderId}/task/${taskId}/update/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: `action=dropdown&selected_option=${encodeURIComponent(option)}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => console.error('Error updating task:', error));
+}
+
+function updateTaskDecision(orderId, taskId, decision) {
+    // Remove active class from all buttons in this decision group
+    event.target.closest('.decision-options').querySelectorAll('.decision-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Add active class to clicked button
+    event.target.closest('.decision-btn').classList.add('active');
+    
+    fetch(`/order/${orderId}/task/${taskId}/update/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: `action=decision&selected_option=${decision}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(`Decision: ${decision}`, 'info');
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => console.error('Error updating decision:', error));
+}
+
+function progressToNextStage(orderId) {
+    fetch(`/order/${orderId}/workflow/progress/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error progressing stage:', error);
+        showAlert('Error progressing to next stage', 'danger');
+    });
+}
+
+function revertToPreviousStage(orderId) {
+    if (!confirm('Are you sure you want to revert to the previous stage?')) {
+        return;
+    }
+    
+    fetch(`/order/${orderId}/workflow/revert/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error reverting stage:', error);
+        showAlert('Error reverting to previous stage', 'danger');
+    });
+}
+
+function openWorkflowModal() {
+    const modal = document.getElementById('workflowModal');
+    if (modal) {
+        modal.classList.add('show');
+        document.body.classList.add('modal-open');
+        
+        // Scroll to current stage
+        setTimeout(() => {
+            const currentStage = modal.querySelector('.current-stage');
+            if (currentStage) {
+                currentStage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 100);
+    }
+}
+
+function selectWorkflowStage(orderId, stageId) {
+    if (!confirm('Are you sure you want to change the workflow stage?')) {
+        return;
+    }
+    
+    fetch(`/order/${orderId}/update-workflow-stage/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: `stage_id=${stageId}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Workflow stage updated successfully', 'success');
+            closeModal('workflowModal');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating workflow stage:', error);
+        showAlert('Error updating workflow stage', 'danger');
+    });
+}
 </script>
 
 {% endblock %}

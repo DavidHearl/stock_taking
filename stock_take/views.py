@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment
 
 import csv
 import io
@@ -18,6 +18,9 @@ from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup
 from django.template.loader import render_to_string
 import datetime
 from django.utils import timezone
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 @login_required
 def ordering(request):
@@ -1216,6 +1219,21 @@ def create_boards_po(request):
                             continue
                             
                         try:
+                            # Handle both old and new PNX formats:
+                            # Old format: CUSTOMER="BFS-RW-403054 Customer Name", ORDERNAME="20393"
+                            # New format: CUSTOMER="", ORDERNAME="BFS-NR-410415 Customer Name"
+                            customer_field = row.get('CUSTOMER', '').strip()
+                            ordername_field = row.get('ORDERNAME', '').strip()
+                            
+                            # If CUSTOMER is empty, use ORDERNAME instead
+                            if not customer_field and ordername_field:
+                                customer_value = ordername_field
+                            # If CUSTOMER has value, combine it with ORDERNAME for compatibility
+                            elif customer_field and ordername_field:
+                                customer_value = f"{customer_field};{ordername_field}"
+                            else:
+                                customer_value = customer_field
+                            
                             PNXItem.objects.create(
                                 boards_po=boards_po,
                                 barcode=row.get('BARCODE', '').strip(),
@@ -1223,7 +1241,7 @@ def create_boards_po(request):
                                 cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
                                 cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
                                 cnt=Decimal(row.get('CNT', '0').strip() or '0'),
-                                customer=row.get('CUSTOMER', '').strip()
+                                customer=customer_value
                             )
                             items_created += 1
                         except (ValueError, KeyError) as e:
@@ -1382,6 +1400,21 @@ def replace_pnx_file(request, boards_po_id):
                     continue
                     
                 try:
+                    # Handle both old and new PNX formats:
+                    # Old format: CUSTOMER="BFS-RW-403054 Customer Name", ORDERNAME="20393"
+                    # New format: CUSTOMER="", ORDERNAME="BFS-NR-410415 Customer Name"
+                    customer_field = row.get('CUSTOMER', '').strip()
+                    ordername_field = row.get('ORDERNAME', '').strip()
+                    
+                    # If CUSTOMER is empty, use ORDERNAME instead
+                    if not customer_field and ordername_field:
+                        customer_value = ordername_field
+                    # If CUSTOMER has value, combine it with ORDERNAME for compatibility
+                    elif customer_field and ordername_field:
+                        customer_value = f"{customer_field};{ordername_field}"
+                    else:
+                        customer_value = customer_field
+                    
                     PNXItem.objects.create(
                         boards_po=boards_po,
                         barcode=row.get('BARCODE', '').strip(),
@@ -1389,7 +1422,7 @@ def replace_pnx_file(request, boards_po_id):
                         cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
                         cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
                         cnt=Decimal(row.get('CNT', '0').strip() or '0'),
-                        customer=row.get('CUSTOMER', '').strip()
+                        customer=customer_value
                     )
                     items_created += 1
                 except (ValueError, KeyError) as e:
@@ -1407,6 +1440,36 @@ def replace_pnx_file(request, boards_po_id):
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
+    
+    # Get or create workflow progress for this order
+    from .models import OrderWorkflowProgress, WorkflowStage, TaskCompletion
+    workflow_progress, created = OrderWorkflowProgress.objects.get_or_create(
+        order=order,
+        defaults={'current_stage': WorkflowStage.objects.first()}
+    )
+    
+    # Get all available workflow stages
+    workflow_stages = WorkflowStage.objects.all().prefetch_related('tasks')
+    
+    # Get task completions for current stage
+    task_completions = {}
+    if workflow_progress.current_stage:
+        for task in workflow_progress.current_stage.tasks.all():
+            completion, _ = TaskCompletion.objects.get_or_create(
+                order_progress=workflow_progress,
+                task=task
+            )
+            task_completions[task.id] = completion
+    
+    # Group stages by phase for workflow modal
+    phases = [
+        ('enquiry', 'Enquiry'),
+        ('lead', 'Lead'),
+        ('sale', 'Sale'),
+    ]
+    stages_by_phase = {}
+    for phase_code, phase_display in phases:
+        stages_by_phase[phase_code] = workflow_stages.filter(phase=phase_code)
     
     # Get price per square meter from session, default to 12
     price_per_sqm_str = request.session.get('price_per_sqm', '12')
@@ -1523,6 +1586,11 @@ def order_details(request, order_id):
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
         'price_per_sqm': price_per_sqm,
+        'workflow_progress': workflow_progress,
+        'workflow_stages': workflow_stages,
+        'task_completions': task_completions,
+        'phases': phases,
+        'stages_by_phase': stages_by_phase,
     })
 
 def completed_stock_takes(request):
@@ -3116,6 +3184,337 @@ def delete_all_accessories(request, order_id):
 
 
 @login_required
+def search_stock_items(request):
+    """Search stock items by SKU or name (AJAX endpoint)"""
+    from django.db.models import Q
+    
+    query = request.GET.get('q', '').strip()
+    
+    if len(query) < 2:
+        return JsonResponse({'results': []})
+    
+    # Search in both SKU and name fields
+    stock_items = StockItem.objects.filter(
+        Q(sku__icontains=query) | Q(name__icontains=query)
+    ).order_by('sku')[:20]  # Limit to 20 results
+    
+    results = [
+        {
+            'id': item.id,
+            'sku': item.sku,
+            'name': item.name,
+            'quantity': item.quantity,
+        }
+        for item in stock_items
+    ]
+    
+    return JsonResponse({'results': results})
+
+
+@login_required
+def swap_accessory(request, accessory_id):
+    """Swap an accessory item with a different stock item and regenerate CSV"""
+    import json
+    import csv
+    import io
+    from django.core.files.base import ContentFile
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            new_stock_item_id = data.get('new_stock_item_id')
+            
+            if not new_stock_item_id:
+                return JsonResponse({'success': False, 'error': 'No stock item selected'})
+            
+            # Get the accessory and new stock item
+            accessory = get_object_or_404(Accessory, id=accessory_id)
+            new_stock_item = get_object_or_404(StockItem, id=new_stock_item_id)
+            order = accessory.order
+            
+            # Update accessory with new stock item details
+            old_sku = accessory.sku
+            old_name = accessory.name
+            
+            accessory.sku = new_stock_item.sku
+            accessory.name = new_stock_item.name
+            accessory.cost_price = new_stock_item.cost
+            accessory.stock_item = new_stock_item
+            accessory.missing = False  # Item is no longer missing since we found a replacement
+            accessory.save()
+            
+            # Regenerate processed CSV
+            if order.original_csv:
+                # Read original CSV
+                order.original_csv.seek(0)
+                file_content = order.original_csv.read().decode('utf-8')
+                io_string = io.StringIO(file_content)
+                
+                # Detect delimiter
+                sample = file_content[:1024]
+                sniffer = csv.Sniffer()
+                try:
+                    delimiter = sniffer.sniff(sample, delimiters=',\t;').delimiter
+                except csv.Error:
+                    delimiter = ','
+                
+                io_string.seek(0)
+                reader = csv.DictReader(io_string, delimiter=delimiter)
+                
+                # Create processed CSV with updated item
+                output = io.StringIO()
+                fieldnames = reader.fieldnames
+                writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=delimiter)
+                writer.writeheader()
+                
+                for row in reader:
+                    # If this row matches the old SKU, replace with new SKU
+                    if row.get('Sku', '').strip() == old_sku:
+                        row['Sku'] = new_stock_item.sku
+                        row['Name'] = new_stock_item.name
+                        row['CostPrice'] = str(new_stock_item.cost)
+                    
+                    writer.writerow(row)
+                
+                # Save processed CSV
+                csv_content = output.getvalue()
+                filename = f"{order.customer_number}_processed_{order.original_csv.name.split('/')[-1]}"
+                order.processed_csv.save(filename, ContentFile(csv_content.encode('utf-8')))
+                order.processed_csv_created_at = timezone.now()
+                order.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Swapped {old_sku} to {new_stock_item.sku}. Processed CSV updated.'
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def update_accessory_quantities(request):
+    """Update quantities for multiple accessories and regenerate CSV"""
+    import json
+    import csv
+    import io
+    from django.core.files.base import ContentFile
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            changes = data.get('changes', {})
+            
+            if not changes:
+                return JsonResponse({'success': False, 'error': 'No changes provided'})
+            
+            order = None
+            # Update each accessory quantity
+            for accessory_id, new_quantity in changes.items():
+                accessory = get_object_or_404(Accessory, id=accessory_id)
+                if order is None:
+                    order = accessory.order
+                accessory.quantity = new_quantity
+                accessory.save()
+            
+            # Regenerate CSV if original exists
+            csv_regenerated = False
+            if order and order.original_csv:
+                # Read original CSV
+                order.original_csv.seek(0)
+                file_content = order.original_csv.read().decode('utf-8')
+                io_string = io.StringIO(file_content)
+                
+                # Detect delimiter
+                sample = file_content[:1024]
+                sniffer = csv.Sniffer()
+                try:
+                    delimiter = sniffer.sniff(sample, delimiters=',\t;').delimiter
+                except csv.Error:
+                    delimiter = ','
+                
+                io_string.seek(0)
+                reader = csv.DictReader(io_string, delimiter=delimiter)
+                
+                # Create processed CSV with updated quantities
+                output = io.StringIO()
+                fieldnames = reader.fieldnames
+                writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=delimiter)
+                writer.writeheader()
+                
+                # Build a map of SKU to current quantity from accessories
+                sku_quantities = {}
+                for acc in order.accessories.all():
+                    sku_quantities[acc.sku] = str(int(acc.quantity))
+                
+                for row in reader:
+                    sku = row.get('Sku', '').strip()
+                    if sku in sku_quantities:
+                        row['Quantity'] = sku_quantities[sku]
+                    writer.writerow(row)
+                
+                # Save processed CSV
+                csv_content = output.getvalue()
+                filename = f"{order.customer_number}_processed_{order.original_csv.name.split('/')[-1]}"
+                order.processed_csv.save(filename, ContentFile(csv_content.encode('utf-8')))
+                order.processed_csv_created_at = timezone.now()
+                order.save()
+                csv_regenerated = True
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Updated {len(changes)} accessory quantities',
+                'csv_regenerated': csv_regenerated
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def add_accessory_item(request, order_id):
+    """Add a new accessory item to an order"""
+    import json
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            stock_item_id = data.get('stock_item_id')
+            quantity = data.get('quantity', 1)
+            
+            if not stock_item_id:
+                return JsonResponse({'success': False, 'error': 'No stock item selected'})
+            
+            order = get_object_or_404(Order, id=order_id)
+            stock_item = get_object_or_404(StockItem, id=stock_item_id)
+            
+            # Create new accessory
+            accessory = Accessory.objects.create(
+                order=order,
+                sku=stock_item.sku,
+                name=stock_item.name,
+                description='',
+                cost_price=stock_item.cost,
+                sell_price=stock_item.cost,  # Default to cost price
+                quantity=quantity,
+                billable=True,
+                stock_item=stock_item,
+                missing=False
+            )
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Added {quantity}x {stock_item.sku} to order'
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def regenerate_csv(request, order_id):
+    """Regenerate the processed CSV from current accessory data"""
+    import csv
+    import io
+    from django.core.files.base import ContentFile
+    
+    if request.method == 'POST':
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            
+            if not order.original_csv:
+                return JsonResponse({'success': False, 'error': 'No original CSV found'})
+            
+            # Read original CSV
+            order.original_csv.seek(0)
+            file_content = order.original_csv.read().decode('utf-8')
+            io_string = io.StringIO(file_content)
+            
+            # Detect delimiter
+            sample = file_content[:1024]
+            sniffer = csv.Sniffer()
+            try:
+                delimiter = sniffer.sniff(sample, delimiters=',\t;').delimiter
+            except csv.Error:
+                delimiter = ','
+            
+            io_string.seek(0)
+            reader = csv.DictReader(io_string, delimiter=delimiter)
+            
+            # Create processed CSV with current accessory data
+            output = io.StringIO()
+            fieldnames = reader.fieldnames
+            writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=delimiter)
+            writer.writeheader()
+            
+            # Build a map of SKU to current accessory data
+            sku_data = {}
+            processed_skus = set()  # Track which SKUs we've written
+            
+            for acc in order.accessories.all():
+                sku_data[acc.sku] = {
+                    'sku': acc.sku,
+                    'name': acc.name,
+                    'description': acc.description or '',
+                    'quantity': str(int(acc.quantity)),
+                    'cost': str(acc.cost_price),
+                    'sell': str(acc.sell_price),
+                    'billable': 'True' if acc.billable else 'False'
+                }
+            
+            # Update existing rows
+            for row in reader:
+                sku = row.get('Sku', '').strip()
+                if sku in sku_data:
+                    # Update with current data
+                    row['Name'] = sku_data[sku]['name']
+                    row['Description'] = sku_data[sku]['description']
+                    row['Quantity'] = sku_data[sku]['quantity']
+                    row['CostPrice'] = sku_data[sku]['cost']
+                    row['SellPrice'] = sku_data[sku]['sell']
+                    row['Billable'] = sku_data[sku]['billable']
+                    processed_skus.add(sku)
+                writer.writerow(row)
+            
+            # Add new items that weren't in the original CSV
+            for sku, data in sku_data.items():
+                if sku not in processed_skus:
+                    new_row = {
+                        'Sku': data['sku'],
+                        'Name': data['name'],
+                        'Description': data['description'],
+                        'CostPrice': data['cost'],
+                        'SellPrice': data['sell'],
+                        'Quantity': data['quantity'],
+                        'Billable': data['billable']
+                    }
+                    writer.writerow(new_row)
+            
+            # Save processed CSV
+            csv_content = output.getvalue()
+            filename = f"{order.customer_number}_processed_{order.original_csv.name.split('/')[-1]}"
+            order.processed_csv.save(filename, ContentFile(csv_content.encode('utf-8')))
+            order.processed_csv_created_at = timezone.now()
+            order.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Processed CSV regenerated successfully'
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
 def remove_order_csv(request, order_id, csv_type):
     """Remove original or processed CSV file from an order"""
     if request.method == 'POST':
@@ -3708,3 +4107,981 @@ def remedial_report(request):
         'boards_ordered_count': boards_ordered_count,
         'recent_remedials': recent_remedials,
     })
+
+
+@login_required
+@login_required
+def fit_board(request):
+    """Display fit board calendar with appointments and completion tracking"""
+    from datetime import datetime, timedelta
+    from calendar import monthrange
+    import calendar
+    
+    # Get current date or requested month/year
+    today = timezone.now().date()
+    current_year = int(request.GET.get('year', today.year))
+    current_month = int(request.GET.get('month', today.month))
+    
+    # Navigation for previous/next month
+    first_day = datetime(current_year, current_month, 1).date()
+    if current_month == 12:
+        next_month = datetime(current_year + 1, 1, 1).date()
+    else:
+        next_month = datetime(current_year, current_month + 1, 1).date()
+    
+    if current_month == 1:
+        prev_month = datetime(current_year - 1, 12, 1).date()
+    else:
+        prev_month = datetime(current_year, current_month - 1, 1).date()
+    
+    # Get all appointments for this month
+    appointments = FitAppointment.objects.filter(
+        fit_date__year=current_year,
+        fit_date__month=current_month
+    ).select_related('order')
+    
+    # Get all orders with fit dates in this month (for quick add)
+    orders_this_month = Order.objects.filter(
+        fit_date__year=current_year,
+        fit_date__month=current_month,
+        job_finished=False
+    ).order_by('fit_date', 'last_name')
+    
+    # Create appointments dict by date and fitter
+    appointments_by_date = {}
+    for appointment in appointments:
+        date_key = appointment.fit_date.day
+        if date_key not in appointments_by_date:
+            appointments_by_date[date_key] = {'R': [], 'G': [], 'S': [], 'P': []}
+        appointments_by_date[date_key][appointment.fitter].append(appointment)
+    
+    # Build calendar structure
+    cal = calendar.Calendar(firstweekday=0)  # Monday as first day
+    month_days = cal.monthdayscalendar(current_year, current_month)
+    
+    # Get day names
+    day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    month_name = calendar.month_name[current_month]
+    
+    # Get all unfinished orders for selection dropdown
+    all_orders = Order.objects.filter(
+        job_finished=False
+    ).order_by('fit_date', 'last_name')
+    
+    # Fitter choices
+    fitters = [('R', 'Ross'), ('G', 'Gavin'), ('S', 'Stuart'), ('P', 'Paddy')]
+    
+    context = {
+        'current_year': current_year,
+        'current_month': current_month,
+        'month_name': month_name,
+        'month_days': month_days,
+        'day_names': day_names,
+        'appointments_by_date': appointments_by_date,
+        'orders_this_month': orders_this_month,
+        'all_orders': all_orders,
+        'prev_month': prev_month,
+        'next_month': next_month,
+        'today': today,
+        'fitters': fitters,
+    }
+    
+    return render(request, 'stock_take/fit_board.html', context)
+
+
+@login_required
+def workflow(request):
+    """Display workflow stages for order management"""
+    from .models import WorkflowStage
+    
+    stages = WorkflowStage.objects.all().prefetch_related('tasks')
+    phases = [
+        ('enquiry', 'Enquiry'),
+        ('lead', 'Lead'),
+        ('sale', 'Sale'),
+    ]
+    
+    # Group stages by phase for template iteration
+    stages_by_phase = {}
+    for phase_code, phase_display in phases:
+        stages_by_phase[phase_code] = stages.filter(phase=phase_code)
+    
+    context = {
+        'stages': stages,
+        'phases': phases,
+        'stages_by_phase': stages_by_phase,
+    }
+    return render(request, 'stock_take/workflow.html', context)
+
+
+@login_required
+def save_workflow_stage(request):
+    """Create or update a workflow stage"""
+    from .models import WorkflowStage
+    
+    if request.method == 'POST':
+        stage_id = request.POST.get('stage_id')
+        name = request.POST.get('name')
+        phase = request.POST.get('phase')
+        role = request.POST.get('role')
+        description = request.POST.get('description')
+        expected_days = request.POST.get('expected_days')
+        
+        if stage_id:
+            # Update existing stage
+            stage = get_object_or_404(WorkflowStage, id=stage_id)
+            stage.name = name
+            stage.phase = phase
+            stage.role = role
+            stage.description = description
+            stage.expected_days = int(expected_days) if expected_days else None
+            stage.save()
+        else:
+            # Create new stage
+            # Get the highest order number and add 1
+            max_order = WorkflowStage.objects.aggregate(models.Max('order'))['order__max'] or 0
+            stage = WorkflowStage.objects.create(
+                name=name,
+                phase=phase,
+                role=role,
+                description=description,
+                expected_days=int(expected_days) if expected_days else None,
+                order=max_order + 1
+            )
+        
+        return redirect('workflow')
+    
+    return redirect('workflow')
+
+
+@login_required
+def get_workflow_stage(request, stage_id):
+    """Get workflow stage details as JSON"""
+    from .models import WorkflowStage
+    
+    stage = get_object_or_404(WorkflowStage, id=stage_id)
+    data = {
+        'id': stage.id,
+        'name': stage.name,
+        'phase': stage.phase,
+        'role': stage.role,
+        'description': stage.description,
+        'expected_days': stage.expected_days,
+    }
+    return JsonResponse(data)
+
+
+@login_required
+def delete_workflow_stage(request, stage_id):
+    """Delete a workflow stage"""
+    from .models import WorkflowStage
+    
+    if request.method == 'POST':
+        try:
+            stage = get_object_or_404(WorkflowStage, id=stage_id)
+            stage.delete()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def move_workflow_stage(request, stage_id):
+    """Move a workflow stage up or down"""
+    from .models import WorkflowStage
+    
+    if request.method == 'POST':
+        direction = request.POST.get('direction')
+        stage = get_object_or_404(WorkflowStage, id=stage_id)
+        
+        if direction == 'up':
+            # Get the stage immediately above this one
+            prev_stage = WorkflowStage.objects.filter(
+                order__lt=stage.order
+            ).order_by('-order').first()
+            
+            if prev_stage:
+                # Swap orders
+                stage.order, prev_stage.order = prev_stage.order, stage.order
+                stage.save()
+                prev_stage.save()
+        
+        elif direction == 'down':
+            # Get the stage immediately below this one
+            next_stage = WorkflowStage.objects.filter(
+                order__gt=stage.order
+            ).order_by('order').first()
+            
+            if next_stage:
+                # Swap orders
+                stage.order, next_stage.order = next_stage.order, stage.order
+                stage.save()
+                next_stage.save()
+        
+        return JsonResponse({'success': True})
+    
+    return JsonResponse({'success': False})
+
+
+@login_required
+def save_workflow_task(request):
+    """Add a task to a workflow stage"""
+    from .models import WorkflowTask, WorkflowStage
+    
+    if request.method == 'POST':
+        stage_id = request.POST.get('stage_id')
+        description = request.POST.get('description')
+        task_type = request.POST.get('task_type', 'record')
+        options = request.POST.get('options', '')
+        
+        stage = get_object_or_404(WorkflowStage, id=stage_id)
+        
+        # Get the highest order number for tasks in this stage
+        max_order = stage.tasks.aggregate(models.Max('order'))['order__max'] or 0
+        
+        WorkflowTask.objects.create(
+            stage=stage,
+            description=description,
+            task_type=task_type,
+            options=options,
+            order=max_order + 1
+        )
+        
+        return redirect('workflow')
+    
+    return redirect('workflow')
+
+
+@login_required
+def delete_workflow_task(request, task_id):
+    """Delete a workflow task"""
+    from .models import WorkflowTask
+    
+    if request.method == 'POST':
+        try:
+            task = get_object_or_404(WorkflowTask, id=task_id)
+            task.delete()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def update_order_workflow_stage(request, order_id):
+    """Update the workflow stage for an order"""
+    from .models import OrderWorkflowProgress, WorkflowStage
+    from django.utils import timezone
+    
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        stage_id = request.POST.get('stage_id')
+        
+        # Get or create workflow progress
+        workflow_progress, created = OrderWorkflowProgress.objects.get_or_create(order=order)
+        
+        if stage_id:
+            stage = get_object_or_404(WorkflowStage, id=stage_id)
+            workflow_progress.current_stage = stage
+            workflow_progress.stage_started_at = timezone.now()
+        else:
+            workflow_progress.current_stage = None
+        
+        workflow_progress.save()
+        
+        return JsonResponse({'success': True, 'message': 'Stage updated successfully'})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)
+
+
+@login_required
+def update_task_completion(request, order_id, task_id):
+    """Update task completion status for an order"""
+    from .models import OrderWorkflowProgress, WorkflowTask, TaskCompletion
+    from django.utils import timezone
+    
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        task = get_object_or_404(WorkflowTask, id=task_id)
+        
+        # Get or create workflow progress
+        workflow_progress, _ = OrderWorkflowProgress.objects.get_or_create(order=order)
+        
+        # Get or create task completion
+        completion, _ = TaskCompletion.objects.get_or_create(
+            order_progress=workflow_progress,
+            task=task
+        )
+        
+        # Handle different task types
+        action = request.POST.get('action')
+        
+        if action == 'checkbox':
+            completed = request.POST.get('completed') == 'true'
+            completion.completed = completed
+            completion.completed_at = timezone.now() if completed else None
+            if request.user.is_authenticated:
+                completion.completed_by = request.user.username if completed else ''
+        
+        elif action == 'radio' or action == 'dropdown' or action == 'decision':
+            selected_option = request.POST.get('selected_option', '')
+            completion.selected_option = selected_option
+            completion.completed = bool(selected_option)
+            completion.completed_at = timezone.now() if selected_option else None
+            if request.user.is_authenticated:
+                completion.completed_by = request.user.username if selected_option else ''
+        
+        completion.save()
+        
+        return JsonResponse({'success': True, 'message': 'Task updated successfully'})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)
+
+
+@login_required
+def progress_to_next_stage(request, order_id):
+    """Progress order to the next workflow stage"""
+    from .models import OrderWorkflowProgress, WorkflowStage
+    from django.utils import timezone
+    
+    if request.method == 'POST':
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            
+            # Get or create workflow progress
+            workflow_progress, _ = OrderWorkflowProgress.objects.get_or_create(order=order)
+            
+            if not workflow_progress.current_stage:
+                return JsonResponse({'success': False, 'error': 'No current stage set'}, status=400)
+            
+            # Check if all requirement tasks are completed before progressing
+            if not workflow_progress.can_progress_to_next_stage:
+                return JsonResponse({'success': False, 'error': 'Cannot progress: Required tasks must be completed first'}, status=400)
+            
+            current_stage = workflow_progress.current_stage
+            
+            # Find next stage (same phase, higher order, or first stage of next phase)
+            next_stage = WorkflowStage.objects.filter(
+                phase=current_stage.phase,
+                order__gt=current_stage.order
+            ).order_by('order').first()
+            
+            # If no next stage in same phase, try next phase
+            if not next_stage:
+                phase_order = {'enquiry': 0, 'lead': 1, 'sale': 2}
+                current_phase_order = phase_order.get(current_stage.phase, -1)
+                
+                for phase_key, phase_value in phase_order.items():
+                    if phase_value > current_phase_order:
+                        next_stage = WorkflowStage.objects.filter(phase=phase_key).order_by('order').first()
+                        if next_stage:
+                            break
+            
+            if next_stage:
+                workflow_progress.current_stage = next_stage
+                workflow_progress.stage_started_at = timezone.now()
+                workflow_progress.save()
+                return JsonResponse({'success': True, 'message': f'Progressed to {next_stage.name}'})
+            else:
+                return JsonResponse({'success': False, 'error': 'No next stage available'}, status=400)
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)
+
+
+@login_required
+def revert_to_previous_stage(request, order_id):
+    """Revert order to the previous workflow stage"""
+    from .models import OrderWorkflowProgress, WorkflowStage
+    from django.utils import timezone
+    
+    if request.method == 'POST':
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            
+            # Get or create workflow progress
+            workflow_progress, _ = OrderWorkflowProgress.objects.get_or_create(order=order)
+            
+            if not workflow_progress.current_stage:
+                return JsonResponse({'success': False, 'error': 'No current stage set'}, status=400)
+            
+            current_stage = workflow_progress.current_stage
+            
+            # Find previous stage (same phase, lower order, or last stage of previous phase)
+            previous_stage = WorkflowStage.objects.filter(
+                phase=current_stage.phase,
+                order__lt=current_stage.order
+            ).order_by('-order').first()
+            
+            # If no previous stage in same phase, try previous phase
+            if not previous_stage:
+                phase_order = {'enquiry': 0, 'lead': 1, 'sale': 2}
+                current_phase_order = phase_order.get(current_stage.phase, -1)
+                
+                for phase_key in reversed(list(phase_order.keys())):
+                    if phase_order[phase_key] < current_phase_order:
+                        previous_stage = WorkflowStage.objects.filter(phase=phase_key).order_by('-order').first()
+                        if previous_stage:
+                            break
+            
+            if previous_stage:
+                workflow_progress.current_stage = previous_stage
+                workflow_progress.stage_started_at = timezone.now()
+                workflow_progress.save()
+                return JsonResponse({'success': True, 'message': f'Reverted to {previous_stage.name}'})
+            else:
+                return JsonResponse({'success': False, 'error': 'No previous stage available'}, status=400)
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)
+
+
+@login_required
+def add_fit_appointment(request):
+    """Add or update a fit appointment"""
+    if request.method == 'POST':
+        entity_id = request.POST.get('entity_id')
+        entity_type = request.POST.get('entity_type', 'order')  # 'order' or 'remedial'
+        fit_date = request.POST.get('fit_date')
+        fitter = request.POST.get('fitter', 'R')  # Default to Ross
+        
+        try:
+            if entity_type == 'order':
+                order = Order.objects.get(id=entity_id)
+                appointment, created = FitAppointment.objects.get_or_create(
+                    order=order,
+                    remedial=None,
+                    fit_date=fit_date,
+                    defaults={'fitter': fitter}
+                )
+                customer_name = f"{order.first_name} {order.last_name}"
+            elif entity_type == 'remedial':
+                remedial = Remedial.objects.get(id=entity_id)
+                appointment, created = FitAppointment.objects.get_or_create(
+                    remedial=remedial,
+                    order=None,
+                    fit_date=fit_date,
+                    defaults={'fitter': fitter}
+                )
+                customer_name = f"{remedial.remedial_number} - {remedial.first_name} {remedial.last_name}"
+            else:
+                return JsonResponse({'success': False, 'error': 'Invalid entity type'})
+            
+            if created:
+                messages.success(request, f'Fit appointment added for {customer_name}')
+            else:
+                messages.info(request, f'Appointment already exists for {customer_name}')
+            
+            return JsonResponse({'success': True, 'created': created})
+        except (Order.DoesNotExist, Remedial.DoesNotExist):
+            return JsonResponse({'success': False, 'error': 'Entity not found'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def update_fit_status(request, appointment_id):
+    """Update completion status of a fit appointment"""
+    if request.method == 'POST':
+        try:
+            appointment = get_object_or_404(FitAppointment, id=appointment_id)
+            
+            # Update status fields
+            appointment.interior_completed = request.POST.get('interior_completed') == 'true'
+            appointment.door_completed = request.POST.get('door_completed') == 'true'
+            appointment.accessories_completed = request.POST.get('accessories_completed') == 'true'
+            appointment.materials_completed = request.POST.get('materials_completed') == 'true'
+            appointment.save()
+            
+            return JsonResponse({
+                'success': True,
+                'is_fully_completed': appointment.is_fully_completed
+            })
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def delete_fit_appointment(request, appointment_id):
+    """Delete a fit appointment"""
+    if request.method == 'POST':
+        try:
+            appointment = get_object_or_404(FitAppointment, id=appointment_id)
+            customer_name = appointment.customer_name
+            appointment.delete()
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Appointment for {customer_name} deleted'
+            })
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def move_fit_appointment(request, appointment_id):
+    """Move a fit appointment to a new date and/or fitter"""
+    if request.method == 'POST':
+        try:
+            import json
+            data = json.loads(request.body)
+            appointment = get_object_or_404(FitAppointment, id=appointment_id)
+            
+            # Update fitter if provided
+            if 'fitter' in data:
+                appointment.fitter = data['fitter']
+            
+            # Update fit date if provided
+            if 'fit_date' in data:
+                from datetime import datetime
+                appointment.fit_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
+            
+            appointment.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Appointment for {appointment.customer_name} moved'
+            })
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def bulk_import_fit_dates(request):
+    """Bulk import all fit dates from unfinished orders as appointments"""
+    if request.method == 'POST':
+        try:
+            # Get all unfinished orders that have a fit date
+            orders = Order.objects.filter(
+                job_finished=False,
+                fit_date__isnull=False
+            )
+            
+            created_count = 0
+            for order in orders:
+                # Create appointment with Ross as default fitter if it doesn't exist
+                appointment, created = FitAppointment.objects.get_or_create(
+                    order=order,
+                    fit_date=order.fit_date,
+                    defaults={'fitter': 'R'}  # Default to Ross
+                )
+                if created:
+                    created_count += 1
+            
+            return JsonResponse({
+                'success': True,
+                'created': created_count,
+                'message': f'Imported {created_count} appointments'
+            })
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def search_orders_api(request):
+    """Search orders for fit board appointment selection"""
+    query = request.GET.get('q', '').strip()
+    
+    # Get base queryset of unfinished orders
+    orders = Order.objects.filter(job_finished=False)
+    
+    # Filter if query provided
+    if query:
+        orders = orders.filter(
+            models.Q(first_name__icontains=query) |
+            models.Q(last_name__icontains=query) |
+            models.Q(sale_number__icontains=query) |
+            models.Q(customer_number__icontains=query)
+        )
+    
+    # Limit results and order by fit date
+    orders = orders.order_by('fit_date', 'last_name')[:20]
+    
+    results = [{
+        'id': order.id,
+        'first_name': order.first_name,
+        'last_name': order.last_name,
+        'sale_number': order.sale_number,
+        'customer_number': order.customer_number,
+        'fit_date': order.fit_date.strftime('%d/%m/%Y')
+    } for order in orders]
+    
+    return JsonResponse({'orders': results})
+
+
+@login_required
+def search_remedials_api(request):
+    """Search remedials for fit board appointment selection"""
+    query = request.GET.get('q', '').strip()
+    
+    # Get base queryset of incomplete remedials
+    remedials = Remedial.objects.filter(is_completed=False)
+    
+    # Filter if query provided
+    if query:
+        remedials = remedials.filter(
+            models.Q(remedial_number__icontains=query) |
+            models.Q(first_name__icontains=query) |
+            models.Q(last_name__icontains=query) |
+            models.Q(customer_number__icontains=query)
+        )
+    
+    # Limit results and order by ID
+    remedials = remedials.order_by('-id')[:20]
+    
+    results = [{
+        'id': remedial.id,
+        'remedial_number': remedial.remedial_number,
+        'first_name': remedial.first_name,
+        'last_name': remedial.last_name,
+        'customer_number': remedial.customer_number,
+        'reason': remedial.reason[:50] + '...' if len(remedial.reason) > 50 else remedial.reason
+    } for remedial in remedials]
+    
+    return JsonResponse({'remedials': results})
+
+
+@login_required
+def update_order_fit_status(request, order_id):
+    """Update fit completion status on the Order model"""
+    if request.method == 'POST':
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            field = request.POST.get('field')
+            value = request.POST.get('value') == 'true'
+            
+            # Update the appropriate field
+            if field == 'interior':
+                order.interior_completed = value
+            elif field == 'door':
+                order.door_completed = value
+            elif field == 'accessories':
+                order.accessories_completed = value
+            elif field == 'materials':
+                order.materials_completed = value
+            elif field == 'paperwork':
+                order.paperwork_completed = value
+            else:
+                return JsonResponse({'success': False, 'error': 'Invalid field'})
+            
+            order.save()
+            
+            return JsonResponse({
+                'success': True,
+                'field': field,
+                'value': value
+            })
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def generate_and_attach_pnx(request, order_id):
+    """Generate PNX file from CAD number and attach to boards PO"""
+    from material_generator.board_logic import generate_board_order_file
+    from django.conf import settings
+    import os
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    if not order.customer_number:
+        messages.error(request, 'Order must have a CAD Number to generate PNX.')
+        return redirect('order_details', order_id=order_id)
+    
+    if not order.boards_po:
+        messages.error(request, 'Order must have a Boards PO assigned to attach PNX file.')
+        return redirect('order_details', order_id=order_id)
+    
+    try:
+        # Get database path - look in project root directory (where .env is)
+        db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
+        
+        if not os.path.exists(db_path):
+            messages.error(request, f'CAD database not found at: {db_path}. Please ensure cad_data.db is in the project root directory.')
+            return redirect('order_details', order_id=order_id)
+        
+        # Generate PNX content using customer number (CAD number)
+        pnx_content = generate_board_order_file(order.customer_number, db_path)
+        
+        if not pnx_content or pnx_content.strip() == '':
+            messages.warning(request, f'No board data found for CAD Number {order.customer_number}.')
+            return redirect('order_details', order_id=order_id)
+        
+        # Save PNX file to boards PO
+        filename = f"Boards_Order_{order.boards_po.po_number}.pnx"
+        order.boards_po.file.save(filename, io.BytesIO(pnx_content.encode('utf-8')))
+        
+        # Parse PNX and create/update PNX items
+        io_string = io.StringIO(pnx_content)
+        reader = csv.DictReader(io_string, delimiter=';')
+        
+        # Clear existing PNX items for this customer number to avoid duplicates
+        order.boards_po.pnx_items.filter(customer__icontains=order.customer_number).delete()
+        
+        items_created = 0
+        for row in reader:
+            # Skip empty rows
+            if not row.get('BARCODE', '').strip():
+                continue
+                
+            try:
+                customer_field = row.get('CUSTOMER', '').strip()
+                ordername_field = row.get('ORDERNAME', '').strip()
+                
+                # If CUSTOMER is empty, use ORDERNAME instead
+                if not customer_field and ordername_field:
+                    customer_value = ordername_field
+                # If CUSTOMER has value, combine it with ORDERNAME for compatibility
+                elif customer_field and ordername_field:
+                    customer_value = f"{customer_field};{ordername_field}"
+                else:
+                    customer_value = customer_field
+                
+                PNXItem.objects.create(
+                    boards_po=order.boards_po,
+                    barcode=row.get('BARCODE', '').strip(),
+                    matname=row.get('MATNAME', '').strip(),
+                    cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
+                    cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
+                    cnt=Decimal(row.get('CNT', '0').strip() or '0'),
+                    customer=customer_value
+                )
+                items_created += 1
+            except (ValueError, KeyError) as e:
+                # Skip rows with invalid data
+                continue
+        
+        order.boards_po.save()
+        
+        messages.success(request, f'PNX file generated with {items_created} items and attached to {order.boards_po.po_number}.')
+        
+        # Return file as download
+        response = HttpResponse(pnx_content.encode('utf-8'), content_type='text/plain')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"Error generating PNX for order {order_id}: {error_detail}")
+        messages.error(request, f'Error generating PNX: {str(e)}')
+        return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def generate_and_upload_accessories_csv(request, order_id):
+    """Generate accessories CSV from CAD database and upload it to the order"""
+    from material_generator import workguru_logic
+    from django.conf import settings
+    import os
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    if not order.customer_number:
+        messages.error(request, 'Order must have a CAD Number to generate accessories CSV.')
+        return redirect('order_details', order_id=order_id)
+    
+    try:
+        # Get database paths - look in project root directory (where .env is)
+        cad_db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
+        products_db_path = os.path.join(settings.BASE_DIR, 'order_generator_files', 'src', 'products.db')
+        
+        if not os.path.exists(cad_db_path):
+            messages.error(request, f'CAD database not found at: {cad_db_path}. Please ensure cad_data.db is in the project root directory.')
+            return redirect('order_details', order_id=order_id)
+        
+        if not os.path.exists(products_db_path):
+            messages.error(request, f'Products database not found at: {products_db_path}.')
+            return redirect('order_details', order_id=order_id)
+        
+        # Generate CSV content using customer number (CAD number)
+        logger.info(f"Generating accessories CSV for CAD Number: {order.customer_number}")
+        csv_content = workguru_logic.generate_workguru_csv(
+            int(order.customer_number), 
+            cad_db_path, 
+            products_db_path
+        )
+        
+        if not csv_content or csv_content.strip() == '':
+            messages.warning(request, f'No accessory data found for CAD Number {order.customer_number}.')
+            return redirect('order_details', order_id=order_id)
+        
+        # Save to order
+        filename = f"{order.customer_number}_WG_Accessories.csv"
+        order.processed_csv.save(filename, io.BytesIO(csv_content.encode('utf-8')))
+        order.processed_csv_created_at = timezone.now()
+        
+        # Parse CSV and create/update accessories
+        io_string = io.StringIO(csv_content)
+        reader = csv.DictReader(io_string)
+        
+        accessories_created = 0
+        accessories_updated = 0
+        missing_items = 0
+        substitutions_used = 0
+        substitutions_created = 0
+        
+        # Safe decimal conversion
+        def safe_decimal(value, default='0'):
+            try:
+                cleaned = str(value).strip() or default
+                return Decimal(cleaned)
+            except (ValueError, TypeError, InvalidOperation):
+                return Decimal(default)
+        
+        for row in reader:
+            sku = row.get('Sku', '').strip()
+            if not sku:
+                continue
+            
+            # Check if this is an OS Door requirement indicator
+            if 'DOR_VNL_OSD_MTM' in sku:
+                order.os_doors_required = True
+                continue
+            
+            # Parse billable field early
+            billable_str = row.get('Billable', 'TRUE') or 'TRUE'
+            billable = billable_str.strip().upper() == 'TRUE'
+            
+            # Try to find matching stock item
+            stock_item = None
+            missing = False
+            substituted = False
+            final_sku = sku
+            final_name = row.get('Name', '').strip()
+            final_description = row.get('Description', '').strip()
+            final_cost_price = safe_decimal(row.get('CostPrice', '0'))
+            final_sell_price = safe_decimal(row.get('SellPrice', '0'))
+            final_quantity = safe_decimal(row.get('Quantity', '0'))
+            final_billable = billable
+            
+            try:
+                stock_item = StockItem.objects.get(sku=sku)
+            except StockItem.DoesNotExist:
+                # Check for substitution
+                try:
+                    substitution = Substitution.objects.get(missing_sku=sku)
+                    replacement_sku = substitution.replacement_sku
+                    if replacement_sku and replacement_sku.strip():
+                        # Apply substitution
+                        final_sku = replacement_sku
+                        final_name = substitution.replacement_name or substitution.missing_name
+                        final_description = substitution.description or substitution.replacement_name or substitution.missing_name
+                        if substitution.cost_price is not None:
+                            final_cost_price = substitution.cost_price
+                        final_sell_price = Decimal('0')  # Always 0 for substitutions
+                        if substitution.quantity is not None and substitution.quantity > 0:
+                            final_quantity = Decimal(str(substitution.quantity))
+                        final_billable = False  # Always FALSE for substitutions
+                        
+                        # Try to find the replacement stock item
+                        try:
+                            stock_item = StockItem.objects.get(sku=replacement_sku)
+                            substituted = True
+                            substitutions_used += 1
+                        except StockItem.DoesNotExist:
+                            stock_item = None
+                            substituted = True
+                            substitutions_used += 1
+                    else:
+                        # Substitution exists but no replacement
+                        missing = True
+                        missing_items += 1
+                except Substitution.DoesNotExist:
+                    # Create substitution for manual handling
+                    logger.info(f"Creating substitution for missing SKU: {sku}")
+                    Substitution.objects.create(
+                        missing_sku=sku,
+                        missing_name=row.get('Name', '').strip() if row.get('Name') else '',
+                        replacement_sku='',
+                        replacement_name='',
+                        description='Auto-created from CSV generation',
+                        cost_price=final_cost_price,
+                        sell_price=final_sell_price,
+                        quantity=int(final_quantity),
+                        billable=billable
+                    )
+                    missing = True
+                    missing_items += 1
+                    substitutions_created += 1
+            
+            # Check if accessory already exists
+            existing_accessory = Accessory.objects.filter(order=order, sku=final_sku).first()
+            
+            if existing_accessory:
+                # Update existing
+                existing_accessory.name = final_name
+                existing_accessory.description = final_description
+                existing_accessory.cost_price = final_cost_price
+                existing_accessory.sell_price = final_sell_price
+                existing_accessory.quantity = final_quantity
+                existing_accessory.billable = final_billable
+                existing_accessory.stock_item = stock_item
+                existing_accessory.missing = missing
+                existing_accessory.save()
+                accessories_updated += 1
+            else:
+                # Create new
+                Accessory.objects.create(
+                    order=order,
+                    sku=final_sku,
+                    name=final_name,
+                    description=final_description,
+                    cost_price=final_cost_price,
+                    sell_price=final_sell_price,
+                    quantity=final_quantity,
+                    billable=final_billable,
+                    stock_item=stock_item,
+                    missing=missing
+                )
+                accessories_created += 1
+        
+        # Set flag if there are missing items
+        if substitutions_created > 0:
+            order.csv_has_missing_items = True
+        
+        order.save()
+        
+        # Count rows (excluding header)
+        row_count = csv_content.count('\n') - 1
+        
+        # Build success message
+        msg_parts = [f'Accessories CSV generated with {row_count} items.']
+        if accessories_created or accessories_updated:
+            msg_parts.append(f'Created: {accessories_created}, Updated: {accessories_updated}')
+        if substitutions_used:
+            msg_parts.append(f'Substitutions applied: {substitutions_used}')
+        if substitutions_created:
+            msg_parts.append(f'New substitutions created: {substitutions_created}')
+        
+        messages.success(request, ' '.join(msg_parts))
+        
+        # Return file as download
+        response = HttpResponse(csv_content.encode('utf-8'), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"Error generating accessories CSV for order {order_id}: {error_detail}")
+        messages.error(request, f'Error generating CSV: {str(e)}')
+        return redirect('order_details', order_id=order_id)
+

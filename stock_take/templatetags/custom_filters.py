@@ -1,0 +1,27 @@
+from django import template
+
+register = template.Library()
+
+@register.filter
+def get_item(dictionary, key):
+    """Get an item from a dictionary using a variable key"""
+    if dictionary:
+        return dictionary.get(key)
+    return None
+
+@register.filter
+def calculate_remaining(accessory):
+    """Calculate remaining stock: Stock - QTY - Allocated"""
+    if not accessory.stock_item:
+        return 0
+    stock = accessory.available_quantity
+    allocated = accessory.allocated_quantity
+    qty = accessory.quantity
+    return stock - qty - allocated
+
+@register.filter
+def split_options(value, delimiter=','):
+    """Split a string by delimiter and return a list"""
+    if not value:
+        return []
+    return [option.strip() for option in value.split(delimiter)]

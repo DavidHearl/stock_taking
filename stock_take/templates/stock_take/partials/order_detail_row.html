@@ -103,6 +103,7 @@
     {% endif %}
     
     {% if order.accessories.all %}
+    {% load custom_filters %}
     <div class="detail-section">
         <h4>Accessories ({{ order.accessories.count }} items)</h4>
         <table class="table detail-table">
@@ -111,7 +112,7 @@
                     <th>SKU</th>
                     <th>Name</th>
                     <th>Qty</th>
-                    <th>Available</th>
+                    <th>Stock/Allocated/Remaining</th>
                     <th>Status</th>
                 </tr>
             </thead>
@@ -123,7 +124,15 @@
                     <td>{{ accessory.quantity|floatformat:0 }}</td>
                     <td>
                         {% if accessory.stock_item %}
-                            {{ accessory.available_quantity|floatformat:0 }}
+                            {% with remaining=accessory|calculate_remaining %}
+                                <div style="font-size: 0.85em;">
+                                    <div>Stock: {{ accessory.available_quantity|floatformat:0 }}</div>
+                                    <div>Allocated: {{ accessory.allocated_quantity|floatformat:0 }}</div>
+                                    <div style="font-weight: bold; {% if remaining < 0 %}color: #dc3545;{% else %}color: #28a745;{% endif %}">
+                                        Remaining: {{ remaining|floatformat:0 }}
+                                    </div>
+                                </div>
+                            {% endwith %}
                         {% else %}
                             <span class="text-muted">-</span>
                         {% endif %}
@@ -132,11 +141,13 @@
                         {% if accessory.missing %}
                             <span class="badge badge-warning">Missing</span>
                         {% elif accessory.stock_item %}
-                            {% if accessory.available_quantity >= accessory.quantity %}
-                                <span class="badge badge-success">In Stock</span>
-                            {% else %}
-                                <span class="badge badge-danger">Low Stock</span>
-                            {% endif %}
+                            {% with remaining=accessory|calculate_remaining %}
+                                {% if remaining >= 0 %}
+                                    <span class="badge badge-success">In Stock</span>
+                                {% else %}
+                                    <span class="badge badge-danger">Out of Stock</span>
+                                {% endif %}
+                            {% endwith %}
                         {% else %}
                             <span class="badge badge-info">No Stock Link</span>
                         {% endif %}

@@ -6,6 +6,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),
+    path('generate-pnx-csv/', include('material_generator.urls')),
     path('', include('stock_take.urls')),
 ]
 

@@ -1,6 +1,10 @@
 from django.contrib import admin
 from django.db.models import F, ExpressionWrapper, DecimalField
-from .models import BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, Remedial, RemedialAccessory
+from .models import (
+    BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
+    Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
+    OrderWorkflowProgress, TaskCompletion
+)
 
 @admin.register(BoardsPO)
 class BoardsPOAdmin(admin.ModelAdmin):
@@ -113,3 +117,53 @@ class RemedialAccessoryAdmin(admin.ModelAdmin):
     list_display = ['remedial', 'sku', 'name', 'quantity', 'ordered', 'received']
     search_fields = ['remedial__remedial_number', 'sku', 'name']
     list_filter = ['ordered', 'received']
+
+
+@admin.register(FitAppointment)
+class FitAppointmentAdmin(admin.ModelAdmin):
+    list_display = ['customer_name', 'fit_date', 'fitter', 'interior_completed', 'door_completed', 'accessories_completed', 'materials_completed', 'is_fully_completed']
+    search_fields = ['order__sale_number', 'order__first_name', 'order__last_name']
+    list_filter = ['fit_date', 'fitter', 'interior_completed', 'door_completed', 'accessories_completed', 'materials_completed']
+    readonly_fields = ['customer_name', 'is_fully_completed', 'created_at', 'updated_at']
+    
+    def customer_name(self, obj):
+        return obj.customer_name
+    customer_name.short_description = 'Customer'
+
+
+class WorkflowTaskInline(admin.TabularInline):
+    model = WorkflowTask
+    extra = 1
+    fields = ['description', 'order']
+
+
+@admin.register(WorkflowStage)
+class WorkflowStageAdmin(admin.ModelAdmin):
+    list_display = ['name', 'phase', 'role', 'expected_days', 'order']
+    list_filter = ['phase', 'role']
+    search_fields = ['name', 'description']
+    inlines = [WorkflowTaskInline]
+    list_editable = ['order']
+
+
+@admin.register(WorkflowTask)
+class WorkflowTaskAdmin(admin.ModelAdmin):
+    list_display = ['description', 'stage', 'order']
+    list_filter = ['stage']
+    search_fields = ['description']
+
+
+@admin.register(OrderWorkflowProgress)
+class OrderWorkflowProgressAdmin(admin.ModelAdmin):
+    list_display = ['order', 'current_stage', 'stage_started_at', 'stage_updated_at']
+    list_filter = ['current_stage', 'stage_started_at']
+    search_fields = ['order__sale_number', 'order__first_name', 'order__last_name']
+    readonly_fields = ['stage_started_at', 'stage_updated_at']
+
+
+@admin.register(TaskCompletion)
+class TaskCompletionAdmin(admin.ModelAdmin):
+    list_display = ['order_progress', 'task', 'completed', 'completed_at', 'completed_by']
+    list_filter = ['completed', 'completed_at', 'task__stage']
+    search_fields = ['order_progress__order__sale_number', 'task__description']
+    readonly_fields = ['completed_at']

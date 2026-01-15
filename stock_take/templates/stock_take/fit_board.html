@@ -1,0 +1,790 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_filters %}
+
+{% block title %}Fit Board - {{ month_name }} {{ current_year }}{% endblock %}
+
+{% block nav_fit_board_active %}active{% endblock %}
+    
+{% block extra_css %}
+<link href="{% static 'css/fit_board.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <!-- <h1>Fit Board Calendar</h1> -->
+</div>
+
+<div class="summary" id="appointmentSummary">
+    <div class="summary-header">
+        <div class="summary-title" id="summaryCustomerName"></div>
+        <button class="btn btn-secondary btn-sm" onclick="closeSummary()">✕ Close</button>
+    </div>
+    
+    <div class="summary-info" id="summaryInfo">
+        <div class="summary-info-item">
+            <label>Sale Number:</label>
+            <span id="summarySaleNumber">-</span>
+        </div>
+        <div class="summary-info-item">
+            <label>Customer Number:</label>
+            <span id="summaryCustomerNumber">-</span>
+        </div>
+        <div class="summary-info-item">
+            <label>Fitter:</label>
+            <span id="summaryFitter">-</span>
+        </div>
+        <div class="summary-info-item">
+            <label>Order Date:</label>
+            <span id="summaryOrderDate">-</span>
+        </div>
+        <div class="summary-info-item">
+            <label>Fit Date:</label>
+            <span id="summaryFitDate">-</span>
+        </div>
+        <div class="summary-info-item">
+            <label>Address:</label>
+            <span id="summaryAddress">-</span>
+        </div>
+        <div class="summary-info-item">
+            <label>Postcode:</label>
+            <span id="summaryPostcode">-</span>
+        </div>
+    </div>
+    
+    <div class="summary-content">
+        <div class="summary-item">
+            <input type="checkbox" id="summary-interior" onchange="updateSummaryStatus('interior', this.checked)">
+            <label for="summary-interior">Interior Completed</label>
+        </div>
+        <div class="summary-item">
+            <input type="checkbox" id="summary-door" onchange="updateSummaryStatus('door', this.checked)">
+            <label for="summary-door">Doors</label>
+        </div>
+        <div class="summary-item">
+            <input type="checkbox" id="summary-accessories" onchange="updateSummaryStatus('accessories', this.checked)">
+            <label for="summary-accessories">Accessories</label>
+        </div>
+        <div class="summary-item">
+            <input type="checkbox" id="summary-materials" onchange="updateSummaryStatus('materials', this.checked)">
+            <label for="summary-materials">Materials</label>
+        </div>
+        <div class="summary-item">
+            <input type="checkbox" id="summary-paperwork" onchange="updateSummaryStatus('paperwork', this.checked)">
+            <label for="summary-paperwork">Paperwork</label>
+        </div>
+    </div>
+    
+    <div class="summary-actions">
+        <button class="btn btn-info btn-move" onclick="openMoveModal()">Move Appointment</button>
+        <button class="btn btn-danger delete-appointment-btn" onclick="deleteSummaryAppointment()">Delete Appointment</button>
+    </div>
+</div>
+
+<div class="calendar-container">
+    <div class="calendar-header">
+        <div class="calendar-nav">
+            <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="btn btn-secondary">
+                ← Previous
+            </a>
+            <h2 class="calendar-date">{{ month_name }} {{ current_year }}</h2>
+            <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="btn btn-secondary">
+                Next →
+            </a>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-info" onclick="bulkImportFitDates()">Import All Fit Dates</button>
+            <a href="?year={{ today.year }}&month={{ today.month }}" class="btn btn-primary">Today</a>
+        </div>
+    </div>
+    
+    <table class="calendar-table">
+        <thead>
+            <tr>
+                {% for day_name in day_names %}
+                <th>{{ day_name }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for week in month_days %}
+            <tr>
+                {% for day in week %}
+                <td class="calendar-day {% if day == 0 %}empty{% elif day == today.day and current_month == today.month and current_year == today.year %}today{% endif %}">
+                    {% if day != 0 %}
+                        <div class="day-number">{{ day }}</div>
+                        
+                        <div class="fitter-rows">
+                            {% for fitter_code, fitter_name in fitters %}
+                            <div class="fitter-row" 
+                                 data-fitter="{{ fitter_code }}"
+                                 data-date="{{ current_year }}-{{ current_month|stringformat:'02d' }}-{{ day|stringformat:'02d' }}"
+                                 ondrop="handleDrop(event)"
+                                 ondragover="handleDragOver(event)"
+                                 ondragleave="handleDragLeave(event)">
+                                <button class="add-appointment-btn-row" onclick="openAddAppointment({{ current_year }}, {{ current_month }}, {{ day }}, '{{ fitter_code }}')" title="Add appointment for {{ fitter_name }}">+</button>
+                                <span class="fitter-label">{{ fitter_code }}</span>
+                                {% if day in appointments_by_date and fitter_code in appointments_by_date|get_item:day %}
+                                    {% for appointment in appointments_by_date|get_item:day|get_item:fitter_code %}
+                                    {% if appointment.order %}
+                                    <div class="appointment-card {% if appointment.order.interior_completed and appointment.order.door_completed and appointment.order.accessories_completed and appointment.order.materials_completed %}completed{% endif %}" 
+                                         id="appointment-{{ appointment.id }}"
+                                         draggable="true"
+                                         ondragstart="handleDragStart(event)"
+                                         ondragend="handleDragEnd(event)"
+                                         data-appointment-id="{{ appointment.id }}"
+                                         data-order-id="{{ appointment.order.id }}"
+                                         data-customer-name="{{ appointment.order.first_name|escapejs }} {{ appointment.order.last_name|escapejs }}"
+                                         data-interior="{{ appointment.order.interior_completed|yesno:'true,false' }}"
+                                         data-door="{{ appointment.order.door_completed|yesno:'true,false' }}"
+                                         data-accessories="{{ appointment.order.accessories_completed|yesno:'true,false' }}"
+                                         data-materials="{{ appointment.order.materials_completed|yesno:'true,false' }}"
+                                         data-paperwork="{{ appointment.order.paperwork_completed|yesno:'true,false' }}"
+                                         data-sale-number="{{ appointment.order.sale_number|escapejs }}"
+                                         data-customer-number="{{ appointment.order.customer_number|escapejs }}"
+                                         data-fitter="{{ fitter_name|escapejs }}"
+                                         data-order-date="{{ appointment.order.order_date|date:'d/m/Y' }}"
+                                         data-fit-date="{{ appointment.fit_date|date:'d/m/Y' }}"
+                                         data-address="{{ appointment.order.address|default:'-'|escapejs }}"
+                                         data-postcode="{{ appointment.order.postcode|default:'-'|escapejs }}"
+                                         onclick="selectAppointmentFromCard(this)">
+                                        <div class="appointment-customer">
+                                            {{ appointment.order.first_name|slice:":1" }}. {{ appointment.order.last_name }}
+                                        </div>
+                                        <div class="appointment-checkboxes">
+                                            <div class="checkbox-item">
+                                                <input type="checkbox" 
+                                                       id="interior-{{ appointment.order.id }}" 
+                                                       {% if appointment.order.interior_completed %}checked{% endif %}
+                                                       onclick="event.stopPropagation();"
+                                                       onchange="updateOrderStatus({{ appointment.order.id }}, 'interior', this.checked)"
+                                                       title="Interior">
+                                            </div>
+                                            <div class="checkbox-item">
+                                                <input type="checkbox" 
+                                                       id="door-{{ appointment.order.id }}" 
+                                                       {% if appointment.order.door_completed %}checked{% endif %}
+                                                       onclick="event.stopPropagation();"
+                                                       onchange="updateOrderStatus({{ appointment.order.id }}, 'door', this.checked)"
+                                                       title="Door">
+                                            </div>
+                                            <div class="checkbox-item">
+                                                <input type="checkbox" 
+                                                       id="accessories-{{ appointment.order.id }}" 
+                                                       {% if appointment.order.accessories_completed %}checked{% endif %}
+                                                       onclick="event.stopPropagation();"
+                                                       onchange="updateOrderStatus({{ appointment.order.id }}, 'accessories', this.checked)"
+                                                       title="Accessories">
+                                            </div>
+                                        </div>
+                                        <div class="appointment-indicators">
+                                            <span class="indicator {% if appointment.order.materials_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Materials">M</span>
+                                            <span class="indicator {% if appointment.order.paperwork_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Paperwork">P</span>
+                                        </div>
+                                    </div>
+                                    {% elif appointment.remedial %}
+                                    <div class="appointment-card remedial-card" 
+                                         id="appointment-{{ appointment.id }}"
+                                         draggable="true"
+                                         ondragstart="handleDragStart(event)"
+                                         ondragend="handleDragEnd(event)"
+                                         data-appointment-id="{{ appointment.id }}"
+                                         data-remedial-id="{{ appointment.remedial.id }}"
+                                         data-customer-name="{{ appointment.remedial.remedial_number|escapejs }} - {{ appointment.remedial.first_name|escapejs }} {{ appointment.remedial.last_name|escapejs }}"
+                                         data-sale-number="{{ appointment.remedial.remedial_number|escapejs }}"
+                                         data-customer-number="{{ appointment.remedial.customer_number|escapejs }}"
+                                         data-fitter="{{ fitter_name|escapejs }}"
+                                         data-fit-date="{{ appointment.fit_date|date:'d/m/Y' }}"
+                                         data-address="{{ appointment.remedial.address|default:'-'|escapejs }}"
+                                         data-postcode="{{ appointment.remedial.postcode|default:'-'|escapejs }}"
+                                         onclick="selectAppointmentFromCard(this)">
+                                        <div class="appointment-customer">
+                                            {{ appointment.remedial.remedial_number }} - {{ appointment.remedial.first_name|slice:":1" }}. {{ appointment.remedial.last_name }}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-box today"></div>
+            <span>Today</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box completed"></div>
+            <span>Fully Completed</span>
+        </div>
+    </div>
+</div>
+
+<!-- Add Appointment Modal -->
+<div id="addAppointmentModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Add Fit Appointment</h3>
+            <span class="close" onclick="closeModal('addAppointmentModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <label for="fitterSelect">Select Fitter:</label>
+            <select id="fitterSelect" class="modal-select">
+                <option value="R">Ross (R)</option>
+                <option value="G">Gavin (G)</option>
+                <option value="S">Stuart (S)</option>
+                <option value="P">Paddy (P)</option>
+            </select>
+            
+            <label for="appointmentType">Appointment Type:</label>
+            <select id="appointmentType" class="modal-select" onchange="toggleAppointmentType()">
+                <option value="order">Order</option>
+                <option value="remedial">Remedial</option>
+            </select>
+            
+            <div id="orderSearchSection">
+                <label for="customerSearch">Search Customer:</label>
+                <input type="text" 
+                       id="customerSearch" 
+                       class="modal-select" 
+                       placeholder="Type customer name or sale number..."
+                       oninput="searchCustomers()"
+                       autocomplete="off">
+                
+                <div id="searchResults" class="search-results" style="display: none;"></div>
+            </div>
+            
+            <div id="remedialSearchSection" style="display: none;">
+                <label for="remedialSearch">Search Remedial:</label>
+                <input type="text" 
+                       id="remedialSearch" 
+                       class="modal-select" 
+                       placeholder="Type remedial number or customer name..."
+                       oninput="searchRemedials()"
+                       autocomplete="off">
+                
+                <div id="remedialSearchResults" class="search-results" style="display: none;"></div>
+            </div>
+            
+            <input type="hidden" id="selectedDate">
+            <input type="hidden" id="selectedOrderId">
+            <input type="hidden" id="selectedRemedialId">
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('addAppointmentModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="addAppointment()">Add Appointment</button>
+        </div>
+    </div>
+</div>
+
+<!-- Move Appointment Modal -->
+<div id="moveAppointmentModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Move Appointment</h3>
+            <span class="close" onclick="closeModal('moveAppointmentModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <label for="moveFitterSelect">Select New Fitter:</label>
+            <select id="moveFitterSelect" class="modal-select">
+                <option value="R">Ross (R)</option>
+                <option value="G">Gavin (G)</option>
+                <option value="S">Stuart (S)</option>
+                <option value="P">Paddy (P)</option>
+            </select>
+            
+            <label for="moveDateInput">Select New Date:</label>
+            <input type="date" id="moveDateInput" class="modal-select">
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('moveAppointmentModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="moveAppointment()">Move Appointment</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedAppointmentId = null;
+let draggedAppointmentId = null;
+
+function bulkImportFitDates() {
+    if (!confirm('This will create appointments for all unfinished orders based on their fit dates. Continue?')) {
+        return;
+    }
+    
+    fetch('{% url "bulk_import_fit_dates" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Successfully imported ${data.created} appointments!`);
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error importing appointments');
+    });
+}
+
+// Drag and Drop Functions
+function handleDragStart(event) {
+    draggedAppointmentId = event.target.dataset.appointmentId;
+    event.target.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/html', event.target.innerHTML);
+}
+
+function handleDragEnd(event) {
+    event.target.classList.remove('dragging');
+    // Remove drag-over class from all fitter rows
+    document.querySelectorAll('.fitter-row').forEach(row => {
+        row.classList.remove('drag-over');
+    });
+}
+
+function handleDragOver(event) {
+    if (event.preventDefault) {
+        event.preventDefault();
+    }
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('drag-over');
+    return false;
+}
+
+function handleDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+function handleDrop(event) {
+    if (event.stopPropagation) {
+        event.stopPropagation();
+    }
+    event.preventDefault();
+    
+    const targetRow = event.currentTarget;
+    targetRow.classList.remove('drag-over');
+    
+    const newFitter = targetRow.dataset.fitter;
+    const newDate = targetRow.dataset.date;
+    
+    if (!draggedAppointmentId) {
+        return false;
+    }
+    
+    // Move the appointment
+    fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({
+            fitter: newFitter,
+            fit_date: newDate
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error moving appointment');
+    });
+    
+    return false;
+}
+
+function openAddAppointment(year, month, day, fitterCode) {
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    document.getElementById('selectedDate').value = date;
+    if (fitterCode) {
+        document.getElementById('fitterSelect').value = fitterCode;
+    }
+    
+    // Reset search fields and load initial results
+    document.getElementById('customerSearch').value = '';
+    document.getElementById('remedialSearch').value = '';
+    document.getElementById('selectedOrderId').value = '';
+    document.getElementById('selectedRemedialId').value = '';
+    
+    // Load initial lists
+    searchCustomers();
+    
+    openModal('addAppointmentModal');
+}
+
+function selectAppointmentFromCard(cardElement) {
+    const appointmentId = parseInt(cardElement.dataset.appointmentId);
+    const orderId = parseInt(cardElement.dataset.orderId);
+    const customerName = cardElement.dataset.customerName;
+    const interior = cardElement.dataset.interior === 'true';
+    const door = cardElement.dataset.door === 'true';
+    const accessories = cardElement.dataset.accessories === 'true';
+    const materials = cardElement.dataset.materials === 'true';
+    const paperwork = cardElement.dataset.paperwork === 'true';
+    const saleNumber = cardElement.dataset.saleNumber;
+    const customerNumber = cardElement.dataset.customerNumber;
+    const fitter = cardElement.dataset.fitter;
+    const orderDate = cardElement.dataset.orderDate;
+    const fitDate = cardElement.dataset.fitDate;
+    const address = cardElement.dataset.address;
+    const postcode = cardElement.dataset.postcode;
+    
+    selectAppointment(appointmentId, orderId, customerName, interior, door, accessories, materials, paperwork,
+                     saleNumber, customerNumber, fitter, orderDate, fitDate, address, postcode);
+}
+
+function selectAppointment(appointmentId, orderId, customerName, interior, door, accessories, materials, paperwork, saleNumber, customerNumber, fitter, orderDate, fitDate, address, postcode) {
+    // Remove previous selection
+    document.querySelectorAll('.appointment-card.selected').forEach(card => {
+        card.classList.remove('selected');
+    });
+    
+    // Add selection to clicked card
+    const card = document.getElementById(`appointment-${appointmentId}`);
+    if (card) {
+        card.classList.add('selected');
+    }
+    
+    // Update summary header
+    selectedAppointmentId = appointmentId;
+    window.selectedOrderId = orderId;
+    
+    document.getElementById('summaryCustomerName').textContent = customerName;
+    
+    // Update customer info
+    document.getElementById('summarySaleNumber').textContent = saleNumber;
+    document.getElementById('summaryCustomerNumber').textContent = customerNumber;
+    document.getElementById('summaryFitter').textContent = fitter;
+    document.getElementById('summaryOrderDate').textContent = orderDate;
+    document.getElementById('summaryFitDate').textContent = fitDate;
+    document.getElementById('summaryAddress').textContent = address;
+    document.getElementById('summaryPostcode').textContent = postcode;
+    
+    // Update checkboxes
+    document.getElementById('summary-interior').checked = interior;
+    document.getElementById('summary-door').checked = door;
+    document.getElementById('summary-accessories').checked = accessories;
+    document.getElementById('summary-materials').checked = materials;
+    document.getElementById('summary-paperwork').checked = paperwork;
+    
+    // Show summary
+    document.getElementById('appointmentSummary').classList.add('active');
+}
+
+function closeSummary() {
+    document.getElementById('appointmentSummary').classList.remove('active');
+    document.querySelectorAll('.appointment-card.selected').forEach(card => {
+        card.classList.remove('selected');
+    });
+    selectedAppointmentId = null;
+    window.selectedOrderId = null;
+}
+
+function updateSummaryStatus(field, checked) {
+    if (!window.selectedOrderId) return;
+    
+    // Update the order status
+    updateOrderStatus(window.selectedOrderId, field, checked);
+}
+
+function toggleAppointmentType() {
+    const type = document.getElementById('appointmentType').value;
+    const orderSection = document.getElementById('orderSearchSection');
+    const remedialSection = document.getElementById('remedialSearchSection');
+    
+    if (type === 'order') {
+        orderSection.style.display = 'block';
+        remedialSection.style.display = 'none';
+        document.getElementById('selectedRemedialId').value = '';
+        searchCustomers(); // Load orders list
+    } else {
+        orderSection.style.display = 'none';
+        remedialSection.style.display = 'block';
+        document.getElementById('selectedOrderId').value = '';
+        searchRemedials(); // Load remedials list
+    }
+}
+
+function searchCustomers() {
+    const query = document.getElementById('customerSearch').value;
+    const resultsDiv = document.getElementById('searchResults');
+    
+    // Always show results (empty query shows all)
+    fetch(`/search-orders-api/?q=${encodeURIComponent(query)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.orders && data.orders.length > 0) {
+                resultsDiv.innerHTML = data.orders.map(order => {
+                    const name = `${order.first_name} ${order.last_name}`.replace(/'/g, "\\'");
+                    const saleNumber = `${order.sale_number}`.replace(/'/g, "\\'");
+                    return `
+                        <div class="search-result-item" onclick="selectOrder(${order.id}, '${name}', '${saleNumber}')">
+                            <div class="search-result-name">
+                                <h5>${order.first_name} ${order.last_name} - ${order.sale_number}</h5>
+                            </div>
+                            <small>Fit: ${order.fit_date}</small>
+                        </div>
+                    `;
+                }).join('');
+                resultsDiv.style.display = 'block';
+            } else {
+                resultsDiv.innerHTML = '<div class="search-result-item">No results found</div>';
+                resultsDiv.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('Search error:', error);
+        });
+}
+
+function searchRemedials() {
+    const query = document.getElementById('remedialSearch').value;
+    const resultsDiv = document.getElementById('remedialSearchResults');
+    
+    // Always show results (empty query shows all)
+    fetch(`/search-remedials-api/?q=${encodeURIComponent(query)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.remedials && data.remedials.length > 0) {
+                resultsDiv.innerHTML = data.remedials.map(remedial => {
+                    const name = `${remedial.first_name} ${remedial.last_name}`.replace(/'/g, "\\'");
+                    const remedialNumber = `${remedial.remedial_number}`.replace(/'/g, "\\'");
+                    const reason = `${remedial.reason}`.replace(/'/g, "\\'");
+                    return `
+                        <div class="search-result-item" onclick="selectRemedial(${remedial.id}, '${remedialNumber}', '${name}')">
+                            <strong>${remedial.first_name} ${remedial.last_name}</strong> - ${remedial.remedial_number}
+                            <br><small>${remedial.reason}</small>
+                        </div>
+                    `;
+                }).join('');
+                resultsDiv.style.display = 'block';
+            } else {
+                resultsDiv.innerHTML = '<div class="search-result-item">No results found</div>';
+                resultsDiv.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('Search error:', error);
+        });
+}
+
+function selectOrder(orderId, customerName, saleNumber) {
+    document.getElementById('selectedOrderId').value = orderId;
+    document.getElementById('customerSearch').value = `${customerName} - ${saleNumber}`;
+    document.getElementById('searchResults').style.display = 'none';
+}
+
+function selectRemedial(remedialId, remedialNumber, customerName) {
+    document.getElementById('selectedRemedialId').value = remedialId;
+    document.getElementById('remedialSearch').value = `${remedialNumber} - ${customerName}`;
+    document.getElementById('remedialSearchResults').style.display = 'none';
+}
+
+function deleteSummaryAppointment() {
+    if (!selectedAppointmentId) return;
+    deleteAppointment(selectedAppointmentId);
+}
+
+function addAppointment() {
+    const appointmentType = document.getElementById('appointmentType').value;
+    const fitDate = document.getElementById('selectedDate').value;
+    const fitter = document.getElementById('fitterSelect').value;
+    
+    let entityId, entityType;
+    
+    if (appointmentType === 'order') {
+        entityId = document.getElementById('selectedOrderId').value;
+        entityType = 'order';
+        if (!entityId) {
+            alert('Please select a customer');
+            return;
+        }
+    } else {
+        entityId = document.getElementById('selectedRemedialId').value;
+        entityType = 'remedial';
+        if (!entityId) {
+            alert('Please select a remedial');
+            return;
+        }
+    }
+    
+    fetch('{% url "add_fit_appointment" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `entity_id=${entityId}&entity_type=${entityType}&fit_date=${fitDate}&fitter=${fitter}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('addAppointmentModal');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error adding appointment');
+    });
+}
+
+function updateOrderStatus(orderId, field, checked) {
+    const data = new URLSearchParams();
+    data.append('field', field);
+    data.append('value', checked);
+    
+    fetch(`/fit-board/update-order-status/${orderId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: data
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            // 1. Update M/P indicators for all cards with this order
+            document.querySelectorAll(`[data-order-id="${orderId}"]`).forEach(card => {
+                const indicators = card.querySelectorAll('.indicator');
+                if (indicators.length >= 2) {
+                    // Update M indicator (index 0)
+                    if (field === 'materials') {
+                        indicators[0].classList.toggle('indicator-complete', checked);
+                        indicators[0].classList.toggle('indicator-missing', !checked);
+                    }
+                    // Update P indicator (index 1)
+                    if (field === 'paperwork') {
+                        indicators[1].classList.toggle('indicator-complete', checked);
+                        indicators[1].classList.toggle('indicator-missing', !checked);
+                    }
+                }
+            });
+            
+            // 2. Update summary checkboxes if this order is currently selected in UI
+            if (window.selectedOrderId === orderId) {
+                const summaryElement = document.getElementById(`summary-${field}`);
+                if (summaryElement) {
+                    summaryElement.checked = checked;
+                }
+            }
+        } else {
+            alert('Error updating status: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error updating status');
+    });
+}
+
+function deleteAppointment(appointmentId) {
+    if (!confirm('Are you sure you want to delete this appointment?')) {
+        return;
+    }
+    
+    fetch(`/fit-board/delete-appointment/${appointmentId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error deleting appointment');
+    });
+}
+
+function openMoveModal() {
+    if (!selectedAppointmentId) {
+        alert('No appointment selected');
+        return;
+    }
+    
+    // Get current fit date from summary
+    const currentFitDate = document.getElementById('summaryFitDate').textContent;
+    // Convert from d/m/Y to Y-m-d for date input
+    const dateParts = currentFitDate.split('/');
+    if (dateParts.length === 3) {
+        const isoDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
+        document.getElementById('moveDateInput').value = isoDate;
+    }
+    
+    openModal('moveAppointmentModal');
+}
+
+function moveAppointment() {
+    if (!selectedAppointmentId) {
+        alert('No appointment selected');
+        return;
+    }
+    
+    const fitter = document.getElementById('moveFitterSelect').value;
+    const newDate = document.getElementById('moveDateInput').value;
+    
+    if (!newDate) {
+        alert('Please select a date');
+        return;
+    }
+    
+    fetch(`/fit-board/move-appointment/${selectedAppointmentId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({
+            fitter: fitter,
+            fit_date: newDate
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('moveAppointmentModal');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error moving appointment');
+    });
+}
+
+</script>
+{% endblock %}

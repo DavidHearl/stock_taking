@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.sites',
     'stock_take',
+    'material_generator',
     'allauth',
     'allauth.account',
 ]

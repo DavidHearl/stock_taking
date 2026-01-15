@@ -45,6 +45,13 @@ class Order(models.Model):
     original_csv_uploaded_at = models.DateTimeField(blank=True, null=True, help_text='When the original CSV was uploaded')
     processed_csv_created_at = models.DateTimeField(blank=True, null=True, help_text='When the processed CSV was created')
     csv_has_missing_items = models.BooleanField(default=False, help_text='True if the uploaded CSV has unresolved missing items that need substitution')
+    
+    # Fit completion fields
+    interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')
+    door_completed = models.BooleanField(default=False, help_text='Door fit completed')
+    accessories_completed = models.BooleanField(default=False, help_text='Accessories fit completed')
+    materials_completed = models.BooleanField(default=False, help_text='Materials delivered/ready')
+    paperwork_completed = models.BooleanField(default=False, help_text='Paperwork completed')
 
     def time_allowance(self):
         return (self.fit_date - self.order_date).days
@@ -208,6 +215,19 @@ class Accessory(models.Model):
         if self.stock_item:
             return self.stock_item.quantity
         return 0
+
+    @property
+    def allocated_quantity(self):
+        """Get quantity allocated to other non-completed jobs"""
+        from django.db.models import Sum
+        # Get all accessories with same SKU, excluding current order and completed jobs
+        allocated = Accessory.objects.filter(
+            sku=self.sku,
+            order__job_finished=False
+        ).exclude(
+            order=self.order
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+        return allocated
 
     def __str__(self):
         return f"{self.sku} - {self.name} ({self.order.sale_number})"
@@ -476,3 +496,157 @@ class CSVSkipItem(models.Model):
     
     def __str__(self):
         return f"{self.sku} - {self.name}"
+
+
+class FitAppointment(models.Model):
+    """Track fit appointments and completion status"""
+    FITTER_CHOICES = [
+        ('R', 'Ross'),
+        ('G', 'Gavin'),
+        ('S', 'Stuart'),
+        ('P', 'Paddy'),
+    ]
+    
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
+    remedial = models.ForeignKey(Remedial, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
+    fit_date = models.DateField(help_text='Scheduled fit date')
+    fitter = models.CharField(max_length=1, choices=FITTER_CHOICES, default='R', help_text='Assigned fitter')
+    interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')
+    door_completed = models.BooleanField(default=False, help_text='Door fit completed')
+    accessories_completed = models.BooleanField(default=False, help_text='Accessories fit completed')
+    materials_completed = models.BooleanField(default=False, help_text='Materials delivered/ready')
+    notes = models.TextField(blank=True, help_text='Additional notes about the fit')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['fit_date', 'fitter', 'order__last_name']
+    
+    def __str__(self):
+        if self.order:
+            return f"{self.get_fitter_display()} - {self.order.first_name} {self.order.last_name} - {self.fit_date}"
+        elif self.remedial:
+            return f"{self.get_fitter_display()} - {self.remedial.remedial_number} - {self.fit_date}"
+        return f"{self.get_fitter_display()} - {self.fit_date}"
+    
+    @property
+    def is_fully_completed(self):
+        """Check if all aspects of the fit are completed"""
+        return self.interior_completed and self.door_completed and self.accessories_completed and self.materials_completed
+    
+    @property
+    def customer_name(self):
+        """Get full customer name"""
+        if self.order:
+            return f"{self.order.first_name} {self.order.last_name}"
+        elif self.remedial:
+            return f"{self.remedial.remedial_number} - {self.remedial.first_name} {self.remedial.last_name}"
+        return "Unknown"
+
+
+class WorkflowStage(models.Model):
+    """Defines a stage in the customer workflow process"""
+    PHASE_CHOICES = [
+        ('enquiry', 'Enquiry'),
+        ('lead', 'Lead'),
+        ('sale', 'Sale'),
+    ]
+    
+    ROLE_CHOICES = [
+        ('customer-support', 'Customer Support'),
+        ('design', 'Design'),
+        ('fitter', 'Fitter'),
+        ('operations', 'Operations'),
+        ('manufacturing', 'Manufacturing'),
+        ('enquiry', 'Enquiry'),
+    ]
+    
+    name = models.CharField(max_length=200, help_text='Name of the workflow stage')
+    phase = models.CharField(max_length=20, choices=PHASE_CHOICES, help_text='Which phase this stage belongs to')
+    role = models.CharField(max_length=30, choices=ROLE_CHOICES, help_text='Which role is responsible for this stage')
+    description = models.TextField(help_text='Description of what needs to be done in this stage')
+    expected_days = models.IntegerField(null=True, blank=True, help_text='Expected number of days for this stage')
+    order = models.IntegerField(default=0, help_text='Order in which stages appear')
+    
+    class Meta:
+        ordering = ['order', 'phase']
+    
+    def __str__(self):
+        return f"{self.phase.upper()} - {self.name}"
+
+
+class WorkflowTask(models.Model):
+    """Individual tasks/checkboxes within a workflow stage"""
+    TASK_TYPE_CHOICES = [
+        ('record', 'Record Checkbox'),
+        ('requirement', 'Requirement Checkbox'),
+        ('attachment', 'Attachment Field'),
+        ('radio', 'Radio Buttons'),
+        ('dropdown', 'Dropdown Menu'),
+        ('decision_matrix', 'Decision Matrix'),
+    ]
+    
+    stage = models.ForeignKey(WorkflowStage, on_delete=models.CASCADE, related_name='tasks')
+    description = models.CharField(max_length=300, help_text='Description of the task')
+    task_type = models.CharField(max_length=20, choices=TASK_TYPE_CHOICES, default='record', help_text='Type of task')
+    options = models.TextField(blank=True, help_text='Comma-separated options for radio/dropdown (e.g., "Brochure,Design Appointment,Both")')
+    order = models.IntegerField(default=0, help_text='Order in which tasks appear')
+    
+    class Meta:
+        ordering = ['order']
+    
+    def __str__(self):
+        return f"{self.stage.name} - {self.description}"
+
+
+class OrderWorkflowProgress(models.Model):
+    """Tracks which workflow stage an order is currently in and task completion"""
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='workflow_progress')
+    current_stage = models.ForeignKey(WorkflowStage, on_delete=models.SET_NULL, null=True, related_name='orders_in_stage')
+    stage_started_at = models.DateTimeField(auto_now_add=True)
+    stage_updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order']
+    
+    def __str__(self):
+        return f"{self.order.sale_number} - {self.current_stage.name if self.current_stage else 'No Stage'}"
+    
+    @property
+    def can_progress_to_next_stage(self):
+        """Check if all requirement tasks are completed"""
+        if not self.current_stage:
+            return True
+        
+        # Get all requirement tasks for current stage
+        requirement_tasks = self.current_stage.tasks.filter(task_type='requirement')
+        if not requirement_tasks.exists():
+            return True
+        
+        # Check if all requirement tasks are completed
+        for task in requirement_tasks:
+            completion = self.task_completions.filter(task=task).first()
+            if not completion or not completion.completed:
+                return False
+        
+        return True
+
+
+class TaskCompletion(models.Model):
+    """Tracks completion of individual tasks within a workflow stage for an order"""
+    order_progress = models.ForeignKey(OrderWorkflowProgress, on_delete=models.CASCADE, related_name='task_completions')
+    task = models.ForeignKey(WorkflowTask, on_delete=models.CASCADE)
+    completed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.CharField(max_length=100, blank=True, help_text='User who completed the task')
+    attachment = models.FileField(upload_to='workflow_attachments/', null=True, blank=True, help_text='File attachment for this task')
+    selected_option = models.CharField(max_length=200, blank=True, help_text='Selected option for radio/dropdown tasks')
+    notes = models.TextField(blank=True, help_text='Additional notes for this task completion')
+    
+    class Meta:
+        unique_together = ['order_progress', 'task']
+        ordering = ['task__order']
+    
+    def __str__(self):
+        status = '✓' if self.completed else '○'
+        return f"{status} {self.order_progress.order.sale_number} - {self.task.description}"

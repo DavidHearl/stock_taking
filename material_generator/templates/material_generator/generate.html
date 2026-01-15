@@ -1,0 +1,341 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Generate PNX & CSV{% endblock %}
+
+{% block nav_generate_pnx_active %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e9ecef;
+    }
+
+    .page-header h1 {
+        margin: 0;
+        color: #2c3e50;
+        font-size: 2rem;
+        font-weight: 600;
+    }
+
+    .db-status {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .status-card {
+        flex: 1;
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .status-card.success {
+        border-left: 4px solid #28a745;
+    }
+
+    .status-card.error {
+        border-left: 4px solid #dc3545;
+    }
+
+    .status-card h3 {
+        font-size: 0.9rem;
+        margin: 0 0 0.5rem 0;
+        color: #6c757d;
+    }
+
+    .status-card p {
+        margin: 0;
+        font-weight: 600;
+    }
+
+    .card {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 2rem;
+        overflow: hidden;
+    }
+
+    .card-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+
+    .card-body {
+        padding: 2rem;
+    }
+
+    .info-box {
+        background: #f8f9fa;
+        border-left: 4px solid #667eea;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        border-radius: 4px;
+    }
+
+    .info-box p {
+        margin: 0;
+        color: #495057;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: #495057;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 0.75rem;
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        font-size: 1rem;
+        transition: border-color 0.2s;
+        pointer-events: auto !important;
+        background-color: white !important;
+    }
+
+    .form-control:disabled {
+        background-color: #e9ecef !important;
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    textarea.form-control {
+        min-height: 120px;
+        resize: vertical;
+        font-family: 'Courier New', monospace;
+        line-height: 1.5;
+    }
+
+    .btn-group-custom {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+
+    .btn-primary-custom {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.75rem 2rem;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-primary-custom:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-primary-custom:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn-secondary-custom {
+        background: #6c757d;
+        color: white;
+        padding: 0.75rem 2rem;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-secondary-custom:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+    }
+
+    .help-text {
+        font-size: 0.875rem;
+        color: #6c757d;
+        margin-top: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="bi bi-file-earmark-code"></i> Generate PNX & CSV</h1>
+</div>
+
+<!-- Database Status -->
+<div class="db-status">
+    <div class="status-card {% if db_stats.database_exists %}success{% else %}error{% endif %}">
+        <h3>CAD Database</h3>
+        <p>{% if db_stats.database_exists %}✓ Connected ({{ db_stats.database_size }}){% else %}✗ Not Found{% endif %}</p>
+        <small class="help-text">{{ db_stats.database_path }}</small>
+    </div>
+    <div class="status-card {% if db_stats.products_db_exists %}success{% else %}error{% endif %}">
+        <h3>Products Database</h3>
+        <p>{% if db_stats.products_db_exists %}✓ Connected ({{ db_stats.products_db_size }}){% else %}✗ Not Found{% endif %}</p>
+        <small class="help-text">{{ db_stats.products_db_path }}</small>
+    </div>
+    <div class="status-card {% if modules_loaded %}success{% else %}error{% endif %}">
+        <h3>Generator Modules</h3>
+        <p>{% if modules_loaded %}✓ Loaded{% else %}✗ Not Loaded{% endif %}</p>
+        <small class="help-text">board_logic & workguru_logic</small>
+    </div>
+</div>
+
+<!-- PNX Generation Card -->
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-file-earmark-code"></i> PNX File Generation (Board Orders)
+    </div>
+    <div class="card-body">
+        <div class="info-box">
+            <p><strong>Info:</strong> Generate PNX files for board orders. Enter a PO label and one or more system numbers (one per line).</p>
+        </div>
+        
+        <form method="POST" action="{% url 'generate_pnx' %}" id="pnxForm">
+            {% csrf_token %}
+            
+            <div class="form-group">
+                <label for="po_label">PO Label <span style="color: red;">*</span></label>
+                <input type="text" 
+                       id="po_label" 
+                       name="po_label" 
+                       class="form-control" 
+                       placeholder="e.g., PO1234" 
+                       required
+                       {% if not db_stats.database_exists or not modules_loaded %}disabled{% endif %}>
+                <small class="help-text">This will be used in the filename: Boards_Order_[PO Label].pnx</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="pnx_system_numbers">System Numbers <span style="color: red;">*</span></label>
+                <textarea id="pnx_system_numbers" 
+                          name="system_numbers" 
+                          class="form-control" 
+                          placeholder="Enter system numbers, one per line&#10;e.g.,&#10;21001&#10;21002&#10;21003"
+                          required
+                          {% if not db_stats.database_exists or not modules_loaded %}disabled{% endif %}></textarea>
+                <small class="help-text">Enter one system number per line</small>
+            </div>
+            
+            <div class="btn-group-custom">
+                <button type="submit" 
+                        class="btn-primary-custom"
+                        {% if not db_stats.database_exists or not modules_loaded %}disabled{% endif %}>
+                    <i class="bi bi-file-earmark-code"></i> Generate PNX
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- CSV Generation Card -->
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-file-earmark-spreadsheet"></i> CSV File Generation (WorkGuru Import)
+    </div>
+    <div class="card-body">
+        <div class="info-box">
+            <p><strong>Info:</strong> Generate CSV files for WorkGuru import. Enter one or more system numbers. Multiple numbers will create a ZIP file.</p>
+        </div>
+        
+        <form method="POST" action="{% url 'generate_csv' %}" id="csvForm">
+            {% csrf_token %}
+            
+            <div class="form-group">
+                <label for="csv_system_numbers">System Numbers <span style="color: red;">*</span></label>
+                <textarea id="csv_system_numbers" 
+                          name="system_numbers" 
+                          class="form-control" 
+                          placeholder="Enter system numbers, one per line&#10;e.g.,&#10;21001&#10;21002&#10;21003"
+                          required
+                          {% if not db_stats.database_exists or not db_stats.products_db_exists or not modules_loaded %}disabled{% endif %}></textarea>
+                <small class="help-text">
+                    Single number = Single CSV download<br>
+                    Multiple numbers = ZIP file with all CSVs
+                </small>
+            </div>
+            
+            <div class="btn-group-custom">
+                <button type="submit" 
+                        class="btn-primary-custom"
+                        {% if not db_stats.database_exists or not db_stats.products_db_exists or not modules_loaded %}disabled{% endif %}>
+                    <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if not db_stats.database_exists or not db_stats.products_db_exists or not modules_loaded %}
+<div class="card" style="border-left: 4px solid #dc3545;">
+    <div class="card-body">
+        <h3 style="color: #dc3545;"><i class="bi bi-exclamation-triangle"></i> System Not Ready</h3>
+        <p>The generation system is not fully operational. Please ensure:</p>
+        <ul>
+            {% if not db_stats.database_exists %}
+            <li>CAD database is synced and available at the expected location</li>
+            {% endif %}
+            {% if not db_stats.products_db_exists %}
+            <li>Products database is available</li>
+            {% endif %}
+            {% if not modules_loaded %}
+            <li>Generator modules (board_logic and workguru_logic) are properly installed</li>
+            {% endif %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const pnxForm = document.getElementById('pnxForm');
+    const csvForm = document.getElementById('csvForm');
+    
+    if (pnxForm) {
+        pnxForm.addEventListener('submit', function(e) {
+            const submitBtn = this.querySelector('button[type="submit"]');
+            if (submitBtn && !submitBtn.disabled) {
+                submitBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Generating...';
+                submitBtn.disabled = true;
+            }
+        });
+    }
+    
+    if (csvForm) {
+        csvForm.addEventListener('submit', function(e) {
+            const submitBtn = this.querySelector('button[type="submit"]');
+            if (submitBtn && !submitBtn.disabled) {
+                submitBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Generating...';
+                submitBtn.disabled = true;
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

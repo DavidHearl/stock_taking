@@ -3,49 +3,54 @@
 
 {% block title %}Search Results - {{ query }}{% endblock %}
 
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/search_results.css' %}">
+{% endblock %}
+
 {% block content %}
-<div class="container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+<div class="search-container">
+    <div class="search-header">
         <h2>Search Results</h2>
-        <a href="{% url 'ordering' %}" class="btn btn-secondary">
+        <a href="{% url 'ordering' %}" class="btn-back">
             <i class="bi bi-arrow-left"></i> Back to Orders
         </a>
     </div>
 
     {% if query %}
-        <div class="mb-4">
+        <div class="search-details">
             <h5>Search results for: "<strong>{{ query }}</strong>"</h5>
         </div>
     {% endif %}
 
     {% if orders %}
-        <div class="row">
+        <div class="results-grid">
             {% for order in orders %}
-            <div class="col-md-6 col-lg-4">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <h6 class="card-title">
-                            <a href="{% url 'order_details' order.id %}" class="text-decoration-none">
-                                {{ order.first_name }} {{ order.last_name }}
-                            </a>
+            <div class="order-card">
+                <div class="order-card-body">
+                    <div class="order-card-header">
+                        <h6 class="order-card-title">
+                            {{ order.first_name }} {{ order.last_name }}
                         </h6>
-                        <div class="card-text">
-                            <small class="text-muted">
-                                <strong>Sale #:</strong> {{ order.sale_number }}<br>
-                                <strong>Customer #:</strong> {{ order.customer_number }}<br>
-                                <strong>Order Date:</strong> {{ order.order_date }}<br>
-                                <strong>Status:</strong>
-                                {% if order.job_finished %}
-                                    <span class="badge bg-success">Complete</span>
-                                {% else %}
-                                    <span class="badge bg-warning">In Progress</span>
-                                {% endif %}
-                            </small>
+                        {% if order.job_finished %}
+                            <span class="status-badge status-complete">Complete</span>
+                        {% else %}
+                            <span class="status-badge status-progress">In Progress</span>
+                        {% endif %}
+                    </div>
+                    <div class="order-card-details">
+                        <div class="detail-row">
+                            <strong>Sale #:</strong> {{ order.sale_number }}
+                        </div>
+                        <div class="detail-row">
+                            <strong>Customer #:</strong> {{ order.customer_number }}
+                        </div>
+                        <div class="detail-row">
+                            <strong>Order Date:</strong> {{ order.order_date }}
                         </div>
                     </div>
-                    <div class="card-footer">
-                        <a href="{% url 'order_details' order.id %}" class="btn btn-primary btn-sm w-100">
-                            View Details
+                    <div class="order-card-actions">
+                        <a href="{% url 'order_details' order.id %}" class="btn-view-details">
+                            <i class="bi bi-arrow-right-circle"></i> View Details
                         </a>
                     </div>
                 </div>
@@ -54,13 +59,17 @@
         </div>
     {% else %}
         {% if query %}
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle"></i> No orders found matching "{{ query }}".
-                <br><small>Try searching by customer name, sale number, or customer number.</small>
+            <div class="alert-box alert-info">
+                <i class="bi bi-info-circle"></i> 
+                <div>
+                    <strong>No orders found matching "{{ query }}".</strong>
+                    <br><small>Try searching by customer name, sale number, or customer number.</small>
+                </div>
             </div>
         {% else %}
-            <div class="alert alert-info">
-                <i class="bi bi-search"></i> Enter a search term to find orders.
+            <div class="alert-box alert-info">
+                <i class="bi bi-search"></i> 
+                <div>Enter a search term to find orders.</div>
             </div>
         {% endif %}
     {% endif %}

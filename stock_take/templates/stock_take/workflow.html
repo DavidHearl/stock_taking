@@ -1,0 +1,380 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_filters %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/workflow.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <header>
+        <nav class="main-nav">
+            <h1 class="header-title">Workflow Management</h1>
+            <button class="btn-primary" onclick="openModal('addStageModal')">
+                <i class="bi bi-plus-circle"></i> Add New Stage
+            </button>
+        </nav>
+    </header>
+    
+    <!-- Role Key -->
+    <div class="role-key-container">
+        <ul class="role-key">
+            <li><span class="key customer-support"></span> Customer Support</li>
+            <li><span class="key design"></span> Design</li>
+            <li><span class="key fitter"></span> Fitter</li>
+            <li><span class="key operations"></span> Operations</li>
+            <li><span class="key manufacturing"></span> Manufacturing</li>
+        </ul>
+    </div>
+    
+    <div class="workflow-container">
+        {% for phase, phase_display in phases %}
+            <div class="separator-with-text">
+                <span>{{ phase_display }}</span>
+            </div>
+
+            {% for stage in stages_by_phase|get_item:phase %}
+                <div class="stage {{ stage.role }}" data-stage-id="{{ stage.id }}">
+                    <div class="stage-heading">
+                        <h3 class="stage-title">{{ stage.name }}</h3>
+                        <div class="stage-actions">
+                            {% if stage.expected_days %}
+                            <p class="time">{{ stage.expected_days }} Day{{ stage.expected_days|pluralize }}</p>
+                            {% endif %}
+                            <button class="btn-icon" onclick="editStage({{ stage.id }})" title="Edit Stage">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn-icon" onclick="moveStageUp({{ stage.id }})" title="Move Up">
+                                <i class="bi bi-arrow-up"></i>
+                            </button>
+                            <button class="btn-icon" onclick="moveStageDown({{ stage.id }})" title="Move Down">
+                                <i class="bi bi-arrow-down"></i>
+                            </button>
+                            <button class="btn-icon btn-danger" onclick="deleteStage({{ stage.id }})" title="Delete Stage">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="stage-description">
+                        <p class="description-text">{{ stage.description }}</p>
+                        
+                        {% if stage.tasks.all %}
+                        <hr>
+                        {% for task in stage.tasks.all %}
+                        <div class="description-checkbox task-type-{{ task.task_type }}">
+                            {% if task.task_type == 'decision_matrix' %}
+                                <button class="btn-icon-small task-delete-btn" onclick="deleteTask({{ task.id }}, {{ stage.id }})" title="Delete Task">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                                <div class="task-decision-matrix">
+                                    <strong>{{ task.description }}</strong>
+                                    <div class="decision-options">
+                                        <button class="decision-btn decision-proceed" disabled>
+                                            <i class="bi bi-arrow-right-circle"></i> Proceed to Next Step
+                                        </button>
+                                        <button class="decision-btn decision-postpone" disabled>
+                                            <i class="bi bi-clock-history"></i> Postpone
+                                        </button>
+                                        <button class="decision-btn decision-dead" disabled>
+                                            <i class="bi bi-x-circle"></i> Mark as Dead/Inactive
+                                        </button>
+                                    </div>
+                                </div>
+                            {% elif task.task_type == 'radio' %}
+                                <button class="btn-icon-small task-delete-btn" onclick="deleteTask({{ task.id }}, {{ stage.id }})" title="Delete Task">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                                <div class="task-radio-group">
+                                    <strong>{{ task.description }}</strong>
+                                    {% if task.options %}
+                                    {% for option in task.options|split_options %}
+                                    <label class="radio-option">
+                                        <input type="radio" name="task_{{ task.id }}" disabled/>
+                                        {{ option }}
+                                    </label>
+                                    {% endfor %}
+                                    {% endif %}
+                                </div>
+                            {% elif task.task_type == 'dropdown' %}
+                                <div class="task-dropdown-group">
+                                    <label>
+                                        <strong>{{ task.description }}</strong>
+                                        <select disabled class="task-select">
+                                            <option>Select...</option>
+                                            {% if task.options %}
+                                            {% for option in task.options|split_options %}
+                                            <option>{{ option }}</option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                    </label>
+                                </div>
+                            {% else %}
+                                <label>
+                                    <input type="checkbox" disabled/>
+                                    {{ task.description }}
+                                    {% if task.task_type == 'requirement' %}
+                                    <span class="badge-required">Required</span>
+                                    {% elif task.task_type == 'attachment' %}
+                                    <span class="badge-attachment"><i class="bi bi-paperclip"></i></span>
+                                    {% endif %}
+                                </label>
+                                <button class="btn-icon-small" onclick="deleteTask({{ task.id }}, {{ stage.id }})" title="Delete Task">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                        {% endif %}
+                        
+                        <button class="btn-add-task" onclick="openAddTaskModal({{ stage.id }})">
+                            <i class="bi bi-plus"></i> Add Task
+                        </button>
+                    </div>
+                </div>
+
+                {% if not forloop.last %}
+                <div class="arrow-link">
+                    <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+                        <line x1="20" y1="0" x2="20" y2="28" stroke="#888" stroke-width="6"/>
+                        <polygon points="10,28 20,40 30,28" fill="#888"/>
+                    </svg>
+                </div>
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Add/Edit Stage Modal -->
+<div class="modal" id="addStageModal">
+    <div class="modal-overlay" onclick="closeModal('addStageModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Add Workflow Stage</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addStageModal')">&times;</button>
+            </div>
+            <form id="stageForm" method="POST" action="{% url 'save_workflow_stage' %}">
+                {% csrf_token %}
+                <input type="hidden" id="stageId" name="stage_id">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="stageName">Stage Name</label>
+                        <input type="text" id="stageName" name="name" required class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label for="stagePhase">Phase</label>
+                        <select id="stagePhase" name="phase" required class="form-control">
+                            <option value="enquiry">Enquiry</option>
+                            <option value="lead">Lead</option>
+                            <option value="sale">Sale</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="stageRole">Role</label>
+                        <select id="stageRole" name="role" required class="form-control">
+                            <option value="customer-support">Customer Support</option>
+                            <option value="design">Design</option>
+                            <option value="fitter">Fitter</option>
+                            <option value="operations">Operations</option>
+                            <option value="manufacturing">Manufacturing</option>
+                            <option value="enquiry">Enquiry</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="stageDescription">Description</label>
+                        <textarea id="stageDescription" name="description" rows="3" required class="form-control"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="expectedDays">Expected Days (optional)</label>
+                        <input type="number" id="expectedDays" name="expected_days" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeModal('addStageModal')">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Stage</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Add Task Modal -->
+<div class="modal" id="addTaskModal">
+    <div class="modal-overlay" onclick="closeModal('addTaskModal')"></div>
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Task</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addTaskModal')">&times;</button>
+            </div>
+            <form id="taskForm" method="POST" action="{% url 'save_workflow_task' %}">
+                {% csrf_token %}
+                <input type="hidden" id="taskStageId" name="stage_id">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="taskDescription">Task Description</label>
+                        <input type="text" id="taskDescription" name="description" required class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label for="taskType">Task Type</label>
+                        <select id="taskType" name="task_type" required class="form-control" onchange="toggleTaskOptions()">
+                            <option value="record">Record Checkbox</option>
+                            <option value="requirement">Requirement Checkbox (Must Complete)</option>
+                            <option value="attachment">Attachment Field</option>
+                            <option value="radio">Radio Buttons</option>
+                            <option value="dropdown">Dropdown Menu</option>
+                            <option value="decision_matrix">Decision Matrix</option>
+                        </select>
+                        <small class="form-text">
+                            • <strong>Record:</strong> Simple tracking checkbox<br>
+                            • <strong>Requirement:</strong> Must be completed to progress<br>
+                            • <strong>Attachment:</strong> File upload field<br>
+                            • <strong>Radio:</strong> Single choice from multiple options<br>
+                            • <strong>Dropdown:</strong> Select from dropdown list<br>
+                            • <strong>Decision Matrix:</strong> Proceed, Postpone, or Mark Dead
+                        </small>
+                    </div>
+                    <div class="form-group" id="taskOptionsGroup" style="display: none;">
+                        <label for="taskOptions">Options (comma-separated)</label>
+                        <input type="text" id="taskOptions" name="options" class="form-control" placeholder="e.g., Brochure, Design Appointment, Both">
+                        <small class="form-text">Enter options separated by commas for radio buttons or dropdown menu</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeModal('addTaskModal')">Cancel</button>
+                    <button type="submit" class="btn-primary">Add Task</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openModal(modalId) {
+    document.getElementById(modalId).style.display = 'flex';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+    if (modalId === 'addStageModal') {
+        document.getElementById('stageForm').reset();
+        document.getElementById('stageId').value = '';
+        document.getElementById('modalTitle').textContent = 'Add Workflow Stage';
+    }
+    if (modalId === 'addTaskModal') {
+        document.getElementById('taskForm').reset();
+    }
+}
+
+function editStage(stageId) {
+    fetch(`/workflow/stage/${stageId}/`)
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('modalTitle').textContent = 'Edit Workflow Stage';
+            document.getElementById('stageId').value = data.id;
+            document.getElementById('stageName').value = data.name;
+            document.getElementById('stagePhase').value = data.phase;
+            document.getElementById('stageRole').value = data.role;
+            document.getElementById('stageDescription').value = data.description;
+            document.getElementById('expectedDays').value = data.expected_days || '';
+            openModal('addStageModal');
+        });
+}
+
+function openAddTaskModal(stageId) {
+    document.getElementById('taskStageId').value = stageId;
+    document.getElementById('taskForm').reset();
+    document.getElementById('taskStageId').value = stageId; // Set again after reset
+    document.getElementById('taskOptionsGroup').style.display = 'none'; // Hide options by default
+    openModal('addTaskModal');
+}
+
+function toggleTaskOptions() {
+    const taskType = document.getElementById('taskType').value;
+    const optionsGroup = document.getElementById('taskOptionsGroup');
+    
+    if (taskType === 'radio' || taskType === 'dropdown') {
+        optionsGroup.style.display = 'block';
+        document.getElementById('taskOptions').required = true;
+    } else {
+        optionsGroup.style.display = 'none';
+        document.getElementById('taskOptions').required = false;
+    }
+}
+
+function deleteStage(stageId) {
+    if (confirm('Are you sure you want to delete this workflow stage?')) {
+        fetch(`/workflow/stage/${stageId}/delete/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error deleting stage: ' + data.error);
+            }
+        });
+    }
+}
+
+function deleteTask(taskId, stageId) {
+    if (confirm('Are you sure you want to delete this task?')) {
+        fetch(`/workflow/task/${taskId}/delete/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error deleting task: ' + data.error);
+            }
+        });
+    }
+}
+
+function moveStageUp(stageId) {
+    fetch(`/workflow/stage/${stageId}/move/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'direction=up'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+}
+
+function moveStageDown(stageId) {
+    fetch(`/workflow/stage/${stageId}/move/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'direction=down'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+}
+</script>
+{% endblock %}

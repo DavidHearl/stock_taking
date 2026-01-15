@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Generators</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Simple style for active tab */
+        .tab-active {
+            border-color: #4f46e5; /* indigo-600 */
+            color: #4f46e5;
+            background-color: #eef2ff; /* indigo-50 */
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <!-- Navigation Bar -->
+    <nav class="bg-white shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex">
+                    <div class="flex-shrink-0 flex items-center">
+                        <h1 class="text-xl font-bold text-gray-800">Production Tools</h1>
+                    </div>
+                    <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                        <a href="{{ url_for('index') }}" class="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" aria-current="page">
+                            Order Generators
+                        </a>
+                        <a href="{{ url_for('list_products') }}" class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            Manage Products
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <h1 class="text-3xl font-bold text-gray-900 mb-4">Order Generators</h1>
+        
+        <!-- Data Status Info Box -->
+        <div class="bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-4 mb-8">
+            <p class="text-sm font-medium"><strong>Last Data Sync:</strong> {{ stats.last_update }}</p>
+            <p class="text-sm mt-1"><strong>Job Data Range:</strong> From {{ stats.min_date }} to {{ stats.max_date }}</p>
+            <p class="text-sm mt-1"><strong>System Number Range:</strong> From {{ stats.min_num }} to {{ stats.max_num }}</p>
+        </div>
+
+        <!-- Tabbed Interface for Forms -->
+        <div>
+            <!-- Tab Buttons -->
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-6" aria-label="Tabs">
+                    <button id="tab-btn-pnx" class="tab-active whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm">Boards Order (PNX)</button>
+                    <button id="tab-btn-wg" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm">WorkGuru Import (CSV)</button>
+                </nav>
+            </div>
+
+            <!-- Form Panels -->
+            <div class="bg-white shadow sm:rounded-lg mt-4">
+                <!-- PNX Generator Form (Visible by default) -->
+                <div id="tab-panel-pnx" class="p-6 sm:p-8">
+                    <form action="/generate" method="post">
+                        <div class="space-y-6">
+                            <div>
+                                <label for="po_label" class="block text-sm font-medium text-gray-700">PO Label</label>
+                                <input type="text" name="po_label" id="po_label" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                            </div>
+                            <div>
+                                <label for="system_numbers_pnx" class="block text-sm font-medium text-gray-700">System Numbers (one per line)</label>
+                                <textarea id="system_numbers_pnx" name="system_numbers" required rows="8" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <button type="submit" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Generate PNX File
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- WorkGuru CSV Generator Form (Hidden by default) -->
+                <div id="tab-panel-wg" class="p-6 sm:p-8 hidden">
+                    <form action="/generate_wg_csv" method="post">
+                        <div class="space-y-6">
+                             <div>
+                                <label for="system_numbers_wg" class="block text-sm font-medium text-gray-700">System Numbers (one per line)</label>
+                                <textarea id="system_numbers_wg" name="system_numbers" required rows="8" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <button type="submit" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                                Generate WorkGuru CSVs (as .zip)
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const pnxBtn = document.getElementById('tab-btn-pnx');
+        const wgBtn = document.getElementById('tab-btn-wg');
+        const pnxPanel = document.getElementById('tab-panel-pnx');
+        const wgPanel = document.getElementById('tab-panel-wg');
+
+        pnxBtn.addEventListener('click', () => {
+            pnxBtn.classList.add('tab-active');
+            wgBtn.classList.remove('tab-active');
+            pnxPanel.classList.remove('hidden');
+            wgPanel.classList.add('hidden');
+        });
+
+        wgBtn.addEventListener('click', () => {
+            wgBtn.classList.add('tab-active');
+            pnxBtn.classList.remove('tab-active');
+            wgPanel.classList.remove('hidden');
+            pnxPanel.classList.add('hidden');
+        });
+    </script>
+
+</body>
+</html>

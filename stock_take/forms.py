@@ -43,6 +43,9 @@ class OrderForm(forms.ModelForm):
             'anthill_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 273121'}),
             'workguru_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 41422'}),
         }
+        labels = {
+            'customer_number': 'CAD Number',
+        }
 
     def clean_sale_number(self):
         sale_number = self.cleaned_data['sale_number']
