@@ -179,6 +179,7 @@ class OSDoor(models.Model):
     ordered = models.BooleanField(default=False)
     received = models.BooleanField(default=False)
     received_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Quantity that has been received')
+    po_number = models.CharField(max_length=100, blank=True, null=True, help_text='PO Number for tracking OS Doors orders')
 
     def __str__(self):
         return f"OS Door for {self.customer.sale_number} - {self.door_style}"

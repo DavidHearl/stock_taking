@@ -35,6 +35,24 @@
     </div>
 </div>
 
+<!-- Tabs -->
+<div class="tabs">
+    <div class="tab-nav">
+        <a href="?tab=wip{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
+           class="tab-button {% if current_tab == 'wip' %}active{% endif %}">
+            WIP ({{ wip_orders }})
+        </a>
+        <a href="?tab=completed{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
+           class="tab-button {% if current_tab == 'completed' %}active{% endif %}">
+            Completed ({{ completed_orders }})
+        </a>
+        <a href="?tab=all{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
+           class="tab-button {% if current_tab == 'all' %}active{% endif %}">
+            All Jobs ({{ total_orders }})
+        </a>
+    </div>
+</div>
+
 <!-- Edit Boards PO Section -->
 <div class="collapsible-section hidden" id="editPOSection">
     <div class="card">
@@ -221,12 +239,18 @@
                 </td>
                 <!-- OS Doors -->
                 <td class="text-center">
-                    {% if order.os_doors_required %}
+                    {% if order.os_doors.exists or order.os_doors_required %}
                         <div class="status-cell">
                             <a class="po-link" href="{% url 'order_details' order.id %}">
-                                {% if order.os_doors_po %}{{ order.os_doors_po }}{% else %}Required{% endif %}
+                                {% if order.os_doors_po %}
+                                    {{ order.os_doors_po }}
+                                {% elif order.os_doors_required %}
+                                    Required
+                                {% else %}
+                                    No PO
+                                {% endif %}
                             </a>
-                            {% if order.os_doors_ordered %}
+                            {% if order.os_doors_po %}
                                 <span class="status-icon success" title="OS Doors Ordered">✓</span>
                             {% else %}
                                 <span class="status-icon danger" title="OS Doors Not Ordered">✗</span>
@@ -450,6 +474,14 @@
             return;
         }
         
+        // Get sale number from the detail row
+        const saleNumber = detailRow.getAttribute('data-sale-number');
+        
+        // Priority load the indicator for this row when clicked
+        if (saleNumber && typeof loadOrderIndicator === 'function') {
+            loadOrderIndicator(saleNumber, true);
+        }
+        
         // Check if row is currently expanded (check for hidden class)
         const isExpanded = !detailRow.classList.contains('hidden');
         
@@ -464,9 +496,6 @@
             
             // Check if content has already been loaded (data-loaded attribute)
             if (!detailRow.hasAttribute('data-loaded')) {
-                // Get the sale number from the data attribute
-                const saleNumber = detailRow.getAttribute('data-sale-number');
-                
                 // Show loading spinner
                 const detailCell = detailRow.querySelector('.detail-cell');
                 detailCell.innerHTML = '<div class="loading-spinner">Loading order details...</div>';
@@ -624,19 +653,27 @@
                 const detailRow = document.getElementById('details-' + saleNumber);
                 
                 if (shouldShow) {
-                    // Show the main row and ensure it's not expanded
+                    // Show the main row
                     row.style.display = '';
-                    row.classList.remove('expanded');
-                    // Ensure detail row is hidden (collapsed state)
+                    // Reset detail row to its proper state (clear inline style, use CSS class only)
                     if (detailRow) {
-                        detailRow.style.display = 'none';
+                        detailRow.style.display = ''; // Always clear inline style
+                        if (row.classList.contains('expanded')) {
+                            // If row was expanded, keep it expanded
+                            detailRow.classList.remove('hidden');
+                        } else {
+                            // If row was collapsed, keep it collapsed
+                            detailRow.classList.add('hidden');
+                        }
                     }
                 } else {
                     // Hide the main row
                     row.style.display = 'none';
-                    // Ensure detail row is hidden
+                    // Always hide and collapse detail row when main row is hidden
                     if (detailRow) {
-                        detailRow.style.display = 'none';
+                        detailRow.style.display = 'none'; // Use inline style for filtered-out rows
+                        detailRow.classList.add('hidden');
+                        row.classList.remove('expanded');
                     }
                 }
             });
@@ -719,20 +756,74 @@
         });
     });
 
-    // Background load order indicators (has_accessories, has_missing, has_remedials)
-    // Load in batches after page displays to avoid blocking initial render
+    // Track loaded indicators to avoid duplicate requests
+    const loadedIndicators = new Set();
+    const pendingIndicators = new Set();
+    
+    // Priority loading queue for clicked rows
+    let priorityQueue = [];
+    let isLoadingPriority = false;
+    
+    // Load indicator for a specific order (priority load when clicked)
+    function loadOrderIndicator(saleNumber, isPriority = false) {
+        if (loadedIndicators.has(saleNumber) || pendingIndicators.has(saleNumber)) {
+            return Promise.resolve();
+        }
+        
+        pendingIndicators.add(saleNumber);
+        
+        return fetch(`/ordering/load-indicators/?sale_numbers=${saleNumber}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.indicators[saleNumber]) {
+                    const indicators = data.indicators[saleNumber];
+                    const row = document.getElementById(`main-${saleNumber}`);
+                    if (!row) return;
+                    
+                    // Update row classes
+                    if (indicators.has_missing) {
+                        row.classList.add('row-missing');
+                    }
+                    if (indicators.has_remedials) {
+                        row.classList.add('row-has-remedials');
+                    }
+                    
+                    // Update accessories cell
+                    const accessoriesCell = row.querySelector('[data-indicator="accessories"]');
+                    if (accessoriesCell && indicators.has_accessories) {
+                        accessoriesCell.innerHTML = '<span class="status-icon success" title="Has Accessories">✓</span>';
+                    }
+                    
+                    loadedIndicators.add(saleNumber);
+                }
+                pendingIndicators.delete(saleNumber);
+            })
+            .catch(error => {
+                console.error('Error loading indicator:', error);
+                pendingIndicators.delete(saleNumber);
+            });
+    }
+    
+    // Background load order indicators and details in batches
+    let detailLoadQueue = [];
+    let isLoadingDetails = false;
+    
     function loadOrderIndicators() {
         const rows = document.querySelectorAll('.clickable-row');
-        const saleNumbers = Array.from(rows).map(row => row.dataset.saleNumber);
+        const saleNumbers = Array.from(rows)
+            .map(row => row.dataset.saleNumber)
+            .filter(sn => !loadedIndicators.has(sn) && !pendingIndicators.has(sn));
         
         if (saleNumbers.length === 0) return;
         
-        // Load indicators in batches of 50
-        const batchSize = 50;
+        // Load indicators in batches of 30
+        const batchSize = 30;
         for (let i = 0; i < saleNumbers.length; i += batchSize) {
             const batch = saleNumbers.slice(i, i + batchSize);
             
             setTimeout(() => {
+                batch.forEach(sn => pendingIndicators.add(sn));
+                
                 fetch(`/ordering/load-indicators/?sale_numbers=${batch.join(',')}`)
                     .then(response => response.json())
                     .then(data => {
@@ -754,16 +845,67 @@
                                 if (accessoriesCell && indicators.has_accessories) {
                                     accessoriesCell.innerHTML = '<span class="status-icon success" title="Has Accessories">✓</span>';
                                 }
+                                
+                                loadedIndicators.add(saleNumber);
+                                pendingIndicators.delete(saleNumber);
                             });
                         }
+                        batch.forEach(sn => pendingIndicators.delete(sn));
                     })
-                    .catch(error => console.error('Error loading indicators:', error));
-            }, i * 100); // Stagger batch requests by 100ms
+                    .catch(error => {
+                        console.error('Error loading indicators:', error);
+                        batch.forEach(sn => pendingIndicators.delete(sn));
+                    });
+                
+                // Add batch to detail load queue
+                detailLoadQueue.push(...batch);
+            }, i * 150); // Stagger batch requests by 150ms
+        }
+        
+        // Start loading details from queue
+        setTimeout(processDetailQueue, 1000);
+    }
+    
+    // Process detail queue one at a time to avoid overwhelming the browser
+    function processDetailQueue() {
+        if (isLoadingDetails || detailLoadQueue.length === 0) return;
+        
+        isLoadingDetails = true;
+        const saleNumber = detailLoadQueue.shift();
+        
+        const detailRow = document.getElementById(`details-${saleNumber}`);
+        if (detailRow && !detailRow.hasAttribute('data-loaded')) {
+            fetch(`/ordering/load-order-details/${saleNumber}/`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const detailCell = detailRow.querySelector('.detail-cell');
+                        detailCell.innerHTML = data.html;
+                        detailRow.setAttribute('data-loaded', 'true');
+                    }
+                })
+                .catch(error => {
+                    // Silently fail - details will load on click if needed
+                    console.log(`Will load details for ${saleNumber} on demand`);
+                })
+                .finally(() => {
+                    isLoadingDetails = false;
+                    // Continue processing queue with delay
+                    if (detailLoadQueue.length > 0) {
+                        setTimeout(processDetailQueue, 300); // 300ms between each detail load
+                    }
+                });
+        } else {
+            isLoadingDetails = false;
+            // Continue processing queue
+            if (detailLoadQueue.length > 0) {
+                setTimeout(processDetailQueue, 50);
+            }
         }
     }
     
-    // Load indicators after a short delay to let page render first
-    setTimeout(loadOrderIndicators, 100);
+    // Load indicators and details after a short delay to let page render first
+    setTimeout(loadOrderIndicators, 500);
 </script>
 
 {% endblock %}

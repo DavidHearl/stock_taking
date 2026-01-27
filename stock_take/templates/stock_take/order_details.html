@@ -372,13 +372,16 @@
                 <h3>Boards PO Details</h3>
                 <div class="header-actions">
                     {% if order.customer_number %}
-                        <a href="{% url 'generate_and_attach_pnx' order.id %}" class="btn btn-info btn-sm">
-                            <i class="bi bi-file-earmark-plus"></i> Generate PNX
+                        <a href="{% url 'generate_and_attach_pnx' order.id %}" class="btn btn-info btn-sm" style="background-color: #17a2b8; border-color: #17a2b8; color: white; font-weight: 600;">
+                            <i class="bi bi-file-earmark-plus"></i> Generate PNX - CAD
                         </a>
                     {% endif %}
                     {% if order.boards_po.file %}
                         <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary btn-sm download-pnx">
-                            <i class="bi bi-download"></i> Download
+                            <i class="bi bi-download"></i> Download PNX
+                        </a>
+                        <a href="{% url 'download_pnx_as_csv' order.id %}" class="btn btn-success btn-sm">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Download CSV
                         </a>
                     {% endif %}
                     <div class="section-actions">
@@ -469,18 +472,21 @@
             <div class="card-header">
                 <h3>
                     OS Doors
+                    {% if order.os_doors_po %}
+                        <span class="badge badge-info" style="margin-left: 10px;">PO: {{ order.os_doors_po }}</span>
+                    {% endif %}
                     {% if order.os_doors_required %}
                         {% if order.os_doors_po %}
-                            <span class="badge badge-success" style="margin-left: 10px;">Ordered - PO: {{ order.os_doors_po }}</span>
+                            <span class="badge badge-success" style="margin-left: 10px;">Ordered</span>
                         {% else %}
                             <span class="badge badge-danger" style="margin-left: 10px;">Required</span>
                         {% endif %}
                     {% endif %}
                 </h3>
                 <div class="header-actions">
-                    {% if order.os_doors_required %}
+                    {% if order.os_doors.exists or order.os_doors_required %}
                     <button type="button" class="btn btn-sm btn-primary" onclick="openModal('updateOSDModal')">
-                        <i class="bi bi-pencil"></i> Update PO
+                        <i class="bi bi-pencil"></i> Update Order PO
                     </button>
                     {% endif %}
                     <button class="btn btn-sm btn-primary" type="button" onclick="toggleCollapse('addOSDoorForm')">
@@ -500,6 +506,7 @@
                                 <th>Dimensions</th>
                                 <th>Colour</th>
                                 <th>Qty</th>
+                                <th>PO Number</th>
                                 <th>Ordered</th>
                                 <th>Received</th>
                             </tr>
@@ -512,6 +519,7 @@
                                 <td>{{ os_door.height }} x {{ os_door.width }}</td>
                                 <td>{{ os_door.colour }}</td>
                                 <td>{{ os_door.quantity|floatformat:0 }}</td>
+                                <td>{{ os_door.po_number|default:"-" }}</td>
                                 <td>
                                     {% if os_door.ordered %}
                                         <span class="status-icon success">✓</span>
@@ -573,6 +581,10 @@
                                 {{ os_door_form.quantity }}
                             </div>
                             <div class="form-group">
+                                <label for="{{ os_door_form.po_number.id_for_label }}">PO Number</label>
+                                {{ os_door_form.po_number }}
+                            </div>
+                            <div class="form-group">
                                 <label class="checkbox-label">
                                     {{ os_door_form.ordered }}
                                     <span>Ordered</span>
@@ -602,15 +614,21 @@
                             <i class="bi bi-plus-lg"></i> Add Item
                         </button>
                         <button class="btn btn-primary" type="button" onclick="openModal('uploadAccessoriesModal')">
-                            Upload CSV
+                            <i class="bi bi-upload"></i> Upload CSV
                         </button>
-                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-info">
-                            <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV
+                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-info" style="background-color: #17a2b8; border-color: #17a2b8;">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
                         </a>
-                        {% if order.processed_csv %}
-                        <a href="{% url 'download_processed_csv' order.id %}" class="btn btn-secondary">
+                        {% if order.accessories.exists %}
+                        <a href="{% url 'download_current_accessories_csv' order.id %}" class="btn btn-success">
                             <i class="bi bi-download"></i> Download CSV
                         </a>
+                        {% if order.workguru_id %}
+                        <a href="{% url 'push_accessories_to_workguru' order.id %}" class="btn btn-primary" 
+                           onclick="return confirm('Push {{ order.accessories.count }} accessory/accessories to WorkGuru Project {{ order.workguru_id }}?');">
+                            <i class="bi bi-cloud-upload"></i> Push to WorkGuru
+                        </a>
+                        {% endif %}
                         {% endif %}
                         {% if order.original_csv %}
                         <button class="btn btn-warning" type="button" onclick="regenerateCSV({{ order.id }})">

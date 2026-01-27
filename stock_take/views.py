@@ -38,6 +38,9 @@ def ordering(request):
     price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
     
+    # Get tab filter
+    tab = request.GET.get('tab', 'all')  # 'all', 'wip', 'completed'
+    
     # Handle sorting
     sort_by = request.GET.get('sort', 'order_date')
     sort_order = request.GET.get('order', 'desc')
@@ -59,17 +62,53 @@ def ordering(request):
     
     # Build ordering string
     order_field = valid_sort_fields[sort_by]
-    if sort_order == 'asc':
-        ordering = ['job_finished', order_field, models.F('boards_po__po_number').asc(nulls_last=True)]
+    
+    # Default sorting: Always group by name (last_name, first_name) but use fit_date as primary
+    # Furthest fit_date should be at top (descending by default)
+    # Names stay together, ordered by their latest/furthest fit_date
+    from django.db.models import Max
+    
+    if sort_by == 'fit_date':
+        # Primary sort by fit_date, but keep same names together
+        if sort_order == 'asc':
+            ordering = ['job_finished', 'last_name', 'first_name', 'fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+        else:
+            ordering = ['job_finished', 'last_name', 'first_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+    elif sort_by == 'last_name':
+        if sort_order == 'asc':
+            ordering = ['job_finished', 'last_name', 'first_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+        else:
+            ordering = ['job_finished', '-last_name', '-first_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+    elif sort_by == 'first_name':
+        if sort_order == 'asc':
+            ordering = ['job_finished', 'first_name', 'last_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+        else:
+            ordering = ['job_finished', '-first_name', '-last_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
     else:
-        ordering = ['job_finished', f'-{order_field}', models.F('boards_po__po_number').asc(nulls_last=True)]
+        # For other fields, still group by name then sort by the field
+        if sort_order == 'asc':
+            ordering = ['job_finished', order_field, 'last_name', 'first_name', models.F('boards_po__po_number').asc(nulls_last=True)]
+        else:
+            ordering = ['job_finished', f'-{order_field}', 'last_name', 'first_name', models.F('boards_po__po_number').asc(nulls_last=True)]
     
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by selected field
     # OPTIMIZATION: Don't load PNX items upfront - they'll be loaded via AJAX when row is clicked
     # OPTIMIZATION: Removed prefetch and annotations - will lazy load indicators via AJAX
     from django.db.models import Exists, OuterRef, Q
     
-    orders = Order.objects.select_related('boards_po').all().order_by(*ordering)
+    # Get all orders for statistics
+    all_orders = Order.objects.select_related('boards_po').all()
+    total_orders = all_orders.count()
+    completed_orders = all_orders.filter(job_finished=True).count()
+    wip_orders = all_orders.filter(job_finished=False).count()
+    
+    # Filter orders based on tab
+    if tab == 'completed':
+        orders = all_orders.filter(job_finished=True).order_by(*ordering)
+    elif tab == 'wip':
+        orders = all_orders.filter(job_finished=False).order_by(*ordering)
+    else:  # 'all'
+        orders = all_orders.order_by(*ordering)
     
     # OPTIMIZATION: Don't load BoardsPO details upfront - only load basic list for the edit section
     # Annotate with orders count to avoid per-row queries
@@ -94,6 +133,10 @@ def ordering(request):
         'price_per_sqm': price_per_sqm,
         'current_sort': sort_by,
         'current_order': sort_order,
+        'current_tab': tab,
+        'total_orders': total_orders,
+        'completed_orders': completed_orders,
+        'wip_orders': wip_orders,
     })
 
 @login_required
@@ -422,6 +465,59 @@ def material_shortage(request):
     
     today = timezone.now().date()
     
+    # Handle search query
+    search_query = request.GET.get('search', '').strip()
+    search_result = None
+    
+    if search_query:
+        # Get all active orders (not finished)
+        active_orders = Order.objects.filter(job_finished=False).prefetch_related('accessories__stock_item')
+        
+        # Find accessories matching the search query (by SKU or name)
+        matching_accessories = Accessory.objects.filter(
+            order__job_finished=False,
+            sku__icontains=search_query
+        ).select_related('stock_item', 'order') | Accessory.objects.filter(
+            order__job_finished=False,
+            name__icontains=search_query
+        ).select_related('stock_item', 'order')
+        
+        if matching_accessories.exists():
+            # Group by SKU to aggregate
+            search_data = defaultdict(lambda: {
+                'sku': '',
+                'name': '',
+                'current_stock': 0,
+                'required_qty': 0,
+                'shortage': 0,
+                'orders': []
+            })
+            
+            for accessory in matching_accessories:
+                key = accessory.sku
+                if not search_data[key]['sku']:
+                    search_data[key]['sku'] = accessory.sku
+                    search_data[key]['name'] = accessory.name
+                    if accessory.stock_item:
+                        search_data[key]['current_stock'] = accessory.stock_item.quantity
+                
+                search_data[key]['required_qty'] += float(accessory.quantity)
+                search_data[key]['orders'].append({
+                    'sale_number': accessory.order.sale_number,
+                    'first_name': accessory.order.first_name,
+                    'last_name': accessory.order.last_name,
+                    'fit_date': accessory.order.fit_date,
+                    'quantity': float(accessory.quantity),
+                    'order_id': accessory.order.id
+                })
+            
+            # Calculate shortage for each item
+            for key, data in search_data.items():
+                data['shortage'] = max(0, data['required_qty'] - data['current_stock'])
+            
+            # Convert to list
+            search_result = list(search_data.values())
+    
     # Get upcoming orders with prefetched accessories and stock items (OPTIMIZATION)
     upcoming_orders = Order.objects.filter(
         job_finished=False,
@@ -610,6 +706,8 @@ def material_shortage(request):
         'total_predicted_shortage': total_predicted_shortage,
         'upcoming_orders_count': upcoming_orders.count(),
         'historical_period_days': 90,
+        'search_query': search_query,
+        'search_result': search_result,
     })
 
 def round_to_min_order_qty(quantity, min_order_qty):
@@ -3773,6 +3871,232 @@ def download_processed_csv(request, order_id):
     response['Content-Length'] = len(file_content)
     
     return response
+
+
+@login_required
+def download_current_accessories_csv(request, order_id):
+    """Generate and download CSV from current accessories in database"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if not order.accessories.exists():
+        messages.error(request, 'No accessories available for this order.')
+        return redirect('order_details', order_id=order_id)
+    
+    # Create CSV in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header with all columns
+    writer.writerow(['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable'])
+    
+    # Write accessory data
+    for accessory in order.accessories.all().order_by('sku'):
+        writer.writerow([
+            accessory.sku,
+            accessory.name,
+            accessory.description,
+            accessory.cost_price,
+            accessory.sell_price,
+            accessory.quantity,
+            'TRUE' if accessory.billable else 'FALSE'
+        ])
+    
+    # Get CSV content
+    csv_content = output.getvalue()
+    output.close()
+    
+    # Create response
+    response = HttpResponse(csv_content, content_type='text/csv')
+    filename = f"{order.customer_number or order.sale_number}_Accessories.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    return response
+
+
+@login_required
+def download_pnx_as_csv(request, order_id):
+    """Generate and download CSV from PNX items for this order"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if not order.boards_po:
+        messages.error(request, 'No PNX file available for this order.')
+        return redirect('order_details', order_id=order_id)
+    
+    # Get PNX items for this order
+    pnx_items = order.boards_po.pnx_items.filter(customer=order.customer_number).order_by('barcode')
+    
+    if not pnx_items.exists():
+        messages.error(request, 'No PNX items found for this order.')
+        return redirect('order_details', order_id=order_id)
+    
+    # Create CSV in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header
+    writer.writerow(['Barcode', 'Material Name', 'Customer', 'Quantity', 'Height', 'Width', 'Edging', 'Received'])
+    
+    # Write PNX item data
+    for item in pnx_items:
+        writer.writerow([
+            item.barcode,
+            item.matname,
+            item.customer,
+            item.quantity,
+            item.height,
+            item.width,
+            item.edging or '',
+            item.received_quantity
+        ])
+    
+    # Get CSV content
+    csv_content = output.getvalue()
+    output.close()
+    
+    # Create response
+    response = HttpResponse(csv_content, content_type='text/csv')
+    filename = f"{order.boards_po.po_number}_{order.customer_number}_PNX_Items.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    return response
+
+
+@login_required
+def push_accessories_to_workguru(request, order_id):
+    """Push accessories to WorkGuru project via API"""
+    import requests
+    import json
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    if not order.workguru_id:
+        messages.error(request, 'This order does not have a WorkGuru Project ID.')
+        return redirect('order_details', order_id=order_id)
+    
+    if not order.accessories.exists():
+        messages.error(request, 'No accessories to push to WorkGuru.')
+        return redirect('order_details', order_id=order_id)
+    
+    # Get API credentials from environment
+    api_key = os.getenv('WORKGURU_API_KEY')
+    secret_key = os.getenv('WORKGURU_SECRET_KEY')
+    
+    if not api_key or not secret_key:
+        messages.error(request, 'WorkGuru API credentials not configured.')
+        return redirect('order_details', order_id=order_id)
+    
+    # Step 1: Authenticate to get access token
+    auth_url = "https://ukapi.workguru.io/api/ClientTokenAuth/Authenticate/api/client/v1/tokenauth"
+    auth_payload = {
+        'apiKey': api_key,
+        'secret': secret_key
+    }
+    
+    try:
+        logger.info(f'Authenticating with WorkGuru using endpoint: {auth_url}')
+        logger.info(f'Auth payload keys: {list(auth_payload.keys())}')
+        auth_response = requests.post(auth_url, json=auth_payload, timeout=10)
+        
+        if auth_response.status_code != 200:
+            messages.error(request, f'WorkGuru authentication failed: {auth_response.status_code} - {auth_response.text[:200]}')
+            logger.error(f'WorkGuru auth failed: {auth_response.text}')
+            return redirect('order_details', order_id=order_id)
+        
+        auth_data = auth_response.json()
+        access_token = auth_data.get('result', {}).get('accessToken') or auth_data.get('accessToken')
+        
+        if not access_token:
+            messages.error(request, f'No access token received from WorkGuru. Response: {auth_response.text[:200]}')
+            return redirect('order_details', order_id=order_id)
+            
+        logger.info(f'Successfully authenticated with WorkGuru')
+        
+    except requests.exceptions.RequestException as e:
+        messages.error(request, f'Error authenticating with WorkGuru: {str(e)}')
+        logger.error(f'WorkGuru auth error: {str(e)}')
+        return redirect('order_details', order_id=order_id)
+    
+    # Step 2: Use token to push accessories
+    base_url = "https://ukapi.workguru.io"
+    endpoint = "/api/services/app/Project/AddProductToProject"
+    url = f"{base_url}{endpoint}"
+    
+    # Prepare headers with Bearer token
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {access_token}',
+        'Abp.TenantId': '1'
+    }
+    
+    success_count = 0
+    error_count = 0
+    errors = []
+    
+    # First, add BOARDS_CH (Carnehill Boards Order) - always required for every job
+    # Only add if it doesn't already exist
+    boards_ch_payload = {
+        'projectId': int(order.workguru_id),
+        'sku': 'BOARDS_CH',
+        'description': 'Carnehill Boards Order per Job',
+        'quantity': 1,
+        'billable': False,  # Not billable
+        'isStock': False  # This is a non-stock item
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=boards_ch_payload, timeout=10)
+        if response.status_code in [200, 201]:
+            success_count += 1
+            logger.info(f"Successfully added BOARDS_CH to WorkGuru project {order.workguru_id}")
+        elif response.status_code == 400 and 'already exists' in response.text.lower():
+            # BOARDS_CH already exists, skip it
+            logger.info(f"BOARDS_CH already exists in project {order.workguru_id}, skipping")
+        else:
+            logger.warning(f"Failed to add BOARDS_CH: {response.status_code} - {response.text[:200]}")
+    except Exception as e:
+        logger.warning(f"Error adding BOARDS_CH: {str(e)}")
+    
+    # Push each accessory to WorkGuru
+    for accessory in order.accessories.all():
+        payload = {
+            'projectId': int(order.workguru_id),
+            'sku': accessory.sku,
+            'name': accessory.name,
+            'description': accessory.description or accessory.name,
+            'quantity': float(accessory.quantity),
+            'costPrice': float(accessory.cost_price),
+            'sellPrice': float(accessory.sell_price),
+            'billable': False  # All imported items are not billable
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            
+            if response.status_code in [200, 201]:
+                success_count += 1
+                logger.info(f"Successfully pushed {accessory.sku} to WorkGuru project {order.workguru_id}")
+            else:
+                error_count += 1
+                error_msg = f"{accessory.sku}: {response.status_code} - {response.text[:100]}"
+                errors.append(error_msg)
+                logger.error(f"Failed to push {accessory.sku}: {response.status_code} - {response.text}")
+        except requests.exceptions.RequestException as e:
+            error_count += 1
+            error_msg = f"{accessory.sku}: {str(e)}"
+            errors.append(error_msg)
+            logger.error(f"Error pushing {accessory.sku} to WorkGuru: {str(e)}")
+    
+    # Show results to user
+    if success_count > 0:
+        messages.success(request, f'Successfully pushed {success_count} accessory/accessories to WorkGuru project {order.workguru_id}.')
+    
+    if error_count > 0:
+        error_summary = f'Failed to push {error_count} item(s). Errors: ' + '; '.join(errors[:3])
+        if len(errors) > 3:
+            error_summary += f'... and {len(errors) - 3} more'
+        messages.error(request, error_summary)
+    
+    return redirect('order_details', order_id=order_id)
 
 
 @login_required

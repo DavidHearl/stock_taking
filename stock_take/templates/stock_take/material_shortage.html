@@ -31,6 +31,102 @@
         </div>
     </div>
 
+    <!-- Search Box -->
+    <div class="search-box mb-3">
+        <form method="get" action="{% url 'material_shortage' %}" class="search-form">
+            <div class="search-input-group">
+                <input type="text" name="search" id="materialSearch" class="form-control" 
+                       placeholder="🔍 Search by SKU or material name..." 
+                       value="{{ search_query }}">
+                <button type="submit" class="btn btn-primary">Search</button>
+                {% if search_query %}
+                    <a href="{% url 'material_shortage' %}" class="btn btn-secondary">Clear</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Search Results -->
+    {% if search_query %}
+        <div class="search-results-section">
+            <h3><i class="bi bi-search"></i> Search Results for "{{ search_query }}"</h3>
+            {% if search_result %}
+                <div class="table-responsive">
+                    <table class="shortage-table search-results-table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Material Name</th>
+                                <th class="text-end">Current Stock</th>
+                                <th class="text-end">Required for Active Jobs</th>
+                                <th class="text-end">Shortage</th>
+                                <th class="text-start">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in search_result %}
+                            <tr>
+                                <td><code>{{ item.sku }}</code></td>
+                                <td><strong>{{ item.name }}</strong></td>
+                                <td class="text-end {% if item.current_stock < item.required_qty %}text-danger{% else %}text-success{% endif %}">
+                                    {{ item.current_stock|floatformat:0 }}
+                                </td>
+                                <td class="text-end">{{ item.required_qty|floatformat:0 }}</td>
+                                <td class="text-end">
+                                    {% if item.shortage > 0 %}
+                                        <span class="shortage-badge high">-{{ item.shortage|floatformat:0 }}</span>
+                                    {% else %}
+                                        <span class="text-success">✓</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-start">
+                                    <button class="btn btn-sm btn-primary" onclick="toggleOrderDetails('orders-{{ forloop.counter }}')">
+                                        View Orders ({{ item.orders|length }})
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="order-details-row hidden" id="orders-{{ forloop.counter }}">
+                                <td colspan="6">
+                                    <div class="orders-detail-expanded">
+                                        <table class="orders-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Sale #</th>
+                                                    <th>Customer</th>
+                                                    <th>Fit Date</th>
+                                                    <th class="text-end">Quantity</th>
+                                                    <th class="text-center">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for order in item.orders %}
+                                                <tr>
+                                                    <td>{{ order.sale_number }}</td>
+                                                    <td>{{ order.first_name }} {{ order.last_name }}</td>
+                                                    <td>{{ order.fit_date }}</td>
+                                                    <td class="text-end">{{ order.quantity|floatformat:0 }}</td>
+                                                    <td class="text-start">
+                                                        <a href="{% url 'order_details' order.order_id %}" class="btn btn-sm btn-primary" target="_blank">View Order</a>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-circle"></i> No materials found matching "{{ search_query }}"
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+
     <!-- Critical Items Section -->
     {% if critical_items %}
     <div class="critical-section">
@@ -127,4 +223,15 @@
         </ul>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function toggleOrderDetails(rowId) {
+        const detailRow = document.getElementById(rowId);
+        if (detailRow) {
+            detailRow.classList.toggle('hidden');
+        }
+    }
+</script>
 {% endblock %}
