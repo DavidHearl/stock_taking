@@ -22,7 +22,7 @@ class OrderForm(forms.ModelForm):
         model = Order
         fields = [
             'first_name', 'last_name', 'sale_number', 'customer_number',
-            'order_date', 'fit_date', 'boards_po',
+            'order_date', 'fit_date', 'designer', 'boards_po',
             'job_finished', 'address', 'postcode', 'order_type', 'os_doors_required', 'all_items_ordered',
             'anthill_id', 'workguru_id'
         ]
@@ -33,6 +33,7 @@ class OrderForm(forms.ModelForm):
             'customer_number': forms.TextInput(attrs={'class': 'form-input'}),
             'order_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-input'}),
             'fit_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-input'}),
+            'designer': forms.Select(attrs={'class': 'form-input'}),
             'boards_po': forms.Select(attrs={'class': 'form-input'}),
             'job_finished': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
             'address': forms.TextInput(attrs={'class': 'form-input'}),

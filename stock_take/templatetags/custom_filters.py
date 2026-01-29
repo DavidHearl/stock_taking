@@ -25,3 +25,11 @@ def split_options(value, delimiter=','):
     if not value:
         return []
     return [option.strip() for option in value.split(delimiter)]
+
+@register.filter
+def sum_accessory_costs(accessories):
+    """Calculate total cost of all accessories (cost_price * quantity)"""
+    total = 0
+    for accessory in accessories:
+        total += accessory.cost_price * accessory.quantity
+    return f"{total:.2f}"

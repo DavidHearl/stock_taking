@@ -153,18 +153,13 @@
             
             <div class="card">
                 <div class="card-header">
-                    <h3>Edit Order Information</h3>
+                    <h3 style="margin: 0;">Edit Order Information</h3>
                     <div class="header-links">
-                        {% if order.anthill_id %}
-                            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="btn btn-sm btn-success">
-                                🔗 Anthill
-                            </a>
-                        {% endif %}
-                        {% if order.workguru_id %}
-                            <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" target="_blank" class="btn btn-sm btn-primary">
-                                🔗 WorkGuru
-                            </a>
-                        {% endif %}
+                        <select class="order-type-select" onchange="updateOrderType(this, {{ order.id }})" style="padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                            <option value="sale" {% if order.order_type == 'sale' %}selected{% endif %} style="background: #10b981; color: white; cursor: pointer;">Sale</option>
+                            <option value="remedial" {% if order.order_type == 'remedial' %}selected{% endif %} style="background: #f59e0b; color: white; cursor: pointer;">Remedial</option>
+                            <option value="warranty" {% if order.order_type == 'warranty' %}selected{% endif %} style="background: #ef4444; color: white; cursor: pointer;">Warranty</option>
+                        </select>
                     </div>
                 </div>
                 
@@ -187,81 +182,455 @@
                 
                 <!-- Edit Order Information -->
                 <div class="card-body">
-                    <form method="POST">
-                        {% csrf_token %}
-                        <div class="form-grid-2col">
-                            <div class="form-group">
-                                <label for="{{ form.first_name.id_for_label }}">First Name</label>
-                                {{ form.first_name }}
+                    <div class="form-grid-2col">
+                        <!-- Left Column: Customer Info + Job Info -->
+                        <div>
+                            <!-- Customer Info -->
+                            <div>
+                                <div class="info-section-header">
+                                    <h4 class="info-section-title customer">Customer Info</h4>
+                                    <button type="button" class="btn btn-sm btn-outline-primary edit-btn-spacing" id="edit-customer-btn" onclick="toggleCustomerEdit()">
+                                        <i class="bi bi-pencil"></i> Edit
+                                    </button>
+                                </div>
+                            <div id="customer-display" class="info-display">
+                                <div>
+                                    <div class="field-label">Customer Name</div>
+                                    <div class="field-value-large" id="customer-name-display">{{ order.first_name }} {{ order.last_name }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Anthill Customer ID</div>
+                                    <div class="field-row-with-button">
+                                        <div class="field-value" id="anthill-id-display">{{ order.anthill_id|default:"Not specified" }}</div>
+                                        {% if order.anthill_id %}
+                                            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                                <i class="bi bi-box-arrow-up-right"></i> View Anthill Customer
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Address</div>
+                                    <div class="field-value" id="address-display">{{ order.address|default:"Not set" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Postcode</div>
+                                    <div class="field-value" id="postcode-display">{{ order.postcode|default:"Not set" }}</div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="{{ form.last_name.id_for_label }}">Last Name</label>
-                                {{ form.last_name }}
+                            <div id="customer-edit" class="info-edit">
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">First Name</label>
+                                    <input type="text" class="form-input" id="first-name-input" value="{{ order.first_name }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Last Name</label>
+                                    <input type="text" class="form-input" id="last-name-input" value="{{ order.last_name }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Anthill Customer ID</label>
+                                    <input type="text" class="form-input" id="anthill-id-input" value="{{ order.anthill_id }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Address</label>
+                                    <input type="text" class="form-input" id="address-input" value="{{ order.address }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Postcode</label>
+                                    <input type="text" class="form-input" id="postcode-input" value="{{ order.postcode }}">
+                                </div>
+                                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveCustomerInfo({{ order.id }})">
+                                    <i class="bi bi-check-lg"></i> Save Customer Info
+                                </button>
                             </div>
-                            <div class="form-group">
-                                <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
-                                {{ form.sale_number }}
                             </div>
-                            <div class="form-group">
-                                <label for="{{ form.customer_number.id_for_label }}">Customer Number</label>
-                                {{ form.customer_number }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.order_date.id_for_label }}">Order Date</label>
-                                {{ form.order_date }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
-                                {{ form.fit_date }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.boards_po.id_for_label }}">Boards PO</label>
-                                {{ form.boards_po }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.order_type.id_for_label }}">Order Type</label>
-                                {{ form.order_type }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.anthill_id.id_for_label }}">Anthill ID</label>
-                                {{ form.anthill_id }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.workguru_id.id_for_label }}">WorkGuru ID</label>
-                                {{ form.workguru_id }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.address.id_for_label }}">Address</label>
-                                {{ form.address }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.postcode.id_for_label }}">Postcode</label>
-                                {{ form.postcode }}
-                            </div>
-                            <div class="form-group checkbox-group">
-                                <label class="checkbox-label">
-                                    <span>All Items Ordered</span>
-                                    {{ form.all_items_ordered }}
-                                </label>
-                            </div>
-                            <div class="form-group checkbox-group">
-                                <label class="checkbox-label">
-                                    <span>Job Finished</span>
-                                    {{ form.job_finished }}
-                                </label>
+                        
+                            <!-- Job Info Section -->
+                            <div class="job-section-spacing">
+                                <div class="info-section-header">
+                                    <h4 class="info-section-title job">Job Info</h4>
+                                    <button type="button" class="btn btn-sm btn-outline-warning edit-btn-spacing" onclick="openAddPOModal()" title="Add new boards PO">
+                                        <i class="bi bi-plus-lg"></i> Add Boards PO
+                                    </button>
+                                </div>
+
+                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                    <!-- Boards PO (Editable Dropdown with Search) -->
+                                    <div>
+                                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block;">Boards PO</label>
+                                        <input type="text" id="po-search" class="form-input" placeholder="Type PO digits (e.g., 1234)..." style="margin-bottom: 8px; font-size: 14px; padding: 6px 10px;" onkeyup="filterPOOptions()" oninput="formatPOSearch(this)">
+                                        <select class="form-select" id="boards-po-select" onchange="updateBoardsPO({{ order.id }}, this.value)" style="font-size: 14px; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">
+                                            <option value="">No PO Selected</option>
+                                            {% for po in available_pos %}
+                                                <option value="{{ po.id }}" data-po-number="{{ po.po_number }}" {% if order.boards_po and order.boards_po.id == po.id %}selected{% endif %}>{{ po.po_number }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    
+                                    <!-- All Items Ordered Checkbox -->
+                                    <div class="job-checkbox-container">
+                                        <input class="job-checkbox" type="checkbox" id="allItemsOrdered" 
+                                               {% if order.all_items_ordered %}checked{% endif %}
+                                               onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
+                                        <label class="job-checkbox-label" for="allItemsOrdered">
+                                            <i class="bi bi-box-seam"></i> All Items Ordered
+                                        </label>
+                                    </div>
+                                    
+                                    <!-- Job Finished Checkbox -->
+                                    <div class="job-checkbox-container">
+                                        <input class="job-checkbox" type="checkbox" id="jobFinished" 
+                                               {% if order.job_finished %}checked{% endif %}
+                                               onchange="updateJobCheckbox({{ order.id }}, 'job_finished', this.checked)">
+                                        <label class="job-checkbox-label" for="jobFinished">
+                                            <i class="bi bi-check2-circle"></i> Job Finished
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">
-                                💾 Save Changes
-                            </button>
+                        
+                        <!-- Right Column: Sale Info -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title sale">Sale Info</h4>
+                                <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
+                                    <i class="bi bi-pencil"></i> Edit
+                                </button>
+                            </div>
+                            <div id="sale-display" class="info-display">
+                                <div>
+                                    <div class="field-label">Sale Number</div>
+                                    <div class="field-row-with-button">
+                                        <div class="field-value-medium" id="sale-number-display">{{ order.sale_number }}</div>
+                                        {% if order.sale_number %}
+                                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                                <i class="bi bi-box-arrow-up-right"></i> View Anthill Sale
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Customer Number</div>
+                                    <div class="field-value" id="customer-number-display">{{ order.customer_number }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Designer</div>
+                                    <div class="field-value" id="designer-display">{{ order.designer|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">WorkGuru ID</div>
+                                    <div class="field-row-with-button">
+                                        <div class="field-value" id="workguru-id-display">{{ order.workguru_id|default:"Not set" }}</div>
+                                        {% if order.workguru_id %}
+                                            <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" target="_blank" class="btn btn-sm btn-outline-primary external-link-btn">
+                                                <i class="bi bi-box-arrow-up-right"></i> View WorkGuru Project
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Order Date</div>
+                                    <div class="field-value" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Fit Date</div>
+                                    <div class="field-value" id="fit-date-display">{{ order.fit_date|date:"d M Y"|default:"Not set" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Total Value (Inc VAT)</div>
+                                    <div class="field-value" id="total-value-display" style="font-weight: 600; color: var(--primary);">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            <div id="sale-edit" class="info-edit">
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Sale Number</label>
+                                    <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Customer Number</label>
+                                    <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Designer</label>
+                                    <div style="display: flex; gap: 5px; align-items: center;">
+                                        <select class="form-input" id="designer-input" style="flex: 1;">
+                                            <option value="">Select designer...</option>
+                                            {% for designer in designers %}
+                                                <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="button" class="btn btn-sm btn-success" onclick="toggleAddDesignerInline()" title="Add new designer" style="padding: 6px 10px;">
+                                            <i class="bi bi-plus-lg"></i>
+                                        </button>
+                                    </div>
+                                    <div id="new-designer-inline" style="display: none; margin-top: 8px; display: none; gap: 5px;">
+                                        <input type="text" id="new-designer-name-inline" class="form-input" placeholder="New designer name" style="flex: 1;">
+                                        <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesignerInline()" title="Cancel">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">WorkGuru ID</label>
+                                    <input type="text" class="form-input" id="workguru-id-input" value="{{ order.workguru_id }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Order Date</label>
+                                    <input type="date" class="form-input" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Fit Date</label>
+                                    <input type="date" class="form-input" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Total Value (Inc VAT)</label>
+                                    <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
+                                </div>
+                                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
+                                    <i class="bi bi-check-lg"></i> Save Sale Info
+                                </button>
+                            </div>
                         </div>
-                    </form>
+                    </div>
                 </div>
             </div>
         </div>
         
         <div class="sidebar-column">
+            <!-- Financial Summary Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Financial Summary</h3>
+                    <button class="btn btn-primary btn-sm" onclick="recalculateFinancials({{ order.id }})" title="Recalculate all costs from source data">
+                        <i class="bi bi-arrow-clockwise"></i> Recalculate
+                    </button>
+                </div>
+                <div class="financial-card-body">
+                    <div class="financial-cards-vertical">
+                        <!-- Total Value Inc VAT (Display only) -->
+                        <div class="financial-card-vertical card-total-inc">
+                            <div class="financial-card-icon">
+                                <i class="bi bi-cash-stack"></i>
+                            </div>
+                            <div class="financial-card-content">
+                                <span class="financial-card-label">Total Value (Inc VAT)</span>
+                                <div class="financial-display" id="total_value_inc_vat_display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Total Value Exc VAT (Auto-calculated) -->
+                        <div class="financial-card-vertical card-total-exc">
+                            <div class="financial-card-icon">
+                                <i class="bi bi-calculator"></i>
+                            </div>
+                            <div class="financial-card-content">
+                                <span class="financial-card-label">Total Value (Exc VAT)</span>
+                                <div class="financial-display" id="total_value_exc_vat_display">£{{ order.total_value_exc_vat|default:'0.00'|floatformat:2 }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Materials Cost (Auto-calculated from boards, accessories, OS doors) -->
+                        <div class="financial-card-vertical card-materials">
+                            <div class="financial-card-icon">
+                                <i class="bi bi-box-seam"></i>
+                            </div>
+                            <div class="financial-card-content">
+                                <span class="financial-card-label">Materials Cost (Auto)</span>
+                                <div class="financial-display" id="materials_cost_display">£{{ materials_cost|default:'0.00'|floatformat:2 }}</div>
+                                {% if order.total_value_exc_vat > 0 %}
+                                <div class="financial-progress-wrapper">
+                                    <div class="financial-progress">
+                                        {% if boards_cost > 0 %}
+                                        <div class="financial-progress-bar-segment boards-segment" 
+                                             style="width: {% widthratio boards_cost order.total_value_exc_vat 100 %}%"
+                                             title="Boards: £{{ boards_cost|floatformat:2 }} ({% widthratio boards_cost materials_cost 100 %}% of materials)"></div>
+                                        {% endif %}
+                                        {% if accessories_cost > 0 %}
+                                        <div class="financial-progress-bar-segment accessories-segment" 
+                                             style="width: {% widthratio accessories_cost order.total_value_exc_vat 100 %}%"
+                                             title="Accessories: £{{ accessories_cost|floatformat:2 }} ({% widthratio accessories_cost materials_cost 100 %}% of materials)"></div>
+                                        {% endif %}
+                                        {% if os_doors_cost > 0 %}
+                                        <div class="financial-progress-bar-segment os-doors-segment" 
+                                             style="width: {% widthratio os_doors_cost order.total_value_exc_vat 100 %}%"
+                                             title="OS Doors: £{{ os_doors_cost|floatformat:2 }} ({% widthratio os_doors_cost materials_cost 100 %}% of materials)"></div>
+                                        {% endif %}
+                                    </div>
+                                    <span class="financial-percentage">{% widthratio materials_cost order.total_value_exc_vat 100 %}%</span>
+                                </div>
+                                <div class="cost-breakdown-legend">
+                                    {% if boards_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color boards-color"></span>
+                                        Boards: £{{ boards_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if accessories_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color accessories-color"></span>
+                                        Accessories: £{{ accessories_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if os_doors_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color os-doors-color"></span>
+                                        OS Doors: £{{ os_doors_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Installation Cost -->
+                        <div class="financial-card-vertical card-installation">
+                            <div class="financial-card-icon">
+                                <i class="bi bi-tools"></i>
+                            </div>
+                            <div class="financial-card-content">
+                                <span class="financial-card-label">
+                                    Installation Cost
+                                    <button type="button" class="btn btn-sm btn-primary ms-2" onclick="openTimesheetModal('installation')" style="padding: 2px 8px; font-size: 0.75rem;">
+                                        <i class="bi bi-plus-circle"></i> Add
+                                    </button>
+                                </span>
+                                <div class="financial-display-value" id="installation_cost_display">
+                                    £{{ calculated_installation_cost|floatformat:2 }}
+                                </div>
+                                {% if order.total_value_exc_vat > 0 %}
+                                <div class="financial-progress-wrapper">
+                                    <div class="financial-progress">
+                                        {% if installation_fitter_cost > 0 %}
+                                        <div class="financial-progress-bar-segment installation-fitter-segment" 
+                                             style="width: {% widthratio installation_fitter_cost order.total_value_exc_vat 100 %}%"
+                                             title="Fitter Timesheets: £{{ installation_fitter_cost|floatformat:2 }}"></div>
+                                        {% endif %}
+                                        {% if installation_helper_cost > 0 %}
+                                        <div class="financial-progress-bar-segment installation-helper-segment" 
+                                             style="width: {% widthratio installation_helper_cost order.total_value_exc_vat 100 %}%"
+                                             title="Helper Timesheets: £{{ installation_helper_cost|floatformat:2 }}"></div>
+                                        {% endif %}
+                                        {% if petrol_cost > 0 %}
+                                        <div class="financial-progress-bar-segment petrol-segment" 
+                                             style="width: {% widthratio petrol_cost order.total_value_exc_vat 100 %}%"
+                                             title="Petrol: £{{ petrol_cost|floatformat:2 }}"></div>
+                                        {% endif %}
+                                        {% if materials_expense_cost > 0 %}
+                                        <div class="financial-progress-bar-segment materials-expense-segment" 
+                                             style="width: {% widthratio materials_expense_cost order.total_value_exc_vat 100 %}%"
+                                             title="Materials Expenses: £{{ materials_expense_cost|floatformat:2 }}"></div>
+                                        {% endif %}
+                                        {% if other_expense_cost > 0 %}
+                                        <div class="financial-progress-bar-segment other-expense-segment" 
+                                             style="width: {% widthratio other_expense_cost order.total_value_exc_vat 100 %}%"
+                                             title="Other Expenses: £{{ other_expense_cost|floatformat:2 }}"></div>
+                                        {% endif %}
+                                    </div>
+                                    <span class="financial-percentage">{% widthratio calculated_installation_cost order.total_value_exc_vat 100 %}%</span>
+                                </div>
+                                <div class="cost-breakdown-legend">
+                                    {% if installation_fitter_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color installation-fitter-color"></span>
+                                        Fitters: £{{ installation_fitter_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if installation_helper_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color installation-helper-color"></span>
+                                        Helpers: £{{ installation_helper_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if petrol_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color petrol-color"></span>
+                                        Petrol: £{{ petrol_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if materials_expense_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color materials-expense-color"></span>
+                                        Materials: £{{ materials_expense_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if other_expense_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color other-expense-color"></span>
+                                        Other: £{{ other_expense_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Manufacturing Cost -->
+                        <div class="financial-card-vertical card-manufacturing">
+                            <div class="financial-card-icon">
+                                <i class="bi bi-gear"></i>
+                            </div>
+                            <div class="financial-card-content">
+                                <span class="financial-card-label">
+                                    Manufacturing Cost
+                                    <button type="button" class="btn btn-sm btn-primary ms-2" onclick="openTimesheetModal('manufacturing')" style="padding: 2px 8px; font-size: 0.75rem;">
+                                        <i class="bi bi-plus-circle"></i> Add
+                                    </button>
+                                </span>
+                                <div class="financial-display-value" id="manufacturing_cost_display">
+                                    £{{ calculated_manufacturing_cost|floatformat:2 }}
+                                </div>
+                                {% if order.total_value_exc_vat > 0 and calculated_manufacturing_cost > 0 %}
+                                <div class="financial-progress-wrapper">
+                                    <div class="financial-progress">
+                                        {% for worker_name, cost in manufacturing_by_worker.items %}
+                                        <div class="financial-progress-bar-segment manufacturing-worker-segment manufacturing-worker-{{ forloop.counter }}" 
+                                             style="width: {% widthratio cost order.total_value_exc_vat 100 %}%"
+                                             title="{{ worker_name }}: £{{ cost|floatformat:2 }}"></div>
+                                        {% endfor %}
+                                    </div>
+                                    <span class="financial-percentage">{% widthratio calculated_manufacturing_cost order.total_value_exc_vat 100 %}%</span>
+                                </div>
+                                <div class="cost-breakdown-legend">
+                                    {% for worker_name, cost in manufacturing_by_worker.items %}
+                                    <span class="legend-item">
+                                        <span class="legend-color manufacturing-worker-{{ forloop.counter }}-color"></span>
+                                        {{ worker_name }}: £{{ cost|floatformat:2 }}
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Profit (Auto-calculated) -->
+                        <div class="financial-card-vertical card-profit">
+                            <div class="financial-card-icon">
+                                <i class="bi bi-graph-up"></i>
+                            </div>
+                            <div class="financial-card-content">
+                                <span class="financial-card-label">Profit</span>
+                                <div class="financial-display" id="profit_display">£{{ order.profit|default:'0.00'|floatformat:2 }}</div>
+                                {% if order.total_value_exc_vat > 0 %}
+                                <div class="financial-progress-wrapper">
+                                    <div class="financial-progress">
+                                        <div class="financial-progress-bar" id="profit_progress_bar" style="width: {% if order.profit > 0 %}{% widthratio order.profit order.total_value_exc_vat 100 %}{% else %}0{% endif %}%"></div>
+                                    </div>
+                                    <span class="financial-percentage" id="profit_percentage">{% if order.profit > 0 %}{% widthratio order.profit order.total_value_exc_vat 100 %}{% else %}0{% endif %}%</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <button class="btn btn-success" style="width: 100%; margin-top: 12px;" onclick="saveFinancials({{ order.id }})">💾 Save Financial Data</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Order Summary Card -->
             <div class="card">
                 <div class="card-header">
                     <h3>Order Summary</h3>
@@ -369,12 +738,12 @@
         {% if order.boards_po %}
         <div class="card">
             <div class="card-header">
-                <h3>Boards PO Details</h3>
+                <h3>{% if order.boards_po %}{{ order.boards_po.po_number }} {% endif %} : Board Details</h3>
                 <div class="header-actions">
                     {% if order.customer_number %}
-                        <a href="{% url 'generate_and_attach_pnx' order.id %}" class="btn btn-info btn-sm" style="background-color: #17a2b8; border-color: #17a2b8; color: white; font-weight: 600;">
+                        <button type="button" class="btn btn-info btn-sm" style="background-color: #17a2b8; border-color: #17a2b8; color: white; font-weight: 600;" onclick="analyzePNXGeneration(event)">
                             <i class="bi bi-file-earmark-plus"></i> Generate PNX - CAD
-                        </a>
+                        </button>
                     {% endif %}
                     {% if order.boards_po.file %}
                         <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary btn-sm download-pnx">
@@ -386,43 +755,44 @@
                     {% endif %}
                     <div class="section-actions">
                         {% if order_pnx_items %}
-                            <button type="button" class="btn btn-success" id="save-pnx-changes">
-                                <i class="bi bi-box-seam"></i> Receive Items
+                            <button type="button" class="btn btn-success" id="save-pnx-changes" style="display: none;">
+                                <i class="bi bi-box-seam"></i> Save Received Items
                             </button>
                         {% endif %}
                     </div>
                 </div>
             </div>
             <div class="card-body">
-                <div class="section-header">
-                    <h4>{{ order.boards_po.po_number }}</h4>
-                </div>
-
                 {% if order_pnx_items %}
-                    <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <p style="margin: 0;"><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
+                        <button type="button" class="btn btn-danger btn-sm" id="delete-selected-pnx" style="display: none;">
+                            <i class="bi bi-trash"></i> Delete Selected
+                        </button>
+                    </div>
                     <div class="table-container">
                         <table class="table">
                             <thead>
                                 <tr>
+                                    <th><input type="checkbox" id="select-all-pnx"></th>
                                     <th>Barcode</th>
                                     <th>Material</th>
                                     <th>Dimensions (LxW)</th>
                                     <th>Count</th>
-                                    <th>Cost</th>
-                                    <th>Customer</th>
                                     <th>Received</th>
                                     <th>Status</th>
+                                    <th>Cost</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for item in order_pnx_items %}
                                 <tr>
+                                    <td><input type="checkbox" class="pnx-item-checkbox" data-item-id="{{ item.id }}"></td>
                                     <td>{{ item.barcode }}</td>
                                     <td>{{ item.matname }}</td>
                                     <td>{{ item.cleng }} x {{ item.cwidth }}</td>
                                     <td>{{ item.cnt|floatformat:0 }}</td>
-                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
-                                    <td>{{ item.customer }}</td>
                                     <td>
                                         <input type="number" 
                                                class="quantity-input pnx-received-quantity" 
@@ -442,27 +812,25 @@
                                             <span class="badge badge-danger">Not Received</span>
                                         {% endif %}
                                     </td>
+                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary mark-received-btn" 
+                                                data-pnx-id="{{ item.id }}"
+                                                data-max-quantity="{{ item.cnt|floatformat:0 }}"
+                                                {% if item.is_fully_received %}disabled{% endif %}>
+                                            Mark Received
+                                        </button>
+                                    </td>
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
                                     <td colspan="7"><strong>Total Cost:</strong></td>
-                                    <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
+                                    <td colspan="2"><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
                 {% endif %}
-
-                <p><strong>Other Orders:</strong></p>
-                <div class="button-group">
-                    {% for other_order in other_orders %}
-                        <a href="{% url 'order_details' other_order.id %}" class="btn btn-primary btn-sm">
-                            {{ other_order.sale_number }} - {{ other_order.first_name }} {{ other_order.last_name }}
-                        </a>
-                    {% empty %}
-                        <span class="text-muted">No other orders assigned to this PO</span>
-                    {% endfor %}
-                </div>
             </div>
         </div>
         {% endif %}
@@ -650,98 +1018,6 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <!-- CSV Files Section -->
-                    {% if order.original_csv %}
-                    <div style="margin-bottom: 20px;">
-                        <h4>CSV Files</h4>
-                        <div class="csv-grid">
-                            {% if order.original_csv %}
-                            <div class="csv-card {% if order.csv_has_missing_items %}csv-warning{% else %}csv-info{% endif %}">
-                                <div class="csv-card-header">
-                                    <h5>
-                                        <i class="bi bi-file-earmark-text"></i> Original CSV
-                                        {% if order.csv_has_missing_items %}
-                                            <span class="badge badge-danger" style="margin-left: 8px;">Missing Items</span>
-                                        {% endif %}
-                                    </h5>
-                                </div>
-                                <div class="csv-card-body">
-                                    <p><strong>Filename:</strong> {{ order.original_csv.name|slice:"12:" }}</p>
-                                    <p class="text-muted">Generated from the Order Generator</p>
-                                    {% if order.original_csv_uploaded_at %}
-                                        <p class="text-muted">📅 Uploaded: {{ order.original_csv_uploaded_at|date:"M j, Y" }} at {{ order.original_csv_uploaded_at|time:"g:i A" }}</p>
-                                    {% endif %}
-                                    {% if order.csv_has_missing_items %}
-                                        <p class="text-warning">⚠ This CSV contains missing items that need to be resolved</p>
-                                    {% endif %}
-                                    <div class="button-group" style="margin-top: 12px;">
-                                        <a href="{{ order.original_csv.url }}" class="btn btn-primary" target="_blank">
-                                            <i class="bi bi-download"></i> Download
-                                        </a>
-                                        {% if order.csv_has_missing_items %}
-                                        <form method="POST" action="{% url 'resolve_missing_items' order.id %}" style="display: inline;">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-warning" title="Apply substitutions to resolve missing items">
-                                                ✓ Resolve
-                                            </button>
-                                        </form>
-                                        {% endif %}
-                                        <form method="POST" action="{% url 'remove_order_csv' order.id 'original' %}" style="display: inline;" 
-                                            onsubmit="return confirm('Are you sure you want to remove the original CSV file?');">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-danger">
-                                                <i class="bi bi-trash"></i> Remove
-                                            </button>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endif %}
-                            {% if order.processed_csv %}
-                            <div class="csv-card csv-success">
-                                <div class="csv-card-header">
-                                    <h5><i class="bi bi-file-earmark-check"></i> Processed CSV</h5>
-                                </div>
-                                <div class="csv-card-body">
-                                    <p><strong>Filename:</strong> {{ order.processed_csv.name|slice:"12:" }}</p>
-                                    <p class="text-muted">Contains substitutions applied automatically</p>
-                                    {% if order.processed_csv_created_at %}
-                                        <p class="text-muted"><i class="bi bi-calendar-check"></i> Created: {{ order.processed_csv_created_at|date:"M j, Y" }} at {{ order.processed_csv_created_at|time:"g:i A" }}</p>
-                                    {% endif %}
-                                    <div class="button-group" style="margin-top: 12px;">
-                                        <a href="{% url 'download_processed_csv' order.id %}" class="btn btn-success">
-                                            <i class="bi bi-download"></i> Download
-                                        </a>
-                                        <form method="POST" action="{% url 'remove_order_csv' order.id 'processed' %}" style="display: inline;" 
-                                            onsubmit="return confirm('Are you sure you want to remove the processed CSV file?');">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-danger">
-                                                <i class="bi bi-trash"></i> Remove
-                                            </button>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
-                            {% else %}
-                            <div class="csv-card csv-warning">
-                                <div class="csv-card-header">
-                                    <h5><i class="bi bi-file-earmark-x"></i> Processed CSV</h5>
-                                </div>
-                                <div class="csv-card-body">
-                                    <p><strong>Status:</strong> Not generated</p>
-                                    <p class="text-muted">Generate a processed CSV with substitutions applied</p>
-                                    <form method="POST" action="{% url 'resolve_missing_items' order.id %}" style="display: inline;">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-warning" style="margin-top: 12px;">
-                                            <i class="bi bi-arrow-repeat"></i> Generate Processed CSV
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
                     
                     <!-- Existing Accessories -->
                     {% if order.accessories.all %}
@@ -753,6 +1029,7 @@
                                     <th>Name</th>
                                     <th>Description</th>
                                     <th>Qty</th>
+                                    <th>Cost</th>
                                     <th>Stock/Allocated/Remaining</th>
                                     <th>Status</th>
                                     {% if has_os_door_accessories %}
@@ -775,6 +1052,7 @@
                                                data-original-quantity="{{ accessory.quantity|floatformat:0 }}"
                                                min="0" step="1">
                                     </td>
+                                    <td>£{{ accessory.cost_price|floatformat:2 }}</td>
                                     <td>
                                         {% if accessory.stock_item %}
                                             {% with remaining=accessory|calculate_remaining %}
@@ -836,6 +1114,11 @@
                                     </td>
                                 </tr>
                                 {% endfor %}
+                                <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
+                                    <td colspan="4" style="text-align: right;">Total:</td>
+                                    <td>£{{ order.accessories.all|sum_accessory_costs }}</td>
+                                    <td colspan="{% if has_os_door_accessories %}4{% else %}2{% endif %}"></td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -844,6 +1127,146 @@
                     {% endif %}
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Timesheets and Expenses Section -->
+    <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+            <h3>Labor Costs & Expenses</h3>
+        </div>
+        <div class="card-body">
+            <!-- Installation Timesheets -->
+            <h4>Installation Timesheets</h4>
+            {% if installation_timesheets %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Fitter</th>
+                                <th>Date</th>
+                                <th>Price</th>
+                                <th>Total Cost</th>
+                                <th>Description</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for timesheet in installation_timesheets %}
+                            <tr>
+                                <td>{{ timesheet.worker_name }}</td>
+                                <td>{{ timesheet.date|date:"d/m/Y" }}</td>
+                                <td>£{{ timesheet.price|floatformat:2 }}</td>
+                                <td>£{{ timesheet.total_cost|floatformat:2 }}</td>
+                                <td>{{ timesheet.description|default:"-" }}</td>
+                                <td>
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteTimesheet({{ timesheet.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
+                                <td colspan="3" style="text-align: right;">Subtotal:</td>
+                                <td>£{{ calculated_installation_cost|floatformat:2 }}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-muted">No installation timesheets added yet.</p>
+            {% endif %}
+            
+            <hr>
+            
+            <!-- Manufacturing Timesheets -->
+            <h4>Manufacturing Timesheets</h4>
+            {% if manufacturing_timesheets %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Worker</th>
+                                <th>Date</th>
+                                <th>Hours</th>
+                                <th>Rate/Hour</th>
+                                <th>Total Cost</th>
+                                <th>Description</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for timesheet in manufacturing_timesheets %}
+                            <tr>
+                                <td>{{ timesheet.worker_name }}</td>
+                                <td>{{ timesheet.date|date:"d/m/Y" }}</td>
+                                <td>{{ timesheet.hours }}</td>
+                                <td>£{{ timesheet.hourly_rate }}</td>
+                                <td>£{{ timesheet.total_cost|floatformat:2 }}</td>
+                                <td>{{ timesheet.description|default:"-" }}</td>
+                                <td>
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteTimesheet({{ timesheet.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
+                                <td colspan="4" style="text-align: right;">Subtotal:</td>
+                                <td>£{{ calculated_manufacturing_cost|floatformat:2 }}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-muted">No manufacturing timesheets added yet.</p>
+            {% endif %}
+            
+            <hr>
+            
+            <!-- Expenses -->
+            <h4>Expenses</h4>
+            {% if expenses %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Fitter</th>
+                                <th>Type</th>
+                                <th>Date</th>
+                                <th>Amount</th>
+                                <th>Description</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for expense in expenses %}
+                            <tr>
+                                <td>{{ expense.fitter.name }}</td>
+                                <td>{{ expense.get_expense_type_display }}</td>
+                                <td>{{ expense.date|date:"d/m/Y" }}</td>
+                                <td>£{{ expense.amount }}</td>
+                                <td>{{ expense.description|default:"-" }}</td>
+                                <td>
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteExpense({{ expense.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
+                                <td colspan="3" style="text-align: right;">Total Expenses:</td>
+                                <td>£{% for expense in expenses %}{{ expense.amount|default:0 }}{% if not forloop.last %}+{% endif %}{% endfor %}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-muted">No expenses added yet.</p>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -930,6 +1353,129 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('swapItemModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Adding Timesheet -->
+<div class="modal" id="addTimesheetModal">
+    <div class="modal-overlay" onclick="closeModal('addTimesheetModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="timesheet-modal-title">Add Timesheet</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addTimesheetModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="timesheet_type" name="timesheet_type">
+                
+                <div class="form-group" id="fitter-group">
+                    <label for="timesheet_fitter">Fitter</label>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <select class="form-input" id="timesheet_fitter" name="fitter" style="flex: 1;">
+                            <option value="">Select a fitter...</option>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                        <button type="button" class="btn btn-sm btn-success" onclick="toggleAddFitterInline()" title="Add new fitter">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                    <div id="new-fitter-inline" style="display: none; margin-top: 8px; gap: 5px;">
+                        <input type="text" id="new-fitter-name" class="form-input" placeholder="Fitter name" style="margin-bottom: 5px;">
+                        <div style="display: flex; gap: 5px;">
+                            <button type="button" class="btn btn-sm btn-success" onclick="saveNewFitter()" title="Save fitter">
+                                <i class="bi bi-check-lg"></i> Save
+                            </button>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddFitter()" title="Cancel">
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group" id="helper-group" style="display: none;">
+                    <label for="timesheet_helper">Helper / Additional Party</label>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <select class="form-input" id="timesheet_helper" name="helper" style="flex: 1;">
+                            <option value="">Select a helper...</option>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                        <button type="button" class="btn btn-sm btn-success" onclick="toggleAddHelperInline()" title="Add new helper">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                    <div id="new-helper-inline" style="display: none; margin-top: 8px; gap: 5px;">
+                        <input type="text" id="new-helper-name" class="form-input" placeholder="Helper name" style="margin-bottom: 5px;">
+                        <div style="display: flex; gap: 5px;">
+                            <button type="button" class="btn btn-sm btn-success" onclick="saveNewHelper()" title="Save helper">
+                                <i class="bi bi-check-lg"></i> Save
+                            </button>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddHelper()" title="Cancel">
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group" id="worker-group" style="display: none;">
+                    <label for="timesheet_worker">Factory Worker</label>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <select class="form-input" id="timesheet_worker" name="factory_worker" style="flex: 1;">
+                            <option value="">Select a worker...</option>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                        <button type="button" class="btn btn-sm btn-success" onclick="toggleAddWorkerInline()" title="Add new worker">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                    <div id="new-worker-inline" style="display: none; margin-top: 8px; gap: 5px;">
+                        <input type="text" id="new-worker-name" class="form-input" placeholder="Worker name" style="margin-bottom: 5px;">
+                        <div style="display: flex; gap: 5px;">
+                            <button type="button" class="btn btn-sm btn-success" onclick="saveNewWorker()" title="Save worker">
+                                <i class="bi bi-check-lg"></i> Save
+                            </button>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddWorker()" title="Cancel">
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- For installation: fixed price -->
+                <div class="form-group" id="price-group">
+                    <label for="timesheet_price">Price (£)</label>
+                    <input type="number" step="0.01" min="0" class="form-input" id="timesheet_price" name="price" value="220.00" required>
+                </div>
+                
+                <!-- For manufacturing: hours and rate -->
+                <div class="form-group" id="hours-group" style="display: none;">
+                    <label for="timesheet_hours">Hours</label>
+                    <input type="number" step="0.25" min="0" class="form-input" id="timesheet_hours" name="hours">
+                </div>
+                
+                <div class="form-group" id="rate-group" style="display: none;">
+                    <label for="timesheet_hourly_rate">Hourly Rate (£)</label>
+                    <input type="number" step="0.01" min="0" class="form-input" id="timesheet_hourly_rate" name="hourly_rate">
+                </div>
+                
+                <div class="form-group">
+                    <label for="timesheet_description">Description (Optional)</label>
+                    <textarea class="form-input" id="timesheet_description" name="description" rows="3"></textarea>
+                </div>
+                
+                <div class="form-group" id="add-expense-group" style="display: none;">
+                    <label>
+                        <input type="checkbox" id="add_petrol_expense" onchange="togglePetrolAmount()">
+                        Add Petrol Expense
+                    </label>
+                    <input type="number" step="0.01" min="0" class="form-input" id="petrol_amount" 
+                           name="petrol_amount" value="20.00" style="display: none; margin-top: 10px;" placeholder="Amount (£)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addTimesheetModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveTimesheet()">Save Timesheet</button>
             </div>
         </div>
     </div>
@@ -1033,9 +1579,410 @@
     </div>
 </div>
 
+<!-- Modal for Adding Boards PO -->
+<div class="modal" id="addPOModal">
+    <div class="modal-overlay" onclick="closeModal('addPOModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="add-po-form" method="POST" action="{% url 'create_boards_po' %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h3>Add New Boards PO</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('addPOModal')">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="po-number-input">PO Number</label>
+                        <input type="text" id="po-number-input" name="po_number" class="form-input" placeholder="e.g., PO1234" required>
+                        <small class="form-help">Must start with "PO"</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="boards_ordered" id="boards-ordered-input">
+                            <span>Boards Ordered</span>
+                        </label>
+                        <small class="form-help">Check if boards have already been ordered</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="po-file-input">Attach File (Optional)</label>
+                        <input type="file" id="po-file-input" name="file" class="form-input">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addPOModal')">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Create PO</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for PNX Generation Analysis -->
+<div class="modal" id="pnxAnalysisModal">
+    <div class="modal-overlay" onclick="closePNXAnalysisModal()"></div>
+    <div class="modal-dialog" style="max-width: 800px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>PNX Generation Analysis</h3>
+                <button type="button" class="modal-close" onclick="closePNXAnalysisModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="pnx-analysis-content">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closePNXAnalysisModal()">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirm-pnx-btn" onclick="confirmPNXGeneration()">Proceed with Generation</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+// Open Add PO Modal
+function openAddPOModal() {
+    document.getElementById('add-po-form').reset();
+    openModal('addPOModal');
+}
+
+// Toggle Customer Edit Mode
+function toggleCustomerEdit() {
+    const display = document.getElementById('customer-display');
+    const edit = document.getElementById('customer-edit');
+    const btn = document.getElementById('edit-customer-btn');
+    
+    if (display.style.display === 'none') {
+        display.style.display = 'flex';
+        edit.style.display = 'none';
+        btn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
+    } else {
+        display.style.display = 'none';
+        edit.style.display = 'flex';
+        btn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel';
+    }
+}
+
+// Toggle Sale Edit Mode
+function toggleSaleEdit() {
+    const display = document.getElementById('sale-display');
+    const edit = document.getElementById('sale-edit');
+    const btn = document.getElementById('edit-sale-btn');
+    
+    if (display.style.display === 'none') {
+        display.style.display = 'flex';
+        edit.style.display = 'none';
+        btn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
+    } else {
+        display.style.display = 'none';
+        edit.style.display = 'flex';
+        btn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel';
+    }
+}
+
+// Save Customer Info
+function saveCustomerInfo(orderId) {
+    const data = {
+        first_name: document.getElementById('first-name-input').value,
+        last_name: document.getElementById('last-name-input').value,
+        anthill_id: document.getElementById('anthill-id-input').value,
+        address: document.getElementById('address-input').value,
+        postcode: document.getElementById('postcode-input').value
+    };
+    
+    fetch(`/order/${orderId}/update-customer/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            // Update display values
+            document.getElementById('customer-name-display').textContent = `${data.first_name} ${data.last_name}`;
+            document.getElementById('anthill-id-display').textContent = data.anthill_id || 'Not specified';
+            document.getElementById('address-display').textContent = data.address || 'Not specified';
+            document.getElementById('postcode-display').textContent = data.postcode || 'Not specified';
+            
+            // Toggle back to display mode
+            toggleCustomerEdit();
+            showAlert('Customer information updated successfully!', 'success');
+        } else {
+            showAlert('Error updating customer information', 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error updating customer information', 'danger');
+    });
+}
+
+// Save Sale Info
+function saveSaleInfo(orderId) {
+    const designerSelect = document.getElementById('designer-input');
+    const designerId = designerSelect.value;
+    const designerName = designerSelect.options[designerSelect.selectedIndex].text;
+    
+    const data = {
+        sale_number: document.getElementById('sale-number-input').value,
+        customer_number: document.getElementById('customer-number-input').value,
+        designer_id: designerId,
+        workguru_id: document.getElementById('workguru-id-input').value,
+        order_date: document.getElementById('order-date-input').value,
+        fit_date: document.getElementById('fit-date-input').value,
+        total_value_inc_vat: document.getElementById('total-value-input').value
+    };
+    
+    fetch(`/order/${orderId}/update-sale/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            // Update display values
+            document.getElementById('sale-number-display').textContent = data.sale_number;
+            document.getElementById('customer-number-display').textContent = data.customer_number;
+            document.getElementById('designer-display').textContent = designerId ? designerName : 'Not assigned';
+            document.getElementById('workguru-id-display').textContent = data.workguru_id || 'Not set';
+            
+            // Format dates for display
+            const orderDate = new Date(data.order_date);
+            const fitDate = new Date(data.fit_date);
+            document.getElementById('order-date-display').textContent = orderDate.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
+            document.getElementById('fit-date-display').textContent = fitDate.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
+            
+            // Update total value displays
+            const totalValue = parseFloat(data.total_value_inc_vat) || 0;
+            document.getElementById('total-value-display').textContent = '£' + totalValue.toFixed(2);
+            
+            // Update financial summary displays
+            document.getElementById('total_value_inc_vat_display').textContent = '£' + totalValue.toFixed(2);
+            const excVat = totalValue / 1.2;
+            document.getElementById('total_value_exc_vat_display').textContent = '£' + excVat.toFixed(2);
+            
+            // Toggle back to display mode
+            toggleSaleEdit();
+            showAlert('Sale information updated successfully!', 'success');
+        } else {
+            showAlert('Error updating sale information', 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error updating sale information', 'danger');
+    });
+}
+
+// Designer inline management functions
+function toggleAddDesignerInline() {
+    const row = document.getElementById('new-designer-inline');
+    if (row.style.display === 'none' || row.style.display === '') {
+        row.style.display = 'flex';
+        document.getElementById('new-designer-name-inline').focus();
+    } else {
+        row.style.display = 'none';
+        document.getElementById('new-designer-name-inline').value = '';
+    }
+}
+
+function cancelAddDesignerInline() {
+    document.getElementById('new-designer-inline').style.display = 'none';
+    document.getElementById('new-designer-name-inline').value = '';
+}
+
+function saveNewDesignerInline() {
+    const designerName = document.getElementById('new-designer-name-inline').value.trim();
+    
+    if (!designerName) {
+        showAlert('Please enter a designer name', 'warning');
+        return;
+    }
+    
+    fetch('/add-designer/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ name: designerName })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Add new option to designer dropdown and select it
+            const designerSelect = document.getElementById('designer-input');
+            const option = new Option(data.designer.name, data.designer.id, true, true);
+            designerSelect.add(option);
+            
+            // Hide the input row
+            document.getElementById('new-designer-inline').style.display = 'none';
+            document.getElementById('new-designer-name-inline').value = '';
+            
+            showAlert('Designer added successfully!', 'success');
+        } else {
+            showAlert('Error: ' + (data.error || 'Failed to add designer'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error adding designer', 'danger');
+    });
+}
+
+// Update Order Type
+function updateOrderType(selectElement, orderId) {
+    const orderType = selectElement.value;
+    fetch(`/order/${orderId}/update-order-type/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({order_type: orderType})
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Order type updated successfully!', 'success');
+            // Update select styling based on type
+            selectElement.style.borderColor = orderType === 'sale' ? '#10b981' : orderType === 'remedial' ? '#f59e0b' : '#ef4444';
+            selectElement.style.color = 'white';
+            selectElement.style.background = orderType === 'sale' ? '#10b981' : orderType === 'remedial' ? '#f59e0b' : '#ef4444';
+        } else {
+            showAlert('Error updating order type', 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error updating order type', 'danger');
+    });
+}
+
+// Update Boards PO
+function updateBoardsPO(orderId, poId) {
+    fetch(`/order/${orderId}/update-boards-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({boards_po_id: poId})
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Boards PO updated successfully!', 'success');
+        } else {
+            showAlert('Error updating Boards PO', 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error updating Boards PO', 'danger');
+    });
+}
+
+// Format PO search input to show PO prefix
+function formatPOSearch(input) {
+    let value = input.value.toUpperCase();
+    
+    // Remove any existing PO prefix
+    if (value.startsWith('PO')) {
+        value = value.substring(2);
+    }
+    
+    // Only keep digits
+    value = value.replace(/\D/g, '');
+    
+    // Update display value
+    if (value) {
+        input.value = 'PO' + value;
+    } else {
+        input.value = '';
+    }
+}
+
+// Format PO search input to show PO prefix
+function formatPOSearch(input) {
+    let value = input.value.toUpperCase();
+    
+    // Remove any existing PO prefix
+    if (value.startsWith('PO')) {
+        value = value.substring(2);
+    }
+    
+    // Only keep digits
+    value = value.replace(/\D/g, '');
+    
+    // Update display value
+    if (value) {
+        input.value = 'PO' + value;
+    } else {
+        input.value = '';
+    }
+}
+
+// Filter PO dropdown options
+function filterPOOptions() {
+    const searchInput = document.getElementById('po-search');
+    const select = document.getElementById('boards-po-select');
+    let filter = searchInput.value.toUpperCase();
+    
+    // If user typed just digits, prepend PO automatically
+    if (filter && !filter.startsWith('PO') && /^\d/.test(filter)) {
+        filter = 'PO' + filter;
+    }
+    
+    const options = select.getElementsByTagName('option');
+    
+    for (let i = 1; i < options.length; i++) { // Start at 1 to skip "No PO Selected"
+        const poNumber = options[i].getAttribute('data-po-number');
+        if (poNumber && poNumber.toUpperCase().indexOf(filter) > -1) {
+            options[i].style.display = '';
+        } else {
+            options[i].style.display = 'none';
+        }
+    }
+}
+
+// Update Job Checkbox
+function updateJobCheckbox(orderId, field, value) {
+    const data = {};
+    data[field] = value;
+    
+    fetch(`/order/${orderId}/update-job-checkbox/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            showAlert(`${fieldName} updated successfully!`, 'success');
+        } else {
+            const fieldName = field.replace(/_/g, ' ');
+            showAlert(`Error updating ${fieldName}`, 'danger');
+        }
+    })
+    .catch(error => {
+        const fieldName = field.replace(/_/g, ' ');
+        showAlert(`Error updating ${fieldName}`, 'danger');
+    });
+}
+
 // Auto-dismiss alerts after 5 seconds
 document.addEventListener('DOMContentLoaded', function() {
+    // Calculate profit on page load
+    calculateProfit();
+    
     setTimeout(function() {
         const alerts = document.querySelectorAll('.alert');
         alerts.forEach(function(alert) {
@@ -1057,8 +2004,40 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (quantity !== originalQuantity) {
                 pnxChanges[pnxId] = quantity;
+                // Show save button
+                const saveBtn = document.getElementById('save-pnx-changes');
+                if (saveBtn) saveBtn.style.display = 'inline-block';
             } else {
                 delete pnxChanges[pnxId];
+                // Hide save button if no changes
+                if (Object.keys(pnxChanges).length === 0) {
+                    const saveBtn = document.getElementById('save-pnx-changes');
+                    if (saveBtn) saveBtn.style.display = 'none';
+                }
+            }
+        });
+    });
+
+    // Handle "Mark Received" button clicks for PNX items
+    document.querySelectorAll('.mark-received-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const pnxId = this.getAttribute('data-pnx-id');
+            const maxQuantity = parseFloat(this.getAttribute('data-max-quantity'));
+            const input = document.querySelector(`.pnx-received-quantity[data-pnx-id="${pnxId}"]`);
+            
+            if (input) {
+                input.value = maxQuantity;
+                pnxChanges[pnxId] = maxQuantity;
+                
+                // Trigger input event to update tracking
+                input.dispatchEvent(new Event('input'));
+                
+                // Show save button
+                const saveBtn = document.getElementById('save-pnx-changes');
+                if (saveBtn) saveBtn.style.display = 'inline-block';
+                
+                // Disable the button
+                this.disabled = true;
             }
         });
     });
@@ -1075,12 +2054,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (quantity !== originalQuantity) {
                 accessoryChanges[accessoryId] = quantity;
                 // Show save button
-                document.getElementById('save-accessory-changes').style.display = 'inline-block';
+                const saveAccessoryBtn = document.getElementById('save-accessory-changes');
+                if (saveAccessoryBtn) saveAccessoryBtn.style.display = 'inline-block';
             } else {
                 delete accessoryChanges[accessoryId];
                 // Hide save button if no changes
                 if (Object.keys(accessoryChanges).length === 0) {
-                    document.getElementById('save-accessory-changes').style.display = 'none';
+                    const saveAccessoryBtn = document.getElementById('save-accessory-changes');
+                    if (saveAccessoryBtn) saveAccessoryBtn.style.display = 'none';
                 }
             }
         });
@@ -1136,15 +2117,17 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Handle save button click
-    document.getElementById('save-pnx-changes').addEventListener('click', function() {
-        if (Object.keys(pnxChanges).length === 0) {
-            showAlert('No changes to save.', 'info');
-            return;
-        }
+    const savePnxBtn = document.getElementById('save-pnx-changes');
+    if (savePnxBtn) {
+        savePnxBtn.addEventListener('click', function() {
+            if (Object.keys(pnxChanges).length === 0) {
+                showAlert('No changes to save.', 'info');
+                return;
+            }
 
-        // Disable button during save
-        this.disabled = true;
-        this.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
+            // Disable button during save
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
 
         // Send all changes in one request
         fetch('/stock-take/update-pnx-batch/', {
@@ -1181,7 +2164,8 @@ document.addEventListener('DOMContentLoaded', function() {
             this.disabled = false;
             this.innerHTML = '<i class="bi bi-save"></i> Save PNX Changes';
         });
-    });
+        });
+    }
 
     // Track OS Doors changes
     let osDoorsChanges = {};
@@ -1285,12 +2269,14 @@ function openModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
         modal.classList.add('active');
+        document.body.classList.add('modal-open');
     }
 }
 
 function closeModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
+        modal.classList.remove('active');
         modal.classList.remove('show');
         document.body.classList.remove('modal-open');
     }
@@ -1618,6 +2604,185 @@ function updateWorkflowStage(orderId, stageId) {
     });
 }
 
+function calculateExcVat() {
+    const incVatInput = document.getElementById('total-value-input');
+    if (!incVatInput) return; // Field only exists in edit mode
+    
+    const incVat = parseFloat(incVatInput.value) || 0;
+    const excVat = incVat / 1.2;
+    document.getElementById('total_value_exc_vat_display').textContent = '£' + excVat.toFixed(2);
+    calculateProfit();
+}
+
+function calculateProfit() {
+    let incVat = 0;
+    const incVatInput = document.getElementById('total-value-input');
+    const incVatDisplay = document.getElementById('total-value-display');
+    
+    if (incVatInput) {
+        incVat = parseFloat(incVatInput.value) || 0;
+    } else if (incVatDisplay) {
+        incVat = parseFloat(incVatDisplay.textContent.replace('£', '').replace(',', '')) || 0;
+    }
+    
+    const excVat = incVat / 1.2;
+    
+    const materialsElement = document.getElementById('materials_cost_display');
+    const materials = materialsElement ? parseFloat(materialsElement.textContent.replace('£', '').replace(',', '')) || 0 : 0;
+    
+    const installationElement = document.getElementById('installation_cost_display');
+    const installation = installationElement ? parseFloat(installationElement.textContent.replace('£', '').replace(',', '')) || 0 : 0;
+    
+    const manufacturingElement = document.getElementById('manufacturing_cost_display');
+    const manufacturing = manufacturingElement ? parseFloat(manufacturingElement.textContent.replace('£', '').replace(',', '')) || 0 : 0;
+    
+    const profit = excVat - materials - installation - manufacturing;
+    const profitElement = document.getElementById('profit_display');
+    if (profitElement) {
+        profitElement.textContent = '£' + profit.toFixed(2);
+    }
+    
+    // Update progress bar and percentage
+    const profitProgressBar = document.getElementById('profit_progress_bar');
+    const profitPercentage = document.getElementById('profit_percentage');
+    if (profitProgressBar && profitPercentage && excVat > 0) {
+        const percentage = profit > 0 ? Math.round((profit / excVat) * 100) : 0;
+        profitProgressBar.style.width = percentage + '%';
+        profitPercentage.textContent = percentage + '%';
+    }
+}
+
+function saveFinancials(orderId) {
+    let incVat = 0;
+    const incVatInput = document.getElementById('total-value-input');
+    const incVatDisplay = document.getElementById('total-value-display');
+    
+    if (incVatInput) {
+        incVat = parseFloat(incVatInput.value) || 0;
+    } else if (incVatDisplay) {
+        incVat = parseFloat(incVatDisplay.textContent.replace('£', '').replace(',', '')) || 0;
+    }
+    
+    const excVat = incVat / 1.2;
+    
+    const materialsElement = document.getElementById('materials_cost_display');
+    const materials = materialsElement ? parseFloat(materialsElement.textContent.replace('£', '').replace(',', '')) || 0 : 0;
+    
+    const installationElement = document.getElementById('installation_cost_display');
+    const installation = installationElement ? parseFloat(installationElement.textContent.replace('£', '').replace(',', '')) || 0 : 0;
+    
+    const manufacturingElement = document.getElementById('manufacturing_cost_display');
+    const manufacturing = manufacturingElement ? parseFloat(manufacturingElement.textContent.replace('£', '').replace(',', '')) || 0 : 0;
+    
+    const profit = excVat - materials - installation - manufacturing;
+
+    const data = {
+        total_value_inc_vat: incVat,
+        total_value_exc_vat: excVat,
+        materials_cost: materials,
+        installation_cost: installation,
+        manufacturing_cost: manufacturing,
+        profit: profit
+    };
+
+    fetch(`/order/${orderId}/save-all-financials/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Financial data saved successfully', 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving financials:', error);
+        showAlert('Error saving financial information', 'danger');
+    });
+}
+
+function recalculateFinancials(orderId) {
+    // Disable the button and show loading state
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass"></i> Recalculating...';
+    
+    fetch(`/order/${orderId}/recalculate-financials/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Financial data recalculated successfully!', 'success');
+            // Update all displays with new values
+            if (data.materials_cost !== undefined) {
+                document.getElementById('materials_cost_display').textContent = '£' + parseFloat(data.materials_cost).toFixed(2);
+            }
+            if (data.installation_cost !== undefined) {
+                document.getElementById('installation_cost_display').textContent = '£' + parseFloat(data.installation_cost).toFixed(2);
+            }
+            if (data.manufacturing_cost !== undefined) {
+                document.getElementById('manufacturing_cost_display').textContent = '£' + parseFloat(data.manufacturing_cost).toFixed(2);
+            }
+            if (data.total_value_exc_vat !== undefined) {
+                document.getElementById('total_value_exc_vat_display').textContent = '£' + parseFloat(data.total_value_exc_vat).toFixed(2);
+            }
+            
+            // Recalculate profit with new values
+            calculateProfit();
+            
+            // Reload page after a short delay to show updated progress bars
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        console.error('Error recalculating financials:', error);
+        showAlert('Error recalculating financial information', 'danger');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    });
+}
+
+function updateFinancial(orderId, field, value) {
+    fetch(`/order/${orderId}/update-financial/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ field: field, value: value })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload to update percentages
+            location.reload();
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating financial:', error);
+        showAlert('Error updating financial information', 'danger');
+    });
+}
+
 function updateTaskCheckbox(orderId, taskId, checked) {
     fetch(`/order/${orderId}/task/${taskId}/update/`, {
         method: 'POST',
@@ -1794,6 +2959,762 @@ function selectWorkflowStage(orderId, stageId) {
         showAlert('Error updating workflow stage', 'danger');
     });
 }
+
+// PNX Generation Analysis Functions
+window.analyzePNXGeneration = function(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    
+    const orderId = {{ order.id }};
+    
+    fetch(`/order/${orderId}/generate-pnx/`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showPNXAnalysisModal(data);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error analyzing PNX:', error);
+        showAlert('Error analyzing PNX generation', 'danger');
+    });
+};
+
+// Store PNX data globally for manipulation
+let pnxStagingData = {
+    newItems: [],
+    updatedItems: [],
+    duplicateItems: []
+};
+
+function showPNXAnalysisModal(data) {
+    const content = document.getElementById('pnx-analysis-content');
+    
+    // New structure - all_items with status
+    const allItems = data.all_items || [];
+    
+    // Store in global state
+    pnxStagingData.newItems = allItems.filter(item => item.status === 'new');
+    pnxStagingData.updatedItems = allItems.filter(item => item.status === 'updated');
+    pnxStagingData.duplicateItems = allItems.filter(item => item.status === 'duplicate');
+    
+    // Render the modal
+    renderPNXAnalysisModal();
+    openModal('pnxAnalysisModal');
+}
+
+function renderPNXAnalysisModal() {
+    const content = document.getElementById('pnx-analysis-content');
+    let html = '';
+    
+    const duplicateCount = pnxStagingData.duplicateItems.length;
+    const updateCount = pnxStagingData.updatedItems.length;
+    const newCount = pnxStagingData.newItems.length;
+    
+    // Action Summary at the top
+    html += '<div style="background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 15px; margin-bottom: 25px; border-radius: 4px;">';
+    html += '<h5 style="margin: 0 0 10px 0; color: #1976D2;"><i class="bi bi-info-circle-fill"></i> PNX Staging - Review Before Import</h5>';
+    html += '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; font-size: 14px;">';
+    
+    if (newCount > 0) {
+        html += '<div>';
+        html += '<div style="color: #155724; font-weight: 600;"><i class="bi bi-plus-circle"></i> Will Add</div>';
+        html += `<div style="font-size: 20px; font-weight: bold; color: #155724;">${newCount}</div>`;
+        html += '<div style="font-size: 12px; color: #6c757d;">new items</div>';
+        html += '</div>';
+    }
+    
+    if (updateCount > 0) {
+        html += '<div>';
+        html += '<div style="color: #856404; font-weight: 600;"><i class="bi bi-arrow-up-circle"></i> Will Update</div>';
+        html += `<div style="font-size: 20px; font-weight: bold; color: #856404;">${updateCount}</div>`;
+        html += '<div style="font-size: 12px; color: #6c757d;">quantity changes</div>';
+        html += '</div>';
+    }
+    
+    if (duplicateCount > 0) {
+        html += '<div>';
+        html += '<div style="color: #6c757d; font-weight: 600;"><i class="bi bi-dash-circle"></i> Will Ignore</div>';
+        html += `<div style="font-size: 20px; font-weight: bold; color: #6c757d;">${duplicateCount}</div>`;
+        html += '<div style="font-size: 12px; color: #6c757d;">duplicates</div>';
+        html += '</div>';
+    }
+    
+    html += '</div></div>';
+    
+    // New Items Section
+    if (newCount > 0) {
+        html += '<div style="margin-bottom: 25px;">';
+        html += '<h4 style="color: #155724; margin-bottom: 15px; border-bottom: 2px solid #c3e6cb; padding-bottom: 10px;">';
+        html += '<i class="bi bi-plus-circle-fill"></i> Items to Add (' + newCount + ')';
+        html += '</h4>';
+        html += '<table class="table table-sm table-striped" style="font-size: 13px;">';
+        html += '<thead style="background-color: #d4edda;">';
+        html += '<tr><th>Barcode</th><th>Material</th><th>Dimensions</th><th>Customer</th><th>Quantity</th></tr>';
+        html += '</thead><tbody>';
+        pnxStagingData.newItems.forEach(item => {
+            html += '<tr>';
+            html += `<td><strong>${item.barcode}</strong></td>`;
+            html += `<td>${item.matname}</td>`;
+            html += `<td>${item.dimensions}</td>`;
+            html += `<td>${item.customer || ''}</td>`;
+            html += `<td><span style="background-color: #d4edda; padding: 3px 8px; border-radius: 3px; font-weight: 600;">${item.qty}</span></td>`;
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+    
+    // Updated Items Section
+    if (updateCount > 0) {
+        html += '<div style="margin-bottom: 25px;">';
+        html += '<h4 style="color: #856404; margin-bottom: 15px; border-bottom: 2px solid #ffc107; padding-bottom: 10px;">';
+        html += '<i class="bi bi-arrow-up-circle-fill"></i> Quantity Updates (' + updateCount + ')';
+        html += '</h4>';
+        html += '<table class="table table-sm table-striped" style="font-size: 13px;">';
+        html += '<thead style="background-color: #fff3cd;">';
+        html += '<tr><th>Barcode</th><th>Material</th><th>Dimensions</th><th>Current</th><th>New</th><th>Change</th></tr>';
+        html += '</thead><tbody>';
+        pnxStagingData.updatedItems.forEach(item => {
+            const change = item.qty - item.old_qty;
+            html += '<tr>';
+            html += `<td><strong>${item.barcode}</strong></td>`;
+            html += `<td>${item.matname}</td>`;
+            html += `<td>${item.dimensions}</td>`;
+            html += `<td>${item.old_qty}</td>`;
+            html += `<td><strong style="color: #856404;">${item.qty}</strong></td>`;
+            html += `<td><span style="background-color: #fff3cd; padding: 3px 8px; border-radius: 3px; font-weight: 600; color: #856404;">+${change}</span></td>`;
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+    
+    // Duplicate Items Section
+    if (duplicateCount > 0) {
+        html += '<div id="duplicates-section" style="margin-bottom: 25px;">';
+        html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">';
+        html += '<h4 style="color: #6c757d; margin: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px; flex-grow: 1;">';
+        html += '<i class="bi bi-dash-circle-fill"></i> Items to Ignore (' + duplicateCount + ')';
+        html += '</h4>';
+        html += '<button type="button" class="btn btn-sm btn-outline-success" onclick="moveSelectedDuplicatesToImport()" style="margin-left: 15px;">';
+        html += '<i class="bi bi-arrow-up-circle"></i> Move Selected to Import';
+        html += '</button>';
+        html += '</div>';
+        html += '<p style="color: #6c757d; font-size: 13px; margin-bottom: 10px;">';
+        html += '<em>These items already exist with the same quantity. Select items below to include them in the import anyway.</em>';
+        html += '</p>';
+        html += '<table class="table table-sm table-striped" style="font-size: 13px;">';
+        html += '<thead style="background-color: #f8f9fa;">';
+        html += '<tr>';
+        html += '<th style="width: 40px;"><input type="checkbox" id="select-all-duplicates" onchange="toggleAllDuplicates(this.checked)"></th>';
+        html += '<th>Barcode</th><th>Material</th><th>Dimensions</th><th>Quantity</th>';
+        html += '</tr>';
+        html += '</thead><tbody id="duplicates-tbody">';
+        pnxStagingData.duplicateItems.forEach((item, index) => {
+            html += `<tr data-duplicate-index="${index}">`;
+            html += `<td><input type="checkbox" class="duplicate-checkbox" data-barcode="${item.barcode}"></td>`;
+            html += `<td>${item.barcode}</td>`;
+            html += `<td>${item.matname}</td>`;
+            html += `<td>${item.dimensions}</td>`;
+            html += `<td>${item.qty}</td>`;
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+    
+    // If nothing to do
+    if (duplicateCount === 0 && updateCount === 0 && newCount === 0) {
+        html += '<div class="alert alert-warning">';
+        html += '<p style="margin: 0;">No changes detected. The PNX file contains no new or updated items.</p>';
+        html += '</div>';
+    }
+    
+    content.innerHTML = html;
+}
+
+function toggleAllDuplicates(checked) {
+    document.querySelectorAll('.duplicate-checkbox').forEach(checkbox => {
+        checkbox.checked = checked;
+    });
+}
+
+function moveSelectedDuplicatesToImport() {
+    const checkboxes = document.querySelectorAll('.duplicate-checkbox:checked');
+    
+    if (checkboxes.length === 0) {
+        showAlert('Please select at least one item to move', 'warning');
+        return;
+    }
+    
+    const selectedBarcodes = Array.from(checkboxes).map(cb => cb.dataset.barcode);
+    
+    // Move selected items from duplicates to new items
+    const itemsToMove = pnxStagingData.duplicateItems.filter(item => 
+        selectedBarcodes.includes(item.barcode)
+    );
+    
+    // Change their status to 'new' so they'll be imported
+    itemsToMove.forEach(item => {
+        item.status = 'new';
+        item.original_status = 'duplicate'; // Track that it was originally a duplicate
+    });
+    
+    // Add to new items
+    pnxStagingData.newItems.push(...itemsToMove);
+    
+    // Remove from duplicates
+    pnxStagingData.duplicateItems = pnxStagingData.duplicateItems.filter(item => 
+        !selectedBarcodes.includes(item.barcode)
+    );
+    
+    // Re-render the modal
+    renderPNXAnalysisModal();
+    
+    showAlert(`Moved ${itemsToMove.length} item(s) to import list`, 'success');
+}
+
+function closePNXAnalysisModal() {
+    closeModal('pnxAnalysisModal');
+}
+
+function confirmPNXGeneration() {
+    const orderId = {{ order.id }};
+    const btn = document.getElementById('confirm-pnx-btn');
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    
+    // Collect barcodes that were originally duplicates but moved to import
+    const forceImportBarcodes = pnxStagingData.newItems
+        .filter(item => item.original_status === 'duplicate')
+        .map(item => item.barcode);
+    
+    fetch(`/order/${orderId}/confirm-pnx/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            force_import_barcodes: forceImportBarcodes
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(`PNX generated successfully! ${data.items_created} items added, ${data.items_updated} items updated.`, 'success');
+            closePNXAnalysisModal();
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+            btn.disabled = false;
+            btn.textContent = 'Proceed with Generation';
+        }
+    })
+    .catch(error => {
+        console.error('Error confirming PNX:', error);
+        showAlert('Error confirming PNX generation', 'danger');
+        btn.disabled = false;
+        btn.textContent = 'Proceed with Generation';
+    });
+}
+
+// PNX Item Selection and Delete Functions
+function updateDeleteButtonVisibility() {
+    const checkboxes = document.querySelectorAll('.pnx-item-checkbox:checked');
+    const deleteBtn = document.getElementById('delete-selected-pnx');
+    if (deleteBtn) {
+        deleteBtn.style.display = checkboxes.length > 0 ? 'block' : 'none';
+    }
+}
+
+// Timesheet Functions
+function openTimesheetModal(type) {
+    const modal = document.getElementById('addTimesheetModal');
+    const title = document.getElementById('timesheet-modal-title');
+    const typeInput = document.getElementById('timesheet_type');
+    const fitterGroup = document.getElementById('fitter-group');
+    const helperGroup = document.getElementById('helper-group');
+    const workerGroup = document.getElementById('worker-group');
+    const expenseGroup = document.getElementById('add-expense-group');
+    const priceGroup = document.getElementById('price-group');
+    const hoursGroup = document.getElementById('hours-group');
+    const rateGroup = document.getElementById('rate-group');
+    
+    typeInput.value = type;
+    
+    if (type === 'installation') {
+        title.textContent = 'Add Installation Timesheet';
+        fitterGroup.style.display = 'block';
+        helperGroup.style.display = 'block';
+        workerGroup.style.display = 'none';
+        expenseGroup.style.display = 'block';
+        priceGroup.style.display = 'block';
+        hoursGroup.style.display = 'none';
+        rateGroup.style.display = 'none';
+        // Set required/optional
+        document.getElementById('timesheet_price').required = true;
+        document.getElementById('timesheet_hours').required = false;
+        document.getElementById('timesheet_hourly_rate').required = false;
+        loadFitters();
+        loadHelpers();
+    } else {
+        title.textContent = 'Add Manufacturing Timesheet';
+        fitterGroup.style.display = 'none';
+        helperGroup.style.display = 'none';
+        workerGroup.style.display = 'block';
+        expenseGroup.style.display = 'none';
+        priceGroup.style.display = 'none';
+        hoursGroup.style.display = 'block';
+        rateGroup.style.display = 'block';
+        // Set required/optional
+        document.getElementById('timesheet_price').required = false;
+        document.getElementById('timesheet_hours').required = true;
+        document.getElementById('timesheet_hourly_rate').required = true;
+        loadFactoryWorkers();
+    }
+    
+    openModal('addTimesheetModal');
+}
+
+function loadFitters() {
+    fetch('/api/get-fitters/')
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('timesheet_fitter');
+            select.innerHTML = '<option value="">Select a fitter...</option>';
+            data.fitters.forEach(fitter => {
+                const option = document.createElement('option');
+                option.value = fitter.id;
+                option.textContent = fitter.name;
+                option.dataset.rate = fitter.hourly_rate;
+                select.appendChild(option);
+            });
+            
+            // Auto-populate hourly rate when fitter is selected
+            select.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption.dataset.rate) {
+                    document.getElementById('timesheet_hourly_rate').value = selectedOption.dataset.rate;
+                }
+            });
+        })
+        .catch(error => console.error('Error loading fitters:', error));
+}
+
+function loadHelpers() {
+    // Helpers use the same fitter list
+    fetch('/api/get-fitters/')
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('timesheet_helper');
+            select.innerHTML = '<option value="">Select a helper (optional)...</option>';
+            data.fitters.forEach(fitter => {
+                const option = document.createElement('option');
+                option.value = fitter.id;
+                option.textContent = fitter.name;
+                select.appendChild(option);
+            });
+        })
+        .catch(error => console.error('Error loading helpers:', error));
+}
+
+function loadFactoryWorkers() {
+    fetch('/api/get-factory-workers/')
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('timesheet_worker');
+            select.innerHTML = '<option value="">Select a worker...</option>';
+            data.workers.forEach(worker => {
+                const option = document.createElement('option');
+                option.value = worker.id;
+                option.textContent = worker.name;
+                option.dataset.rate = worker.hourly_rate;
+                select.appendChild(option);
+            });
+            
+            // Auto-populate hourly rate when worker is selected
+            select.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption.dataset.rate) {
+                    document.getElementById('timesheet_hourly_rate').value = selectedOption.dataset.rate;
+                }
+            });
+        })
+        .catch(error => console.error('Error loading factory workers:', error));
+}
+
+function togglePetrolAmount() {
+    const checkbox = document.getElementById('add_petrol_expense');
+    const amountInput = document.getElementById('petrol_amount');
+    amountInput.style.display = checkbox.checked ? 'block' : 'none';
+}
+
+// Inline fitter management
+function toggleAddFitterInline() {
+    const form = document.getElementById('new-fitter-inline');
+    if (form.style.display === 'none' || form.style.display === '') {
+        form.style.display = 'block';
+        document.getElementById('new-fitter-name').focus();
+    } else {
+        form.style.display = 'none';
+        clearFitterForm();
+    }
+}
+
+function cancelAddFitter() {
+    document.getElementById('new-fitter-inline').style.display = 'none';
+    clearFitterForm();
+}
+
+function clearFitterForm() {
+    document.getElementById('new-fitter-name').value = '';
+}
+
+function saveNewFitter() {
+    const name = document.getElementById('new-fitter-name').value.trim();
+    
+    if (!name) {
+        showAlert('Please enter a fitter name', 'warning');
+        return;
+    }
+    
+    fetch('/api/add-fitter/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ name })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const select = document.getElementById('timesheet_fitter');
+            const option = new Option(data.fitter.name, data.fitter.id, true, true);
+            select.add(option);
+            
+            document.getElementById('new-fitter-inline').style.display = 'none';
+            clearFitterForm();
+            showAlert('Fitter added successfully!', 'success');
+        } else {
+            showAlert('Error: ' + (data.error || 'Failed to add fitter'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error adding fitter', 'danger');
+    });
+}
+
+// Inline factory worker management
+function toggleAddWorkerInline() {
+    const form = document.getElementById('new-worker-inline');
+    if (form.style.display === 'none' || form.style.display === '') {
+        form.style.display = 'block';
+        document.getElementById('new-worker-name').focus();
+    } else {
+        form.style.display = 'none';
+        clearWorkerForm();
+    }
+}
+
+function cancelAddWorker() {
+    document.getElementById('new-worker-inline').style.display = 'none';
+    clearWorkerForm();
+}
+
+function clearWorkerForm() {
+    document.getElementById('new-worker-name').value = '';
+}
+
+// Inline helper management
+function toggleAddHelperInline() {
+    const form = document.getElementById('new-helper-inline');
+    if (form.style.display === 'none' || form.style.display === '') {
+        form.style.display = 'block';
+        document.getElementById('new-helper-name').focus();
+    } else {
+        form.style.display = 'none';
+        clearHelperForm();
+    }
+}
+
+function cancelAddHelper() {
+    document.getElementById('new-helper-inline').style.display = 'none';
+    clearHelperForm();
+}
+
+function clearHelperForm() {
+    document.getElementById('new-helper-name').value = '';
+}
+
+function saveNewHelper() {
+    const name = document.getElementById('new-helper-name').value.trim();
+    
+    if (!name) {
+        showAlert('Please enter a helper name', 'warning');
+        return;
+    }
+    
+    // Helpers are just fitters, so use the same API
+    fetch('/api/add-fitter/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ name })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const select = document.getElementById('timesheet_helper');
+            const option = new Option(data.fitter.name, data.fitter.id, true, true);
+            select.add(option);
+            
+            document.getElementById('new-helper-inline').style.display = 'none';
+            clearHelperForm();
+            showAlert('Helper added successfully!', 'success');
+        } else {
+            showAlert('Error: ' + (data.error || 'Failed to add helper'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error adding helper', 'danger');
+    });
+}
+
+function saveNewWorker() {
+    const name = document.getElementById('new-worker-name').value.trim();
+    
+    if (!name) {
+        showAlert('Please enter a worker name', 'warning');
+        return;
+    }
+    
+    fetch('/api/add-factory-worker/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ name })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const select = document.getElementById('timesheet_worker');
+            const option = new Option(data.worker.name, data.worker.id, true, true);
+            select.add(option);
+            
+            document.getElementById('new-worker-inline').style.display = 'none';
+            clearWorkerForm();
+            showAlert('Factory worker added successfully!', 'success');
+        } else {
+            showAlert('Error: ' + (data.error || 'Failed to add worker'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error adding factory worker', 'danger');
+    });
+}
+
+function saveTimesheet() {
+    const type = document.getElementById('timesheet_type').value;
+    const fitterId = document.getElementById('timesheet_fitter').value;
+    const helperId = document.getElementById('timesheet_helper').value;
+    const workerId = document.getElementById('timesheet_worker').value;
+    const price = document.getElementById('timesheet_price').value;
+    const hours = document.getElementById('timesheet_hours').value;
+    const hourlyRate = document.getElementById('timesheet_hourly_rate').value;
+    const description = document.getElementById('timesheet_description').value;
+    const addPetrol = document.getElementById('add_petrol_expense').checked;
+    const petrolAmount = document.getElementById('petrol_amount').value;
+    
+    // Validation
+    if (type === 'installation') {
+        if (!fitterId && !helperId) {
+            showAlert('Please select at least a fitter or helper', 'danger');
+            return;
+        }
+        if (!price) {
+            showAlert('Please enter a price', 'danger');
+            return;
+        }
+    } else {
+        if (!workerId) {
+            showAlert('Please select a factory worker', 'danger');
+            return;
+        }
+        if (!hours || !hourlyRate) {
+            showAlert('Please fill in hours and hourly rate', 'danger');
+            return;
+        }
+    }
+    
+    const data = {
+        timesheet_type: type,
+        description: description
+    };
+    
+    if (type === 'installation') {
+        if (fitterId) data.fitter_id = fitterId;
+        if (helperId) data.helper_id = helperId;
+        data.price = price;
+        if (addPetrol) {
+            data.petrol_amount = petrolAmount;
+        }
+    } else {
+        data.factory_worker_id = workerId;
+        data.hours = hours;
+        data.hourly_rate = hourlyRate;
+    }
+    
+    fetch(`/order/{{ order.id }}/add-timesheet/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Timesheet added successfully!', 'success');
+            closeModal('addTimesheetModal');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving timesheet:', error);
+        showAlert('Error saving timesheet', 'danger');
+    });
+}
+
+function deleteTimesheet(timesheetId) {
+    if (!confirm('Are you sure you want to delete this timesheet?')) {
+        return;
+    }
+    
+    fetch(`/timesheet/${timesheetId}/delete/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Timesheet deleted successfully!', 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting timesheet:', error);
+        showAlert('Error deleting timesheet', 'danger');
+    });
+}
+
+function deleteExpense(expenseId) {
+    if (!confirm('Are you sure you want to delete this expense?')) {
+        return;
+    }
+    
+    fetch(`/expense/${expenseId}/delete/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Expense deleted successfully!', 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting expense:', error);
+        showAlert('Error deleting expense', 'danger');
+    });
+}
+
+function deletePNXItems() {
+    const checkboxes = document.querySelectorAll('.pnx-item-checkbox:checked');
+    const itemIds = Array.from(checkboxes).map(cb => cb.dataset.itemId);
+    
+    if (itemIds.length === 0) {
+        showAlert('No items selected', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete ${itemIds.length} item(s)?`)) {
+        return;
+    }
+    
+    fetch('/delete-pnx-items/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ item_ids: itemIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(`Successfully deleted ${data.deleted_count} item(s)`, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting items:', error);
+        showAlert('Error deleting items', 'danger');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Select All checkbox for PNX items
+    const selectAllCheckbox = document.getElementById('select-all-pnx');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.pnx-item-checkbox');
+            checkboxes.forEach(cb => cb.checked = this.checked);
+            updateDeleteButtonVisibility();
+        });
+    }
+    
+    // Individual checkboxes for PNX items
+    const checkboxes = document.querySelectorAll('.pnx-item-checkbox');
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', updateDeleteButtonVisibility);
+    });
+    
+    // Delete button for PNX items
+    const deleteBtn = document.getElementById('delete-selected-pnx');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', deletePNXItems);
+    }
+});
 </script>
 
 {% endblock %}

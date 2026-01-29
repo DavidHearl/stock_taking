@@ -5,6 +5,7 @@
 
 {% block extra_css %}
 <link href="{% static 'css/ordering.css' %}" rel="stylesheet">
+<link href="{% static 'css/ordering_modal.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
@@ -20,14 +21,11 @@
                 <button type="submit" class="btn btn-primary btn-sm">Update</button>
             </div>
         </form>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="togglePOSection('editPOSection')">
-            <i class="bi bi-pencil"></i> Edit Boards PO
+        <button type="button" class="btn btn-secondary btn-sm" onclick="togglePOSection('manageBoardsSection')">
+            <i class="bi bi-clipboard-check"></i> Manage Boards
         </button>
-        <button type="button" class="btn btn-info btn-sm" onclick="openModal('uploadAccessoriesModal')">
-            📤 Upload CSV
-        </button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createPOModal')">
-            <i class="bi bi-plus-lg"></i> Add Boards PO
+        <button type="button" class="btn btn-info btn-sm" onclick="togglePOSection('manageAccessoriesSection')">
+            <i class="bi bi-box-seam"></i> Manage Accessories
         </button>
         <button type="button" class="btn btn-success btn-sm" onclick="openModal('addOrderModal')">
             <i class="bi bi-plus-lg"></i> Add Order
@@ -53,73 +51,162 @@
     </div>
 </div>
 
-<!-- Edit Boards PO Section -->
-<div class="collapsible-section hidden" id="editPOSection">
+<!-- Manage Boards Section -->
+<div class="collapsible-section hidden" id="manageBoardsSection">
     <div class="card">
         <div class="card-header">
-            Edit Boards PO Status & Replace PNX Files
+            <div class="section-header-with-button">
+                <span>Manage Boards PO <span class="count-badge">({{ boards_pos.count }})</span></span>
+                <button type="button" class="btn btn-primary" onclick="openModal('createPOModal')">
+                    <i class="bi bi-plus-lg"></i> Add Boards PO
+                </button>
+            </div>
         </div>
         <div class="card-body">
             {% if boards_pos %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>PO Number</th>
-                        <th>Status</th>
-                        <th>Orders Count</th>
-                        <th>Current File</th>
-                        <th>Mark Ordered</th>
-                        <th>Replace PNX File</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for po in boards_pos %}
-                    <tr class="{% if po.boards_ordered %}row-success{% endif %}">
-                        <td class="sku-cell">{{ po.po_number }}</td>
-                        <td>
-                            <div class="status-group">
+            <div class="boards-po-scroll-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>PO Number</th>
+                            <th>Status</th>
+                            <th>Current File</th>
+                            <th>Mark Ordered</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for po in boards_pos %}
+                        <tr class="{% if po.boards_ordered %}row-success{% endif %}">
+                            <td class="sku-cell">
+                                <input type="text" 
+                                       class="editable-po-number" 
+                                       value="{{ po.po_number }}" 
+                                       data-po-id="{{ po.id }}"
+                                       onblur="updatePONumber({{ po.id }}, this.value)"
+                                       style="border: none; background: transparent; color: inherit; font-weight: inherit;">
+                            </td>
+                            <td>
                                 {% if po.boards_ordered %}
-                                    <span class="status-icon success" title="Ordered">✓</span>
                                     <span class="badge badge-success">Ordered</span>
                                 {% else %}
-                                    <span class="status-icon danger" title="Not Ordered">✗</span>
                                     <span class="badge badge-danger">Not Ordered</span>
                                 {% endif %}
-                            </div>
-                        </td>
-                        <td>
-                            <span class="badge badge-primary">{{ po.orders_count }}</span>
-                        </td>
-                        <td class="file-cell">
-                            {% if po.file %}
-                                {{ po.file.name }}
-                            {% else %}
-                                No file
-                            {% endif %}
-                        </td>
-                        <td>
-                            <label class="checkbox-label">
-                                <input class="boards-ordered-toggle" type="checkbox"
-                                       id="po-{{ po.id }}" {% if po.boards_ordered %}checked{% endif %}
-                                       data-po-id="{{ po.id }}">
-                                Ordered
-                            </label>
-                        </td>
-                        <td>
-                            <form method="POST" enctype="multipart/form-data" action="{% url 'replace_pnx_file' po.id %}" class="inline-form">
-                                {% csrf_token %}
-                                <input type="file" name="pnx_file" accept=".pnx" required>
-                                <button type="submit" class="btn btn-primary btn-sm">
-                                    📤 Replace
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            </td>
+                            <td class="file-cell">
+                                {% if po.file %}
+                                    {{ po.file.name|slice:":30" }}{% if po.file.name|length > 30 %}...{% endif %}
+                                {% else %}
+                                    <span class="text-muted">No file</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <label class="checkbox-label">
+                                    <input class="boards-ordered-toggle" type="checkbox"
+                                           id="po-{{ po.id }}" {% if po.boards_ordered %}checked{% endif %}
+                                           data-po-id="{{ po.id }}">
+                                    Ordered
+                                </label>
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    {% if po.file %}
+                                    <button type="button" class="btn btn-secondary" onclick="previewPNX({{ po.id }})" title="Preview PNX">
+                                        <i class="bi bi-eye"></i> Preview PNX
+                                    </button>
+                                    <a href="{{ po.file.url }}" download class="btn btn-info" title="Download PNX">
+                                        <i class="bi bi-download"></i> PNX
+                                    </a>
+                                    {% endif %}
+                                    {% if po.csv_file %}
+                                    <button type="button" class="btn btn-secondary" onclick="previewCSV({{ po.id }})" title="Preview CSV">
+                                        <i class="bi bi-eye"></i> Preview CSV
+                                    </button>
+                                    <a href="{{ po.csv_file.url }}" download class="btn btn-success" title="Download CSV">
+                                        <i class="bi bi-download"></i> CSV
+                                    </a>
+                                    {% elif po.file %}
+                                    <button type="button" class="btn btn-warning" onclick="generateCSV({{ po.id }})" title="Generate CSV">
+                                        <i class="bi bi-gear"></i> Generate CSV
+                                    </button>
+                                    {% endif %}
+                                    <button type="button" class="btn btn-primary" onclick="openReplaceFileModal({{ po.id }})" title="Replace PNX">
+                                        <i class="bi bi-upload"></i> Replace
+                                    </button>
+                                    <form method="POST" action="{% url 'delete_boards_po' po.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete PO {{ po.po_number }}?');">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-danger" title="Delete PO">
+                                            <i class="bi bi-trash"></i> Delete
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
             {% else %}
             <p class="text-muted">No Boards POs found.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Manage Accessories Section -->
+<div class="collapsible-section hidden" id="manageAccessoriesSection">
+    <div class="card">
+        <div class="card-header">
+            <div class="section-header-with-button">
+                <span>Manage Accessories CSV <span class="count-badge">({{ accessories_csvs.count }})</span></span>
+                <button type="button" class="btn btn-primary" onclick="openModal('uploadAccessoriesModal')">
+                    <i class="bi bi-plus-lg"></i> Upload CSV
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if accessories_csvs %}
+            <div class="boards-po-scroll-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Sale Number</th>
+                            <th>Customer</th>
+                            <th>File Name</th>
+                            <th>Upload Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for csv in accessories_csvs %}
+                        <tr>
+                            <td class="sku-cell">{{ csv.sale_number }}</td>
+                            <td>{{ csv.first_name }} {{ csv.last_name }}</td>
+                            <td class="file-cell">{{ csv.original_csv.name|slice:":40" }}{% if csv.original_csv.name|length > 40 %}...{% endif %}</td>
+                            <td>{{ csv.original_csv_uploaded_at|date:"Y-m-d H:i"|default:"N/A" }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button type="button" class="btn btn-sm btn-primary" onclick="previewAccessoryCSV({{ csv.id }})" title="Preview CSV">
+                                        <i class="bi bi-eye"></i> Preview
+                                    </button>
+                                    <a href="{{ csv.original_csv.url }}" download class="btn btn-sm btn-success" title="Download CSV">
+                                        <i class="bi bi-download"></i> Download
+                                    </a>
+                                    <form method="POST" action="{% url 'delete_accessory_csv' csv.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this CSV for sale {{ csv.sale_number }}?');">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-sm btn-danger" title="Delete CSV">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No Accessories CSVs found.</p>
             {% endif %}
         </div>
     </div>
@@ -220,21 +307,25 @@
                 <td class="text-center">{{ order.time_allowance }}</td>
                 <!-- Boards -->
                 <td class="text-center">
-                    {% if order.boards_po %}
-                        <div class="status-cell">
-                            <a class="po-link" href="{% url 'order_details' order.id %}">
-                                {{ order.boards_po.po_number }}
+                    {% if not order.job_finished %}
+                        {% if order.boards_po %}
+                            <div class="status-cell">
+                                <a class="po-link" href="{% url 'order_details' order.id %}">
+                                    {{ order.boards_po.po_number }}
+                                </a>
+                                {% if order.boards_po.boards_ordered %}
+                                    <span class="status-icon success" title="Ordered">✓</span>
+                                {% else %}
+                                    <span class="status-icon danger" title="Not Ordered">✗</span>
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <a href="{% url 'order_details' order.id %}" class="text-muted">
+                                Not assigned
                             </a>
-                            {% if order.boards_po.boards_ordered %}
-                                <span class="status-icon success" title="Ordered">✓</span>
-                            {% else %}
-                                <span class="status-icon danger" title="Not Ordered">✗</span>
-                            {% endif %}
-                        </div>
+                        {% endif %}
                     {% else %}
-                        <a href="{% url 'order_details' order.id %}" class="text-muted">
-                            Not assigned
-                        </a>
+                        <span class="text-muted">-</span>
                     {% endif %}
                 </td>
                 <!-- OS Doors -->
@@ -386,72 +477,93 @@
                     <button type="button" class="modal-close" onclick="closeModal('addOrderModal')">✕</button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="{{ form.first_name.id_for_label }}">First Name</label>
-                            {{ form.first_name }}
+                    <!-- Customer Info Section -->
+                    <div class="add-order-section customer-section">
+                        <h4 class="section-title customer-title">
+                            <i class="bi bi-person"></i> Customer Information
+                        </h4>
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <label for="customer-search">Search Existing Customer</label>
+                                <input type="text" id="customer-search" class="form-input" placeholder="Type to search by name..." autocomplete="off">
+                                <div id="customer-results" class="search-results"></div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="{{ form.last_name.id_for_label }}">Last Name</label>
-                            {{ form.last_name }}
+                        <div class="divider-text">OR ADD NEW CUSTOMER</div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="{{ form.first_name.id_for_label }}">First Name</label>
+                                {{ form.first_name }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.last_name.id_for_label }}">Last Name</label>
+                                {{ form.last_name }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.anthill_id.id_for_label }}">Anthill Customer ID</label>
+                                {{ form.anthill_id }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.postcode.id_for_label }}">Postcode</label>
+                                {{ form.postcode }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.address.id_for_label }}">Address</label>
+                                {{ form.address }}
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
-                            {{ form.sale_number }}
+                    </div>
+
+                    <!-- Sale Info Section -->
+                    <div class="add-order-section sale-section">
+                        <div class="section-header-with-select">
+                            <h4 class="section-title sale-title">
+                                <i class="bi bi-receipt"></i> Sale Information
+                            </h4>
+                            <div class="order-type-wrapper">
+                                {{ form.order_type }}
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="{{ form.customer_number.id_for_label }}">Customer Number</label>
-                            {{ form.customer_number }}
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
+                                {{ form.sale_number }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.customer_number.id_for_label }}">Customer Number (CAD)</label>
+                                {{ form.customer_number }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.order_date.id_for_label }}">Order Date</label>
+                                {{ form.order_date }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
+                                {{ form.fit_date }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.designer.id_for_label }}">Designer</label>
+                                <div class="designer-input-wrapper">
+                                    {{ form.designer }}
+                                    <button type="button" class="btn btn-sm btn-success add-designer-btn" onclick="toggleAddDesigner()" title="Add new designer">
+                                        <i class="bi bi-plus-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ form.workguru_id.id_for_label }}">WorkGuru ID</label>
+                                {{ form.workguru_id }}
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="{{ form.order_date.id_for_label }}">Order Date</label>
-                            {{ form.order_date }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
-                            {{ form.fit_date }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.boards_po.id_for_label }}">Boards PO</label>
-                            {{ form.boards_po }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.anthill_id.id_for_label }}">Anthill ID</label>
-                            {{ form.anthill_id }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.workguru_id.id_for_label }}">WorkGuru ID</label>
-                            {{ form.workguru_id }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.address.id_for_label }}">Address</label>
-                            {{ form.address }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.postcode.id_for_label }}">Postcode</label>
-                            {{ form.postcode }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ form.order_type.id_for_label }}">Order Type</label>
-                            {{ form.order_type }}
-                        </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                {{ form.os_doors_required }}
-                                <span>OS Doors Required</span>
-                            </label>
-                        </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                {{ form.all_items_ordered }}
-                                <span>All Items Ordered</span>
-                            </label>
-                        </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                {{ form.job_finished }}
-                                <span>Job Finished</span>
-                            </label>
+                        <!-- New Designer Row - outside the grid -->
+                        <div id="new-designer-row" class="new-designer-input" style="display: none;">
+                            <input type="text" id="new-designer-name" class="form-input" placeholder="New designer name">
+                            <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesigner()" title="Save designer">
+                                <i class="bi bi-check-lg"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesigner()" title="Cancel">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -906,6 +1018,502 @@
     
     // Load indicators and details after a short delay to let page render first
     setTimeout(loadOrderIndicators, 500);
+
+    // Replace file modal functionality
+    let currentReplacePOId = null;
+
+    function openReplaceFileModal(poId) {
+        currentReplacePOId = poId;
+        const modalHtml = `
+            <div class="modal show" id="replaceFileModal" style="display: block;">
+                <div class="modal-overlay" onclick="closeReplaceFileModal()"></div>
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>Replace PNX File</h3>
+                            <button type="button" class="modal-close" onclick="closeReplaceFileModal()">✕</button>
+                        </div>
+                        <form method="POST" enctype="multipart/form-data" action="/stock-take/boards-po/${poId}/replace-pnx/">
+                            <input type="hidden" name="csrfmiddlewaretoken" value="${document.querySelector('[name=csrfmiddlewaretoken]').value}">
+                            <div class="modal-body">
+                                <div class="form-group">
+                                    <label for="pnx_file">Select PNX File</label>
+                                    <input type="file" name="pnx_file" id="pnx_file" accept=".pnx" required class="form-control">
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" onclick="closeReplaceFileModal()">Cancel</button>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-upload"></i> Upload
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    }
+
+    function closeReplaceFileModal() {
+        const modal = document.getElementById('replaceFileModal');
+        if (modal) {
+            modal.remove();
+        }
+        currentReplacePOId = null;
+    }
+
+    // Update PO Number
+    function updatePONumber(poId, newPONumber) {
+        const originalValue = document.querySelector(`input[data-po-id="${poId}"]`).defaultValue;
+        
+        // If value hasn't changed, don't make request
+        if (newPONumber === originalValue) {
+            return;
+        }
+        
+        fetch(`/stock-take/boards-po/${poId}/update-po-number/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({
+                po_number: newPONumber
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Update the default value
+                document.querySelector(`input[data-po-id="${poId}"]`).defaultValue = newPONumber;
+                console.log('PO number updated successfully');
+            } else {
+                alert('Error updating PO number: ' + (data.error || 'Unknown error'));
+                // Revert to original value
+                document.querySelector(`input[data-po-id="${poId}"]`).value = originalValue;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error updating PO number');
+            // Revert to original value
+            document.querySelector(`input[data-po-id="${poId}"]`).value = originalValue;
+        });
+    }
+
+    // Preview PNX file
+    function previewPNX(poId) {
+        fetch(`/stock-take/boards-po/${poId}/preview-pnx/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Build table HTML
+                    let tableHtml = '<div style="overflow-x: auto;"><table id="previewTable" class="table table-striped" style="font-size: 11px;"><thead><tr>';
+                    
+                    // Header row
+                    data.header.forEach(col => {
+                        tableHtml += `<th style="white-space: nowrap; padding: 6px;">${col || '&nbsp;'}</th>`;
+                    });
+                    tableHtml += '</tr></thead><tbody>';
+                    
+                    // Data rows
+                    data.rows.forEach((row, rowIndex) => {
+                        tableHtml += '<tr>';
+                        row.forEach((cell, cellIndex) => {
+                            tableHtml += `<td contenteditable="true" data-row="${rowIndex}" data-col="${cellIndex}" style="white-space: nowrap; padding: 6px; cursor: text;">${cell || ''}</td>`;
+                        });
+                        tableHtml += '</tr>';
+                    });
+                    tableHtml += '</tbody></table></div>';
+                    
+                    const modalHtml = `
+                        <div class="modal show" id="previewPNXModal" style="display: block;">
+                            <div class="modal-overlay" onclick="closePreviewModal()"></div>
+                            <div class="modal-dialog" style="max-width: 95%;">
+                                <div class="modal-content-csv-table">
+                                    <div class="modal-header">
+                                        <h3>PNX Preview - ${data.po_number}</h3>
+                                        <button type="button" class="modal-close" onclick="closePreviewModal()">✕</button>
+                                    </div>
+                                    <div class="modal-body" style="overflow: auto; max-height: 70vh;">
+                                        ${tableHtml}
+                                        <div style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
+                                            <strong>Total Lines:</strong> ${data.line_count} | 
+                                            <strong>Total Items:</strong> ${data.item_count}
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" onclick="closePreviewModal()">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.insertAdjacentHTML('beforeend', modalHtml);
+                } else {
+                    alert('Error loading preview: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error loading preview');
+            });
+    }
+
+    function closePreviewModal() {
+        const modal = document.getElementById('previewPNXModal');
+        if (modal) {
+            modal.remove();
+        }
+    }
+
+    // Save preview changes
+    function savePreview(poId, fileType) {
+        const table = document.getElementById('previewTable');
+        if (!table) {
+            alert('Table not found');
+            return;
+        }
+
+        // Collect header
+        const headerCells = table.querySelectorAll('thead th');
+        const header = Array.from(headerCells).map(th => th.textContent.trim());
+
+        // Collect rows
+        const rows = [];
+        const dataRows = table.querySelectorAll('tbody tr');
+        dataRows.forEach(tr => {
+            const cells = tr.querySelectorAll('td');
+            const row = Array.from(cells).map(td => td.textContent.trim());
+            rows.push(row);
+        });
+
+        // Send to backend to update both files
+        const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        fetch(`/stock-take/boards-po/${poId}/update-both-files/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify({ header, rows, source: fileType })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Files updated successfully (PNX and CSV)');
+                closePreviewModal();
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error saving changes');
+        });
+    }
+
+    // Preview Accessory CSV file
+    function previewAccessoryCSV(csvId) {
+        fetch(`/stock-take/accessory-csv/${csvId}/preview/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Build table HTML
+                    let tableHtml = '<div style="overflow-x: auto;"><table id="previewTable" class="table table-striped" style="font-size: 11px;"><thead><tr>';
+                    
+                    // Header row
+                    data.header.forEach(col => {
+                        tableHtml += `<th style="white-space: nowrap; padding: 6px;">${col || '&nbsp;'}</th>`;
+                    });
+                    tableHtml += '</tr></thead><tbody>';
+                    
+                    // Data rows
+                    data.rows.forEach((row, rowIndex) => {
+                        tableHtml += '<tr>';
+                        row.forEach((cell, cellIndex) => {
+                            tableHtml += `<td style="white-space: nowrap; padding: 6px;">${cell || '&nbsp;'}</td>`;
+                        });
+                        tableHtml += '</tr>';
+                    });
+                    tableHtml += '</tbody></table></div>';
+                    
+                    const modalHtml = `
+                        <div class="modal show" id="previewPNXModal" style="display: block;">
+                            <div class="modal-overlay" onclick="closePreviewModal()"></div>
+                            <div class="modal-dialog" style="max-width: 95%;">
+                                <div class="modal-content-csv-table">
+                                    <div class="modal-header">
+                                        <h3>Accessories CSV Preview - ${data.sale_number}</h3>
+                                        <button type="button" class="modal-close" onclick="closePreviewModal()">✕</button>
+                                    </div>
+                                    <div class="modal-body" style="overflow: auto; max-height: 70vh;">
+                                        ${tableHtml}
+                                        <div style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
+                                            <strong>Total Lines:</strong> ${data.line_count} | 
+                                            <strong>Total Items:</strong> ${data.item_count}
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" onclick="closePreviewModal()">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.insertAdjacentHTML('beforeend', modalHtml);
+                } else {
+                    alert('Error loading preview: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error loading preview');
+            });
+    }
+
+    // Preview CSV file
+    function previewCSV(poId) {
+        fetch(`/stock-take/boards-po/${poId}/preview-csv/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Build table HTML
+                    let tableHtml = '<div style="overflow-x: auto;"><table id="previewTable" class="table table-striped" style="font-size: 11px;"><thead><tr>';
+                    
+                    // Header row
+                    data.header.forEach(col => {
+                        tableHtml += `<th style="white-space: nowrap; padding: 6px;">${col || '&nbsp;'}</th>`;
+                    });
+                    tableHtml += '</tr></thead><tbody>';
+                    
+                    // Data rows
+                    data.rows.forEach((row, rowIndex) => {
+                        tableHtml += '<tr>';
+                        row.forEach((cell, cellIndex) => {
+                            tableHtml += `<td contenteditable="true" data-row="${rowIndex}" data-col="${cellIndex}" style="white-space: nowrap; padding: 6px; cursor: text;">${cell || ''}</td>`;
+                        });
+                        tableHtml += '</tr>';
+                    });
+                    tableHtml += '</tbody></table></div>';
+                    
+                    const modalHtml = `
+                        <div class="modal show" id="previewPNXModal" style="display: block;">
+                            <div class="modal-overlay" onclick="closePreviewModal()"></div>
+                            <div class="modal-dialog" style="max-width: 95%;">
+                                <div class="modal-content-csv-table">
+                                    <div class="modal-header">
+                                        <h3>CSV Preview - ${data.po_number}</h3>
+                                        <button type="button" class="modal-close" onclick="closePreviewModal()">✕</button>
+                                    </div>
+                                    <div class="modal-body" style="overflow: auto; max-height: 70vh;">
+                                        ${tableHtml}
+                                        <div style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
+                                            <strong>Total Lines:</strong> ${data.line_count} | 
+                                            <strong>Total Items:</strong> ${data.item_count}
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" onclick="closePreviewModal()">Close</button>
+                                        <button type="button" class="btn btn-success" onclick="savePreview(${poId}, 'csv')">Save Changes</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.insertAdjacentHTML('beforeend', modalHtml);
+                } else {
+                    alert('Error loading preview: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error loading preview');
+            });
+    }
+
+    // Generate CSV file from PNX
+    function generateCSV(poId) {
+        if (!confirm('Generate CSV file from PNX? This will create a comma-delimited version of the boards order.')) {
+            return;
+        }
+
+        fetch(`/stock-take/boards-po/${poId}/generate-csv/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('CSV file generated successfully!');
+                location.reload();
+            } else {
+                alert('Error generating CSV: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error generating CSV');
+        });
+    }
+
+    // Customer Search and Designer Management
+    document.addEventListener('DOMContentLoaded', function() {
+        // Customer Search Functionality
+        let customerSearchTimeout;
+        const customerSearchInput = document.getElementById('customer-search');
+        const customerResults = document.getElementById('customer-results');
+        
+        if (customerSearchInput) {
+            customerSearchInput.addEventListener('input', function() {
+                clearTimeout(customerSearchTimeout);
+                const query = this.value.trim();
+                
+                if (query.length < 2) {
+                    customerResults.classList.remove('show');
+                    return;
+                }
+                
+                customerSearchTimeout = setTimeout(() => {
+                    fetch(`/search-customers/?q=${encodeURIComponent(query)}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.customers && data.customers.length > 0) {
+                                customerResults.innerHTML = data.customers.map(customer => `
+                                    <div class="search-result-item" onclick="selectCustomer(${customer.id}, '${customer.first_name}', '${customer.last_name}', '${customer.anthill_customer_id || ''}', '${customer.address || ''}', '${customer.postcode || ''}')">
+                                        <div class="search-result-name">${customer.first_name} ${customer.last_name}</div>
+                                        <div class="search-result-details">${customer.address || 'No address'} ${customer.postcode || ''}</div>
+                                    </div>
+                                `).join('');
+                                customerResults.classList.add('show');
+                            } else {
+                                customerResults.innerHTML = '<div class="search-result-item">No customers found</div>';
+                                customerResults.classList.add('show');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error searching customers:', error);
+                            customerResults.classList.remove('show');
+                        });
+                }, 300);
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.form-group.full-width')) {
+                    customerResults.classList.remove('show');
+                }
+            });
+        }
+        
+        // Designer input - clear dropdown when typing
+        const newDesignerInput = document.getElementById('new-designer-name');
+        const designerSelect = document.getElementById('id_designer');
+        
+        // When selecting from dropdown, hide the new designer input
+        if (designerSelect) {
+            designerSelect.addEventListener('change', function() {
+                if (this.value) {
+                    document.getElementById('new-designer-row').style.display = 'none';
+                    document.getElementById('new-designer-name').value = '';
+                }
+            });
+        }
+        
+        // Order Type color change based on selection
+        const orderTypeSelect = document.getElementById('id_order_type');
+        if (orderTypeSelect) {
+            function updateOrderTypeColor() {
+                const value = orderTypeSelect.value;
+                if (value === 'sale') {
+                    orderTypeSelect.style.background = '#10b981';
+                    orderTypeSelect.style.borderColor = '#10b981';
+                } else if (value === 'remedial') {
+                    orderTypeSelect.style.background = '#f59e0b';
+                    orderTypeSelect.style.borderColor = '#f59e0b';
+                } else if (value === 'warranty') {
+                    orderTypeSelect.style.background = '#ef4444';
+                    orderTypeSelect.style.borderColor = '#ef4444';
+                }
+            }
+            
+            // Set initial color
+            updateOrderTypeColor();
+            
+            // Update on change
+            orderTypeSelect.addEventListener('change', updateOrderTypeColor);
+        }
+    });
+    
+    function selectCustomer(id, firstName, lastName, anthillId, address, postcode) {
+        document.getElementById('id_first_name').value = firstName;
+        document.getElementById('id_last_name').value = lastName;
+        document.getElementById('id_anthill_id').value = anthillId;
+        document.getElementById('id_address').value = address;
+        document.getElementById('id_postcode').value = postcode;
+        document.getElementById('customer-results').classList.remove('show');
+        document.getElementById('customer-search').value = `${firstName} ${lastName}`;
+    }
+    
+    // Designer management functions
+    function toggleAddDesigner() {
+        const row = document.getElementById('new-designer-row');
+        if (row.style.display === 'none') {
+            row.style.display = 'flex';
+            document.getElementById('new-designer-name').focus();
+        } else {
+            row.style.display = 'none';
+            document.getElementById('new-designer-name').value = '';
+        }
+    }
+    
+    function cancelAddDesigner() {
+        document.getElementById('new-designer-row').style.display = 'none';
+        document.getElementById('new-designer-name').value = '';
+    }
+    
+    function saveNewDesigner() {
+        const designerName = document.getElementById('new-designer-name').value.trim();
+        
+        if (!designerName) {
+            alert('Please enter a designer name');
+            return;
+        }
+        
+        fetch('/add-designer/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({ name: designerName })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Add new option to designer dropdown and select it
+                const designerSelect = document.getElementById('id_designer');
+                const option = new Option(data.designer.name, data.designer.id, true, true);
+                designerSelect.add(option);
+                
+                // Hide the input row
+                document.getElementById('new-designer-row').style.display = 'none';
+                document.getElementById('new-designer-name').value = '';
+            } else {
+                alert('Error: ' + (data.error || 'Failed to add designer'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error adding designer');
+        });
+    }
+
 </script>
 
 {% endblock %}

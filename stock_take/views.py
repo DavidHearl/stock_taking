@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer
 
 import csv
 import io
@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db.models import Sum, F, Count, Q, Prefetch
 from django.db import models
+from django.views.decorators.http import require_http_methods
 from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
 from django.template.loader import render_to_string
 import datetime
@@ -38,8 +39,8 @@ def ordering(request):
     price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
     
-    # Get tab filter
-    tab = request.GET.get('tab', 'all')  # 'all', 'wip', 'completed'
+    # Get tab filter - default to WIP
+    tab = request.GET.get('tab', 'wip')  # 'all', 'wip', 'completed'
     
     # Handle sorting
     sort_by = request.GET.get('sort', 'order_date')
@@ -111,10 +112,18 @@ def ordering(request):
         orders = all_orders.order_by(*ordering)
     
     # OPTIMIZATION: Don't load BoardsPO details upfront - only load basic list for the edit section
-    # Annotate with orders count to avoid per-row queries
-    boards_pos = BoardsPO.objects.only('id', 'po_number', 'file', 'boards_ordered').annotate(
-        orders_count=Count('orders')
-    ).order_by('po_number')
+    # Get boards count for each PO using prefetch
+    from django.db.models import Count, Sum
+    boards_pos = BoardsPO.objects.prefetch_related('pnx_items').annotate(
+        boards_count=Count('pnx_items')
+    ).order_by('-po_number')
+    
+    # Get accessories CSVs (orders with original_csv uploaded)
+    accessories_csvs = Order.objects.filter(
+        original_csv__isnull=False
+    ).exclude(
+        original_csv=''
+    ).order_by('-original_csv_uploaded_at')
     
     form = OrderForm(request.POST or None, initial={'order_type': 'sale'})
     po_form = BoardsPOForm()
@@ -127,6 +136,7 @@ def ordering(request):
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'boards_pos': boards_pos,
+        'accessories_csvs': accessories_csvs,
         'form': form,
         'po_form': po_form,
         'accessories_csv_form': accessories_csv_form,
@@ -138,6 +148,72 @@ def ordering(request):
         'completed_orders': completed_orders,
         'wip_orders': wip_orders,
     })
+
+@login_required
+def search_customers(request):
+    """AJAX endpoint to search for existing customers"""
+    query = request.GET.get('q', '').strip()
+    
+    if len(query) < 2:
+        return JsonResponse({'customers': []})
+    
+    # Search by first name, last name, address, or postcode
+    customers = Customer.objects.filter(
+        Q(first_name__icontains=query) |
+        Q(last_name__icontains=query) |
+        Q(address__icontains=query) |
+        Q(postcode__icontains=query)
+    )[:10]  # Limit to 10 results
+    
+    customer_list = [{
+        'id': c.id,
+        'first_name': c.first_name,
+        'last_name': c.last_name,
+        'anthill_customer_id': c.anthill_customer_id,
+        'address': c.address,
+        'postcode': c.postcode
+    } for c in customers]
+    
+    return JsonResponse({'customers': customer_list})
+
+@login_required
+def add_designer(request):
+    """AJAX endpoint to add a new designer"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        name = data.get('name', '').strip()
+        
+        if not name:
+            return JsonResponse({'success': False, 'error': 'Designer name is required'})
+        
+        # Check if designer already exists
+        existing_designer = Designer.objects.filter(name__iexact=name).first()
+        if existing_designer:
+            return JsonResponse({
+                'success': True,
+                'designer': {
+                    'id': existing_designer.id,
+                    'name': existing_designer.name
+                },
+                'message': 'Designer already exists'
+            })
+        
+        # Create new designer
+        designer = Designer.objects.create(name=name)
+        
+        return JsonResponse({
+            'success': True,
+            'designer': {
+                'id': designer.id,
+                'name': designer.name
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 
 @login_required
 def load_order_details_ajax(request, sale_number):
@@ -1373,6 +1449,30 @@ def update_boards_ordered(request, boards_po_id):
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 @login_required
+def update_po_number(request, boards_po_id):
+    """Update the PO number for a Boards PO"""
+    if request.method == 'POST':
+        import json
+        try:
+            boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+            data = json.loads(request.body)
+            new_po_number = data.get('po_number', '').strip()
+            
+            if not new_po_number:
+                return JsonResponse({'success': False, 'error': 'PO number cannot be empty'})
+            
+            # Check if PO number already exists (excluding current PO)
+            if BoardsPO.objects.filter(po_number=new_po_number).exclude(id=boards_po_id).exists():
+                return JsonResponse({'success': False, 'error': 'PO number already exists'})
+            
+            boards_po.po_number = new_po_number
+            boards_po.save()
+            return JsonResponse({'success': True, 'po_number': new_po_number})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+@login_required
 def update_pnx_received(request, pnx_item_id):
     """Update the received quantity for a PNX item"""
     if request.method == 'POST':
@@ -1535,6 +1635,594 @@ def replace_pnx_file(request, boards_po_id):
     return redirect('ordering')
 
 @login_required
+def delete_boards_po(request, boards_po_id):
+    """Delete a Boards PO"""
+    if request.method == 'POST':
+        boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+        po_number = boards_po.po_number
+        
+        # Check if any orders are linked to this PO
+        if boards_po.orders.exists():
+            messages.error(request, f'Cannot delete PO {po_number}. There are {boards_po.orders.count()} orders linked to it.')
+            return redirect('ordering')
+        
+        # Delete the PO
+        boards_po.delete()
+        messages.success(request, f'Successfully deleted PO {po_number}.')
+    
+    return redirect('ordering')
+
+@login_required
+def preview_pnx_file(request, boards_po_id):
+    """Preview PNX file content"""
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.file:
+        return JsonResponse({'success': False, 'error': 'No file attached to this PO'})
+    
+    try:
+        # Read the file
+        file_content = boards_po.file.read().decode('utf-8')
+        lines = file_content.split('\n')
+        
+        # Parse into table format
+        rows = []
+        header = None
+        for line in lines:
+            if line.strip():
+                fields = line.split(';')
+                if header is None:
+                    header = fields
+                else:
+                    rows.append(fields)
+        
+        # Count items (excluding header)
+        item_count = len(rows)
+        
+        return JsonResponse({
+            'success': True,
+            'header': header,
+            'rows': rows,
+            'po_number': boards_po.po_number,
+            'line_count': len(lines),
+            'item_count': item_count
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def preview_csv_file(request, boards_po_id):
+    """Preview CSV file content"""
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.csv_file:
+        return JsonResponse({'success': False, 'error': 'No CSV file attached to this PO'})
+    
+    try:
+        # Read the file
+        file_content = boards_po.csv_file.read().decode('utf-8')
+        lines = file_content.split('\n')
+        
+        # Parse into table format
+        rows = []
+        header = None
+        for line in lines:
+            if line.strip():
+                fields = line.split(',')
+                if header is None:
+                    header = fields
+                else:
+                    rows.append(fields)
+        
+        # Count items (excluding header)
+        item_count = len(rows)
+        
+        return JsonResponse({
+            'success': True,
+            'header': header,
+            'rows': rows,
+            'po_number': boards_po.po_number,
+            'line_count': len(lines),
+            'item_count': item_count
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_both_files(request, boards_po_id):
+    """Update both PNX and CSV files with the same data"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    try:
+        import json
+        from django.core.files.base import ContentFile
+        
+        data = json.loads(request.body)
+        header = data.get('header', [])
+        rows = data.get('rows', [])
+        
+        # Build PNX content (semicolon-delimited)
+        pnx_lines = []
+        pnx_lines.append(';'.join(header))
+        for row in rows:
+            pnx_lines.append(';'.join(row))
+        pnx_content = '\n'.join(pnx_lines)
+        
+        # Build CSV content (comma-delimited)
+        csv_lines = []
+        csv_lines.append(','.join(header))
+        for row in rows:
+            csv_lines.append(','.join(row))
+        csv_content = '\n'.join(csv_lines)
+        
+        # Update PNX file
+        if boards_po.file:
+            pnx_path = boards_po.file.name
+            boards_po.file.delete(save=False)
+            boards_po.file.save(pnx_path.split('/')[-1], ContentFile(pnx_content.encode('utf-8')), save=False)
+        
+        # Update CSV file
+        if boards_po.csv_file:
+            csv_path = boards_po.csv_file.name
+            boards_po.csv_file.delete(save=False)
+            boards_po.csv_file.save(csv_path.split('/')[-1], ContentFile(csv_content.encode('utf-8')), save=False)
+        else:
+            # Create CSV file if it doesn't exist
+            csv_filename = f'PO_{boards_po.po_number}.csv'
+            boards_po.csv_file.save(csv_filename, ContentFile(csv_content.encode('utf-8')), save=False)
+        
+        boards_po.save()
+        
+        return JsonResponse({'success': True, 'message': 'Both PNX and CSV files updated successfully'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_pnx_file(request, boards_po_id):
+    """Update PNX file content from edited table data"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.file:
+        return JsonResponse({'success': False, 'error': 'No PNX file attached to this PO'})
+    
+    try:
+        import json
+        from django.core.files.base import ContentFile
+        
+        data = json.loads(request.body)
+        header = data.get('header', [])
+        rows = data.get('rows', [])
+        
+        # Build PNX content (semicolon-delimited)
+        lines = []
+        lines.append(';'.join(header))
+        for row in rows:
+            lines.append(';'.join(row))
+        
+        pnx_content = '\n'.join(lines)
+        
+        # Save updated PNX file
+        file_path = boards_po.file.name
+        boards_po.file.delete(save=False)
+        boards_po.file.save(file_path.split('/')[-1], ContentFile(pnx_content.encode('utf-8')), save=True)
+        
+        return JsonResponse({'success': True, 'message': 'PNX file updated successfully'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_csv_file(request, boards_po_id):
+    """Update CSV file content from edited table data"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.csv_file:
+        return JsonResponse({'success': False, 'error': 'No CSV file attached to this PO'})
+    
+    try:
+        import json
+        from django.core.files.base import ContentFile
+        
+        data = json.loads(request.body)
+        header = data.get('header', [])
+        rows = data.get('rows', [])
+        
+        # Build CSV content (comma-delimited)
+        lines = []
+        lines.append(','.join(header))
+        for row in rows:
+            lines.append(','.join(row))
+        
+        csv_content = '\n'.join(lines)
+        
+        # Save updated CSV file
+        file_path = boards_po.csv_file.name
+        boards_po.csv_file.delete(save=False)
+        boards_po.csv_file.save(file_path.split('/')[-1], ContentFile(csv_content.encode('utf-8')), save=True)
+        
+        return JsonResponse({'success': True, 'message': 'CSV file updated successfully'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def generate_csv_file(request, boards_po_id):
+    """Generate and save CSV file from PNX file"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.file:
+        return JsonResponse({'success': False, 'error': 'No PNX file attached to this PO'})
+    
+    try:
+        from django.core.files.base import ContentFile
+        
+        # Read the PNX file
+        file_content = boards_po.file.read().decode('utf-8')
+        lines = file_content.split('\n')
+        
+        # Create CSV content
+        csv_lines = []
+        for line in lines:
+            if line.strip():
+                # Split by semicolon and join with comma
+                fields = line.split(';')
+                csv_lines.append(','.join(fields))
+        
+        csv_content = '\n'.join(csv_lines)
+        
+        # Save CSV file
+        csv_filename = f'PO_{boards_po.po_number}.csv'
+        boards_po.csv_file.save(csv_filename, ContentFile(csv_content.encode('utf-8')), save=True)
+        
+        return JsonResponse({'success': True, 'message': 'CSV file generated successfully'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def download_pnx_as_csv_boardspo(request, boards_po_id):
+    """Convert PNX file (semicolon-delimited) to CSV (comma-delimited) and download"""
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.file:
+        messages.error(request, 'No file attached to this PO')
+        return redirect('ordering')
+    
+    try:
+        # Read the PNX file
+        file_content = boards_po.file.read().decode('utf-8')
+        lines = file_content.split('\n')
+        
+        # Create CSV response
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="PO_{boards_po.po_number}.csv"'
+        
+        writer = csv.writer(response)
+        
+        # Convert each line from semicolon to comma
+        for line in lines:
+            if line.strip():
+                # Split by semicolon and write as comma-separated
+                fields = line.split(';')
+                writer.writerow(fields)
+        
+        return response
+    except Exception as e:
+        messages.error(request, f'Error converting PNX to CSV: {str(e)}')
+        return redirect('ordering')
+
+@login_required
+def delete_accessory_csv(request, csv_id):
+    """Delete an accessory CSV file"""
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=csv_id)
+        sale_number = order.sale_number
+        
+        # Clear the CSV file fields
+        if order.original_csv:
+            order.original_csv.delete(save=False)
+        if order.processed_csv:
+            order.processed_csv.delete(save=False)
+        
+        order.original_csv = None
+        order.processed_csv = None
+        order.original_csv_uploaded_at = None
+        order.processed_csv_created_at = None
+        order.save()
+        
+        messages.success(request, f'Successfully deleted CSV for sale {sale_number}.')
+    
+    return redirect('ordering')
+
+@login_required
+def preview_accessory_csv(request, csv_id):
+    """Preview accessories CSV file content"""
+    order = get_object_or_404(Order, id=csv_id)
+    
+    if not order.original_csv:
+        return JsonResponse({'success': False, 'error': 'No CSV file attached to this order'})
+    
+    try:
+        # Read the file
+        file_content = order.original_csv.read().decode('utf-8')
+        lines = file_content.split('\n')
+        
+        # Parse into table format
+        rows = []
+        header = None
+        for line in lines:
+            if line.strip():
+                fields = line.split(',')
+                if header is None:
+                    header = fields
+                else:
+                    rows.append(fields)
+        
+        # Count items (excluding header)
+        item_count = len(rows)
+        
+        return JsonResponse({
+            'success': True,
+            'header': header,
+            'rows': rows,
+            'sale_number': order.sale_number,
+            'line_count': len(lines),
+            'item_count': item_count
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_order_financial(request, order_id):
+    """Update financial fields for an order"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        field = data.get('field')
+        value = data.get('value', 0)
+        
+        # Validate field name
+        valid_fields = ['materials_cost', 'installation_cost', 'manufacturing_cost', 
+                       'total_value_inc_vat', 'total_value_exc_vat', 'profit']
+        if field not in valid_fields:
+            return JsonResponse({'success': False, 'error': 'Invalid field'})
+        
+        # Update the field
+        from decimal import Decimal
+        setattr(order, field, Decimal(str(value)))
+        order.save()
+        
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def recalculate_order_financials(request, order_id):
+    """Recalculate all financial fields from source data"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        from decimal import Decimal
+        
+        # Get price per square meter from session
+        price_per_sqm_str = request.session.get('price_per_sqm', '12')
+        price_per_sqm = float(price_per_sqm_str)
+        
+        # Recalculate materials cost from boards, accessories, and OS doors
+        materials_cost = order.calculate_materials_cost(price_per_sqm)
+        
+        # Recalculate installation cost from timesheets and expenses
+        installation_cost = order.calculate_installation_cost()
+        
+        # Recalculate manufacturing cost from timesheets
+        manufacturing_cost = order.calculate_manufacturing_cost()
+        
+        # Calculate total value exc VAT from inc VAT
+        if order.total_value_inc_vat > 0:
+            total_value_exc_vat = order.total_value_inc_vat / Decimal('1.2')
+        else:
+            total_value_exc_vat = Decimal('0.00')
+        
+        # Calculate profit
+        profit = total_value_exc_vat - materials_cost - installation_cost - manufacturing_cost
+        
+        # Update and save the order
+        order.materials_cost = materials_cost
+        order.installation_cost = installation_cost
+        order.manufacturing_cost = manufacturing_cost
+        order.total_value_exc_vat = total_value_exc_vat
+        order.profit = profit
+        order.save()
+        
+        return JsonResponse({
+            'success': True,
+            'materials_cost': str(materials_cost),
+            'installation_cost': str(installation_cost),
+            'manufacturing_cost': str(manufacturing_cost),
+            'total_value_exc_vat': str(total_value_exc_vat),
+            'profit': str(profit)
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def save_all_order_financials(request, order_id):
+    """Save all financial fields for an order at once"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        from decimal import Decimal
+        data = json.loads(request.body)
+        
+        # Update all financial fields
+        order.total_value_inc_vat = Decimal(str(data.get('total_value_inc_vat', 0)))
+        order.total_value_exc_vat = Decimal(str(data.get('total_value_exc_vat', 0)))
+        order.materials_cost = Decimal(str(data.get('materials_cost', 0)))
+        order.installation_cost = Decimal(str(data.get('installation_cost', 0)))
+        order.manufacturing_cost = Decimal(str(data.get('manufacturing_cost', 0)))
+        order.profit = Decimal(str(data.get('profit', 0)))
+        order.save()
+        
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_customer_info(request, order_id):
+    """Update customer information for an order"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        
+        order.first_name = data.get('first_name', '')
+        order.last_name = data.get('last_name', '')
+        order.anthill_id = data.get('anthill_id', '')
+        order.address = data.get('address', '')
+        order.postcode = data.get('postcode', '')
+        order.save()
+        
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_sale_info(request, order_id):
+    """Update sale information for an order"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        from datetime import datetime
+        data = json.loads(request.body)
+        
+        order.sale_number = data.get('sale_number', '')
+        order.customer_number = data.get('customer_number', '')
+        order.workguru_id = data.get('workguru_id', '')
+        
+        # Handle designer field
+        designer_id = data.get('designer_id')
+        if designer_id:
+            order.designer = Designer.objects.get(id=designer_id)
+        else:
+            order.designer = None
+        
+        # Parse dates
+        if data.get('order_date'):
+            order.order_date = datetime.strptime(data['order_date'], '%Y-%m-%d').date()
+        if data.get('fit_date'):
+            order.fit_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
+        
+        # Update total value inc VAT
+        if data.get('total_value_inc_vat'):
+            order.total_value_inc_vat = Decimal(str(data['total_value_inc_vat']))
+            # Auto-calculate exc VAT
+            order.total_value_exc_vat = order.total_value_inc_vat / Decimal('1.2')
+        
+        order.save()
+        
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_order_type(request, order_id):
+    """Update order type"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        
+        order_type = data.get('order_type', '')
+        if order_type in ['sale', 'remedial', 'warranty']:
+            order.order_type = order_type
+            order.save()
+            return JsonResponse({'success': True})
+        else:
+            return JsonResponse({'success': False, 'error': 'Invalid order type'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_boards_po(request, order_id):
+    """Update boards PO for an order"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        
+        po_id = data.get('boards_po_id', '')
+        if po_id:
+            from .models import BoardsPO
+            boards_po = BoardsPO.objects.get(id=po_id)
+            order.boards_po = boards_po
+        else:
+            order.boards_po = None
+        
+        order.save()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def update_job_checkbox(request, order_id):
+    """Update job checkbox fields (all_items_ordered, job_finished)"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        
+        if 'all_items_ordered' in data:
+            order.all_items_ordered = bool(data['all_items_ordered'])
+        if 'job_finished' in data:
+            order.job_finished = bool(data['job_finished'])
+        
+        order.save()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
@@ -1675,20 +2363,105 @@ def order_details(request, order_id):
         
         messages.info(request, f'Automatically removed {skip_items_removed} items from skip lists.')
     
+    # Calculate total materials cost and save it to the order
+    materials_cost = order.calculate_materials_cost(price_per_sqm)
+    if order.materials_cost != materials_cost:
+        order.materials_cost = materials_cost
+        order.save(update_fields=['materials_cost'])
+    
+    # Calculate materials cost breakdown
+    boards_cost = Decimal('0.00')
+    if order.boards_po:
+        # Only include PNX items for this specific order (filtered by sale_number)
+        order_pnx_items_for_cost = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
+        for pnx_item in order_pnx_items_for_cost:
+            boards_cost += pnx_item.get_cost(price_per_sqm)
+    
+    accessories_cost = Decimal('0.00')
+    for accessory in order.accessories.all():
+        accessories_cost += accessory.cost_price * accessory.quantity
+    
+    os_doors_cost = Decimal('0.00')
+    for os_door in order.os_doors.all():
+        os_doors_cost += os_door.cost_price * os_door.quantity
+    
+    # Get timesheets and expenses for this order
+    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'helper')
+    manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
+    expenses = order.expenses.all().select_related('fitter')
+    
+    # Calculate costs from timesheets with breakdown
+    calculated_installation_cost = order.calculate_installation_cost()
+    calculated_manufacturing_cost = order.calculate_manufacturing_cost()
+    
+    # Calculate installation cost breakdown (fitters vs helpers vs expenses)
+    installation_fitter_cost = sum(
+        ts.total_cost for ts in installation_timesheets if ts.fitter
+    )
+    installation_helper_cost = sum(
+        ts.total_cost for ts in installation_timesheets if ts.helper
+    )
+    
+    # Calculate expenses breakdown by type
+    petrol_cost = sum(exp.amount for exp in expenses.filter(expense_type='petrol'))
+    materials_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='materials'))
+    other_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='other'))
+    
+    # Calculate manufacturing cost breakdown by worker
+    from collections import defaultdict
+    manufacturing_by_worker = defaultdict(Decimal)
+    for ts in manufacturing_timesheets:
+        worker_name = ts.worker_name
+        manufacturing_by_worker[worker_name] += ts.total_cost
+    
+    # Get all available boards POs for the dropdown
+    from .models import BoardsPO
+    from django.db.models import Q, Count
+    
+    # If the current order is finished, show all POs
+    # If not finished, only show POs that have at least one unfinished order or no orders
+    if order.job_finished:
+        available_pos = BoardsPO.objects.all().order_by('-po_number')
+    else:
+        # Get POs that either have no orders or have at least one order that isn't finished
+        available_pos = BoardsPO.objects.annotate(
+            total_orders=Count('orders'),
+            finished_orders=Count('orders', filter=Q(orders__job_finished=True))
+        ).filter(
+            Q(total_orders=0) | Q(total_orders__gt=models.F('finished_orders'))
+        ).order_by('-po_number')
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
         'os_door_form': os_door_form,
         'other_orders': other_orders,
+        'available_pos': available_pos,
         'order_pnx_items': order_pnx_items,
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
         'price_per_sqm': price_per_sqm,
+        'materials_cost': materials_cost,
+        'boards_cost': boards_cost,
+        'accessories_cost': accessories_cost,
+        'os_doors_cost': os_doors_cost,
         'workflow_progress': workflow_progress,
         'workflow_stages': workflow_stages,
         'task_completions': task_completions,
         'phases': phases,
         'stages_by_phase': stages_by_phase,
+        'installation_timesheets': installation_timesheets,
+        'manufacturing_timesheets': manufacturing_timesheets,
+        'expenses': expenses,
+        'calculated_installation_cost': calculated_installation_cost,
+        'calculated_manufacturing_cost': calculated_manufacturing_cost,
+        'installation_fitter_cost': installation_fitter_cost,
+        'installation_helper_cost': installation_helper_cost,
+        'petrol_cost': petrol_cost,
+        'materials_expense_cost': materials_expense_cost,
+        'other_expense_cost': other_expense_cost,
+        'manufacturing_by_worker': dict(manufacturing_by_worker),
+        'designers': Designer.objects.all().order_by('name'),
     })
 
 def completed_stock_takes(request):
@@ -5118,7 +5891,7 @@ def update_order_fit_status(request, order_id):
 
 @login_required
 def generate_and_attach_pnx(request, order_id):
-    """Generate PNX file from CAD number and attach to boards PO"""
+    """Analyze PNX generation and show duplicate detection modal"""
     from material_generator.board_logic import generate_board_order_file
     from django.conf import settings
     import os
@@ -5126,28 +5899,131 @@ def generate_and_attach_pnx(request, order_id):
     order = get_object_or_404(Order, id=order_id)
     
     if not order.customer_number:
-        messages.error(request, 'Order must have a CAD Number to generate PNX.')
-        return redirect('order_details', order_id=order_id)
+        return JsonResponse({'success': False, 'error': 'Order must have a CAD Number to generate PNX.'})
     
     if not order.boards_po:
-        messages.error(request, 'Order must have a Boards PO assigned to attach PNX file.')
-        return redirect('order_details', order_id=order_id)
+        return JsonResponse({'success': False, 'error': 'Order must have a Boards PO assigned to attach PNX file.'})
     
     try:
         # Get database path - look in project root directory (where .env is)
         db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
         
         if not os.path.exists(db_path):
-            messages.error(request, f'CAD database not found at: {db_path}. Please ensure cad_data.db is in the project root directory.')
-            return redirect('order_details', order_id=order_id)
+            return JsonResponse({'success': False, 'error': f'CAD database not found at: {db_path}. Please ensure cad_data.db is in the project root directory.'})
         
         # Generate PNX content using customer number (CAD number)
         pnx_content = generate_board_order_file(order.customer_number, db_path)
         
         if not pnx_content or pnx_content.strip() == '':
-            messages.warning(request, f'No board data found for CAD Number {order.customer_number}.')
-            return redirect('order_details', order_id=order_id)
+            return JsonResponse({'success': False, 'error': f'No board data found for CAD Number {order.customer_number}.'})
         
+        # Parse PNX and analyze for duplicates
+        io_string = io.StringIO(pnx_content)
+        reader = csv.DictReader(io_string, delimiter=';')
+        
+        # Get existing items
+        existing_items = {
+            (item.barcode, item.matname, float(item.cleng), float(item.cwidth)): item
+            for item in order.boards_po.pnx_items.all()
+        }
+        
+        # Collect ALL items from the PNX for review
+        all_items = []
+        
+        for row in reader:
+            # Skip empty rows
+            if not row.get('BARCODE', '').strip():
+                continue
+                
+            try:
+                barcode = row.get('BARCODE', '').strip()
+                matname = row.get('MATNAME', '').strip()
+                cleng = float(row.get('CLENG', '0').strip() or '0')
+                cwidth = float(row.get('CWIDTH', '0').strip() or '0')
+                cnt = float(row.get('CNT', '0').strip() or '0')
+                customer = row.get('CUSTOMER', '').strip()
+                
+                key = (barcode, matname, cleng, cwidth)
+                
+                # Determine status
+                status = 'new'
+                old_qty = 0
+                if key in existing_items:
+                    existing_item = existing_items[key]
+                    old_qty = float(existing_item.cnt)
+                    if old_qty < cnt:
+                        status = 'updated'
+                    else:
+                        status = 'duplicate'
+                
+                all_items.append({
+                    'barcode': barcode,
+                    'matname': matname,
+                    'cleng': cleng,
+                    'cwidth': cwidth,
+                    'dimensions': f"{cleng} x {cwidth}",
+                    'qty': cnt,
+                    'old_qty': old_qty,
+                    'status': status,
+                    'customer': customer
+                })
+                    
+            except (ValueError, KeyError) as e:
+                # Skip rows with invalid data
+                continue
+        
+        # Store the PNX content in session for later use
+        request.session[f'pending_pnx_{order_id}'] = pnx_content
+        request.session.modified = True  # Ensure session is saved
+        
+        return JsonResponse({
+            'success': True,
+            'all_items': all_items,
+            'total_items': len(all_items),
+            'has_existing': len(existing_items) > 0
+        })
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"Error analyzing PNX for order {order_id}: {error_detail}")
+        return JsonResponse({'success': False, 'error': f'Error analyzing PNX: {str(e)}'})
+
+
+@login_required
+def confirm_pnx_generation(request, order_id):
+    """Actually save the PNX items after user confirmation"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    order = get_object_or_404(Order, id=order_id)
+    
+    # Get the pending PNX content from session
+    pnx_content = request.session.get(f'pending_pnx_{order_id}')
+    
+    if not pnx_content:
+        return JsonResponse({'success': False, 'error': 'No pending PNX data found. Please generate PNX again.'})
+    
+    # Get force import barcodes from request body
+    import json
+    force_import_barcodes = []
+    try:
+        body_data = json.loads(request.body.decode('utf-8'))
+        force_import_barcodes = body_data.get('force_import_barcodes', [])
+    except (json.JSONDecodeError, ValueError):
+        pass
+    
+    return confirm_pnx_generation_internal(request, order_id, pnx_content, force_import_barcodes)
+
+
+def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import_barcodes=None):
+    """Internal function to save PNX items - can be called directly or via confirm endpoint"""
+    order = get_object_or_404(Order, id=order_id)
+    
+    if force_import_barcodes is None:
+        force_import_barcodes = []
+    
+    try:
         # Save PNX file to boards PO
         filename = f"Boards_Order_{order.boards_po.po_number}.pnx"
         order.boards_po.file.save(filename, io.BytesIO(pnx_content.encode('utf-8')))
@@ -5156,10 +6032,15 @@ def generate_and_attach_pnx(request, order_id):
         io_string = io.StringIO(pnx_content)
         reader = csv.DictReader(io_string, delimiter=';')
         
-        # Clear existing PNX items for this customer number to avoid duplicates
-        order.boards_po.pnx_items.filter(customer__icontains=order.customer_number).delete()
+        # Get existing items for update detection
+        existing_items = {
+            (item.barcode, item.matname, float(item.cleng), float(item.cwidth)): item
+            for item in order.boards_po.pnx_items.all()
+        }
         
         items_created = 0
+        items_updated = 0
+        
         for row in reader:
             # Skip empty rows
             if not row.get('BARCODE', '').strip():
@@ -5169,44 +6050,123 @@ def generate_and_attach_pnx(request, order_id):
                 customer_field = row.get('CUSTOMER', '').strip()
                 ordername_field = row.get('ORDERNAME', '').strip()
                 
-                # If CUSTOMER is empty, use ORDERNAME instead
-                if not customer_field and ordername_field:
-                    customer_value = ordername_field
-                # If CUSTOMER has value, combine it with ORDERNAME for compatibility
-                elif customer_field and ordername_field:
-                    customer_value = f"{customer_field};{ordername_field}"
-                else:
-                    customer_value = customer_field
+                # Build structured customer value: SITE-DESIGNER-SALENUMBER
+                # Site: default to BFS
+                site = "BFS"
                 
-                PNXItem.objects.create(
-                    boards_po=order.boards_po,
-                    barcode=row.get('BARCODE', '').strip(),
-                    matname=row.get('MATNAME', '').strip(),
-                    cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
-                    cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
-                    cnt=Decimal(row.get('CNT', '0').strip() or '0'),
-                    customer=customer_value
-                )
-                items_created += 1
+                # Designer: get initials from order's designer
+                designer_initials = ""
+                if order.designer:
+                    name_parts = order.designer.name.split()
+                    designer_initials = ''.join([part[0].upper() for part in name_parts if part])
+                
+                # Sale number from order
+                sale_number = order.sale_number
+                
+                # Format: BFS-SD-413491
+                customer_value = f"{site}-{designer_initials}-{sale_number}" if designer_initials else f"{site}-{sale_number}"
+                
+                barcode = row.get('BARCODE', '').strip()
+                matname = row.get('MATNAME', '').strip()
+                cleng = Decimal(row.get('CLENG', '0').strip() or '0')
+                cwidth = Decimal(row.get('CWIDTH', '0').strip() or '0')
+                cnt = Decimal(row.get('CNT', '0').strip() or '0')
+                
+                # Debug logging
+                if items_created == 0 and items_updated == 0:
+                    logger.info(f"First PNX item - customer_value: '{customer_value}', order.sale_number: '{order.sale_number}'")
+                
+                key = (barcode, matname, float(cleng), float(cwidth))
+                
+                # Check if this barcode should be force-imported (user moved it from duplicates)
+                force_import = barcode in force_import_barcodes
+                
+                # Check if item exists and needs updating
+                if key in existing_items:
+                    existing_item = existing_items[key]
+                    # Update if quantity increased OR if force importing
+                    if existing_item.cnt < cnt or force_import:
+                        # Update quantity and customer field
+                        existing_item.cnt = cnt
+                        existing_item.customer = customer_value
+                        existing_item.save()
+                        items_updated += 1
+                    # If it's a duplicate and not force importing, skip it
+                else:
+                    # Create new item
+                    PNXItem.objects.create(
+                        boards_po=order.boards_po,
+                        barcode=barcode,
+                        matname=matname,
+                        cleng=cleng,
+                        cwidth=cwidth,
+                        cnt=cnt,
+                        customer=customer_value
+                    )
+                    items_created += 1
+                    
             except (ValueError, KeyError) as e:
                 # Skip rows with invalid data
                 continue
         
         order.boards_po.save()
         
-        messages.success(request, f'PNX file generated with {items_created} items and attached to {order.boards_po.po_number}.')
+        # Clear the session data if it exists
+        if f'pending_pnx_{order_id}' in request.session:
+            del request.session[f'pending_pnx_{order_id}']
         
-        # Return file as download
-        response = HttpResponse(pnx_content.encode('utf-8'), content_type='text/plain')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
+        logger.info(f"PNX generation complete for order {order_id} - Created: {items_created}, Updated: {items_updated}")
+        logger.info(f"Order sale_number: '{order.sale_number}'")
+        
+        # Check if items can be found with the filter
+        matching_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number).count()
+        logger.info(f"Items matching filter (customer__icontains='{order.sale_number}'): {matching_items}")
+        
+        # Show sample of what customer values actually are
+        sample_items = order.boards_po.pnx_items.all()[:3]
+        for item in sample_items:
+            logger.info(f"Sample PNX item - barcode: {item.barcode}, customer: '{item.customer}'")
+        
+        return JsonResponse({
+            'success': True,
+            'items_created': items_created,
+            'items_updated': items_updated,
+            'po_number': order.boards_po.po_number,
+            'auto_generated': True  # Flag to indicate this was auto-generated
+        })
         
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
-        logger.error(f"Error generating PNX for order {order_id}: {error_detail}")
-        messages.error(request, f'Error generating PNX: {str(e)}')
-        return redirect('order_details', order_id=order_id)
+        logger.error(f"Error confirming PNX for order {order_id}: {error_detail}")
+        return JsonResponse({'success': False, 'error': f'Error saving PNX: {str(e)}'})
+
+
+@login_required
+def delete_pnx_items(request):
+    """Delete multiple PNX items"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+    
+    try:
+        import json
+        data = json.loads(request.body)
+        item_ids = data.get('item_ids', [])
+        
+        if not item_ids:
+            return JsonResponse({'success': False, 'error': 'No items selected for deletion'})
+        
+        # Delete the items
+        deleted_count = PNXItem.objects.filter(id__in=item_ids).delete()[0]
+        
+        return JsonResponse({
+            'success': True,
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting PNX items: {str(e)}")
+        return JsonResponse({'success': False, 'error': f'Error deleting items: {str(e)}'})
 
 
 @login_required
@@ -5270,9 +6230,22 @@ def generate_and_upload_accessories_csv(request, order_id):
             except (ValueError, TypeError, InvalidOperation):
                 return Decimal(default)
         
+        # Helper to safely get string values
+        def safe_str(value):
+            if value is None:
+                return ''
+            return str(value).strip()
+        
+        rows_processed = 0
         for row in reader:
-            sku = row.get('Sku', '').strip()
+            rows_processed += 1
+            sku = safe_str(row.get('Sku', ''))
+            
+            # Log ALL fields from the row to debug
+            logger.info(f"Row {rows_processed} raw data: {dict(row)}")
+            
             if not sku:
+                logger.info(f"Skipping row {rows_processed}: empty SKU")
                 continue
             
             # Check if this is an OS Door requirement indicator
@@ -5281,20 +6254,44 @@ def generate_and_upload_accessories_csv(request, order_id):
                 continue
             
             # Parse billable field early
-            billable_str = row.get('Billable', 'TRUE') or 'TRUE'
-            billable = billable_str.strip().upper() == 'TRUE'
+            billable_str = safe_str(row.get('Billable', '')) or 'TRUE'
+            billable = billable_str.upper() == 'TRUE'
+            
+            # Get initial values from CSV
+            description_value = safe_str(row.get('Description', ''))
+            quantity_value = safe_str(row.get('Quantity', ''))
+            name_value = safe_str(row.get('Name', ''))
+            
+            # Check if this is a MISSING item (quantity in Description, "MISSING" in CostPrice/SellPrice)
+            cost_price_value = safe_str(row.get('CostPrice', ''))
+            is_missing_item = cost_price_value.upper() == 'MISSING'
+            
+            # For MISSING items, quantity is in the Description column
+            if is_missing_item:
+                # The Description column contains the quantity for MISSING items
+                final_quantity = safe_decimal(description_value, '0')
+                final_description = name_value  # Name becomes description for MISSING items
+                logger.info(f"Row {rows_processed}: MISSING item detected (CostPrice=MISSING), qty from Description: {final_quantity}")
+            else:
+                final_quantity = safe_decimal(quantity_value, '0')
+                final_description = description_value
+            
+            # Store the quantity from CSV - we'll use this even after substitution
+            csv_quantity = final_quantity
             
             # Try to find matching stock item
             stock_item = None
-            missing = False
+            missing = is_missing_item  # Start with missing flag if detected from CSV format
             substituted = False
             final_sku = sku
-            final_name = row.get('Name', '').strip()
-            final_description = row.get('Description', '').strip()
-            final_cost_price = safe_decimal(row.get('CostPrice', '0'))
+            final_name = name_value
+            final_cost_price = safe_decimal(cost_price_value, '0') if not is_missing_item else Decimal('0')
             final_sell_price = safe_decimal(row.get('SellPrice', '0'))
-            final_quantity = safe_decimal(row.get('Quantity', '0'))
             final_billable = billable
+            
+            # Count missing items from CSV format
+            if is_missing_item:
+                missing_items += 1
             
             try:
                 stock_item = StockItem.objects.get(sku=sku)
@@ -5304,84 +6301,107 @@ def generate_and_upload_accessories_csv(request, order_id):
                     substitution = Substitution.objects.get(missing_sku=sku)
                     replacement_sku = substitution.replacement_sku
                     if replacement_sku and replacement_sku.strip():
-                        # Apply substitution
-                        final_sku = replacement_sku
-                        final_name = substitution.replacement_name or substitution.missing_name
-                        final_description = substitution.description or substitution.replacement_name or substitution.missing_name
-                        if substitution.cost_price is not None:
+                        # Apply substitution - use the REPLACEMENT SKU
+                        final_sku = replacement_sku.strip()
+                        final_name = substitution.replacement_name or substitution.missing_name or name_value
+                        final_description = substitution.description or final_name
+                        
+                        # Use cost from substitution if available
+                        if substitution.cost_price is not None and substitution.cost_price > 0:
                             final_cost_price = substitution.cost_price
+                        
                         final_sell_price = Decimal('0')  # Always 0 for substitutions
-                        if substitution.quantity is not None and substitution.quantity > 0:
-                            final_quantity = Decimal(str(substitution.quantity))
+                        
+                        # ALWAYS use the quantity from CSV, not from substitution
+                        # (csv_quantity was already extracted correctly for MISSING items)
+                        final_quantity = csv_quantity
+                        
                         final_billable = False  # Always FALSE for substitutions
+                        missing = False  # No longer missing - we have a replacement
+                        substituted = True
                         
                         # Try to find the replacement stock item
                         try:
-                            stock_item = StockItem.objects.get(sku=replacement_sku)
-                            substituted = True
+                            stock_item = StockItem.objects.get(sku=final_sku)
+                            # Use the stock item's cost
+                            if stock_item.cost and stock_item.cost > 0:
+                                final_cost_price = stock_item.cost
                             substitutions_used += 1
+                            logger.info(f"Substitution applied: {sku} -> {final_sku}, qty={final_quantity}, cost={final_cost_price}")
                         except StockItem.DoesNotExist:
                             stock_item = None
-                            substituted = True
+                            # Fall back to substitution cost if no stock item
+                            if substitution.cost_price is not None and substitution.cost_price > 0:
+                                final_cost_price = substitution.cost_price
                             substitutions_used += 1
+                            logger.info(f"Substitution applied but replacement stock item not found: {sku} -> {final_sku}, cost={final_cost_price}")
                     else:
-                        # Substitution exists but no replacement
+                        # Substitution exists but no replacement SKU defined yet
                         missing = True
-                        missing_items += 1
+                        logger.info(f"Substitution exists but no replacement SKU for: {sku}")
                 except Substitution.DoesNotExist:
-                    # Create substitution for manual handling
-                    logger.info(f"Creating substitution for missing SKU: {sku}")
+                    # Create substitution for manual handling - item is missing
+                    logger.info(f"Creating substitution for missing SKU: {sku}, qty={csv_quantity}")
                     Substitution.objects.create(
                         missing_sku=sku,
-                        missing_name=row.get('Name', '').strip() if row.get('Name') else '',
+                        missing_name=name_value,
                         replacement_sku='',
                         replacement_name='',
                         description='Auto-created from CSV generation',
-                        cost_price=final_cost_price,
-                        sell_price=final_sell_price,
-                        quantity=int(final_quantity),
-                        billable=billable
+                        cost_price=Decimal('0'),
+                        sell_price=Decimal('0'),
+                        quantity=int(csv_quantity) if csv_quantity else 0,
+                        billable=False
                     )
                     missing = True
-                    missing_items += 1
                     substitutions_created += 1
             
             # Check if accessory already exists
             existing_accessory = Accessory.objects.filter(order=order, sku=final_sku).first()
             
-            if existing_accessory:
-                # Update existing
-                existing_accessory.name = final_name
-                existing_accessory.description = final_description
-                existing_accessory.cost_price = final_cost_price
-                existing_accessory.sell_price = final_sell_price
-                existing_accessory.quantity = final_quantity
-                existing_accessory.billable = final_billable
-                existing_accessory.stock_item = stock_item
-                existing_accessory.missing = missing
-                existing_accessory.save()
-                accessories_updated += 1
-            else:
-                # Create new
-                Accessory.objects.create(
-                    order=order,
-                    sku=final_sku,
-                    name=final_name,
-                    description=final_description,
-                    cost_price=final_cost_price,
-                    sell_price=final_sell_price,
-                    quantity=final_quantity,
-                    billable=final_billable,
-                    stock_item=stock_item,
-                    missing=missing
-                )
-                accessories_created += 1
+            logger.info(f"Creating/updating accessory: SKU={final_sku}, Name={final_name}, Qty={final_quantity}, Missing={missing}")
+            
+            try:
+                if existing_accessory:
+                    # Update existing
+                    existing_accessory.name = final_name
+                    existing_accessory.description = final_description
+                    existing_accessory.cost_price = final_cost_price
+                    existing_accessory.sell_price = final_sell_price
+                    existing_accessory.quantity = final_quantity
+                    existing_accessory.billable = final_billable
+                    existing_accessory.stock_item = stock_item
+                    existing_accessory.missing = missing
+                    existing_accessory.save()
+                    accessories_updated += 1
+                    logger.info(f"Updated accessory: {final_sku}")
+                else:
+                    # Create new
+                    Accessory.objects.create(
+                        order=order,
+                        sku=final_sku,
+                        name=final_name,
+                        description=final_description,
+                        cost_price=final_cost_price,
+                        sell_price=final_sell_price,
+                        quantity=final_quantity,
+                        billable=final_billable,
+                        stock_item=stock_item,
+                        missing=missing
+                    )
+                    accessories_created += 1
+                    logger.info(f"Created accessory: {final_sku}")
+            except Exception as acc_error:
+                logger.error(f"Error creating/updating accessory {final_sku}: {acc_error}")
+                continue
         
         # Set flag if there are missing items
         if substitutions_created > 0:
             order.csv_has_missing_items = True
         
         order.save()
+        
+        logger.info(f"CSV processing complete: {rows_processed} rows processed, {accessories_created} created, {accessories_updated} updated, {missing_items} missing")
         
         # Count rows (excluding header)
         row_count = csv_content.count('\n') - 1
@@ -5408,4 +6428,183 @@ def generate_and_upload_accessories_csv(request, order_id):
         logger.error(f"Error generating accessories CSV for order {order_id}: {error_detail}")
         messages.error(request, f'Error generating CSV: {str(e)}')
         return redirect('order_details', order_id=order_id)
+
+
+# Timesheet API Views
+@require_http_methods(["GET"])
+def get_fitters(request):
+    """Get all active fitters"""
+    from .models import Fitter
+    fitters = Fitter.objects.filter(active=True).values('id', 'name', 'hourly_rate')
+    return JsonResponse({'fitters': list(fitters)})
+
+
+@require_http_methods(["GET"])
+def get_factory_workers(request):
+    """Get all active factory workers"""
+    from .models import FactoryWorker
+    workers = FactoryWorker.objects.filter(active=True).values('id', 'name', 'hourly_rate')
+    return JsonResponse({'workers': list(workers)})
+
+
+@require_http_methods(["POST"])
+def add_fitter(request):
+    """Add a new fitter"""
+    try:
+        import json
+        from .models import Fitter
+        data = json.loads(request.body)
+        
+        name = data.get('name', '').strip()
+        
+        if not name:
+            return JsonResponse({'success': False, 'error': 'Name is required'})
+        
+        fitter = Fitter.objects.create(
+            name=name,
+            email='',
+            phone='',
+            hourly_rate=0,
+            active=True
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'fitter': {
+                'id': fitter.id,
+                'name': fitter.name
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+def add_factory_worker(request):
+    """Add a new factory worker"""
+    try:
+        import json
+        from .models import FactoryWorker
+        data = json.loads(request.body)
+        
+        name = data.get('name', '').strip()
+        
+        if not name:
+            return JsonResponse({'success': False, 'error': 'Name is required'})
+        
+        worker = FactoryWorker.objects.create(
+            name=name,
+            email='',
+            phone='',
+            hourly_rate=0,
+            active=True
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'worker': {
+                'id': worker.id,
+                'name': worker.name,
+                'hourly_rate': str(worker.hourly_rate)
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+def add_timesheet(request, order_id):
+    """Add a new timesheet for an order"""
+    try:
+        import json
+        from .models import Timesheet, Expense, Fitter, FactoryWorker
+        
+        order = get_object_or_404(Order, id=order_id)
+        data = json.loads(request.body)
+        
+        timesheet_type = data.get('timesheet_type')
+        date = data.get('date')
+        description = data.get('description', '')
+        
+        # Auto-set date to today if not provided
+        if not date:
+            from datetime import date as date_module
+            date = date_module.today()
+        
+        # Create timesheet with different fields based on type
+        timesheet = Timesheet(
+            order=order,
+            timesheet_type=timesheet_type,
+            date=date,
+            description=description
+        )
+        
+        if timesheet_type == 'installation':
+            # Installation uses fixed price
+            fitter_id = data.get('fitter_id')
+            helper_id = data.get('helper_id')
+            price = data.get('price')
+            if fitter_id:
+                timesheet.fitter = Fitter.objects.get(id=fitter_id)
+            if helper_id:
+                timesheet.helper = Fitter.objects.get(id=helper_id)
+            if price:
+                timesheet.price = price
+        else:
+            # Manufacturing uses hours × hourly_rate
+            worker_id = data.get('factory_worker_id')
+            hours = data.get('hours')
+            hourly_rate = data.get('hourly_rate')
+            if worker_id:
+                timesheet.factory_worker = FactoryWorker.objects.get(id=worker_id)
+            if hours:
+                timesheet.hours = hours
+            if hourly_rate:
+                timesheet.hourly_rate = hourly_rate
+        
+        timesheet.save()
+        
+        # Add petrol expense if requested
+        if timesheet_type == 'installation' and data.get('petrol_amount'):
+            # Use the same date as the timesheet
+            if not date:
+                from datetime import date as date_module
+                date = date_module.today()
+            Expense.objects.create(
+                order=order,
+                fitter=timesheet.fitter,
+                expense_type='petrol',
+                date=date,
+                amount=data.get('petrol_amount'),
+                description='Petrol expense'
+            )
+        
+        return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+def delete_timesheet(request, timesheet_id):
+    """Delete a timesheet"""
+    try:
+        from .models import Timesheet
+        timesheet = get_object_or_404(Timesheet, id=timesheet_id)
+        timesheet.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+def delete_expense(request, expense_id):
+    """Delete an expense"""
+    try:
+        from .models import Expense
+        expense = get_object_or_404(Expense, id=expense_id)
+        expense.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 

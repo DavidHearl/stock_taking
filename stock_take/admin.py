@@ -1,10 +1,16 @@
 from django.contrib import admin
 from django.db.models import F, ExpressionWrapper, DecimalField
 from .models import (
-    BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
+    Customer, BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
     Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
-    OrderWorkflowProgress, TaskCompletion
+    OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense
 )
+
+@admin.register(Customer)
+class CustomerAdmin(admin.ModelAdmin):
+    list_display = ['first_name', 'last_name', 'anthill_customer_id', 'postcode']
+    search_fields = ['first_name', 'last_name', 'anthill_customer_id', 'address', 'postcode']
+    list_filter = ['postcode']
 
 @admin.register(BoardsPO)
 class BoardsPOAdmin(admin.ModelAdmin):
@@ -167,3 +173,41 @@ class TaskCompletionAdmin(admin.ModelAdmin):
     list_filter = ['completed', 'completed_at', 'task__stage']
     search_fields = ['order_progress__order__sale_number', 'task__description']
     readonly_fields = ['completed_at']
+
+
+@admin.register(Fitter)
+class FitterAdmin(admin.ModelAdmin):
+    list_display = ['name', 'email', 'phone', 'hourly_rate', 'active']
+    search_fields = ['name', 'email', 'phone']
+    list_filter = ['active']
+    list_editable = ['hourly_rate', 'active']
+
+
+@admin.register(FactoryWorker)
+class FactoryWorkerAdmin(admin.ModelAdmin):
+    list_display = ['name', 'email', 'phone', 'hourly_rate', 'active']
+    search_fields = ['name', 'email', 'phone']
+    list_filter = ['active']
+    list_editable = ['hourly_rate', 'active']
+
+
+@admin.register(Timesheet)
+class TimesheetAdmin(admin.ModelAdmin):
+    list_display = ['order', 'timesheet_type', 'worker_name', 'date', 'hours', 'hourly_rate', 'total_cost']
+    search_fields = ['order__sale_number', 'fitter__name', 'factory_worker__name', 'description']
+    list_filter = ['timesheet_type', 'date', 'fitter', 'factory_worker']
+    readonly_fields = ['total_cost']
+    date_hierarchy = 'date'
+    
+    def total_cost(self, obj):
+        return f"£{obj.total_cost:.2f}"
+    total_cost.short_description = 'Total Cost'
+
+
+@admin.register(Expense)
+class ExpenseAdmin(admin.ModelAdmin):
+    list_display = ['order', 'fitter', 'expense_type', 'date', 'amount', 'description']
+    search_fields = ['order__sale_number', 'fitter__name', 'description']
+    list_filter = ['expense_type', 'date', 'fitter']
+    date_hierarchy = 'date'
+

@@ -2,9 +2,35 @@ from django.db import models
 from django.utils import timezone
 from decimal import Decimal
 
+class Customer(models.Model):
+    """Customer model to store customer information"""
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    anthill_customer_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
+    address = models.CharField(max_length=255, blank=True)
+    postcode = models.CharField(max_length=20, blank=True)
+    
+    def __str__(self):
+        return f"{self.first_name} {self.last_name}"
+    
+    class Meta:
+        ordering = ['last_name', 'first_name']
+
+class Designer(models.Model):
+    """Designer model to store designer information"""
+    name = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+    
+    class Meta:
+        ordering = ['name']
+
 class BoardsPO(models.Model):
     po_number = models.CharField(max_length=50, unique=True)
     file = models.FileField(upload_to='boards_po_files/', blank=True, null=True)
+    csv_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='CSV version of the PNX file')
     boards_ordered = models.BooleanField(default=False)
 
     def __str__(self):
@@ -19,32 +45,48 @@ class BoardsPO(models.Model):
 
 
 class Order(models.Model):
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    # Customer link
+    customer = models.ForeignKey('Customer', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
+    
+    # Legacy customer fields (will be deprecated)
+    first_name = models.CharField(max_length=100, blank=True)
+    last_name = models.CharField(max_length=100, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    postcode = models.CharField(max_length=20, blank=True)
+    anthill_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
+    
+    # Order details
     sale_number = models.CharField(max_length=6)
     customer_number = models.CharField(max_length=6)
     order_date = models.DateField()
     fit_date = models.DateField()
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
     job_finished = models.BooleanField(default=False)
-    address = models.CharField(max_length=255, blank=True)
-    postcode = models.CharField(max_length=20, blank=True)
+    
     ORDER_TYPE_CHOICES = [
         ('sale', 'Sale'),
         ('remedial', 'Remedial'),
         ('warranty', 'Warranty'),
     ]
     order_type = models.CharField(max_length=20, choices=ORDER_TYPE_CHOICES, default='sale')
+    designer = models.ForeignKey('Designer', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders', help_text='Assigned designer')
     os_doors_required = models.BooleanField(default=False, help_text='True if OS Doors are required for this order')
     os_doors_po = models.CharField(max_length=50, blank=True, help_text='PO number when OS Doors are ordered')
     all_items_ordered = models.BooleanField(default=False, help_text='Manual confirmation that all items have been ordered')
-    anthill_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
     workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
     original_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Original uploaded CSV file')
     processed_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Processed CSV with substitutions applied')
     original_csv_uploaded_at = models.DateTimeField(blank=True, null=True, help_text='When the original CSV was uploaded')
     processed_csv_created_at = models.DateTimeField(blank=True, null=True, help_text='When the processed CSV was created')
     csv_has_missing_items = models.BooleanField(default=False, help_text='True if the uploaded CSV has unresolved missing items that need substitution')
+    
+    # Financial fields
+    materials_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Cost of materials')
+    installation_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Cost of installation')
+    manufacturing_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Cost of manufacturing')
+    total_value_inc_vat = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Total value including VAT')
+    total_value_exc_vat = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Total value excluding VAT')
+    profit = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Profit amount')
     
     # Fit completion fields
     interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')
@@ -55,6 +97,27 @@ class Order(models.Model):
 
     def time_allowance(self):
         return (self.fit_date - self.order_date).days
+
+    def calculate_materials_cost(self, price_per_sqm=12):
+        """Calculate total materials cost from boards, accessories, and OS doors"""
+        total_cost = Decimal('0.00')
+        
+        # Add boards cost from PNX items (only for this order's sale number)
+        if self.boards_po:
+            # Filter PNX items by this order's sale_number in the customer field
+            order_pnx_items = self.boards_po.pnx_items.filter(customer__icontains=self.sale_number)
+            for pnx_item in order_pnx_items:
+                total_cost += pnx_item.get_cost(price_per_sqm)
+        
+        # Add accessories cost
+        for accessory in self.accessories.all():
+            total_cost += accessory.cost_price * accessory.quantity
+        
+        # Add OS doors cost
+        for os_door in self.os_doors.all():
+            total_cost += os_door.cost_price * os_door.quantity
+        
+        return total_cost
 
     @property
     def all_materials_ordered(self):
@@ -116,6 +179,24 @@ class Order(models.Model):
     def has_missing_accessories(self):
         """Check if this order has any missing accessories"""
         return self.accessories.filter(missing=True).exists()
+    
+    def calculate_installation_cost(self):
+        """Calculate installation cost from timesheets and expenses"""
+        # Sum all installation timesheets
+        timesheet_cost = sum(
+            ts.total_cost for ts in self.timesheets.filter(timesheet_type='installation')
+        )
+        # Sum all expenses (petrol, materials, other)
+        expense_cost = sum(
+            exp.amount for exp in self.expenses.all()
+        )
+        return timesheet_cost + expense_cost
+    
+    def calculate_manufacturing_cost(self):
+        """Calculate manufacturing cost from timesheets"""
+        return sum(
+            ts.total_cost for ts in self.timesheets.filter(timesheet_type='manufacturing')
+        )
 
 
 class PNXItem(models.Model):
@@ -176,6 +257,7 @@ class OSDoor(models.Model):
     width = models.DecimalField(max_digits=6, decimal_places=2)
     colour = models.CharField(max_length=100)
     quantity = models.PositiveIntegerField()
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Cost price per door')
     ordered = models.BooleanField(default=False)
     received = models.BooleanField(default=False)
     received_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Quantity that has been received')
@@ -651,3 +733,133 @@ class TaskCompletion(models.Model):
     def __str__(self):
         status = '✓' if self.completed else '○'
         return f"{status} {self.order_progress.order.sale_number} - {self.task.description}"
+
+
+class Fitter(models.Model):
+    """Model for installation fitters"""
+    name = models.CharField(max_length=100)
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Hourly rate for this fitter')
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+    
+    class Meta:
+        ordering = ['name']
+
+
+class FactoryWorker(models.Model):
+    """Model for factory/manufacturing workers"""
+    name = models.CharField(max_length=100)
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Hourly rate for this worker')
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+    
+    class Meta:
+        ordering = ['name']
+
+
+class Timesheet(models.Model):
+    """Timesheet entries for both fitters and factory workers"""
+    TIMESHEET_TYPE_CHOICES = [
+        ('installation', 'Installation'),
+        ('manufacturing', 'Manufacturing'),
+    ]
+    
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='timesheets')
+    timesheet_type = models.CharField(max_length=20, choices=TIMESHEET_TYPE_CHOICES)
+    
+    # Worker - use either fitter, factory_worker, or helper (for installation additional party)
+    fitter = models.ForeignKey(Fitter, on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets')
+    factory_worker = models.ForeignKey(FactoryWorker, on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets')
+    helper = models.ForeignKey(Fitter, on_delete=models.SET_NULL, null=True, blank=True, related_name='helper_timesheets', help_text='Additional party for installation')
+    
+    date = models.DateField()
+    
+    # For installation timesheets (fixed price)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Fixed price for installation')
+    
+    # For manufacturing timesheets (hours × rate)
+    hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='Hours worked')
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Rate at time of entry')
+    
+    description = models.TextField(blank=True, help_text='Description of work performed')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    @property
+    def worker_name(self):
+        """Get the worker name regardless of type"""
+        if self.fitter:
+            return self.fitter.name
+        elif self.factory_worker:
+            return self.factory_worker.name
+        elif self.helper:
+            return self.helper.name
+        return 'Unknown'
+    
+    @property
+    def worker_type(self):
+        """Get the worker type"""
+        if self.fitter:
+            return 'fitter'
+        elif self.factory_worker:
+            return 'factory_worker'
+        elif self.helper:
+            return 'helper'
+        return 'unknown'
+    
+    @property
+    def total_cost(self):
+        """Calculate total cost for this timesheet entry"""
+        if self.timesheet_type == 'installation' and self.price:
+            # Installation uses fixed price
+            return self.price
+        elif self.hours and self.hourly_rate:
+            # Manufacturing uses hours × hourly_rate
+            return self.hours * self.hourly_rate
+        return 0
+    
+    def __str__(self):
+        if self.timesheet_type == 'installation':
+            return f"{self.worker_name} - {self.date} (£{self.price})"
+        return f"{self.worker_name} - {self.date} ({self.hours}h)"
+    
+    class Meta:
+        ordering = ['-date', '-created_at']
+
+
+class Expense(models.Model):
+    """Expense entries for fitters (e.g., petrol, materials)"""
+    EXPENSE_TYPE_CHOICES = [
+        ('petrol', 'Petrol'),
+        ('materials', 'Materials'),
+        ('other', 'Other'),
+    ]
+    
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='expenses')
+    fitter = models.ForeignKey(Fitter, on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
+    
+    expense_type = models.CharField(max_length=20, choices=EXPENSE_TYPE_CHOICES, default='petrol')
+    date = models.DateField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2, help_text='Expense amount')
+    description = models.TextField(blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        fitter_name = self.fitter.name if self.fitter else 'Unknown'
+        return f"{fitter_name} - {self.expense_type} - £{self.amount}"
+    
+    class Meta:
+        ordering = ['-date', '-created_at']
