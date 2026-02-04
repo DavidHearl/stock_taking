@@ -1,0 +1,499 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}Costing Report{% endblock %}
+
+{% block nav_costing_report_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/costing_report.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <div class="page-header">
+        <h1><i class="bi bi-calculator"></i> Costing Report</h1>
+        <p class="text-muted">Analysis of job costing for completed orders</p>
+    </div>
+
+    <!-- Summary Statistics Cards -->
+    <div class="costing-stats-overview">
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon green">
+                <i class="bi bi-check-circle"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">{{ stats.fully_costed_count }}</span>
+                <span class="costing-stat-label">Fully Costed</span>
+            </div>
+        </div>
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon amber">
+                <i class="bi bi-clock-history"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">{{ stats.partially_costed_count }}</span>
+                <span class="costing-stat-label">Partially Costed</span>
+            </div>
+        </div>
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon blue">
+                <i class="bi bi-percent"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">{{ stats.costing_completion_rate|floatformat:1 }}%</span>
+                <span class="costing-stat-label">Completion Rate</span>
+            </div>
+        </div>
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon purple">
+                <i class="bi bi-graph-up-arrow"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">{{ stats.avg_profit_margin|floatformat:1 }}%</span>
+                <span class="costing-stat-label">Avg Profit Margin</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cost vs Revenue Breakdown Bars (for fully costed) -->
+    {% if stats.fully_costed_count > 0 %}
+    <div class="cost-breakdown-container">
+        <div class="cost-breakdown-card">
+            <div class="cost-breakdown-header">
+                <h3><i class="bi bi-bar-chart-fill"></i> Average Cost Breakdown per Job</h3>
+            </div>
+            
+            <div class="cost-bar-item">
+                <div class="cost-bar-label">
+                    <span><i class="bi bi-box-seam" style="color: #3b82f6;"></i> Materials</span>
+                    <span>£{{ stats.avg_materials_cost|floatformat:0|intcomma }} ({{ stats.materials_pct_of_revenue|floatformat:1 }}%)</span>
+                </div>
+                <div class="cost-bar-track">
+                    <div class="cost-bar-fill materials" style="width: {{ stats.materials_pct_of_revenue }}%;">
+                        {{ stats.materials_pct_of_revenue|floatformat:0 }}%
+                    </div>
+                </div>
+            </div>
+            
+            <div class="cost-bar-item">
+                <div class="cost-bar-label">
+                    <span><i class="bi bi-tools" style="color: #8b5cf6;"></i> Installation</span>
+                    <span>£{{ stats.avg_installation_cost|floatformat:0|intcomma }} ({{ stats.installation_pct_of_revenue|floatformat:1 }}%)</span>
+                </div>
+                <div class="cost-bar-track">
+                    <div class="cost-bar-fill installation" style="width: {{ stats.installation_pct_of_revenue }}%;">
+                        {{ stats.installation_pct_of_revenue|floatformat:0 }}%
+                    </div>
+                </div>
+            </div>
+            
+            <div class="cost-bar-item">
+                <div class="cost-bar-label">
+                    <span><i class="bi bi-gear" style="color: #6b7280;"></i> Manufacturing</span>
+                    <span>£{{ stats.avg_manufacturing_cost|floatformat:0|intcomma }} ({{ stats.manufacturing_pct_of_revenue|floatformat:1 }}%)</span>
+                </div>
+                <div class="cost-bar-track">
+                    <div class="cost-bar-fill manufacturing" style="width: {{ stats.manufacturing_pct_of_revenue }}%;">
+                        {{ stats.manufacturing_pct_of_revenue|floatformat:0 }}%
+                    </div>
+                </div>
+            </div>
+            
+            <div class="cost-bar-item">
+                <div class="cost-bar-label">
+                    <span><i class="bi bi-graph-up-arrow" style="color: #10b981;"></i> Profit</span>
+                    <span>£{{ stats.avg_profit|floatformat:0|intcomma }} ({{ stats.avg_profit_margin|floatformat:1 }}%)</span>
+                </div>
+                <div class="cost-bar-track">
+                    <div class="cost-bar-fill profit {% if stats.avg_profit < 0 %}negative{% endif %}" style="width: {% if stats.avg_profit_margin > 0 %}{{ stats.avg_profit_margin }}{% else %}5{% endif %}%;">
+                        {{ stats.avg_profit_margin|floatformat:0 }}%
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Stacked Bar showing full breakdown -->
+            <div class="cost-stacked-bar">
+                <h4>Average Revenue Breakdown (100% = £{{ stats.avg_revenue|floatformat:0|intcomma }})</h4>
+                <div class="stacked-bar-track">
+                    <div class="stacked-bar-segment materials" style="width: {{ stats.materials_pct_of_revenue }}%;" title="Materials: {{ stats.materials_pct_of_revenue|floatformat:1 }}%">
+                        {% if stats.materials_pct_of_revenue > 3 %}{{ stats.materials_pct_of_revenue|floatformat:0 }}%{% endif %}
+                    </div>
+                    <div class="stacked-bar-segment installation" style="width: {{ stats.installation_pct_of_revenue }}%;" title="Installation: {{ stats.installation_pct_of_revenue|floatformat:1 }}%">
+                        {% if stats.installation_pct_of_revenue > 3 %}{{ stats.installation_pct_of_revenue|floatformat:0 }}%{% endif %}
+                    </div>
+                    <div class="stacked-bar-segment manufacturing" style="width: {{ stats.manufacturing_pct_of_revenue }}%;" title="Manufacturing: {{ stats.manufacturing_pct_of_revenue|floatformat:1 }}%">
+                        {% if stats.manufacturing_pct_of_revenue > 3 %}{{ stats.manufacturing_pct_of_revenue|floatformat:0 }}%{% endif %}
+                    </div>
+                    {% if stats.avg_profit_margin > 0 %}
+                    <div class="stacked-bar-segment profit" style="width: {{ stats.avg_profit_margin }}%;" title="Profit: {{ stats.avg_profit_margin|floatformat:1 }}%">
+                        {% if stats.avg_profit_margin > 3 %}{{ stats.avg_profit_margin|floatformat:0 }}%{% endif %}
+                    </div>
+                    {% else %}
+                    <div class="stacked-bar-segment loss" style="width: 5%;" title="Loss">
+                        Loss
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="stacked-bar-legend">
+                    <div class="legend-item">
+                        <span class="legend-color materials"></span>
+                        <span>Materials ({{ stats.materials_pct_of_revenue|floatformat:1 }}%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color installation"></span>
+                        <span>Installation ({{ stats.installation_pct_of_revenue|floatformat:1 }}%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color manufacturing"></span>
+                        <span>Manufacturing ({{ stats.manufacturing_pct_of_revenue|floatformat:1 }}%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color profit"></span>
+                        <span>Profit ({{ stats.avg_profit_margin|floatformat:1 }}%)</span>
+                    </div>
+                </div>
+                
+                <h4 style="margin-top: 20px;">Median Revenue Breakdown (100% = £{{ stats.median_revenue|floatformat:0|intcomma }})</h4>
+                <div class="stacked-bar-track">
+                    <div class="stacked-bar-segment materials" style="width: {{ stats.median_materials_pct }}%;" title="Materials: {{ stats.median_materials_pct|floatformat:1 }}%">
+                        {% if stats.median_materials_pct > 3 %}{{ stats.median_materials_pct|floatformat:0 }}%{% endif %}
+                    </div>
+                    <div class="stacked-bar-segment installation" style="width: {{ stats.median_installation_pct }}%;" title="Installation: {{ stats.median_installation_pct|floatformat:1 }}%">
+                        {% if stats.median_installation_pct > 3 %}{{ stats.median_installation_pct|floatformat:0 }}%{% endif %}
+                    </div>
+                    <div class="stacked-bar-segment manufacturing" style="width: {{ stats.median_manufacturing_pct }}%;" title="Manufacturing: {{ stats.median_manufacturing_pct|floatformat:1 }}%">
+                        {% if stats.median_manufacturing_pct > 3 %}{{ stats.median_manufacturing_pct|floatformat:0 }}%{% endif %}
+                    </div>
+                    {% if stats.median_profit_pct > 0 %}
+                    <div class="stacked-bar-segment profit" style="width: {{ stats.median_profit_pct }}%;" title="Profit: {{ stats.median_profit_pct|floatformat:1 }}%">
+                        {% if stats.median_profit_pct > 3 %}{{ stats.median_profit_pct|floatformat:0 }}%{% endif %}
+                    </div>
+                    {% else %}
+                    <div class="stacked-bar-segment loss" style="width: 5%;" title="Loss">
+                        Loss
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="stacked-bar-legend">
+                    <div class="legend-item">
+                        <span class="legend-color materials"></span>
+                        <span>Materials ({{ stats.median_materials_pct|floatformat:1 }}%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color installation"></span>
+                        <span>Installation ({{ stats.median_installation_pct|floatformat:1 }}%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color manufacturing"></span>
+                        <span>Manufacturing ({{ stats.median_manufacturing_pct|floatformat:1 }}%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color profit"></span>
+                        <span>Profit ({{ stats.median_profit_pct|floatformat:1 }}%)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> No fully costed orders yet.
+    </div>
+    {% endif %}
+
+    <!-- Detailed Statistics -->
+    {% if stats.fully_costed_count > 0 %}
+    <div class="costing-analysis-card">
+        <div class="costing-analysis-header">
+            <h3><i class="bi bi-bar-chart-line"></i> Detailed Cost Analysis (Fully Costed Jobs)</h3>
+        </div>
+        <div class="costing-analysis-body">
+            <div class="costing-stats-grid">
+                
+                <!-- Profit Statistics -->
+                <div class="costing-stats-section">
+                    <h4 class="green"><i class="bi bi-currency-pound"></i> Profit Statistics</h4>
+                    <table class="costing-stats-table">
+                        <tr>
+                            <td>Average Profit</td>
+                            <td><strong>£{{ stats.avg_profit|floatformat:0|intcomma }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Median Profit</td>
+                            <td>£{{ stats.median_profit|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Minimum Profit</td>
+                            <td class="{% if stats.min_profit < 0 %}profit-negative{% endif %}">£{{ stats.min_profit|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Maximum Profit</td>
+                            <td>£{{ stats.max_profit|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Total Profit</td>
+                            <td><strong>£{{ stats.total_profit|floatformat:0|intcomma }}</strong></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Cost Breakdown Averages -->
+                <div class="costing-stats-section">
+                    <h4 class="blue"><i class="bi bi-pie-chart"></i> Average Costs</h4>
+                    <table class="costing-stats-table">
+                        <tr>
+                            <td>Materials</td>
+                            <td>£{{ stats.avg_materials_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Installation</td>
+                            <td>£{{ stats.avg_installation_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Manufacturing</td>
+                            <td>£{{ stats.avg_manufacturing_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Total ACost</td>
+                            <td><strong>£{{ stats.avg_total_cost|floatformat:0|intcomma }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Average Revenue</td>
+                            <td>£{{ stats.avg_revenue|floatformat:0|intcomma }}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Median Costs -->
+                <div class="costing-stats-section">
+                    <h4 class="purple"><i class="bi bi-distribute-vertical"></i> Median Costs</h4>
+                    <table class="costing-stats-table">
+                        <tr>
+                            <td>Materials</td>
+                            <td>£{{ stats.median_materials_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Installation</td>
+                            <td>£{{ stats.median_installation_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Manufacturing</td>
+                            <td>£{{ stats.median_manufacturing_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Total Average Cost</td>
+                            <td><strong>£{{ stats.median_total_cost|floatformat:0|intcomma }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Median Margin</td>
+                            <td>{{ stats.median_profit_margin|floatformat:1 }}%</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Totals -->
+                <div class="costing-stats-section">
+                    <h4 class="red"><i class="bi bi-stack"></i> Total Sums</h4>
+                    <table class="costing-stats-table">
+                        <tr>
+                            <td>Total Revenue</td>
+                            <td><strong>£{{ stats.total_revenue|floatformat:0|intcomma }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Total Materials</td>
+                            <td>£{{ stats.total_materials|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Total Installation</td>
+                            <td>£{{ stats.total_installation|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr>
+                            <td>Total Manufacturing</td>
+                            <td>£{{ stats.total_manufacturing|floatformat:0|intcomma }}</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Total Costs</td>
+                            <td><strong>£{{ stats.total_costs|floatformat:0|intcomma }}</strong></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Fully Costed Orders -->
+    <div class="costing-orders-card">
+        <div class="costing-orders-header fully-costed">
+            <h3><i class="bi bi-check-circle-fill green"></i> Fully Costed Orders ({{ fully_costed|length }})</h3>
+        </div>
+        <div class="costing-orders-body">
+            {% if fully_costed %}
+            <div class="costing-table-container">
+                <table class="costing-table" id="fullyCostedTable">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th>Fit Date</th>
+                            <th class="text-end">Revenue</th>
+                            <th class="text-end">Materials</th>
+                            <th class="text-end">Installation</th>
+                            <th class="text-end">Manufacturing</th>
+                            <th class="text-end">Total Cost</th>
+                            <th class="text-end">Profit</th>
+                            <th class="text-end">Margin</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in fully_costed %}
+                        <tr class="costing-row" data-order="{{ item.order.sale_number }}" data-customer="{{ item.order.first_name }} {{ item.order.last_name }}">
+                            <td>
+                                <a href="{% url 'order_details' item.order.id %}">{{ item.order.sale_number }}</a>
+                            </td>
+                            <td>{{ item.order.first_name }} {{ item.order.last_name }}</td>
+                            <td>{{ item.order.fit_date|date:"d/m/Y" }}</td>
+                            <td class="text-end">£{{ item.revenue|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.materials_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.installation_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.manufacturing_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.total_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end {% if item.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">
+                                <strong>£{{ item.profit|floatformat:0|intcomma }}</strong>
+                            </td>
+                            <td class="text-end {% if item.profit_margin < 0 %}profit-negative{% elif item.profit_margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">
+                                {{ item.profit_margin|floatformat:1 }}%
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="costing-empty-state">
+                <i class="bi bi-clipboard-x"></i>
+                <p>No fully costed orders yet.</p>
+                <p>Orders need materials, installation, and manufacturing costs to appear here.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Partially Costed Orders -->
+    <div class="costing-orders-card">
+        <div class="costing-orders-header partially-costed" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <h3><i class="bi bi-exclamation-triangle-fill amber"></i> Partially Costed Orders ({{ partially_costed|length }})</h3>
+            <div class="costing-search-box" style="display: flex; gap: 8px; align-items: center;">
+                <div style="position: relative;">
+                    <i class="bi bi-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.85rem;"></i>
+                    <input type="text" id="costingSearch" placeholder="Search orders..." 
+                           style="width: 200px; padding: 6px 10px 6px 32px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 0.85rem;"
+                           oninput="filterCostingTables()">
+                </div>
+                <button onclick="clearCostingSearch()" class="btn btn-sm" style="padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-secondary);">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div class="costing-orders-body">
+            {% if partially_costed %}
+            <div class="costing-table-container">
+                <table class="costing-table" id="partiallyCostedTable">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th class="text-center">Revenue</th>
+                            <th class="text-center">Materials</th>
+                            <th class="text-center">Installation</th>
+                            <th class="text-center">Manufacturing</th>
+                            <th class="text-end">Current Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in partially_costed %}
+                        <tr class="costing-row" data-order="{{ item.order.sale_number }}" data-customer="{{ item.order.first_name }} {{ item.order.last_name }}">
+                            <td>
+                                <a href="{% url 'order_details' item.order.id %}">{{ item.order.sale_number }}</a>
+                            </td>
+                            <td>{{ item.order.first_name }} {{ item.order.last_name }}</td>
+                            <td class="text-center">
+                                {% if item.revenue > 0 %}
+                                <span class="costing-badge success"><i class="bi bi-check"></i> £{{ item.revenue|floatformat:0 }}</span>
+                                {% else %}
+                                <span class="costing-badge danger"><i class="bi bi-x"></i></span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if item.has_materials %}
+                                <span class="costing-badge success"><i class="bi bi-check"></i> £{{ item.materials_cost|floatformat:0 }}</span>
+                                {% else %}
+                                <span class="costing-badge danger"><i class="bi bi-x"></i></span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if item.has_installation %}
+                                <span class="costing-badge success"><i class="bi bi-check"></i> £{{ item.installation_cost|floatformat:0 }}</span>
+                                {% else %}
+                                <span class="costing-badge danger"><i class="bi bi-x"></i></span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if item.has_manufacturing %}
+                                <span class="costing-badge success"><i class="bi bi-check"></i> £{{ item.manufacturing_cost|floatformat:0 }}</span>
+                                {% else %}
+                                <span class="costing-badge danger"><i class="bi bi-x"></i></span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">£{{ item.total_cost|floatformat:0|intcomma }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="costing-empty-state">
+                <i class="bi bi-check-all" style="color: #10b981;"></i>
+                <p>All completed orders are fully costed!</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function filterCostingTables() {
+    const searchTerm = document.getElementById('costingSearch').value.toLowerCase().trim();
+    
+    // Filter both tables
+    const tables = ['fullyCostedTable', 'partiallyCostedTable'];
+    
+    tables.forEach(tableId => {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        
+        const rows = table.querySelectorAll('tbody tr.costing-row');
+        let visibleCount = 0;
+        
+        rows.forEach(row => {
+            const orderNum = (row.dataset.order || '').toLowerCase();
+            const customer = (row.dataset.customer || '').toLowerCase();
+            
+            if (searchTerm === '' || orderNum.includes(searchTerm) || customer.includes(searchTerm)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    });
+}
+
+function clearCostingSearch() {
+    document.getElementById('costingSearch').value = '';
+    filterCostingTables();
+}
+</script>
+{% endblock %}

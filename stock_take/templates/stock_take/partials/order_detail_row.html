@@ -20,8 +20,14 @@
                 <tr>
                     <th>Barcode</th>
                     <th>Material</th>
-                    <th>Dimensions</th>
+                    <th>Length</th>
+                    <th>Width</th>
                     <th>Count</th>
+                    <th style="text-align: center;" title="PRFID1">E1</th>
+                    <th style="text-align: center;" title="PRFID3">E3</th>
+                    <th style="text-align: center;" title="PRFID4">E4</th>
+                    <th style="text-align: center;" title="PRFID2">E2</th>
+                    <th>Part</th>
                     <th>Cost</th>
                     <th>Received</th>
                 </tr>
@@ -31,8 +37,14 @@
                 <tr>
                     <td>{{ item.barcode }}</td>
                     <td>{{ item.matname }}</td>
-                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
+                    <td>{{ item.cleng|floatformat:1 }}</td>
+                    <td>{{ item.cwidth|floatformat:1 }}</td>
                     <td>{{ item.cnt|floatformat:0 }}</td>
+                    <td style="text-align: center;">{% if item.prfid1 %}<span style="color: #28a745; font-size: 0.9em;">✓</span>{% endif %}</td>
+                    <td style="text-align: center;">{% if item.prfid3 %}<span style="color: #28a745; font-size: 0.9em;">✓</span>{% endif %}</td>
+                    <td style="text-align: center;">{% if item.prfid4 %}<span style="color: #28a745; font-size: 0.9em;">✓</span>{% endif %}</td>
+                    <td style="text-align: center;">{% if item.prfid2 %}<span style="color: #28a745; font-size: 0.9em;">✓</span>{% endif %}</td>
+                    <td>{{ item.partdesc|default:"—" }}</td>
                     <td>£{{ item.calculated_cost|floatformat:2 }}</td>
                     <td>
                         {% if item.is_fully_received %}
@@ -46,7 +58,7 @@
                 </tr>
                 {% endfor %}
                 <tr class="total-row">
-                    <td colspan="5"><strong>Total Cost:</strong></td>
+                    <td colspan="11"><strong>Total Cost:</strong></td>
                     <td><strong>£{{ order.pnx_total_cost|floatformat:2 }}</strong></td>
                 </tr>
             </tbody>
@@ -102,10 +114,10 @@
     </div>
     {% endif %}
     
-    {% if order.accessories.all %}
+    {% if glass_items %}
     {% load custom_filters %}
     <div class="detail-section">
-        <h4>Accessories ({{ order.accessories.count }} items)</h4>
+        <h4>Glass ({{ glass_items|length }} items)</h4>
         <table class="table detail-table">
             <thead>
                 <tr>
@@ -117,10 +129,67 @@
                 </tr>
             </thead>
             <tbody>
-                {% for accessory in order.accessories.all %}
+                {% for glass in glass_items %}
+                <tr>
+                    <td>{{ glass.sku }}</td>
+                    <td>{{ glass.name|truncatechars:30 }}</td>
+                    <td>{{ glass.quantity|floatformat:0 }}</td>
+                    <td>
+                        {% if glass.stock_item %}
+                            {% with remaining=glass|calculate_remaining %}
+                                <div style="font-size: 0.85em;">
+                                    <div>Stock: {{ glass.available_quantity|floatformat:0 }}</div>
+                                    <div>Allocated: {{ glass.allocated_quantity|floatformat:0 }}</div>
+                                    <div style="font-weight: bold; {% if remaining < 0 %}color: #dc3545;{% else %}color: #28a745;{% endif %}">
+                                        Remaining: {{ remaining|floatformat:0 }}
+                                    </div>
+                                </div>
+                            {% endwith %}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if glass.missing %}
+                            <span class="badge badge-warning">Missing</span>
+                        {% elif glass.stock_item %}
+                            {% with remaining=glass|calculate_remaining %}
+                                {% if remaining >= 0 %}
+                                    <span class="badge badge-success">In Stock</span>
+                                {% else %}
+                                    <span class="badge badge-danger">Out of Stock</span>
+                                {% endif %}
+                            {% endwith %}
+                        {% else %}
+                            <span class="badge badge-info">No Stock Link</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if non_glass_accessories %}
+    {% load custom_filters %}
+    <div class="detail-section">
+        <h4>Accessories ({{ non_glass_accessories|length }} items)</h4>
+        <table class="table detail-table">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Name</th>
+                    <th>Qty</th>
+                    <th>Stock/Allocated/Remaining</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for accessory in non_glass_accessories %}
                 <tr>
                     <td>{{ accessory.sku }}</td>
-                    <td>{{ accessory.name|truncatechars:20 }}</td>
+                    <td>{{ accessory.name|truncatechars:30 }}</td>
                     <td>{{ accessory.quantity|floatformat:0 }}</td>
                     <td>
                         {% if accessory.stock_item %}

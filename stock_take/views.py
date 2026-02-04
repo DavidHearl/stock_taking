@@ -243,10 +243,17 @@ def load_order_details_ajax(request, sale_number):
             order.order_pnx_items = []
             order.pnx_total_cost = 0
         
+        # Separate glass items from accessories
+        all_accessories = order.accessories.all()
+        glass_items = [acc for acc in all_accessories if acc.sku.upper().startswith('GLS')]
+        non_glass_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS')]
+        
         # Render the detail row HTML
         html = render_to_string('stock_take/partials/order_detail_row.html', {
             'order': order,
-            'price_per_sqm': price_per_sqm
+            'price_per_sqm': price_per_sqm,
+            'glass_items': glass_items,
+            'non_glass_accessories': non_glass_accessories,
         })
         
         return JsonResponse({'success': True, 'html': html})
@@ -1376,7 +1383,20 @@ def create_boards_po(request):
     if request.method == 'POST':
         form = BoardsPOForm(request.POST, request.FILES)
         if form.is_valid():
-            boards_po = form.save()
+            boards_po = form.save(commit=False)
+            # Always set boards_ordered to False on creation - user will tick when ordered
+            boards_po.boards_ordered = False
+            boards_po.save()
+            
+            # If order_id is provided, associate the new BoardsPO with the order
+            order_id = request.POST.get('order_id')
+            if order_id:
+                try:
+                    order = Order.objects.get(id=order_id)
+                    order.boards_po = boards_po
+                    order.save()
+                except Order.DoesNotExist:
+                    pass
             
             # Parse PNX file if uploaded
             if boards_po.file:
@@ -1415,7 +1435,16 @@ def create_boards_po(request):
                                 cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
                                 cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
                                 cnt=Decimal(row.get('CNT', '0').strip() or '0'),
-                                customer=customer_value
+                                customer=customer_value,
+                                # Additional PNX fields
+                                grain=row.get('GRAIN', '').strip(),
+                                articlename=row.get('ARTICLENAME', '').strip(),
+                                partdesc=row.get('PARTDESC', '').strip(),
+                                prfid1=row.get('PRFID1', '').strip(),
+                                prfid2=row.get('PRFID2', '').strip(),
+                                prfid3=row.get('PRFID3', '').strip(),
+                                prfid4=row.get('PRFID4', '').strip(),
+                                ordername=ordername_field
                             )
                             items_created += 1
                         except (ValueError, KeyError) as e:
@@ -1432,6 +1461,73 @@ def create_boards_po(request):
         else:
             messages.error(request, 'Error creating Boards PO. Please check the form.')
     return redirect('ordering')
+
+
+@login_required
+def reimport_pnx(request, boards_po_id):
+    """Re-import PNX file to refresh all item data"""
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    
+    if not boards_po.file:
+        messages.error(request, 'No PNX file available to re-import.')
+        return redirect(request.META.get('HTTP_REFERER', 'ordering'))
+    
+    try:
+        # Delete existing PNX items
+        deleted_count = boards_po.pnx_items.count()
+        boards_po.pnx_items.all().delete()
+        
+        # Re-read and parse the PNX file
+        boards_po.file.seek(0)
+        file_content = boards_po.file.read().decode('utf-8')
+        io_string = io.StringIO(file_content)
+        reader = csv.DictReader(io_string, delimiter=';')
+        
+        items_created = 0
+        for row in reader:
+            # Skip empty rows
+            if not row.get('BARCODE', '').strip():
+                continue
+                
+            try:
+                # Handle both old and new PNX formats
+                customer_field = row.get('CUSTOMER', '').strip()
+                ordername_field = row.get('ORDERNAME', '').strip()
+                
+                if not customer_field and ordername_field:
+                    customer_value = ordername_field
+                elif customer_field and ordername_field:
+                    customer_value = f"{customer_field};{ordername_field}"
+                else:
+                    customer_value = customer_field
+                
+                PNXItem.objects.create(
+                    boards_po=boards_po,
+                    barcode=row.get('BARCODE', '').strip(),
+                    matname=row.get('MATNAME', '').strip(),
+                    cleng=Decimal(row.get('CLENG', '0').strip() or '0'),
+                    cwidth=Decimal(row.get('CWIDTH', '0').strip() or '0'),
+                    cnt=Decimal(row.get('CNT', '0').strip() or '0'),
+                    customer=customer_value,
+                    grain=row.get('GRAIN', '').strip(),
+                    articlename=row.get('ARTICLENAME', '').strip(),
+                    partdesc=row.get('PARTDESC', '').strip(),
+                    prfid1=row.get('PRFID1', '').strip(),
+                    prfid2=row.get('PRFID2', '').strip(),
+                    prfid3=row.get('PRFID3', '').strip(),
+                    prfid4=row.get('PRFID4', '').strip(),
+                    ordername=ordername_field
+                )
+                items_created += 1
+            except (ValueError, KeyError) as e:
+                continue
+        
+        messages.success(request, f'Re-imported {items_created} items (deleted {deleted_count} old items).')
+    except Exception as e:
+        messages.error(request, f'Error re-importing PNX file: {str(e)}')
+    
+    return redirect(request.META.get('HTTP_REFERER', 'ordering'))
+
 
 @login_required
 def update_boards_ordered(request, boards_po_id):
@@ -1471,6 +1567,264 @@ def update_po_number(request, boards_po_id):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def update_pnx_item(request, pnx_item_id):
+    """Update PNX item dimensions/count and regenerate PNX/CSV files"""
+    if request.method == 'POST':
+        import json
+        try:
+            pnx_item = get_object_or_404(PNXItem, id=pnx_item_id)
+            data = json.loads(request.body)
+            
+            # Update the specified field
+            field = data.get('field')
+            value = data.get('value')
+            
+            if field not in ['cleng', 'cwidth', 'cnt']:
+                return JsonResponse({'success': False, 'error': 'Invalid field'})
+            
+            # Update the field
+            setattr(pnx_item, field, Decimal(str(value)))
+            pnx_item.save()
+            
+            # Regenerate PNX and CSV files for the boards PO
+            boards_po = pnx_item.boards_po
+            if boards_po:
+                regenerate_pnx_csv_files(boards_po)
+            
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def update_pnx_dimensions(request):
+    """Batch update PNX item dimensions/count/edging and regenerate PNX/CSV files"""
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+            changes = data.get('changes', [])
+            boards_po_id = data.get('boards_po_id')
+            
+            if not changes:
+                return JsonResponse({'success': False, 'error': 'No changes provided'})
+            
+            # Update all changed items
+            for change in changes:
+                pnx_id = change.get('pnxId')
+                field = change.get('field')
+                value = change.get('value')
+                
+                # Handle dimension fields (numeric)
+                if field in ['cleng', 'cwidth', 'cnt']:
+                    pnx_item = PNXItem.objects.filter(id=pnx_id).first()
+                    if pnx_item:
+                        setattr(pnx_item, field, Decimal(str(value)))
+                        pnx_item.save()
+                # Handle edging fields (string)
+                elif field in ['prfid1', 'prfid2', 'prfid3', 'prfid4']:
+                    pnx_item = PNXItem.objects.filter(id=pnx_id).first()
+                    if pnx_item:
+                        setattr(pnx_item, field, value)
+                        pnx_item.save()
+            
+            # Regenerate PNX and CSV files
+            if boards_po_id:
+                boards_po = BoardsPO.objects.filter(id=boards_po_id).first()
+                if boards_po:
+                    regenerate_pnx_csv_files(boards_po)
+            
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def add_board_item(request):
+    """Add a new board item to a Boards PO and regenerate files"""
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+            boards_po_id = data.get('boards_po_id')
+            
+            if not boards_po_id:
+                return JsonResponse({'success': False, 'error': 'No Boards PO specified'})
+            
+            boards_po = BoardsPO.objects.filter(id=boards_po_id).first()
+            if not boards_po:
+                return JsonResponse({'success': False, 'error': 'Boards PO not found'})
+            
+            # Get the linked order (reverse relation - boards_po has many orders)
+            linked_order = boards_po.orders.first()
+            
+            # Get designer initials from the linked order's designer
+            designer_initials = ''
+            if linked_order and linked_order.designer:
+                # Get initials from designer name (e.g., "John Smith" -> "JS")
+                name_parts = linked_order.designer.name.split()
+                designer_initials = ''.join([part[0].upper() for part in name_parts if part])
+            
+            # Create the new PNX item
+            pnx_item = PNXItem.objects.create(
+                boards_po=boards_po,
+                barcode=data.get('barcode', ''),
+                matname=data.get('matname', ''),
+                cleng=Decimal(str(data.get('cleng', 0))),
+                cwidth=Decimal(str(data.get('cwidth', 0))),
+                cnt=Decimal(str(data.get('cnt', 1))),
+                grain=data.get('grain', ''),
+                partdesc=data.get('partdesc', ''),
+                prfid1=data.get('prfid1', ''),
+                prfid2=data.get('prfid2', ''),
+                prfid3=data.get('prfid3', ''),
+                prfid4=data.get('prfid4', ''),
+                # Set customer based on linked order
+                customer=f"BFS-{designer_initials}-{linked_order.sale_number}" if linked_order else '',
+                ordername=linked_order.sale_number if linked_order else '',
+            )
+            
+            # Regenerate PNX and CSV files
+            regenerate_pnx_csv_files(boards_po)
+            
+            return JsonResponse({'success': True, 'item_id': pnx_item.id})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def reimport_pnx(request, boards_po_id):
+    """Delete all PNX items and re-import from the PNX file"""
+    if request.method == 'POST':
+        try:
+            boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+            
+            if not boards_po.file:
+                return JsonResponse({'success': False, 'error': 'No PNX file found'})
+            
+            # Delete all existing items
+            boards_po.pnx_items.all().delete()
+            
+            # Re-import from file
+            boards_po.file.seek(0)
+            content = boards_po.file.read().decode('utf-8')
+            reader = csv.DictReader(io.StringIO(content), delimiter=';')
+            
+            count = 0
+            for row in reader:
+                barcode = row.get('BARCODE', '').strip()
+                if not barcode:
+                    continue
+                
+                customer_field = row.get('CUSTOMER', '').strip()
+                ordername_field = row.get('ORDERNAME', '').strip()
+                customer_value = ordername_field if not customer_field and ordername_field else customer_field
+                
+                PNXItem.objects.create(
+                    boards_po=boards_po,
+                    barcode=barcode,
+                    matname=row.get('MATNAME', '').strip(),
+                    cleng=Decimal(str(row.get('CLENG', '0').strip() or '0')),
+                    cwidth=Decimal(str(row.get('CWIDTH', '0').strip() or '0')),
+                    cnt=Decimal(str(row.get('CNT', '0').strip() or '0')),
+                    customer=customer_value,
+                    grain=row.get('GRAIN', '').strip(),
+                    articlename=row.get('ARTICLENAME', '').strip(),
+                    partdesc=row.get('PARTDESC', '').strip(),
+                    prfid1=row.get('PRFID1', '').strip(),
+                    prfid2=row.get('PRFID2', '').strip(),
+                    prfid3=row.get('PRFID3', '').strip(),
+                    prfid4=row.get('PRFID4', '').strip(),
+                    ordername=ordername_field
+                )
+                count += 1
+            
+            return JsonResponse({'success': True, 'count': count})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+def regenerate_pnx_csv_files(boards_po):
+    """Regenerate both PNX and CSV files from current PNX items"""
+    import os
+    from django.conf import settings
+    
+    # Get all PNX items for this boards PO
+    pnx_items = boards_po.pnx_items.all().order_by('barcode')
+    
+    if not pnx_items.exists():
+        return
+    
+    # Generate PNX content (semicolon-delimited)
+    pnx_output = io.StringIO()
+    pnx_header = ['SPARE', 'BARCODE', 'MATNAME', 'CLENG', 'CWIDTH', 'CNT', 'OVERS', 'UNDERS', 'GRAIN', 
+                  'QUICKEDGE0', 'CUSTOMER', 'ORDERNAME', 'ARTICLENAME', 'PARTDESC', 'PRFID1', 'PRFID3', 
+                  'PRFID4', 'PRFID2']
+    pnx_output.write(';'.join(pnx_header) + '\n')
+    
+    for item in pnx_items:
+        row = [
+            '',  # SPARE
+            item.barcode,
+            item.matname,
+            str(item.cleng),
+            str(item.cwidth),
+            str(item.cnt),
+            '',  # OVERS
+            '',  # UNDERS
+            item.grain,
+            '',  # QUICKEDGE0
+            item.customer,
+            item.ordername,
+            item.articlename,
+            item.partdesc,
+            item.prfid1,
+            item.prfid3,
+            item.prfid4,
+            item.prfid2,
+        ]
+        pnx_output.write(';'.join(row) + '\n')
+    
+    # Write directly to existing PNX file path (overwrite, don't create new)
+    if boards_po.file:
+        pnx_path = boards_po.file.path
+        with open(pnx_path, 'w', encoding='utf-8') as f:
+            f.write(pnx_output.getvalue())
+    
+    # Generate CSV content (comma-delimited) - exact header order as specified
+    csv_output = io.StringIO()
+    csv_writer = csv.writer(csv_output)
+    csv_writer.writerow(['BARCODE', 'MATNAME', 'CLENG', 'CWIDTH', 'CNT', 'GRAIN', 'CUSTOMER', 
+                         'ORDERNAME', 'ARTICLENAME', 'PARTDESC', 'PRFID1', 'PRFID3', 'PRFID4', 'PRFID2'])
+    
+    for item in pnx_items:
+        csv_writer.writerow([
+            item.barcode,
+            item.matname,
+            str(item.cleng),
+            str(item.cwidth),
+            str(item.cnt),
+            item.grain,
+            item.customer,
+            item.ordername,
+            item.articlename,
+            item.partdesc,
+            item.prfid1,
+            item.prfid3,
+            item.prfid4,
+            item.prfid2,
+        ])
+    
+    # Write directly to existing CSV file path (overwrite, don't create new)
+    if boards_po.csv_file:
+        csv_path = boards_po.csv_file.path
+        with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(csv_output.getvalue())
+
 
 @login_required
 def update_pnx_received(request, pnx_item_id):
@@ -1531,7 +1885,7 @@ def update_pnx_batch(request):
 
 @login_required
 def update_os_doors_batch(request):
-    """Update the received status for multiple OS Doors"""
+    """Update the received status and cost price for multiple OS Doors"""
     if request.method == 'POST':
         import json
         try:
@@ -1539,17 +1893,27 @@ def update_os_doors_batch(request):
             changes = data.get('changes', {})
             
             # Update all OS Doors in batch
-            for os_door_id, value in changes.items():
+            for os_door_id, updates in changes.items():
                 try:
                     os_door = OSDoor.objects.get(id=int(os_door_id))
                     
-                    # Handle both boolean and quantity values
-                    if isinstance(value, bool):
+                    # Handle dictionary of updates (new format)
+                    if isinstance(updates, dict):
+                        # Update cost price if provided
+                        if 'cost_price' in updates:
+                            os_door.cost_price = Decimal(str(updates['cost_price']))
+                        
+                        # Update received quantity if provided
+                        if 'received_quantity' in updates:
+                            received_quantity = Decimal(str(updates['received_quantity']))
+                            os_door.received_quantity = received_quantity
+                    # Handle legacy boolean/quantity values
+                    elif isinstance(updates, bool):
                         # Boolean update - set to full quantity if received, 0 if not
-                        os_door.received_quantity = os_door.quantity if value else 0
+                        os_door.received_quantity = os_door.quantity if updates else 0
                     else:
                         # Quantity update
-                        received_quantity = Decimal(str(value))
+                        received_quantity = Decimal(str(updates))
                         os_door.received_quantity = received_quantity
                     
                     os_door.save()
@@ -2082,6 +2446,7 @@ def save_all_order_financials(request, order_id):
         order.installation_cost = Decimal(str(data.get('installation_cost', 0)))
         order.manufacturing_cost = Decimal(str(data.get('manufacturing_cost', 0)))
         order.profit = Decimal(str(data.get('profit', 0)))
+        order.fully_costed = data.get('fully_costed', False)
         order.save()
         
         return JsonResponse({'success': True})
@@ -2313,6 +2678,21 @@ def order_details(request, order_id):
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
     
+    # Separate glass items (SKU starts with GLS) from other accessories
+    glass_items_qs = order.accessories.filter(sku__istartswith='GLS')
+    non_glass_accessories_qs = order.accessories.exclude(sku__istartswith='GLS')
+    
+    # Convert to lists and sort by out-of-stock status
+    # Out of stock = remaining (available - allocated) < 0
+    glass_items = sorted(
+        list(glass_items_qs),
+        key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
+    )
+    non_glass_accessories = sorted(
+        list(non_glass_accessories_qs),
+        key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
+    )
+    
     # Automatically remove items that are in skip lists
     skip_items_removed = 0
     
@@ -2440,6 +2820,8 @@ def order_details(request, order_id):
         'order_pnx_items': order_pnx_items,
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
+        'glass_items': glass_items,
+        'non_glass_accessories': non_glass_accessories,
         'price_per_sqm': price_per_sqm,
         'materials_cost': materials_cost,
         'boards_cost': boards_cost,
@@ -4695,31 +5077,44 @@ def download_pnx_as_csv(request, order_id):
         messages.error(request, 'No PNX file available for this order.')
         return redirect('order_details', order_id=order_id)
     
-    # Get PNX items for this order
-    pnx_items = order.boards_po.pnx_items.filter(customer=order.customer_number).order_by('barcode')
+    # Get PNX items for this order - use sale_number with icontains to match how order_details does it
+    pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number).order_by('barcode')
     
     if not pnx_items.exists():
         messages.error(request, 'No PNX items found for this order.')
         return redirect('order_details', order_id=order_id)
     
+    # Build CUSTOMER field: BFS-<designer_initials>-<sale_number>
+    designer_initials = ''
+    if order.designer and order.designer.name:
+        # Get initials from designer name (e.g., "John Smith" -> "JS")
+        designer_initials = ''.join(word[0].upper() for word in order.designer.name.split() if word)
+    customer_value = f"BFS-{designer_initials}-{order.sale_number}"
+    
     # Create CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Write header
-    writer.writerow(['Barcode', 'Material Name', 'Customer', 'Quantity', 'Height', 'Width', 'Edging', 'Received'])
+    # Write header - exact order as specified
+    writer.writerow(['BARCODE', 'MATNAME', 'CLENG', 'CWIDTH', 'CNT', 'GRAIN', 'CUSTOMER', 'ORDERNAME', 'ARTICLENAME', 'PARTDESC', 'PRFID1', 'PRFID3', 'PRFID4', 'PRFID2'])
     
-    # Write PNX item data
+    # Write PNX item data in matching order
     for item in pnx_items:
         writer.writerow([
             item.barcode,
             item.matname,
-            item.customer,
-            item.quantity,
-            item.height,
-            item.width,
-            item.edging or '',
-            item.received_quantity
+            item.cleng,
+            item.cwidth,
+            item.cnt,
+            item.grain,
+            customer_value,
+            item.ordername,
+            item.articlename,
+            item.partdesc,
+            item.prfid1,
+            item.prfid3,
+            item.prfid4,
+            item.prfid2,
         ])
     
     # Get CSV content
@@ -4728,7 +5123,7 @@ def download_pnx_as_csv(request, order_id):
     
     # Create response
     response = HttpResponse(csv_content, content_type='text/csv')
-    filename = f"{order.boards_po.po_number}_{order.customer_number}_PNX_Items.csv"
+    filename = f"{order.boards_po.po_number}_{order.sale_number}_PNX_Items.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     
     return response
@@ -6086,9 +6481,17 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                     existing_item = existing_items[key]
                     # Update if quantity increased OR if force importing
                     if existing_item.cnt < cnt or force_import:
-                        # Update quantity and customer field
+                        # Update quantity, customer field, and edging fields
                         existing_item.cnt = cnt
                         existing_item.customer = customer_value
+                        existing_item.grain = row.get('GRAIN', '').strip()
+                        existing_item.articlename = row.get('ARTICLENAME', '').strip()
+                        existing_item.partdesc = row.get('PARTDESC', '').strip()
+                        existing_item.prfid1 = row.get('PRFID1', '').strip()
+                        existing_item.prfid2 = row.get('PRFID2', '').strip()
+                        existing_item.prfid3 = row.get('PRFID3', '').strip()
+                        existing_item.prfid4 = row.get('PRFID4', '').strip()
+                        existing_item.ordername = row.get('ORDERNAME', '').strip()
                         existing_item.save()
                         items_updated += 1
                     # If it's a duplicate and not force importing, skip it
@@ -6101,7 +6504,15 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                         cleng=cleng,
                         cwidth=cwidth,
                         cnt=cnt,
-                        customer=customer_value
+                        customer=customer_value,
+                        grain=row.get('GRAIN', '').strip(),
+                        articlename=row.get('ARTICLENAME', '').strip(),
+                        partdesc=row.get('PARTDESC', '').strip(),
+                        prfid1=row.get('PRFID1', '').strip(),
+                        prfid2=row.get('PRFID2', '').strip(),
+                        prfid3=row.get('PRFID3', '').strip(),
+                        prfid4=row.get('PRFID4', '').strip(),
+                        ordername=row.get('ORDERNAME', '').strip()
                     )
                     items_created += 1
                     
@@ -6110,6 +6521,50 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 continue
         
         order.boards_po.save()
+        
+        # Generate and save CSV file alongside PNX
+        try:
+            csv_output = io.StringIO()
+            csv_writer = csv.writer(csv_output)
+            
+            # Write header - exact order as specified
+            csv_writer.writerow(['BARCODE', 'MATNAME', 'CLENG', 'CWIDTH', 'CNT', 'GRAIN', 'CUSTOMER', 'ORDERNAME', 'ARTICLENAME', 'PARTDESC', 'PRFID1', 'PRFID3', 'PRFID4', 'PRFID2'])
+            
+            # Build CUSTOMER field for CSV
+            designer_initials = ''
+            if order.designer and order.designer.name:
+                designer_initials = ''.join(word[0].upper() for word in order.designer.name.split() if word)
+            csv_customer_value = f"BFS-{designer_initials}-{order.sale_number}"
+            
+            # Re-parse PNX for CSV generation (to include all fields)
+            io_string_csv = io.StringIO(pnx_content)
+            reader_csv = csv.DictReader(io_string_csv, delimiter=';')
+            
+            for row in reader_csv:
+                if not row.get('BARCODE', '').strip():
+                    continue
+                csv_writer.writerow([
+                    row.get('BARCODE', '').strip(),
+                    row.get('MATNAME', '').strip(),
+                    row.get('CLENG', '').strip(),
+                    row.get('CWIDTH', '').strip(),
+                    row.get('CNT', '').strip(),
+                    row.get('GRAIN', '').strip(),
+                    csv_customer_value,
+                    row.get('ORDERNAME', '').strip(),
+                    row.get('ARTICLENAME', '').strip(),
+                    row.get('PARTDESC', '').strip(),
+                    row.get('PRFID1', '').strip(),
+                    row.get('PRFID3', '').strip(),
+                    row.get('PRFID4', '').strip(),
+                    row.get('PRFID2', '').strip(),
+                ])
+            
+            csv_filename = f"Boards_Order_{order.boards_po.po_number}.csv"
+            order.boards_po.csv_file.save(csv_filename, io.BytesIO(csv_output.getvalue().encode('utf-8')))
+            logger.info(f"CSV file generated and saved: {csv_filename}")
+        except Exception as csv_error:
+            logger.warning(f"Failed to generate CSV file: {csv_error}")
         
         # Clear the session data if it exists
         if f'pending_pnx_{order_id}' in request.session:
@@ -6494,9 +6949,7 @@ def add_factory_worker(request):
         
         worker = FactoryWorker.objects.create(
             name=name,
-            email='',
-            phone='',
-            hourly_rate=0,
+            hourly_rate=data.get('hourly_rate', 0),
             active=True
         )
         
@@ -6505,7 +6958,7 @@ def add_factory_worker(request):
             'worker': {
                 'id': worker.id,
                 'name': worker.name,
-                'hourly_rate': str(worker.hourly_rate)
+                'hourly_rate': str(worker.hourly_rate),
             }
         })
     except Exception as e:
@@ -6540,27 +6993,34 @@ def add_timesheet(request, order_id):
         )
         
         if timesheet_type == 'installation':
-            # Installation uses fixed price
+            # Installation uses fixed price (hours optional)
             fitter_id = data.get('fitter_id')
             helper_id = data.get('helper_id')
+            installation_factory_worker_id = data.get('installation_factory_worker_id')
             price = data.get('price')
+            hours = data.get('hours')  # Optional for installation
             if fitter_id:
                 timesheet.fitter = Fitter.objects.get(id=fitter_id)
             if helper_id:
                 timesheet.helper = Fitter.objects.get(id=helper_id)
+            if installation_factory_worker_id:
+                # Factory worker doing installation work
+                timesheet.factory_worker = FactoryWorker.objects.get(id=installation_factory_worker_id)
             if price:
                 timesheet.price = price
-        else:
-            # Manufacturing uses hours × hourly_rate
-            worker_id = data.get('factory_worker_id')
-            hours = data.get('hours')
-            hourly_rate = data.get('hourly_rate')
-            if worker_id:
-                timesheet.factory_worker = FactoryWorker.objects.get(id=worker_id)
             if hours:
                 timesheet.hours = hours
-            if hourly_rate:
-                timesheet.hourly_rate = hourly_rate
+        else:
+            # Manufacturing uses hours × hourly_rate (rate from worker)
+            worker_id = data.get('factory_worker_id')
+            hours = data.get('hours')
+            if worker_id:
+                factory_worker = FactoryWorker.objects.get(id=worker_id)
+                timesheet.factory_worker = factory_worker
+                # Always use the worker's current hourly rate
+                timesheet.hourly_rate = factory_worker.hourly_rate
+            if hours:
+                timesheet.hours = hours
         
         timesheet.save()
         
@@ -6580,6 +7040,58 @@ def add_timesheet(request, order_id):
             )
         
         return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+def add_multiple_timesheets(request, order_id):
+    """Add multiple manufacturing timesheets at once"""
+    try:
+        import json
+        from .models import Timesheet, FactoryWorker
+        from datetime import date as date_module
+        
+        order = get_object_or_404(Order, id=order_id)
+        data = json.loads(request.body)
+        
+        timesheets_data = data.get('timesheets', [])
+        
+        if not timesheets_data:
+            return JsonResponse({'success': False, 'error': 'No timesheets provided'})
+        
+        created_count = 0
+        today = date_module.today()
+        
+        for ts_data in timesheets_data:
+            timesheet_type = ts_data.get('timesheet_type', 'manufacturing')
+            worker_id = ts_data.get('factory_worker_id')
+            hours = ts_data.get('hours')
+            description = ts_data.get('description', '')
+            
+            if not worker_id or not hours:
+                continue  # Skip invalid entries
+                
+            factory_worker = FactoryWorker.objects.get(id=worker_id)
+            
+            timesheet = Timesheet(
+                order=order,
+                timesheet_type=timesheet_type,
+                date=today,
+                description=description,
+                factory_worker=factory_worker,
+                hours=hours,
+                hourly_rate=factory_worker.hourly_rate
+            )
+            timesheet.save()
+            created_count += 1
+        
+        return JsonResponse({
+            'success': True, 
+            'created_count': created_count,
+            'message': f'{created_count} timesheets added successfully'
+        })
         
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
@@ -6608,3 +7120,304 @@ def delete_expense(request, expense_id):
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
+
+# ============================================================================
+# TIMESHEETS VIEWS
+# ============================================================================
+
+@login_required
+def timesheets(request):
+    """Page to manage timesheets and factory worker rates"""
+    from .models import FactoryWorker, Fitter, Timesheet
+    
+    factory_workers = FactoryWorker.objects.all().order_by('name')
+    fitters = Fitter.objects.all().order_by('name')
+    timesheets = Timesheet.objects.all().select_related('order', 'fitter', 'factory_worker', 'helper').order_by('-date', '-created_at')[:100]
+    
+    return render(request, 'stock_take/timesheets.html', {
+        'factory_workers': factory_workers,
+        'fitters': fitters,
+        'timesheets': timesheets,
+    })
+
+
+@require_http_methods(["POST"])
+@login_required
+def update_factory_worker(request, worker_id):
+    """Update a factory worker's details"""
+    try:
+        import json
+        from .models import FactoryWorker
+        
+        worker = get_object_or_404(FactoryWorker, id=worker_id)
+        data = json.loads(request.body)
+        
+        if 'name' in data:
+            worker.name = data['name'].strip()
+        if 'hourly_rate' in data:
+            worker.hourly_rate = data['hourly_rate']
+        if 'active' in data:
+            worker.active = data['active']
+        
+        worker.save()
+        
+        return JsonResponse({
+            'success': True,
+            'worker': {
+                'id': worker.id,
+                'name': worker.name,
+                'hourly_rate': str(worker.hourly_rate),
+                'active': worker.active,
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+@login_required
+def delete_factory_worker(request, worker_id):
+    """Delete a factory worker"""
+    try:
+        from .models import FactoryWorker
+        worker = get_object_or_404(FactoryWorker, id=worker_id)
+        worker.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+@login_required
+def update_fitter(request, fitter_id):
+    """Update a fitter's details"""
+    try:
+        import json
+        from .models import Fitter
+        
+        fitter = get_object_or_404(Fitter, id=fitter_id)
+        data = json.loads(request.body)
+        
+        if 'name' in data:
+            fitter.name = data['name'].strip()
+        if 'hourly_rate' in data:
+            fitter.hourly_rate = data['hourly_rate']
+        if 'active' in data:
+            fitter.active = data['active']
+        
+        fitter.save()
+        
+        return JsonResponse({
+            'success': True,
+            'fitter': {
+                'id': fitter.id,
+                'name': fitter.name,
+                'hourly_rate': str(fitter.hourly_rate),
+                'active': fitter.active,
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
+@login_required
+def delete_fitter(request, fitter_id):
+    """Delete a fitter"""
+    try:
+        from .models import Fitter
+        fitter = get_object_or_404(Fitter, id=fitter_id)
+        fitter.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+# ============================================================================
+# COSTING REPORT VIEW
+# ============================================================================
+
+@login_required
+def costing_report(request):
+    """Costing report showing fully and partially costed orders with statistics"""
+    from .models import Order, Timesheet
+    from django.db.models import Avg, Sum, Count, F, ExpressionWrapper, DecimalField, Q
+    from decimal import Decimal
+    from datetime import date
+    import statistics
+    
+    # Get all completed orders (job_finished=True OR fit_date has passed) for costing analysis
+    today = date.today()
+    all_orders = Order.objects.filter(
+        Q(job_finished=True) | Q(fit_date__lte=today)
+    ).prefetch_related('timesheets').distinct()
+    
+    # Calculate actual costs from timesheets for each order
+    orders_with_costs = []
+    for order in all_orders:
+        # Calculate installation cost from timesheets, fall back to stored value
+        installation_timesheets = order.timesheets.filter(timesheet_type='installation')
+        calculated_installation = sum(ts.total_cost for ts in installation_timesheets) or Decimal('0')
+        # Use timesheet total if available, otherwise use stored order value
+        installation_cost = calculated_installation if calculated_installation > 0 else (order.installation_cost or Decimal('0'))
+        
+        # Calculate manufacturing cost from timesheets, fall back to stored value
+        manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing')
+        calculated_manufacturing = sum(ts.total_cost for ts in manufacturing_timesheets) or Decimal('0')
+        # Use timesheet total if available, otherwise use stored order value
+        manufacturing_cost = calculated_manufacturing if calculated_manufacturing > 0 else (order.manufacturing_cost or Decimal('0'))
+        
+        # Get materials cost (from order field)
+        materials_cost = order.materials_cost or Decimal('0')
+        
+        # Total costs
+        total_cost = materials_cost + installation_cost + manufacturing_cost
+        
+        # Calculate profit
+        revenue = order.total_value_exc_vat or Decimal('0')
+        profit = revenue - total_cost
+        profit_margin = (profit / revenue * 100) if revenue > 0 else Decimal('0')
+        
+        # Determine costing status - use the explicit fully_costed checkbox
+        has_materials = materials_cost > 0
+        has_installation = installation_cost > 0
+        has_manufacturing = manufacturing_cost > 0
+        is_fully_costed = order.fully_costed  # Use explicit checkbox instead of auto-detection
+        
+        orders_with_costs.append({
+            'order': order,
+            'materials_cost': materials_cost,
+            'installation_cost': installation_cost,
+            'manufacturing_cost': manufacturing_cost,
+            'total_cost': total_cost,
+            'revenue': revenue,
+            'profit': profit,
+            'profit_margin': profit_margin,
+            'has_materials': has_materials,
+            'has_installation': has_installation,
+            'has_manufacturing': has_manufacturing,
+            'is_fully_costed': is_fully_costed,
+        })
+    
+    # Separate fully costed and partially costed
+    fully_costed = [o for o in orders_with_costs if o['is_fully_costed']]
+    partially_costed = [o for o in orders_with_costs if not o['is_fully_costed']]
+    
+    # Calculate statistics for fully costed orders
+    stats = {
+        'total_orders': len(all_orders),
+        'fully_costed_count': len(fully_costed),
+        'partially_costed_count': len(partially_costed),
+        'costing_completion_rate': (len(fully_costed) / len(all_orders) * 100) if all_orders else 0,
+    }
+    
+    if fully_costed:
+        # Profit statistics
+        profits = [float(o['profit']) for o in fully_costed]
+        profit_margins = [float(o['profit_margin']) for o in fully_costed]
+        
+        stats['avg_profit'] = sum(profits) / len(profits)
+        stats['median_profit'] = statistics.median(profits)
+        stats['min_profit'] = min(profits)
+        stats['max_profit'] = max(profits)
+        
+        stats['avg_profit_margin'] = sum(profit_margins) / len(profit_margins)
+        stats['median_profit_margin'] = statistics.median(profit_margins)
+        
+        # Cost breakdowns
+        materials_costs = [float(o['materials_cost']) for o in fully_costed]
+        installation_costs = [float(o['installation_cost']) for o in fully_costed]
+        manufacturing_costs = [float(o['manufacturing_cost']) for o in fully_costed]
+        total_costs = [float(o['total_cost']) for o in fully_costed]
+        revenues = [float(o['revenue']) for o in fully_costed]
+        
+        stats['avg_materials_cost'] = sum(materials_costs) / len(materials_costs)
+        stats['avg_installation_cost'] = sum(installation_costs) / len(installation_costs)
+        stats['avg_manufacturing_cost'] = sum(manufacturing_costs) / len(manufacturing_costs)
+        stats['avg_total_cost'] = sum(total_costs) / len(total_costs)
+        stats['avg_revenue'] = sum(revenues) / len(revenues)
+        
+        stats['median_materials_cost'] = statistics.median(materials_costs)
+        stats['median_installation_cost'] = statistics.median(installation_costs)
+        stats['median_manufacturing_cost'] = statistics.median(manufacturing_costs)
+        stats['median_total_cost'] = statistics.median(total_costs)
+        stats['median_revenue'] = statistics.median(revenues)
+        
+        # Cost as percentage of revenue (averages)
+        if stats['avg_revenue'] > 0:
+            stats['materials_pct_of_revenue'] = (stats['avg_materials_cost'] / stats['avg_revenue']) * 100
+            stats['installation_pct_of_revenue'] = (stats['avg_installation_cost'] / stats['avg_revenue']) * 100
+            stats['manufacturing_pct_of_revenue'] = (stats['avg_manufacturing_cost'] / stats['avg_revenue']) * 100
+        else:
+            stats['materials_pct_of_revenue'] = 0
+            stats['installation_pct_of_revenue'] = 0
+            stats['manufacturing_pct_of_revenue'] = 0
+        
+        # Cost as percentage of revenue (medians) - calculate percentage per order first, then median
+        materials_pcts = [(float(o['materials_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
+        installation_pcts = [(float(o['installation_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
+        manufacturing_pcts = [(float(o['manufacturing_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
+        profit_pcts = [(float(o['profit']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
+        
+        # Calculate raw medians
+        raw_median_materials = statistics.median(materials_pcts)
+        raw_median_installation = statistics.median(installation_pcts)
+        raw_median_manufacturing = statistics.median(manufacturing_pcts)
+        raw_median_profit = statistics.median(profit_pcts)
+        
+        # Normalize to ensure they add up to 100%
+        total_median = raw_median_materials + raw_median_installation + raw_median_manufacturing + raw_median_profit
+        if total_median > 0:
+            stats['median_materials_pct'] = (raw_median_materials / total_median) * 100
+            stats['median_installation_pct'] = (raw_median_installation / total_median) * 100
+            stats['median_manufacturing_pct'] = (raw_median_manufacturing / total_median) * 100
+            stats['median_profit_pct'] = (raw_median_profit / total_median) * 100
+        else:
+            stats['median_materials_pct'] = 0
+            stats['median_installation_pct'] = 0
+            stats['median_manufacturing_pct'] = 0
+            stats['median_profit_pct'] = 0
+        
+        # Total sums
+        stats['total_revenue'] = sum(revenues)
+        stats['total_costs'] = sum(total_costs)
+        stats['total_profit'] = sum(profits)
+        stats['total_materials'] = sum(materials_costs)
+        stats['total_installation'] = sum(installation_costs)
+        stats['total_manufacturing'] = sum(manufacturing_costs)
+    else:
+        # Set defaults if no fully costed orders
+        stats['avg_profit'] = 0
+        stats['median_profit'] = 0
+        stats['min_profit'] = 0
+        stats['max_profit'] = 0
+        stats['avg_profit_margin'] = 0
+        stats['median_profit_margin'] = 0
+        stats['avg_materials_cost'] = 0
+        stats['avg_installation_cost'] = 0
+        stats['avg_manufacturing_cost'] = 0
+        stats['avg_total_cost'] = 0
+        stats['avg_revenue'] = 0
+        stats['median_materials_cost'] = 0
+        stats['median_installation_cost'] = 0
+        stats['median_manufacturing_cost'] = 0
+        stats['median_total_cost'] = 0
+        stats['median_revenue'] = 0
+        stats['materials_pct_of_revenue'] = 0
+        stats['installation_pct_of_revenue'] = 0
+        stats['manufacturing_pct_of_revenue'] = 0
+        stats['median_materials_pct'] = 0
+        stats['median_installation_pct'] = 0
+        stats['median_manufacturing_pct'] = 0
+        stats['median_profit_pct'] = 0
+        stats['total_revenue'] = 0
+        stats['total_costs'] = 0
+        stats['total_profit'] = 0
+        stats['total_materials'] = 0
+        stats['total_installation'] = 0
+        stats['total_manufacturing'] = 0
+    
+    return render(request, 'stock_take/costing_report.html', {
+        'fully_costed': fully_costed,
+        'partially_costed': partially_costed,
+        'stats': stats,
+    })

@@ -8,10 +8,10 @@ from datetime import datetime
 WATCH_FOLDER_NAME = "Olympus"
 PDF_DIR = r"C:\evolution\eCadPro\_PDF"
 
-# Regex to find the specific claim pattern: 4-6 digits, then name, optionally another 4-6 digits
-# Examples: 409546_Andrew Reynolds-Forsyth, 1856_Urwin_35205
-CLAIM_PATTERN = re.compile(r'(\d{4,6})_([A-Za-z\s\-]+)(?:_(\d{4,6}))?')
-# Fallback for simple 4-6 digit numbers
+# Regex to find the specific claim pattern: 2-6 digits, then name, optionally another 2-6 digits
+# Examples: 409546_Andrew Reynolds-Forsyth, 1856_Urwin_35205, 17_Butler_1234
+CLAIM_PATTERN = re.compile(r'(\d{2,6})_([A-Za-z\s\-]+)(?:_(\d{2,6}))?')
+# Fallback for simple 4-6 digit numbers (keep at 4+ to avoid false positives on random 2-digit numbers)
 SIMPLE_NUM = re.compile(r'\b(\d{4,6})\b')
 # Phone number patterns to exclude (UK mobile numbers are 11 digits: 07 + 9 digits)
 PHONE_PATTERNS = [
@@ -220,23 +220,24 @@ def process_claims():
                 # Remove duplicate numbers from the list
                 identifiers['numbers'] = list(dict.fromkeys(identifiers['numbers']))
                 
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                search_info = f"Numbers: {identifiers['numbers']}"
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                # Build compact search description
+                search_parts = identifiers['numbers'][:]
                 if identifiers['name']:
-                    search_info += f", Name: {identifiers['name']}"
-                print(f"[{timestamp}] Searching for: {search_info} (from {message.SenderName})")
+                    search_parts.append(identifiers['name'])
+                search_desc = '_'.join(str(p) for p in search_parts)
                 
                 pdf_set, matched_id = get_job_files(identifiers)
                 
                 if pdf_set:
-                    print(f"[{timestamp}] ✓ Files found for {matched_id}! Sending reply...")
+                    print(f"[{timestamp}] ✓ {search_desc} → Sending reply ({message.SenderName})")
                     reply = message.Reply()
                     reply.Body = f"Hi,\n\nPlease find the 3 drawings for Job {matched_id} attached.\n\nRegards,\nOlympus Print Server\n\n---\nThis is an automated email."
                     for pdf in pdf_set:
                         reply.Attachments.Add(pdf)
                     reply.Send()
                 else:
-                    print(f"[{timestamp}] ✗ No complete file set found for: {search_info}")
+                    print(f"[{timestamp}] ✗ {search_desc} → Not found ({message.SenderName})")
 
         except Exception as e:
             print(f"Processing Error: {e}")

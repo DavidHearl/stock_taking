@@ -17,16 +17,110 @@
         </nav>
     </header>
     
-    <!-- Role Key -->
-    <div class="role-key-container">
-        <ul class="role-key">
-            <li><span class="key customer-support"></span> Customer Support</li>
-            <li><span class="key design"></span> Design</li>
-            <li><span class="key fitter"></span> Fitter</li>
-            <li><span class="key operations"></span> Operations</li>
-            <li><span class="key manufacturing"></span> Manufacturing</li>
-        </ul>
+    <!-- Workflow Timeline Visualization -->
+    <div class="workflow-timeline-container">
+        <div class="workflow-timeline">
+            {% for phase, phase_display in phases %}
+                <div class="timeline-phase {{ phase }}" data-phase="{{ phase }}">
+                    <div class="timeline-blocks">
+                        {% for stage in stages_by_phase|get_item:phase %}
+                        <div class="timeline-block {{ stage.role }}" 
+                             style="flex: {{ stage.expected_days|default:1 }} 0 0;"
+                             data-days="{{ stage.expected_days|default:1 }}"
+                             data-name="{{ stage.name }}"
+                             title="{{ stage.name }} - {{ stage.expected_days|default:1 }} day{{ stage.expected_days|default:1|pluralize }}">
+                            <span class="timeline-block-text">{{ stage.name }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% if not forloop.last %}
+                <div class="timeline-marker">
+                    <div class="marker-line"></div>
+                    <div class="marker-circle">
+                        <span class="marker-days" data-cumulative="{{ forloop.counter }}">0</span>
+                    </div>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        <div class="timeline-marker timeline-marker-end">
+            <div class="marker-line"></div>
+            <div class="marker-circle">
+                <span class="marker-days" id="totalDays">0</span>
+            </div>
+        </div>
     </div>
+    
+    <script>
+    // Calculate total days from all stages and set phase flex values
+    document.addEventListener('DOMContentLoaded', function() {
+        let totalDays = 0;
+        let cumulativeDays = 0;
+        
+        // Get all timeline blocks for hover effect
+        const allBlocks = document.querySelectorAll('.timeline-block');
+        
+        // Calculate phase totals and set flex values
+        const phases = document.querySelectorAll('.timeline-phase');
+        phases.forEach((phase, index) => {
+            const blocks = phase.querySelectorAll('.timeline-block');
+            let phaseDays = 0;
+            
+            blocks.forEach(block => {
+                const days = parseInt(block.getAttribute('data-days')) || 1;
+                phaseDays += days;
+                totalDays += days;
+            });
+            
+            cumulativeDays += phaseDays;
+            
+            // Set the flex value for this phase based on its total days
+            phase.style.flex = `${phaseDays} 0 0`;
+            
+            // Update the marker after this phase (if not last)
+            const marker = phase.nextElementSibling;
+            if (marker && marker.classList.contains('timeline-marker')) {
+                const markerDays = marker.querySelector('.marker-days');
+                if (markerDays) {
+                    markerDays.textContent = cumulativeDays;
+                }
+            }
+        });
+        
+        document.getElementById('totalDays').textContent = totalDays;
+        
+        // Hover effect: expand hovered block, shrink others
+        const EXPAND_FACTOR = 3; // How much larger the hovered block becomes
+        
+        allBlocks.forEach(block => {
+            const originalDays = parseInt(block.getAttribute('data-days')) || 1;
+            
+            block.addEventListener('mouseenter', function() {
+                // Expand this block
+                this.style.flex = `${originalDays * EXPAND_FACTOR} 0 0`;
+                this.classList.add('expanded');
+                
+                // Shrink all other blocks
+                allBlocks.forEach(other => {
+                    if (other !== this) {
+                        const otherDays = parseInt(other.getAttribute('data-days')) || 1;
+                        other.style.flex = `${otherDays * 0.7} 0 0`;
+                    }
+                });
+            });
+            
+            block.addEventListener('mouseleave', function() {
+                // Reset all blocks to original size
+                this.classList.remove('expanded');
+                allBlocks.forEach(b => {
+                    const days = parseInt(b.getAttribute('data-days')) || 1;
+                    b.style.flex = `${days} 0 0`;
+                });
+            });
+        });
+    });
+    </script>
     
     <div class="workflow-container">
         {% for phase, phase_display in phases %}
@@ -37,7 +131,10 @@
             {% for stage in stages_by_phase|get_item:phase %}
                 <div class="stage {{ stage.role }}" data-stage-id="{{ stage.id }}">
                     <div class="stage-heading">
-                        <h3 class="stage-title">{{ stage.name }}</h3>
+                        <div class="stage-title-group">
+                            <h3 class="stage-title">{{ stage.name }}</h3>
+                            <span class="stage-role-badge {{ stage.role }}">{{ stage.get_role_display }}</span>
+                        </div>
                         <div class="stage-actions">
                             {% if stage.expected_days %}
                             <p class="time">{{ stage.expected_days }} Day{{ stage.expected_days|pluralize }}</p>
@@ -181,6 +278,7 @@
                             <option value="operations">Operations</option>
                             <option value="manufacturing">Manufacturing</option>
                             <option value="enquiry">Enquiry</option>
+                            <option value="waiting">Waiting Period</option>
                         </select>
                     </div>
                     <div class="form-group">

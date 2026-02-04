@@ -33,3 +33,11 @@ def sum_accessory_costs(accessories):
     for accessory in accessories:
         total += accessory.cost_price * accessory.quantity
     return f"{total:.2f}"
+
+@register.filter
+def sum_expenses(expenses):
+    """Calculate total amount of all expenses"""
+    total = 0
+    for expense in expenses:
+        total += float(expense.amount or 0)
+    return total

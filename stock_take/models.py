@@ -87,6 +87,7 @@ class Order(models.Model):
     total_value_inc_vat = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Total value including VAT')
     total_value_exc_vat = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Total value excluding VAT')
     profit = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Profit amount')
+    fully_costed = models.BooleanField(default=False, help_text='Mark as fully costed for reporting')
     
     # Fit completion fields
     interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')
@@ -209,6 +210,16 @@ class PNXItem(models.Model):
     customer = models.CharField(max_length=200)
     received = models.BooleanField(default=False)
     received_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Quantity that has been received')
+    
+    # Additional PNX fields
+    grain = models.CharField(max_length=10, blank=True, default='')
+    articlename = models.CharField(max_length=100, blank=True, default='')
+    partdesc = models.CharField(max_length=200, blank=True, default='')
+    prfid1 = models.CharField(max_length=100, blank=True, default='', help_text='Edge profile 1')
+    prfid2 = models.CharField(max_length=100, blank=True, default='', help_text='Edge profile 2')
+    prfid3 = models.CharField(max_length=100, blank=True, default='', help_text='Edge profile 3')
+    prfid4 = models.CharField(max_length=100, blank=True, default='', help_text='Edge profile 4')
+    ordername = models.CharField(max_length=100, blank=True, default='', help_text='Order/Sale number from PNX')
 
     # Price per square meter for boards
     PRICE_PER_SQM = 50
@@ -642,6 +653,7 @@ class WorkflowStage(models.Model):
         ('operations', 'Operations'),
         ('manufacturing', 'Manufacturing'),
         ('enquiry', 'Enquiry'),
+        ('waiting', 'Waiting Period'),
     ]
     
     name = models.CharField(max_length=200, help_text='Name of the workflow stage')

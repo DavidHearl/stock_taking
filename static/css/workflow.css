@@ -39,64 +39,182 @@ body.sidebar-collapsed header {
     color: var(--text-primary);
 }
 
-.role-key-container {
-    position: fixed;
-    top: 100px;
-    left: 300px; /* Sidebar width (280px) + gap */
-    background-color: var(--bg-secondary, #f8f9fa);
+/* Workflow Timeline Visualization */
+.workflow-timeline-container {
+    display: flex;
+    align-items: flex-end;
+    gap: 0;
+    margin: 80px auto 20px;
+    padding: 60px 20px 0;
+    max-width: 1200px;
+}
+
+.workflow-timeline {
+    display: flex;
+    gap: 2px;
+    flex: 1;
+    background: var(--bg-tertiary);
     border-radius: 8px;
-    padding: 15px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    z-index: 998;
-    transition: left 0.3s ease;
+    overflow: visible;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    position: relative;
+    min-width: 0;
+    height: 24px;
 }
 
-/* Adjust when sidebar is collapsed */
-body.sidebar-collapsed .role-key-container {
-    left: 90px; /* Collapsed sidebar width (70px) + gap */
-}
-
-.role-key {
+.timeline-phase {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    list-style: none;
-    margin: 0;
-    padding: 0;
+    min-width: 0;
+    align-items: stretch;
 }
 
-.role-key li {
+.timeline-blocks {
+    display: flex;
+    flex: 1;
+    height: 24px;
+    gap: 2px;
+    min-width: 0;
+    align-items: flex-end;
+}
+
+.timeline-block {
+    position: relative;
+    transition: flex 0.3s ease, height 0.3s ease, filter 0.3s ease;
+    cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    min-width: 8px;
+    height: 24px;
+    overflow: hidden;
+    border-radius: 3px;
+    align-self: flex-end;
+}
+
+.timeline-block:last-child {
+    border-right: none;
+}
+
+.timeline-block.expanded {
+    z-index: 10;
+    filter: brightness(1.1);
+    height: 48px;
+}
+
+.timeline-block-text {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: white;
+    white-space: normal;
+    word-wrap: break-word;
+    text-align: center;
+    line-height: 1.2;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    padding: 2px 4px;
+    max-width: 100%;
+}
+
+.timeline-block.expanded .timeline-block-text {
+    opacity: 1;
+}
+
+/* Total Days Display */
+.timeline-total-days {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    background: var(--bg-secondary);
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    white-space: nowrap;
+}
+
+.total-days-label {
     font-size: 0.9rem;
+    color: var(--text-muted);
+    font-weight: 500;
 }
 
-.key {
-    width: 20px;
-    height: 20px;
-    border-radius: 4px;
-    display: inline-block;
+.total-days-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--primary-color);
 }
 
-.key.customer-support {
-    background-color: #3498db;
+.total-days-unit {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    font-weight: 500;
 }
 
-.key.design {
-    background-color: #9b59b6;
+/* Timeline Markers (Lollipops) */
+.timeline-marker {
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+    justify-content: flex-end;
+    position: relative;
+    min-height: 24px;
 }
 
-.key.fitter {
-    background-color: #e74c3c;
+.marker-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    border: 3px solid var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    position: absolute;
+    bottom: 30px;
+    z-index: 2;
 }
 
-.key.operations {
-    background-color: #f39c12;
+.marker-line {
+    width: 2px;
+    height: 38px;
+    background: var(--border-color);
+    position: absolute;
+    bottom: 0;
+    z-index: 1;
 }
 
-.key.manufacturing {
-    background-color: #2ecc71;
+.marker-days {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: white;
+}
+
+.timeline-marker-end .marker-circle {
+    background: var(--success-color);
+}
+
+/* Color code timeline blocks by phase */
+.timeline-phase.enquiry .timeline-block {
+    background: #3498db;
+}
+
+.timeline-phase.lead .timeline-block {
+    background: #f39c12;
+}
+
+.timeline-phase.sale .timeline-block {
+    background: #9b59b6;
+}
+
+/* Grey color for waiting periods - override phase colors */
+.timeline-phase.enquiry .timeline-block.waiting,
+.timeline-phase.lead .timeline-block.waiting,
+.timeline-phase.sale .timeline-block.waiting {
+    background: #95a5a6;
 }
 
 /* Workflow Container */
@@ -106,7 +224,6 @@ body.sidebar-collapsed .role-key-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding-top: 72px;
     padding-bottom: 40px;
 }
 
@@ -143,8 +260,8 @@ body.sidebar-collapsed .role-key-container {
     width: 100%;
     background-color: var(--bg-secondary, #f8f9fa);
     border-radius: 8px;
-    padding: 20px;
-    margin: 10px 0;
+    padding: 16px 20px;
+    margin: 8px 0;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     border-left: 4px solid #888;
 }
@@ -174,6 +291,10 @@ body.sidebar-collapsed .role-key-container {
     border-left-color: #95a5a6;
 }
 
+.stage.waiting {
+    border-left-color: #95a5a6;
+}
+
 .stage-heading {
     display: flex;
     justify-content: space-between;
@@ -182,11 +303,56 @@ body.sidebar-collapsed .role-key-container {
     gap: 15px;
 }
 
+.stage-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+
 .stage-title {
     margin: 0;
     font-size: 1.2rem;
     color: var(--text-primary);
-    flex: 1;
+}
+
+.stage-role-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: white;
+}
+
+.stage-role-badge.customer-support {
+    background-color: #3498db;
+}
+
+.stage-role-badge.design {
+    background-color: #9b59b6;
+}
+
+.stage-role-badge.fitter {
+    background-color: #e74c3c;
+}
+
+.stage-role-badge.operations {
+    background-color: #f39c12;
+}
+
+.stage-role-badge.manufacturing {
+    background-color: #2ecc71;
+}
+
+.stage-role-badge.enquiry {
+    background-color: #95a5a6;
+}
+
+.stage-role-badge.waiting {
+    background-color: #95a5a6;
 }
 
 .stage-actions {

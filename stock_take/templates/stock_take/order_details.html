@@ -153,12 +153,12 @@
             
             <div class="card">
                 <div class="card-header">
-                    <h3 style="margin: 0;">Edit Order Information</h3>
+                    <h3>Edit Order Information</h3>
                     <div class="header-links">
-                        <select class="order-type-select" onchange="updateOrderType(this, {{ order.id }})" style="padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;">
-                            <option value="sale" {% if order.order_type == 'sale' %}selected{% endif %} style="background: #10b981; color: white; cursor: pointer;">Sale</option>
-                            <option value="remedial" {% if order.order_type == 'remedial' %}selected{% endif %} style="background: #f59e0b; color: white; cursor: pointer;">Remedial</option>
-                            <option value="warranty" {% if order.order_type == 'warranty' %}selected{% endif %} style="background: #ef4444; color: white; cursor: pointer;">Warranty</option>
+                        <select class="order-type-select" onchange="updateOrderType(this, {{ order.id }})">
+                            <option value="sale" {% if order.order_type == 'sale' %}selected{% endif %}>Sale</option>
+                            <option value="remedial" {% if order.order_type == 'remedial' %}selected{% endif %}>Remedial</option>
+                            <option value="warranty" {% if order.order_type == 'warranty' %}selected{% endif %}>Warranty</option>
                         </select>
                     </div>
                 </div>
@@ -220,23 +220,23 @@
                             </div>
                             <div id="customer-edit" class="info-edit">
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">First Name</label>
+                                    <label class="form-label">First Name</label>
                                     <input type="text" class="form-input" id="first-name-input" value="{{ order.first_name }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Last Name</label>
+                                    <label class="form-label">Last Name</label>
                                     <input type="text" class="form-input" id="last-name-input" value="{{ order.last_name }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Anthill Customer ID</label>
+                                    <label class="form-label">Anthill Customer ID</label>
                                     <input type="text" class="form-input" id="anthill-id-input" value="{{ order.anthill_id }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Address</label>
+                                    <label class="form-label">Address</label>
                                     <input type="text" class="form-input" id="address-input" value="{{ order.address }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Postcode</label>
+                                    <label class="form-label">Postcode</label>
                                     <input type="text" class="form-input" id="postcode-input" value="{{ order.postcode }}">
                                 </div>
                                 <button type="button" class="btn btn-outline-success btn-sm" onclick="saveCustomerInfo({{ order.id }})">
@@ -249,23 +249,47 @@
                             <div class="job-section-spacing">
                                 <div class="info-section-header">
                                     <h4 class="info-section-title job">Job Info</h4>
-                                    <button type="button" class="btn btn-sm btn-outline-warning edit-btn-spacing" onclick="openAddPOModal()" title="Add new boards PO">
-                                        <i class="bi bi-plus-lg"></i> Add Boards PO
-                                    </button>
                                 </div>
 
-                                <div style="display: flex; flex-direction: column; gap: 12px;">
-                                    <!-- Boards PO (Editable Dropdown with Search) -->
+                                <div class="job-info-column">
+                                    <!-- Boards PO (Editable Dropdown) -->
                                     <div>
-                                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block;">Boards PO</label>
-                                        <input type="text" id="po-search" class="form-input" placeholder="Type PO digits (e.g., 1234)..." style="margin-bottom: 8px; font-size: 14px; padding: 6px 10px;" onkeyup="filterPOOptions()" oninput="formatPOSearch(this)">
-                                        <select class="form-select" id="boards-po-select" onchange="updateBoardsPO({{ order.id }}, this.value)" style="font-size: 14px; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">
-                                            <option value="">No PO Selected</option>
-                                            {% for po in available_pos %}
-                                                <option value="{{ po.id }}" data-po-number="{{ po.po_number }}" {% if order.boards_po and order.boards_po.id == po.id %}selected{% endif %}>{{ po.po_number }}</option>
-                                            {% endfor %}
-                                        </select>
+                                        <label class="form-label-uppercase">Boards PO</label>
+                                        <div class="flex-row-gap">
+                                            <select class="form-select form-select-styled flex-1" id="boards-po-select" onchange="updateBoardsPO({{ order.id }}, this.value)">
+                                                <option value="">No PO Selected</option>
+                                                {% for po in available_pos %}
+                                                    <option value="{{ po.id }}" data-po-number="{{ po.po_number }}" {% if order.boards_po and order.boards_po.id == po.id %}selected{% endif %}>{{ po.po_number }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddBoardsPOInline()" title="Add new boards PO">
+                                                <i class="bi bi-plus-lg"></i>
+                                            </button>
+                                        </div>
+                                        <div id="new-boards-po-inline" class="new-person-inline">
+                                            <input type="text" id="new-po-number" class="form-input new-person-input" placeholder="PO number (e.g., PO1234)">
+                                            <div class="flex-row-gap">
+                                                <button type="button" class="btn btn-sm btn-success" onclick="saveNewBoardsPO({{ order.id }})" title="Save PO">
+                                                    <i class="bi bi-check-lg"></i> Save
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddBoardsPO()" title="Cancel">
+                                                    <i class="bi bi-x-lg"></i> Cancel
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
+                                    
+                                    <!-- Boards Ordered Checkbox -->
+                                    {% if order.boards_po %}
+                                    <div class="job-checkbox-container">
+                                        <input class="job-checkbox" type="checkbox" id="boardsOrdered" 
+                                               {% if order.boards_po.boards_ordered %}checked{% endif %}
+                                               onchange="updateBoardsOrdered({{ order.boards_po.id }}, this.checked)">
+                                        <label class="job-checkbox-label" for="boardsOrdered">
+                                            <i class="bi bi-box"></i> Boards Ordered
+                                        </label>
+                                    </div>
+                                    {% endif %}
                                     
                                     <!-- All Items Ordered Checkbox -->
                                     <div class="job-checkbox-container">
@@ -339,33 +363,33 @@
                                 </div>
                                 <div>
                                     <div class="field-label">Total Value (Inc VAT)</div>
-                                    <div class="field-value" id="total-value-display" style="font-weight: 600; color: var(--primary);">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
+                                    <div class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
                                 </div>
                             </div>
                             <div id="sale-edit" class="info-edit">
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Sale Number</label>
+                                    <label class="form-label">Sale Number</label>
                                     <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Customer Number</label>
+                                    <label class="form-label">Customer Number</label>
                                     <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Designer</label>
-                                    <div style="display: flex; gap: 5px; align-items: center;">
-                                        <select class="form-input" id="designer-input" style="flex: 1;">
+                                    <label class="form-label">Designer</label>
+                                    <div class="flex-row-gap">
+                                        <select class="form-input flex-1" id="designer-input">
                                             <option value="">Select designer...</option>
                                             {% for designer in designers %}
                                                 <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
                                             {% endfor %}
                                         </select>
-                                        <button type="button" class="btn btn-sm btn-success" onclick="toggleAddDesignerInline()" title="Add new designer" style="padding: 6px 10px;">
+                                        <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddDesignerInline()" title="Add new designer">
                                             <i class="bi bi-plus-lg"></i>
                                         </button>
                                     </div>
-                                    <div id="new-designer-inline" style="display: none; margin-top: 8px; display: none; gap: 5px;">
-                                        <input type="text" id="new-designer-name-inline" class="form-input" placeholder="New designer name" style="flex: 1;">
+                                    <div id="new-designer-inline" class="new-person-inline">
+                                        <input type="text" id="new-designer-name-inline" class="form-input flex-1" placeholder="New designer name">
                                         <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
                                             <i class="bi bi-check-lg"></i>
                                         </button>
@@ -375,19 +399,19 @@
                                     </div>
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">WorkGuru ID</label>
+                                    <label class="form-label">WorkGuru ID</label>
                                     <input type="text" class="form-input" id="workguru-id-input" value="{{ order.workguru_id }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Order Date</label>
+                                    <label class="form-label">Order Date</label>
                                     <input type="date" class="form-input" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Fit Date</label>
+                                    <label class="form-label">Fit Date</label>
                                     <input type="date" class="form-input" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Total Value (Inc VAT)</label>
+                                    <label class="form-label">Total Value (Inc VAT)</label>
                                     <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
                                 </div>
                                 <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
@@ -405,8 +429,8 @@
             <div class="card">
                 <div class="card-header">
                     <h3>Financial Summary</h3>
-                    <button class="btn btn-primary btn-sm" onclick="recalculateFinancials({{ order.id }})" title="Recalculate all costs from source data">
-                        <i class="bi bi-arrow-clockwise"></i> Recalculate
+                    <button class="btn btn-success btn-sm" onclick="saveFinancials({{ order.id }})" title="Save financial data">
+                        <i class="bi bi-floppy"></i> Save
                     </button>
                 </div>
                 <div class="financial-card-body">
@@ -494,7 +518,7 @@
                             <div class="financial-card-content">
                                 <span class="financial-card-label">
                                     Installation Cost
-                                    <button type="button" class="btn btn-sm btn-primary ms-2" onclick="openTimesheetModal('installation')" style="padding: 2px 8px; font-size: 0.75rem;">
+                                    <button type="button" class="btn btn-sm btn-primary ms-2 btn-timesheet-add" onclick="openTimesheetModal('installation')">
                                         <i class="bi bi-plus-circle"></i> Add
                                     </button>
                                 </span>
@@ -576,7 +600,7 @@
                             <div class="financial-card-content">
                                 <span class="financial-card-label">
                                     Manufacturing Cost
-                                    <button type="button" class="btn btn-sm btn-primary ms-2" onclick="openTimesheetModal('manufacturing')" style="padding: 2px 8px; font-size: 0.75rem;">
+                                    <button type="button" class="btn btn-sm btn-primary ms-2 btn-timesheet-add" onclick="openTimesheetModal('manufacturing')">
                                         <i class="bi bi-plus-circle"></i> Add
                                     </button>
                                 </span>
@@ -586,21 +610,11 @@
                                 {% if order.total_value_exc_vat > 0 and calculated_manufacturing_cost > 0 %}
                                 <div class="financial-progress-wrapper">
                                     <div class="financial-progress">
-                                        {% for worker_name, cost in manufacturing_by_worker.items %}
-                                        <div class="financial-progress-bar-segment manufacturing-worker-segment manufacturing-worker-{{ forloop.counter }}" 
-                                             style="width: {% widthratio cost order.total_value_exc_vat 100 %}%"
-                                             title="{{ worker_name }}: £{{ cost|floatformat:2 }}"></div>
-                                        {% endfor %}
+                                        <div class="financial-progress-bar-segment manufacturing-worker-segment manufacturing-worker-1" 
+                                             style="width: {% widthratio calculated_manufacturing_cost order.total_value_exc_vat 100 %}%"
+                                             title="Manufacturing: £{{ calculated_manufacturing_cost|floatformat:2 }}"></div>
                                     </div>
                                     <span class="financial-percentage">{% widthratio calculated_manufacturing_cost order.total_value_exc_vat 100 %}%</span>
-                                </div>
-                                <div class="cost-breakdown-legend">
-                                    {% for worker_name, cost in manufacturing_by_worker.items %}
-                                    <span class="legend-item">
-                                        <span class="legend-color manufacturing-worker-{{ forloop.counter }}-color"></span>
-                                        {{ worker_name }}: £{{ cost|floatformat:2 }}
-                                    </span>
-                                    {% endfor %}
                                 </div>
                                 {% endif %}
                             </div>
@@ -625,7 +639,15 @@
                             </div>
                         </div>
 
-                        <button class="btn btn-success" style="width: 100%; margin-top: 12px;" onclick="saveFinancials({{ order.id }})">💾 Save Financial Data</button>
+                        <!-- Fully Costed Checkbox -->
+                        <div class="fully-costed-container">
+                            <label class="fully-costed-label">
+                                <input type="checkbox" id="fully_costed_checkbox" class="fully-costed-checkbox" {% if order.fully_costed %}checked{% endif %}>
+                                <span class="fully-costed-text">
+                                    Mark as Fully Costed
+                                </span>
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -637,26 +659,6 @@
                 </div>
                 <div class="card-body">
                     <dl class="summary-list">
-                        <div class="summary-row">
-                            <dt>Customer:</dt>
-                            <dd>{{ order.first_name }} {{ order.last_name }}</dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Sale #:</dt>
-                            <dd>{{ order.sale_number }}</dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Customer #:</dt>
-                            <dd>{{ order.customer_number }}</dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Order Date:</dt>
-                            <dd>{{ order.order_date|date:"D, M j, Y" }}</dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Fit Date:</dt>
-                            <dd>{{ order.fit_date|date:"D, M j, Y" }}</dd>
-                        </div>
                         <div class="summary-row">
                             <dt>Time Allowance:</dt>
                             <dd>{{ order.time_allowance }} days</dd>
@@ -673,28 +675,20 @@
                         </div>
                         {% if order.boards_po and order.boards_po.file %}
                         <div class="summary-row download-row">
-                            <dd style="grid-column: 1 / -1;">
-                                <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary download-button" style="width: 100%; text-align: center;">
+                            <dd class="grid-col-full">
+                                <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary download-button btn-download-full">
                                     <i class="bi bi-file-earmark-arrow-down"></i> Download PNX File
                                 </a>
                             </dd>
                         </div>
                         {% endif %}
                         <div class="summary-row">
-                            <dt>Order Type:</dt>
-                            <dd>
-                                <span class="badge badge-{% if order.order_type == 'sale' %}primary{% elif order.order_type == 'remedial' %}warning{% else %}info{% endif %}">
-                                    {{ order.get_order_type_display }}
-                                </span>
-                            </dd>
-                        </div>
-                        <div class="summary-row">
                             <dt>Boards Ordered:</dt>
                             <dd>
                                 {% if order.boards_po and order.boards_po.boards_ordered %}
-                                    <span class="badge badge-success">Yes</span>
+                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
                                 {% else %}
-                                    <span class="badge badge-warning">No</span>
+                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
                                 {% endif %}
                             </dd>
                         </div>
@@ -702,9 +696,9 @@
                             <dt>Boards Received:</dt>
                             <dd>
                                 {% if order.order_boards_received %}
-                                    <span class="badge badge-success">Yes</span>
+                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
                                 {% else %}
-                                    <span class="badge badge-danger">No</span>
+                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
                                 {% endif %}
                             </dd>
                         </div>
@@ -712,9 +706,9 @@
                             <dt>All Items Ordered:</dt>
                             <dd>
                                 {% if order.all_items_ordered %}
-                                    <span class="badge badge-success">Yes</span>
+                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
                                 {% else %}
-                                    <span class="badge badge-danger">No</span>
+                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
                                 {% endif %}
                             </dd>
                         </div>
@@ -722,9 +716,9 @@
                             <dt>Job Finished:</dt>
                             <dd>
                                 {% if order.job_finished %}
-                                    <span class="badge badge-success">Yes</span>
+                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
                                 {% else %}
-                                    <span class="badge badge-warning">No</span>
+                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
                                 {% endif %}
                             </dd>
                         </div>
@@ -735,27 +729,53 @@
     </div>
 
     <div class="full-width-section">
-        {% if order.boards_po %}
         <div class="card">
             <div class="card-header">
-                <h3>{% if order.boards_po %}{{ order.boards_po.po_number }} {% endif %} : Board Details</h3>
+                <h3>{% if order.boards_po %}{{ order.boards_po.po_number }} : {% endif %}Board Details</h3>
                 <div class="header-actions">
-                    {% if order.customer_number %}
-                        <button type="button" class="btn btn-info btn-sm" style="background-color: #17a2b8; border-color: #17a2b8; color: white; font-weight: 600;" onclick="analyzePNXGeneration(event)">
+                    {% if order.boards_po %}
+                        <!-- File status indicators -->
+                        <div class="file-status-group">
+                            <span class="file-status" title="PNX File">
+                                PNX
+                                {% if order.boards_po.file %}
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                    <a href="{{ order.boards_po.file.url }}" download class="btn-icon" title="Download PNX">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                {% else %}
+                                    <i class="bi bi-x-circle-fill text-danger"></i>
+                                {% endif %}
+                            </span>
+                            <span class="file-status" title="CSV File">
+                                CSV
+                                {% if order.boards_po.csv_file %}
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                    <a href="{{ order.boards_po.csv_file.url }}" download class="btn-icon" title="Download CSV">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                {% else %}
+                                    <i class="bi bi-x-circle-fill text-danger"></i>
+                                {% endif %}
+                            </span>
+                        </div>
+                    {% endif %}
+                    {% if order.customer_number and order.boards_po %}
+                        <button type="button" class="btn btn-info btn-sm btn-info-styled" onclick="analyzePNXGeneration(event)">
                             <i class="bi bi-file-earmark-plus"></i> Generate PNX - CAD
                         </button>
                     {% endif %}
-                    {% if order.boards_po.file %}
-                        <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary btn-sm download-pnx">
-                            <i class="bi bi-download"></i> Download PNX
-                        </a>
-                        <a href="{% url 'download_pnx_as_csv' order.id %}" class="btn btn-success btn-sm">
-                            <i class="bi bi-file-earmark-spreadsheet"></i> Download CSV
-                        </a>
-                    {% endif %}
                     <div class="section-actions">
+                        {% if order.boards_po %}
+                            <button type="button" class="btn btn-primary btn-sm" onclick="openModal('addBoardModal')">
+                                <i class="bi bi-plus-circle"></i> Add Board
+                            </button>
+                        {% endif %}
                         {% if order_pnx_items %}
-                            <button type="button" class="btn btn-success" id="save-pnx-changes" style="display: none;">
+                            <button type="button" class="btn btn-warning btn-save-changes" id="save-pnx-dimensions" style="display: none;">
+                                <i class="bi bi-arrow-repeat"></i> Update Files
+                            </button>
+                            <button type="button" class="btn btn-success btn-save-changes" id="save-pnx-changes">
                                 <i class="bi bi-box-seam"></i> Save Received Items
                             </button>
                         {% endif %}
@@ -764,11 +784,16 @@
             </div>
             <div class="card-body">
                 {% if order_pnx_items %}
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <p style="margin: 0;"><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
-                        <button type="button" class="btn btn-danger btn-sm" id="delete-selected-pnx" style="display: none;">
-                            <i class="bi bi-trash"></i> Delete Selected
-                        </button>
+                    <div class="pnx-items-header">
+                        <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
+                        <div style="display: flex; gap: 10px;">
+                            <button type="button" class="btn btn-warning btn-sm" onclick="reimportPNX({{ order.boards_po.id }})">
+                                <i class="bi bi-arrow-clockwise"></i> Reimport from PNX
+                            </button>
+                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected" id="delete-selected-pnx">
+                                <i class="bi bi-trash"></i> Delete Selected
+                            </button>
+                        </div>
                     </div>
                     <div class="table-container">
                         <table class="table">
@@ -777,8 +802,13 @@
                                     <th><input type="checkbox" id="select-all-pnx"></th>
                                     <th>Barcode</th>
                                     <th>Material</th>
-                                    <th>Dimensions (LxW)</th>
+                                    <th>Length</th>
+                                    <th>Width</th>
                                     <th>Count</th>
+                                    <th title="PRFID1">E1</th>
+                                    <th title="PRFID3">E3</th>
+                                    <th title="PRFID4">E4</th>
+                                    <th title="PRFID2">E2</th>
                                     <th>Received</th>
                                     <th>Status</th>
                                     <th>Cost</th>
@@ -791,8 +821,56 @@
                                     <td><input type="checkbox" class="pnx-item-checkbox" data-item-id="{{ item.id }}"></td>
                                     <td>{{ item.barcode }}</td>
                                     <td>{{ item.matname }}</td>
-                                    <td>{{ item.cleng }} x {{ item.cwidth }}</td>
-                                    <td>{{ item.cnt|floatformat:0 }}</td>
+                                    <td>
+                                        <input type="number" 
+                                               class="quantity-input pnx-dimension-input" 
+                                               min="0" 
+                                               step="0.1"
+                                               value="{{ item.cleng|floatformat:1 }}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="cleng"
+                                               data-original-value="{{ item.cleng|floatformat:1 }}">
+                                    </td>
+                                    <td>
+                                        <input type="number" 
+                                               class="quantity-input pnx-dimension-input" 
+                                               min="0" 
+                                               step="0.1"
+                                               value="{{ item.cwidth|floatformat:1 }}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="cwidth"
+                                               data-original-value="{{ item.cwidth|floatformat:1 }}">
+                                    </td>
+                                    <td>
+                                        <input type="number" 
+                                               class="quantity-input pnx-dimension-input" 
+                                               min="0" 
+                                               step="1"
+                                               value="{{ item.cnt|floatformat:0 }}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="cnt"
+                                               data-original-value="{{ item.cnt|floatformat:0 }}">
+                                    </td>
+                                    <td class="edging-cell">
+                                        <input type="checkbox" class="pnx-edging-checkbox" 
+                                               data-pnx-id="{{ item.id }}" data-field="prfid1"
+                                               {% if item.prfid1 %}checked{% endif %}>
+                                    </td>
+                                    <td class="edging-cell">
+                                        <input type="checkbox" class="pnx-edging-checkbox" 
+                                               data-pnx-id="{{ item.id }}" data-field="prfid3"
+                                               {% if item.prfid3 %}checked{% endif %}>
+                                    </td>
+                                    <td class="edging-cell">
+                                        <input type="checkbox" class="pnx-edging-checkbox" 
+                                               data-pnx-id="{{ item.id }}" data-field="prfid4"
+                                               {% if item.prfid4 %}checked{% endif %}>
+                                    </td>
+                                    <td class="edging-cell">
+                                        <input type="checkbox" class="pnx-edging-checkbox" 
+                                               data-pnx-id="{{ item.id }}" data-field="prfid2"
+                                               {% if item.prfid2 %}checked{% endif %}>
+                                    </td>
                                     <td>
                                         <input type="number" 
                                                class="quantity-input pnx-received-quantity" 
@@ -809,7 +887,7 @@
                                         {% elif item.is_partially_received %}
                                             <span class="badge badge-warning">Partial</span>
                                         {% else %}
-                                            <span class="badge badge-danger">Not Received</span>
+                                            <span class="badge badge-danger">Pending</span>
                                         {% endif %}
                                     </td>
                                     <td>£{{ item.calculated_cost|floatformat:2 }}</td>
@@ -818,13 +896,13 @@
                                                 data-pnx-id="{{ item.id }}"
                                                 data-max-quantity="{{ item.cnt|floatformat:0 }}"
                                                 {% if item.is_fully_received %}disabled{% endif %}>
-                                            Mark Received
+                                            RECEIVE
                                         </button>
                                     </td>
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
-                                    <td colspan="7"><strong>Total Cost:</strong></td>
+                                    <td colspan="12"><strong>Total Cost:</strong></td>
                                     <td colspan="2"><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
@@ -833,7 +911,6 @@
                 {% endif %}
             </div>
         </div>
-        {% endif %}
 
         <!-- OS Doors Section -->
         <div class="card">
@@ -841,13 +918,13 @@
                 <h3>
                     OS Doors
                     {% if order.os_doors_po %}
-                        <span class="badge badge-info" style="margin-left: 10px;">PO: {{ order.os_doors_po }}</span>
+                        <span class="badge badge-info badge-ml">PO: {{ order.os_doors_po }}</span>
                     {% endif %}
                     {% if order.os_doors_required %}
                         {% if order.os_doors_po %}
-                            <span class="badge badge-success" style="margin-left: 10px;">Ordered</span>
+                            <span class="badge badge-success badge-ml">Ordered</span>
                         {% else %}
-                            <span class="badge badge-danger" style="margin-left: 10px;">Required</span>
+                            <span class="badge badge-danger badge-ml">Required</span>
                         {% endif %}
                     {% endif %}
                 </h3>
@@ -874,6 +951,8 @@
                                 <th>Dimensions</th>
                                 <th>Colour</th>
                                 <th>Qty</th>
+                                <th>Cost Price</th>
+                                <th>Total Cost</th>
                                 <th>PO Number</th>
                                 <th>Ordered</th>
                                 <th>Received</th>
@@ -887,6 +966,15 @@
                                 <td>{{ os_door.height }} x {{ os_door.width }}</td>
                                 <td>{{ os_door.colour }}</td>
                                 <td>{{ os_door.quantity|floatformat:0 }}</td>
+                                <td>
+                                    <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100" 
+                                           data-os-door-id="{{ os_door.id }}" 
+                                           value="{{ os_door.cost_price }}" 
+                                           placeholder="£0.00">
+                                </td>
+                                <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
+                                    £{% widthratio os_door.cost_price 1 os_door.quantity %}
+                                </td>
                                 <td>{{ os_door.po_number|default:"-" }}</td>
                                 <td>
                                     {% if os_door.ordered %}
@@ -914,7 +1002,7 @@
                 {% endif %}
 
                     <!-- Add OS Door Form -->
-                <div class="collapsible-form" id="addOSDoorForm" style="display: none;">
+                <div class="collapsible-form" id="addOSDoorForm">
                     <hr>
                     <h4>Add New OS Door</h4>
                     <form method="POST">
@@ -928,7 +1016,7 @@
                                 <label for="{{ os_door_form.style_colour.id_for_label }}">Style Colour</label>
                                 {{ os_door_form.style_colour }}
                             </div>
-                            <div class="form-group" style="grid-column: span 2;">
+                            <div class="form-group form-group-span-2">
                                 <label for="{{ os_door_form.item_description.id_for_label }}">Item Description</label>
                                 {{ os_door_form.item_description }}
                             </div>
@@ -947,6 +1035,10 @@
                             <div class="form-group">
                                 <label for="{{ os_door_form.quantity.id_for_label }}">Quantity</label>
                                 {{ os_door_form.quantity }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.cost_price.id_for_label }}">Cost Price (£)</label>
+                                {{ os_door_form.cost_price }}
                             </div>
                             <div class="form-group">
                                 <label for="{{ os_door_form.po_number.id_for_label }}">PO Number</label>
@@ -973,6 +1065,143 @@
             </div>
         </div>
 
+        <!-- Glass Section -->
+        <div class="card">
+            <div class="card-header">
+                <h3>
+                    Glass
+                    {% if glass_items %}
+                        <span class="badge badge-info badge-ml">{{ glass_items.count }} item{{ glass_items.count|pluralize }}</span>
+                    {% endif %}
+                </h3>
+                <div class="header-actions">
+                    <button class="btn btn-sm btn-primary" type="button" onclick="toggleCollapse('addGlassForm')">
+                        <i class="bi bi-plus-lg"></i> Add Glass
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if glass_items %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Qty</th>
+                                <th>Cost</th>
+                                <th>Stock/Allocated/Remaining</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for glass in glass_items %}
+                            <tr>
+                                <td>{{ glass.sku }}</td>
+                                <td>{{ glass.name }}</td>
+                                <td>
+                                    <input type="number" class="quantity-input accessory-quantity" 
+                                           value="{{ glass.quantity|floatformat:0 }}" 
+                                           data-accessory-id="{{ glass.id }}"
+                                           data-original-quantity="{{ glass.quantity|floatformat:0 }}"
+                                           min="0" step="1">
+                                </td>
+                                <td>£{{ glass.cost_price|floatformat:2 }}</td>
+                                <td>
+                                    {% if glass.stock_item %}
+                                        {% with remaining=glass|calculate_remaining %}
+                                            <div class="accessory-price-info">
+                                                <div>Stock: {{ glass.available_quantity|floatformat:0 }}</div>
+                                                <div>Allocated: {{ glass.allocated_quantity|floatformat:0 }}</div>
+                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% else %}accessory-remaining-positive{% endif %}">
+                                                    Remaining: {{ remaining|floatformat:0 }}
+                                                </div>
+                                            </div>
+                                        {% endwith %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if glass.missing %}
+                                        <span class="badge badge-warning">Missing</span>
+                                    {% elif glass.stock_item %}
+                                        {% with remaining=glass|calculate_remaining %}
+                                            {% if remaining >= 0 %}
+                                                <span class="badge badge-success">In Stock</span>
+                                            {% else %}
+                                                <span class="badge badge-danger">Out of Stock</span>
+                                            {% endif %}
+                                        {% endwith %}
+                                    {% else %}
+                                        <span class="badge badge-info">No Stock Link</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-primary btn-sm" title="Swap Item" 
+                                        onclick="openSwapModal({{ glass.id }}, '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
+                                        <i class="bi bi-arrow-repeat"></i>
+                                    </button>
+                                    <form method="POST" action="{% url 'delete_accessory' glass.id %}" class="inline-delete-form" 
+                                        onsubmit="return confirm('Are you sure you want to remove this glass item?');">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-danger btn-sm" title="Remove Glass">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="table-total-row">
+                                <td colspan="3" class="text-right">Total:</td>
+                                <td>£{{ glass_items|sum_accessory_costs }}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No glass items added yet.</p>
+                {% endif %}
+
+                <!-- Add Glass Form -->
+                <div class="collapsible-form" id="addGlassForm">
+                    <hr>
+                    <h4>Add New Glass Item</h4>
+                    <form method="POST" action="{% url 'add_accessory_item' order.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="sku_prefix" value="GLS">
+                        <div class="form-grid-2col">
+                            <div class="form-group">
+                                <label for="glass_sku">SKU</label>
+                                <input type="text" class="form-input" id="glass_sku" name="sku" placeholder="GLS_..." required>
+                            </div>
+                            <div class="form-group">
+                                <label for="glass_name">Name</label>
+                                <input type="text" class="form-input" id="glass_name" name="name" required>
+                            </div>
+                            <div class="form-group form-group-span-2">
+                                <label for="glass_description">Description</label>
+                                <input type="text" class="form-input" id="glass_description" name="description">
+                            </div>
+                            <div class="form-group">
+                                <label for="glass_quantity">Quantity</label>
+                                <input type="number" class="form-input" id="glass_quantity" name="quantity" value="1" min="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="glass_cost_price">Cost Price (£)</label>
+                                <input type="number" class="form-input" id="glass_cost_price" name="cost_price" step="0.01" min="0" value="0.00">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-plus-lg"></i> Add Glass
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
             <!-- Accessories Section -->
             <div class="card">
                 <div class="card-header">
@@ -984,7 +1213,7 @@
                         <button class="btn btn-primary" type="button" onclick="openModal('uploadAccessoriesModal')">
                             <i class="bi bi-upload"></i> Upload CSV
                         </button>
-                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-info" style="background-color: #17a2b8; border-color: #17a2b8;">
+                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-info btn-info-styled">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
                         </a>
                         {% if order.accessories.exists %}
@@ -1004,10 +1233,10 @@
                         </button>
                         {% endif %}
                         {% if order.accessories.exists %}
-                        <button type="button" class="btn btn-success" id="save-accessory-changes" style="display: none;">
+                        <button type="button" class="btn btn-success btn-save-changes" id="save-accessory-changes">
                             <i class="bi bi-save"></i> Save Changes
                         </button>
-                        <form method="POST" action="{% url 'delete_all_accessories' order.id %}" style="display: inline;" 
+                        <form method="POST" action="{% url 'delete_all_accessories' order.id %}" class="inline-delete-form" 
                             onsubmit="return confirm('Are you sure you want to remove ALL accessories from this order? This action cannot be undone.');">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-danger">
@@ -1020,14 +1249,13 @@
                 <div class="card-body">
                     
                     <!-- Existing Accessories -->
-                    {% if order.accessories.all %}
+                    {% if non_glass_accessories %}
                     <div class="table-container">
                         <table class="table">
                             <thead>
                                 <tr>
                                     <th>SKU</th>
                                     <th>Name</th>
-                                    <th>Description</th>
                                     <th>Qty</th>
                                     <th>Cost</th>
                                     <th>Stock/Allocated/Remaining</th>
@@ -1040,11 +1268,10 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for accessory in order.accessories.all %}
+                                {% for accessory in non_glass_accessories %}
                                 <tr>
                                     <td>{{ accessory.sku }}</td>
                                     <td>{{ accessory.name }}</td>
-                                    <td>{{ accessory.description|truncatechars:30 }}</td>
                                     <td>
                                         <input type="number" class="quantity-input accessory-quantity" 
                                                value="{{ accessory.quantity|floatformat:0 }}" 
@@ -1056,10 +1283,10 @@
                                     <td>
                                         {% if accessory.stock_item %}
                                             {% with remaining=accessory|calculate_remaining %}
-                                                <div style="font-size: 0.85em;">
+                                                <div class="accessory-price-info">
                                                     <div>Stock: {{ accessory.available_quantity|floatformat:0 }}</div>
                                                     <div>Allocated: {{ accessory.allocated_quantity|floatformat:0 }}</div>
-                                                    <div style="font-weight: bold; {% if remaining < 0 %}color: #dc3545;{% else %}color: #28a745;{% endif %}">
+                                                    <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% else %}accessory-remaining-positive{% endif %}">
                                                         Remaining: {{ remaining|floatformat:0 }}
                                                     </div>
                                                 </div>
@@ -1104,7 +1331,7 @@
                                             onclick="openSwapModal({{ accessory.id }}, '{{ accessory.sku }}', '{{ accessory.name|escapejs }}')">
                                             <i class="bi bi-arrow-repeat"></i>
                                         </button>
-                                        <form method="POST" action="{% url 'delete_accessory' accessory.id %}" style="display: inline;" 
+                                        <form method="POST" action="{% url 'delete_accessory' accessory.id %}" class="inline-delete-form" 
                                             onsubmit="return confirm('Are you sure you want to remove this accessory?');">
                                             {% csrf_token %}
                                             <button type="submit" class="btn btn-danger btn-sm" title="Remove Accessory">
@@ -1114,9 +1341,9 @@
                                     </td>
                                 </tr>
                                 {% endfor %}
-                                <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
-                                    <td colspan="4" style="text-align: right;">Total:</td>
-                                    <td>£{{ order.accessories.all|sum_accessory_costs }}</td>
+                                <tr class="table-total-row">
+                                    <td colspan="3" class="text-right">Total:</td>
+                                    <td>£{{ non_glass_accessories|sum_accessory_costs }}</td>
                                     <td colspan="{% if has_os_door_accessories %}4{% else %}2{% endif %}"></td>
                                 </tr>
                             </tbody>
@@ -1131,13 +1358,13 @@
     </div>
 
     <!-- Timesheets and Expenses Section -->
-    <div class="card" style="margin-top: 20px;">
+    <div class="card card-mt">
         <div class="card-header">
             <h3>Labor Costs & Expenses</h3>
         </div>
         <div class="card-body">
             <!-- Installation Timesheets -->
-            <h4>Installation Timesheets</h4>
+            <h4 class="section-header-purple">Installation Timesheets</h4>
             {% if installation_timesheets %}
                 <div class="table-container">
                     <table class="table">
@@ -1166,8 +1393,8 @@
                                 </td>
                             </tr>
                             {% endfor %}
-                            <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
-                                <td colspan="3" style="text-align: right;">Subtotal:</td>
+                            <tr class="table-subtotal-row-purple">
+                                <td colspan="3" class="text-right">Subtotal:</td>
                                 <td>£{{ calculated_installation_cost|floatformat:2 }}</td>
                                 <td colspan="2"></td>
                             </tr>
@@ -1181,7 +1408,7 @@
             <hr>
             
             <!-- Manufacturing Timesheets -->
-            <h4>Manufacturing Timesheets</h4>
+            <h4 class="section-header-orange">Manufacturing Timesheets</h4>
             {% if manufacturing_timesheets %}
                 <div class="table-container">
                     <table class="table">
@@ -1212,8 +1439,8 @@
                                 </td>
                             </tr>
                             {% endfor %}
-                            <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
-                                <td colspan="4" style="text-align: right;">Subtotal:</td>
+                            <tr class="table-subtotal-row-orange">
+                                <td colspan="4" class="text-right">Subtotal:</td>
                                 <td>£{{ calculated_manufacturing_cost|floatformat:2 }}</td>
                                 <td colspan="2"></td>
                             </tr>
@@ -1227,7 +1454,7 @@
             <hr>
             
             <!-- Expenses -->
-            <h4>Expenses</h4>
+            <h4 class="section-header-red">Expenses</h4>
             {% if expenses %}
                 <div class="table-container">
                     <table class="table">
@@ -1256,9 +1483,9 @@
                                 </td>
                             </tr>
                             {% endfor %}
-                            <tr style="border-top: 2px solid #dee2e6; font-weight: bold;">
-                                <td colspan="3" style="text-align: right;">Total Expenses:</td>
-                                <td>£{% for expense in expenses %}{{ expense.amount|default:0 }}{% if not forloop.last %}+{% endif %}{% endfor %}</td>
+                            <tr class="table-subtotal-row-red">
+                                <td colspan="3" class="text-right">Total Expenses:</td>
+                                <td>£{{ expenses|sum_expenses|floatformat:2 }}</td>
                                 <td colspan="2"></td>
                             </tr>
                         </tbody>
@@ -1328,10 +1555,71 @@
     </div>
 </div>
 
+<!-- Modal for Adding Board to PNX -->
+<div class="modal" id="addBoardModal">
+    <div class="modal-overlay" onclick="closeModal('addBoardModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Board</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addBoardModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="add-board-barcode">Barcode *</label>
+                    <input type="text" class="form-input" id="add-board-barcode" placeholder="e.g., BRD001">
+                </div>
+                <div class="form-group">
+                    <label for="add-board-matname">Material Name *</label>
+                    <input type="text" class="form-input" id="add-board-matname" placeholder="e.g., White Gloss 18mm">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="add-board-length">Length (mm) *</label>
+                        <input type="number" class="form-input" id="add-board-length" step="0.1" min="0" placeholder="e.g., 2800">
+                    </div>
+                    <div class="form-group">
+                        <label for="add-board-width">Width (mm) *</label>
+                        <input type="number" class="form-input" id="add-board-width" step="0.1" min="0" placeholder="e.g., 600">
+                    </div>
+                    <div class="form-group">
+                        <label for="add-board-count">Count *</label>
+                        <input type="number" class="form-input" id="add-board-count" step="1" min="1" value="1" placeholder="e.g., 2">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="add-board-grain">Grain</label>
+                    <select class="form-input" id="add-board-grain">
+                        <option value="N">N</option>
+                        <option value="Y">Y</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="add-board-partdesc">Part Description</label>
+                    <input type="text" class="form-input" id="add-board-partdesc" placeholder="e.g., Shelf">
+                </div>
+                <div class="form-group">
+                    <label>Edging (check sides that need edging)</label>
+                    <div class="edging-checkboxes">
+                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid1"> PRFID1</label>
+                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid3"> PRFID3</label>
+                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid4"> PRFID4</label>
+                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid2"> PRFID2</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addBoardModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addBoardItem()">Add Board</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for Swapping Accessory Item -->
 <div class="modal" id="swapItemModal">
     <div class="modal-overlay" onclick="closeModal('swapItemModal')"></div>
-    <div class="modal-dialog" style="max-width: 800px;">
+    <div class="modal-dialog modal-dialog-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Swap Accessory Item</h3>
@@ -1347,7 +1635,7 @@
                     <input type="text" class="form-input" id="swap-search" 
                            placeholder="Search by SKU or Name..." onkeyup="searchStockItems()">
                 </div>
-                <div id="search-results" style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                <div id="search-results" class="search-results-container">
                     <p class="text-muted">Type to search for items...</p>
                 </div>
             </div>
@@ -1372,8 +1660,8 @@
                 
                 <div class="form-group" id="fitter-group">
                     <label for="timesheet_fitter">Fitter</label>
-                    <div style="display: flex; gap: 5px; align-items: center;">
-                        <select class="form-input" id="timesheet_fitter" name="fitter" style="flex: 1;">
+                    <div class="flex-row-gap">
+                        <select class="form-input flex-1" id="timesheet_fitter" name="fitter" onchange="handleInstallationPersonSelect('fitter')">
                             <option value="">Select a fitter...</option>
                             <!-- Will be populated dynamically -->
                         </select>
@@ -1381,9 +1669,9 @@
                             <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
-                    <div id="new-fitter-inline" style="display: none; margin-top: 8px; gap: 5px;">
-                        <input type="text" id="new-fitter-name" class="form-input" placeholder="Fitter name" style="margin-bottom: 5px;">
-                        <div style="display: flex; gap: 5px;">
+                    <div id="new-fitter-inline" class="new-person-inline">
+                        <input type="text" id="new-fitter-name" class="form-input new-person-input" placeholder="Fitter name">
+                        <div class="flex-row-gap">
                             <button type="button" class="btn btn-sm btn-success" onclick="saveNewFitter()" title="Save fitter">
                                 <i class="bi bi-check-lg"></i> Save
                             </button>
@@ -1394,10 +1682,10 @@
                     </div>
                 </div>
                 
-                <div class="form-group" id="helper-group" style="display: none;">
+                <div class="form-group form-group-hidden" id="helper-group">
                     <label for="timesheet_helper">Helper / Additional Party</label>
-                    <div style="display: flex; gap: 5px; align-items: center;">
-                        <select class="form-input" id="timesheet_helper" name="helper" style="flex: 1;">
+                    <div class="flex-row-gap">
+                        <select class="form-input flex-1" id="timesheet_helper" name="helper" onchange="handleInstallationPersonSelect('helper')">
                             <option value="">Select a helper...</option>
                             <!-- Will be populated dynamically -->
                         </select>
@@ -1405,9 +1693,9 @@
                             <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
-                    <div id="new-helper-inline" style="display: none; margin-top: 8px; gap: 5px;">
-                        <input type="text" id="new-helper-name" class="form-input" placeholder="Helper name" style="margin-bottom: 5px;">
-                        <div style="display: flex; gap: 5px;">
+                    <div id="new-helper-inline" class="new-person-inline">
+                        <input type="text" id="new-helper-name" class="form-input new-person-input" placeholder="Helper name">
+                        <div class="flex-row-gap">
                             <button type="button" class="btn btn-sm btn-success" onclick="saveNewHelper()" title="Save helper">
                                 <i class="bi bi-check-lg"></i> Save
                             </button>
@@ -1418,10 +1706,20 @@
                     </div>
                 </div>
                 
-                <div class="form-group" id="worker-group" style="display: none;">
+                <div class="form-group form-group-hidden" id="installation-worker-group">
+                    <label for="timesheet_installation_worker">Factory Worker (if doing fit)</label>
+                    <div class="flex-row-gap">
+                        <select class="form-input flex-1" id="timesheet_installation_worker" name="installation_factory_worker" onchange="handleInstallationPersonSelect('installation_worker')">
+                            <option value="">Select a factory worker...</option>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group form-group-hidden" id="worker-group">
                     <label for="timesheet_worker">Factory Worker</label>
-                    <div style="display: flex; gap: 5px; align-items: center;">
-                        <select class="form-input" id="timesheet_worker" name="factory_worker" style="flex: 1;">
+                    <div class="flex-row-gap">
+                        <select class="form-input flex-1" id="timesheet_worker" name="factory_worker">
                             <option value="">Select a worker...</option>
                             <!-- Will be populated dynamically -->
                         </select>
@@ -1429,9 +1727,9 @@
                             <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
-                    <div id="new-worker-inline" style="display: none; margin-top: 8px; gap: 5px;">
-                        <input type="text" id="new-worker-name" class="form-input" placeholder="Worker name" style="margin-bottom: 5px;">
-                        <div style="display: flex; gap: 5px;">
+                    <div id="new-worker-inline" class="new-person-inline">
+                        <input type="text" id="new-worker-name" class="form-input new-person-input" placeholder="Worker name">
+                        <div class="flex-row-gap">
                             <button type="button" class="btn btn-sm btn-success" onclick="saveNewWorker()" title="Save worker">
                                 <i class="bi bi-check-lg"></i> Save
                             </button>
@@ -1448,34 +1746,66 @@
                     <input type="number" step="0.01" min="0" class="form-input" id="timesheet_price" name="price" value="220.00" required>
                 </div>
                 
-                <!-- For manufacturing: hours and rate -->
-                <div class="form-group" id="hours-group" style="display: none;">
-                    <label for="timesheet_hours">Hours</label>
+                <!-- Hours field (shown for both, optional for installation, required for manufacturing) -->
+                <div class="form-group form-group-hidden" id="hours-group">
+                    <label for="timesheet_hours">Hours <span id="hours-optional-label">(Optional)</span></label>
                     <input type="number" step="0.25" min="0" class="form-input" id="timesheet_hours" name="hours">
                 </div>
                 
-                <div class="form-group" id="rate-group" style="display: none;">
-                    <label for="timesheet_hourly_rate">Hourly Rate (£)</label>
-                    <input type="number" step="0.01" min="0" class="form-input" id="timesheet_hourly_rate" name="hourly_rate">
-                </div>
+                <input type="hidden" id="timesheet_hourly_rate" name="hourly_rate">
                 
                 <div class="form-group">
                     <label for="timesheet_description">Description (Optional)</label>
                     <textarea class="form-input" id="timesheet_description" name="description" rows="3"></textarea>
                 </div>
                 
-                <div class="form-group" id="add-expense-group" style="display: none;">
+                <div class="form-group form-group-hidden" id="add-expense-group">
                     <label>
                         <input type="checkbox" id="add_petrol_expense" onchange="togglePetrolAmount()">
                         Add Petrol Expense
                     </label>
-                    <input type="number" step="0.01" min="0" class="form-input" id="petrol_amount" 
-                           name="petrol_amount" value="20.00" style="display: none; margin-top: 10px;" placeholder="Amount (£)">
+                    <input type="number" step="0.01" min="0" class="form-input form-group-hidden petrol-amount-input" id="petrol_amount" 
+                           name="petrol_amount" value="20.00" placeholder="Amount (£)">
+                </div>
+                
+                <!-- Manufacturing Staging Table -->
+                <div id="manufacturing-staging-section" class="manufacturing-staging-section">
+                    <div class="staging-header">
+                        <h4><i class="bi bi-list-check"></i> Staged Timesheets</h4>
+                        <span id="staging-total" class="staging-total">Total: £0.00</span>
+                    </div>
+                    <div class="staging-table-container">
+                        <table class="table staging-table" id="staging-table">
+                            <thead>
+                                <tr>
+                                    <th>Worker</th>
+                                    <th>Hours</th>
+                                    <th>Rate</th>
+                                    <th>Cost</th>
+                                    <th class="th-narrow"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="staging-table-body">
+                                <!-- Staged entries will be added here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <p id="staging-empty-message" class="text-muted staging-empty-message">
+                        No timesheets staged yet. Add entries above.
+                    </p>
                 </div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" id="timesheet-modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('addTimesheetModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveTimesheet()">Save Timesheet</button>
+                <!-- Installation: single save button -->
+                <button type="button" class="btn btn-primary" id="save-single-timesheet-btn" onclick="saveTimesheet()">Save Timesheet</button>
+                <!-- Manufacturing: add to list + save all buttons -->
+                <button type="button" class="btn btn-success btn-save-changes" id="add-to-staging-btn" onclick="addToStagingTable()">
+                    <i class="bi bi-plus-lg"></i> Add to List
+                </button>
+                <button type="button" class="btn btn-primary btn-save-changes" id="save-all-timesheets-btn" onclick="saveAllStagedTimesheets()">
+                    <i class="bi bi-check-all"></i> Save All (<span id="staged-count">0</span>)
+                </button>
             </div>
         </div>
     </div>
@@ -1484,7 +1814,7 @@
 <!-- Modal for Adding New Accessory Item -->
 <div class="modal" id="addItemModal">
     <div class="modal-overlay" onclick="closeModal('addItemModal')"></div>
-    <div class="modal-dialog" style="max-width: 800px;">
+    <div class="modal-dialog modal-dialog-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Add New Accessory Item</h3>
@@ -1496,7 +1826,7 @@
                     <input type="text" class="form-input" id="add-item-search" 
                            placeholder="Search by SKU or Name..." onkeyup="searchItemsToAdd()">
                 </div>
-                <div id="add-item-results" style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                <div id="add-item-results" class="search-results-container">
                     <p class="text-muted">Type to search for items...</p>
                 </div>
             </div>
@@ -1620,7 +1950,7 @@
 <!-- Modal for PNX Generation Analysis -->
 <div class="modal" id="pnxAnalysisModal">
     <div class="modal-overlay" onclick="closePNXAnalysisModal()"></div>
-    <div class="modal-dialog" style="max-width: 800px;">
+    <div class="modal-dialog modal-dialog-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>PNX Generation Analysis</h3>
@@ -1978,6 +2308,29 @@ function updateJobCheckbox(orderId, field, value) {
     });
 }
 
+// Update Boards Ordered Checkbox
+function updateBoardsOrdered(boardsPoId, value) {
+    fetch(`/stock-take/boards-po/${boardsPoId}/update-boards-ordered/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ boards_ordered: value })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Boards Ordered updated successfully!', 'success');
+        } else {
+            showAlert('Error updating Boards Ordered', 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error updating Boards Ordered', 'danger');
+    });
+}
+
 // Auto-dismiss alerts after 5 seconds
 document.addEventListener('DOMContentLoaded', function() {
     // Calculate profit on page load
@@ -1994,6 +2347,94 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Track PNX changes instead of auto-saving
     let pnxChanges = {};
+    let pnxDimensionChanges = {};
+
+    // Handle PNX dimension/count input changes - track changes
+    document.querySelectorAll('.pnx-dimension-input').forEach(function(input) {
+        input.addEventListener('input', function() {
+            const pnxId = this.getAttribute('data-pnx-id');
+            const field = this.getAttribute('data-field');
+            const value = parseFloat(this.value) || 0;
+            const originalValue = parseFloat(this.getAttribute('data-original-value')) || 0;
+            
+            // Create key for this field
+            const key = `${pnxId}_${field}`;
+            
+            if (value !== originalValue) {
+                pnxDimensionChanges[key] = { pnxId: pnxId, field: field, value: value };
+                // Show update files button
+                const updateBtn = document.getElementById('save-pnx-dimensions');
+                if (updateBtn) updateBtn.style.display = 'inline-block';
+            } else {
+                delete pnxDimensionChanges[key];
+                // Hide update files button if no changes
+                if (Object.keys(pnxDimensionChanges).length === 0) {
+                    const updateBtn = document.getElementById('save-pnx-dimensions');
+                    if (updateBtn) updateBtn.style.display = 'none';
+                }
+            }
+        });
+    });
+
+    // Handle "Update Files" button click - save all dimension changes and regenerate files
+    const updateFilesBtn = document.getElementById('save-pnx-dimensions');
+    if (updateFilesBtn) {
+        updateFilesBtn.addEventListener('click', function() {
+            if (Object.keys(pnxDimensionChanges).length === 0) {
+                showAlert('No changes to save', 'warning');
+                return;
+            }
+            
+            // Convert to array of changes
+            const changes = Object.values(pnxDimensionChanges);
+            
+            fetch('/stock-take/update-pnx-dimensions/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ 
+                    changes: changes,
+                    boards_po_id: {{ order.boards_po.id|default:"null" }}
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert('PNX items updated and files regenerated!', 'success');
+                    // Update original values and clear changes
+                    document.querySelectorAll('.pnx-dimension-input').forEach(function(input) {
+                        input.setAttribute('data-original-value', input.value);
+                    });
+                    pnxDimensionChanges = {};
+                    updateFilesBtn.style.display = 'none';
+                } else {
+                    showAlert('Error updating PNX items: ' + result.error, 'danger');
+                }
+            })
+            .catch(error => {
+                showAlert('Error updating PNX items', 'danger');
+            });
+        });
+    }
+
+    // Handle PNX edging checkbox changes - track and show update button
+    document.querySelectorAll('.pnx-edging-checkbox').forEach(function(checkbox) {
+        checkbox.addEventListener('change', function() {
+            const pnxId = this.getAttribute('data-pnx-id');
+            const field = this.getAttribute('data-field');
+            const value = this.checked ? 'Sliderobe_Edge_08' : '';
+            
+            // Track as a dimension change
+            const key = `${pnxId}_${field}`;
+            pnxDimensionChanges[key] = { pnxId: pnxId, field: field, value: value };
+            
+            // Show update files button
+            const updateBtn = document.getElementById('save-pnx-dimensions');
+            if (updateBtn) updateBtn.style.display = 'inline-block';
+        });
+    });
 
     // Handle PNX received quantity changes (just track changes, don't save)
     document.querySelectorAll('.pnx-received-quantity').forEach(function(input) {
@@ -2170,6 +2611,28 @@ document.addEventListener('DOMContentLoaded', function() {
     // Track OS Doors changes
     let osDoorsChanges = {};
 
+    // Handle OS Doors cost price input changes
+    document.querySelectorAll('.os-door-cost-input').forEach(function(input) {
+        input.addEventListener('input', function() {
+            const osDoorId = this.getAttribute('data-os-door-id');
+            const costPrice = parseFloat(this.value) || 0;
+            
+            // Track the cost change
+            if (!osDoorsChanges[osDoorId]) {
+                osDoorsChanges[osDoorId] = {};
+            }
+            osDoorsChanges[osDoorId].cost_price = costPrice;
+            
+            // Update the total cost display for this row
+            const row = this.closest('tr');
+            const quantityCell = row.querySelector('td:nth-child(5)'); // Qty column (5th column)
+            const quantity = parseInt(quantityCell.textContent.trim()) || 0;
+            const totalCost = costPrice * quantity;
+            const totalCostCell = row.querySelector('.os-door-total-cost');
+            totalCostCell.textContent = '£' + totalCost.toFixed(2);
+        });
+    });
+
     // Handle OS Doors received checkbox changes (just track changes, don't save)
     document.querySelectorAll('.os-door-received-checkbox').forEach(function(checkbox) {
         checkbox.addEventListener('change', function() {
@@ -2179,7 +2642,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const row = this.closest('tr');
             const quantityCell = row.querySelector('td:nth-child(5)'); // Qty column
             const quantity = parseInt(quantityCell.textContent.trim()) || 0;
-            osDoorsChanges[osDoorId] = received ? quantity : 0;
+            
+            if (!osDoorsChanges[osDoorId]) {
+                osDoorsChanges[osDoorId] = {};
+            }
+            osDoorsChanges[osDoorId].received_quantity = received ? quantity : 0;
         });
     });
 
@@ -2280,6 +2747,116 @@ function closeModal(modalId) {
         modal.classList.remove('show');
         document.body.classList.remove('modal-open');
     }
+}
+
+// Add Board Item functionality
+function addBoardItem() {
+    const barcode = document.getElementById('add-board-barcode').value.trim();
+    const matname = document.getElementById('add-board-matname').value.trim();
+    const cleng = parseFloat(document.getElementById('add-board-length').value) || 0;
+    const cwidth = parseFloat(document.getElementById('add-board-width').value) || 0;
+    const cnt = parseInt(document.getElementById('add-board-count').value) || 1;
+    const grain = document.getElementById('add-board-grain').value;
+    const partdesc = document.getElementById('add-board-partdesc').value.trim();
+    
+    // Get edging checkboxes
+    const prfid1 = document.getElementById('add-board-prfid1').checked ? 'Sliderobe_Edge_08' : '';
+    const prfid3 = document.getElementById('add-board-prfid3').checked ? 'Sliderobe_Edge_08' : '';
+    const prfid4 = document.getElementById('add-board-prfid4').checked ? 'Sliderobe_Edge_08' : '';
+    const prfid2 = document.getElementById('add-board-prfid2').checked ? 'Sliderobe_Edge_08' : '';
+    
+    // Validation
+    if (!barcode) {
+        showAlert('Barcode is required', 'danger');
+        return;
+    }
+    if (!matname) {
+        showAlert('Material Name is required', 'danger');
+        return;
+    }
+    if (cleng <= 0) {
+        showAlert('Length must be greater than 0', 'danger');
+        return;
+    }
+    if (cwidth <= 0) {
+        showAlert('Width must be greater than 0', 'danger');
+        return;
+    }
+    
+    fetch('/stock-take/add-board-item/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            boards_po_id: {{ order.boards_po.id|default:"null" }},
+            barcode: barcode,
+            matname: matname,
+            cleng: cleng,
+            cwidth: cwidth,
+            cnt: cnt,
+            grain: grain,
+            partdesc: partdesc,
+            prfid1: prfid1,
+            prfid2: prfid2,
+            prfid3: prfid3,
+            prfid4: prfid4
+        })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Board added successfully! Files regenerated.', 'success');
+            closeModal('addBoardModal');
+            // Clear form
+            document.getElementById('add-board-barcode').value = '';
+            document.getElementById('add-board-matname').value = '';
+            document.getElementById('add-board-length').value = '';
+            document.getElementById('add-board-width').value = '';
+            document.getElementById('add-board-count').value = '1';
+            document.getElementById('add-board-grain').value = '';
+            document.getElementById('add-board-partdesc').value = '';
+            document.getElementById('add-board-prfid1').checked = false;
+            document.getElementById('add-board-prfid3').checked = false;
+            document.getElementById('add-board-prfid4').checked = false;
+            document.getElementById('add-board-prfid2').checked = false;
+            // Reload page to show new item
+            location.reload();
+        } else {
+            showAlert('Error adding board: ' + result.error, 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error adding board', 'danger');
+    });
+}
+
+// Reimport PNX items from file
+function reimportPNX(boardsPoId) {
+    if (!confirm('This will delete all current PNX items and re-import them from the PNX file. Continue?')) {
+        return;
+    }
+    
+    fetch(`/stock-take/boards-po/${boardsPoId}/reimport-pnx/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`Successfully reimported ${result.count} items from PNX file`, 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showAlert('Error reimporting PNX: ' + result.error, 'danger');
+        }
+    })
+    .catch(error => {
+        showAlert('Error reimporting PNX', 'danger');
+    });
 }
 
 // Close modals on Escape key
@@ -2676,13 +3253,17 @@ function saveFinancials(orderId) {
     
     const profit = excVat - materials - installation - manufacturing;
 
+    const fullyCostedCheckbox = document.getElementById('fully_costed_checkbox');
+    const fullyCosted = fullyCostedCheckbox ? fullyCostedCheckbox.checked : false;
+
     const data = {
         total_value_inc_vat: incVat,
         total_value_exc_vat: excVat,
         materials_cost: materials,
         installation_cost: installation,
         manufacturing_cost: manufacturing,
-        profit: profit
+        profit: profit,
+        fully_costed: fullyCosted
     };
 
     fetch(`/order/${orderId}/save-all-financials/`, {
@@ -3240,46 +3821,275 @@ function openTimesheetModal(type) {
     const typeInput = document.getElementById('timesheet_type');
     const fitterGroup = document.getElementById('fitter-group');
     const helperGroup = document.getElementById('helper-group');
+    const installationWorkerGroup = document.getElementById('installation-worker-group');
     const workerGroup = document.getElementById('worker-group');
     const expenseGroup = document.getElementById('add-expense-group');
     const priceGroup = document.getElementById('price-group');
     const hoursGroup = document.getElementById('hours-group');
-    const rateGroup = document.getElementById('rate-group');
+    
+    // Get staging elements
+    const stagingSection = document.getElementById('manufacturing-staging-section');
+    const addToStagingBtn = document.getElementById('add-to-staging-btn');
+    const saveAllBtn = document.getElementById('save-all-timesheets-btn');
+    const saveSingleBtn = document.getElementById('save-single-timesheet-btn');
     
     typeInput.value = type;
+    
+    // Reset all selects and enable them
+    document.getElementById('timesheet_fitter').value = '';
+    document.getElementById('timesheet_fitter').disabled = false;
+    document.getElementById('timesheet_helper').value = '';
+    document.getElementById('timesheet_helper').disabled = false;
+    if (document.getElementById('timesheet_installation_worker')) {
+        document.getElementById('timesheet_installation_worker').value = '';
+        document.getElementById('timesheet_installation_worker').disabled = false;
+    }
     
     if (type === 'installation') {
         title.textContent = 'Add Installation Timesheet';
         fitterGroup.style.display = 'block';
         helperGroup.style.display = 'block';
+        installationWorkerGroup.style.display = 'block';
         workerGroup.style.display = 'none';
         expenseGroup.style.display = 'block';
         priceGroup.style.display = 'block';
-        hoursGroup.style.display = 'none';
-        rateGroup.style.display = 'none';
+        hoursGroup.style.display = 'block';
+        document.getElementById('hours-optional-label').style.display = 'inline';
         // Set required/optional
         document.getElementById('timesheet_price').required = true;
         document.getElementById('timesheet_hours').required = false;
-        document.getElementById('timesheet_hourly_rate').required = false;
+        // Show single save button, hide staging
+        stagingSection.style.display = 'none';
+        addToStagingBtn.style.display = 'none';
+        saveAllBtn.style.display = 'none';
+        saveSingleBtn.style.display = 'inline-block';
         loadFitters();
         loadHelpers();
+        loadInstallationWorkers();
     } else {
         title.textContent = 'Add Manufacturing Timesheet';
         fitterGroup.style.display = 'none';
         helperGroup.style.display = 'none';
+        installationWorkerGroup.style.display = 'none';
         workerGroup.style.display = 'block';
         expenseGroup.style.display = 'none';
         priceGroup.style.display = 'none';
         hoursGroup.style.display = 'block';
-        rateGroup.style.display = 'block';
+        document.getElementById('hours-optional-label').style.display = 'none';
         // Set required/optional
         document.getElementById('timesheet_price').required = false;
         document.getElementById('timesheet_hours').required = true;
-        document.getElementById('timesheet_hourly_rate').required = true;
+        // Show staging section and buttons for manufacturing
+        stagingSection.style.display = 'block';
+        addToStagingBtn.style.display = 'inline-block';
+        saveAllBtn.style.display = 'inline-block';
+        saveSingleBtn.style.display = 'none';
+        // Clear staging table
+        clearStagingTable();
         loadFactoryWorkers();
     }
     
     openModal('addTimesheetModal');
+}
+
+function handleInstallationPersonSelect(selectedField) {
+    const fitterSelect = document.getElementById('timesheet_fitter');
+    const helperSelect = document.getElementById('timesheet_helper');
+    const installationWorkerSelect = document.getElementById('timesheet_installation_worker');
+    
+    const fitterValue = fitterSelect.value;
+    const helperValue = helperSelect.value;
+    const workerValue = installationWorkerSelect ? installationWorkerSelect.value : '';
+    
+    // Check if any field has a value
+    const anySelected = fitterValue || helperValue || workerValue;
+    
+    if (anySelected) {
+        // Disable fields that don't have the selection
+        if (selectedField === 'fitter' && fitterValue) {
+            helperSelect.disabled = true;
+            if (installationWorkerSelect) installationWorkerSelect.disabled = true;
+        } else if (selectedField === 'helper' && helperValue) {
+            fitterSelect.disabled = true;
+            if (installationWorkerSelect) installationWorkerSelect.disabled = true;
+        } else if (selectedField === 'installation_worker' && workerValue) {
+            fitterSelect.disabled = true;
+            helperSelect.disabled = true;
+        }
+    } else {
+        // All empty - enable all
+        fitterSelect.disabled = false;
+        helperSelect.disabled = false;
+        if (installationWorkerSelect) installationWorkerSelect.disabled = false;
+    }
+}
+
+// Manufacturing Timesheet Staging Functions
+let stagedTimesheets = [];
+
+function clearStagingTable() {
+    stagedTimesheets = [];
+    updateStagingTableDisplay();
+}
+
+function addToStagingTable() {
+    const workerId = document.getElementById('timesheet_worker').value;
+    const workerSelect = document.getElementById('timesheet_worker');
+    const hours = document.getElementById('timesheet_hours').value;
+    const description = document.getElementById('timesheet_description').value;
+    
+    // Validation
+    if (!workerId) {
+        showAlert('Please select a factory worker', 'danger');
+        return;
+    }
+    if (!hours || parseFloat(hours) <= 0) {
+        showAlert('Please enter valid hours', 'danger');
+        return;
+    }
+    
+    // Get worker details
+    const selectedOption = workerSelect.options[workerSelect.selectedIndex];
+    const workerName = selectedOption.textContent;
+    const hourlyRate = parseFloat(selectedOption.dataset.rate) || 0;
+    const totalCost = parseFloat(hours) * hourlyRate;
+    
+    // Add to staging array
+    stagedTimesheets.push({
+        workerId: workerId,
+        workerName: workerName,
+        hours: parseFloat(hours),
+        hourlyRate: hourlyRate,
+        totalCost: totalCost,
+        description: description
+    });
+    
+    // Reset form fields for next entry
+    document.getElementById('timesheet_worker').value = '';
+    document.getElementById('timesheet_hours').value = '';
+    document.getElementById('timesheet_description').value = '';
+    
+    // Update display
+    updateStagingTableDisplay();
+    
+    showAlert(`Added ${workerName} - ${hours} hours to list`, 'success');
+}
+
+function removeFromStagingTable(index) {
+    const removed = stagedTimesheets.splice(index, 1)[0];
+    updateStagingTableDisplay();
+    showAlert(`Removed ${removed.workerName} from list`, 'info');
+}
+
+function updateStagingTableDisplay() {
+    const tbody = document.getElementById('staging-table-body');
+    const emptyMsg = document.getElementById('staging-empty-message');
+    const table = document.getElementById('staging-table');
+    const totalSpan = document.getElementById('staging-total');
+    const countSpan = document.getElementById('staged-count');
+    const saveAllBtn = document.getElementById('save-all-timesheets-btn');
+    
+    // Update count
+    countSpan.textContent = stagedTimesheets.length;
+    
+    // Enable/disable save all button
+    saveAllBtn.disabled = stagedTimesheets.length === 0;
+    
+    if (stagedTimesheets.length === 0) {
+        table.style.display = 'none';
+        emptyMsg.style.display = 'block';
+        totalSpan.textContent = 'Total: £0.00';
+        return;
+    }
+    
+    table.style.display = 'table';
+    emptyMsg.style.display = 'none';
+    
+    // Calculate total
+    const grandTotal = stagedTimesheets.reduce((sum, ts) => sum + ts.totalCost, 0);
+    totalSpan.textContent = `Total: £${grandTotal.toFixed(2)}`;
+    
+    // Build table rows
+    tbody.innerHTML = stagedTimesheets.map((ts, index) => `
+        <tr>
+            <td>${ts.workerName}</td>
+            <td>${ts.hours}</td>
+            <td>£${ts.hourlyRate.toFixed(2)}</td>
+            <td>£${ts.totalCost.toFixed(2)}</td>
+            <td>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeFromStagingTable(${index})" title="Remove">
+                    <i class="bi bi-x"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function saveAllStagedTimesheets() {
+    if (stagedTimesheets.length === 0) {
+        showAlert('No timesheets staged. Add entries first.', 'warning');
+        return;
+    }
+    
+    // Disable button during save
+    const saveBtn = document.getElementById('save-all-timesheets-btn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
+    
+    // Prepare data for bulk submission
+    const data = {
+        timesheets: stagedTimesheets.map(ts => ({
+            timesheet_type: 'manufacturing',
+            factory_worker_id: ts.workerId,
+            hours: ts.hours,
+            description: ts.description
+        }))
+    };
+    
+    fetch(`/order/{{ order.id }}/add-multiple-timesheets/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`${stagedTimesheets.length} timesheets added successfully!`, 'success');
+            closeModal('addTimesheetModal');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-check-all"></i> Save All (<span id="staged-count">' + stagedTimesheets.length + '</span>)';
+        }
+    })
+    .catch(error => {
+        console.error('Error saving timesheets:', error);
+        showAlert('Error saving timesheets', 'danger');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="bi bi-check-all"></i> Save All (<span id="staged-count">' + stagedTimesheets.length + '</span>)';
+    });
+}
+
+function loadInstallationWorkers() {
+    fetch('/api/get-factory-workers/')
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('timesheet_installation_worker');
+            if (!select) return;
+            select.innerHTML = '<option value="">Select a factory worker...</option>';
+            data.workers.forEach(worker => {
+                const option = document.createElement('option');
+                option.value = worker.id;
+                option.textContent = worker.name;
+                option.dataset.rate = worker.hourly_rate;
+                select.appendChild(option);
+            });
+        })
+        .catch(error => console.error('Error loading factory workers:', error));
 }
 
 function loadFitters() {
@@ -3353,6 +4163,68 @@ function togglePetrolAmount() {
     const checkbox = document.getElementById('add_petrol_expense');
     const amountInput = document.getElementById('petrol_amount');
     amountInput.style.display = checkbox.checked ? 'block' : 'none';
+}
+
+// Inline Boards PO management
+function toggleAddBoardsPOInline() {
+    const form = document.getElementById('new-boards-po-inline');
+    if (form.style.display === 'none' || form.style.display === '') {
+        form.style.display = 'block';
+        document.getElementById('new-po-number').focus();
+    } else {
+        form.style.display = 'none';
+        clearBoardsPOForm();
+    }
+}
+
+function cancelAddBoardsPO() {
+    document.getElementById('new-boards-po-inline').style.display = 'none';
+    clearBoardsPOForm();
+}
+
+function clearBoardsPOForm() {
+    document.getElementById('new-po-number').value = '';
+}
+
+function saveNewBoardsPO(orderId) {
+    let poNumber = document.getElementById('new-po-number').value.trim();
+    
+    if (!poNumber) {
+        showAlert('Please enter a PO number', 'warning');
+        return;
+    }
+    
+    // Auto-prepend "PO" if not present
+    if (!poNumber.toUpperCase().startsWith('PO')) {
+        poNumber = 'PO' + poNumber;
+    }
+    
+    fetch('{% url "create_boards_po" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: new URLSearchParams({
+            'po_number': poNumber,
+            'boards_ordered': 'off',
+            'order_id': orderId
+        })
+    })
+    .then(response => {
+        if (response.redirected) {
+            // Success - reload page to show new PO
+            window.location.reload();
+        } else {
+            return response.text().then(text => {
+                throw new Error('Failed to create PO');
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error creating PO: ' + error.message, 'danger');
+    });
 }
 
 // Inline fitter management
@@ -3531,6 +4403,8 @@ function saveTimesheet() {
     const type = document.getElementById('timesheet_type').value;
     const fitterId = document.getElementById('timesheet_fitter').value;
     const helperId = document.getElementById('timesheet_helper').value;
+    const installationWorkerId = document.getElementById('timesheet_installation_worker') ? 
+                                  document.getElementById('timesheet_installation_worker').value : '';
     const workerId = document.getElementById('timesheet_worker').value;
     const price = document.getElementById('timesheet_price').value;
     const hours = document.getElementById('timesheet_hours').value;
@@ -3541,8 +4415,8 @@ function saveTimesheet() {
     
     // Validation
     if (type === 'installation') {
-        if (!fitterId && !helperId) {
-            showAlert('Please select at least a fitter or helper', 'danger');
+        if (!fitterId && !helperId && !installationWorkerId) {
+            showAlert('Please select a fitter, helper, or factory worker', 'danger');
             return;
         }
         if (!price) {
@@ -3554,8 +4428,8 @@ function saveTimesheet() {
             showAlert('Please select a factory worker', 'danger');
             return;
         }
-        if (!hours || !hourlyRate) {
-            showAlert('Please fill in hours and hourly rate', 'danger');
+        if (!hours) {
+            showAlert('Please fill in hours worked', 'danger');
             return;
         }
     }
@@ -3568,14 +4442,16 @@ function saveTimesheet() {
     if (type === 'installation') {
         if (fitterId) data.fitter_id = fitterId;
         if (helperId) data.helper_id = helperId;
+        if (installationWorkerId) data.installation_factory_worker_id = installationWorkerId;
         data.price = price;
+        if (hours) data.hours = hours;  // Optional hours for installation
         if (addPetrol) {
             data.petrol_amount = petrolAmount;
         }
     } else {
         data.factory_worker_id = workerId;
         data.hours = hours;
-        data.hourly_rate = hourlyRate;
+        // hourly_rate is fetched from the worker on the backend
     }
     
     fetch(`/order/{{ order.id }}/add-timesheet/`, {

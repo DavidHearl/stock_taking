@@ -1,0 +1,511 @@
+{% extends 'base.html' %}
+
+{% block title %}Timesheets{% endblock %}
+
+{% block nav_timesheets_active %}active{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <div class="page-header">
+        <h1><i class="bi bi-clock-history"></i> Timesheets</h1>
+        <p class="text-muted">View all timesheets and manage factory worker rates</p>
+    </div>
+
+    <!-- All Timesheets Table -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3><i class="bi bi-table"></i> All Timesheets</h3>
+        </div>
+        <div class="card-body">
+            {% if timesheets %}
+            <div class="table-container" style="max-height: 500px; overflow-y: auto;">
+                <table class="table">
+                    <thead style="position: sticky; top: 0; background: white; z-index: 1;">
+                        <tr>
+                            <th>Date</th>
+                            <th>Order</th>
+                            <th>Type</th>
+                            <th>Worker</th>
+                            <th>Hours</th>
+                            <th>Rate/Price</th>
+                            <th>Total</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ts in timesheets %}
+                        <tr>
+                            <td>{{ ts.date|date:"d/m/Y" }}</td>
+                            <td>
+                                {% if ts.order %}
+                                <a class="job-info-link" href="{% url 'order_details' ts.order.id %}">
+                                    {{ ts.order.sale_number }} - {{ ts.order.last_name }}
+                                </a>
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if ts.timesheet_type == 'installation' %}
+                                <span class="badge badge-blue">Installation</span>
+                                {% else %}
+                                <span class="badge badge-purple">Manufacturing</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ ts.worker_name }}</td>
+                            <td>
+                                {% if ts.hours %}
+                                {{ ts.hours }}h
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if ts.timesheet_type == 'installation' %}
+                                £{{ ts.price|floatformat:2 }}
+                                {% else %}
+                                £{{ ts.hourly_rate|floatformat:2 }}/hr
+                                {% endif %}
+                            </td>
+                            <td><strong>£{{ ts.total_cost|floatformat:2 }}</strong></td>
+                            <td>{{ ts.description|default:"-"|truncatewords:10 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted" style="margin-top: 10px; font-size: 0.85rem;">
+                Showing latest 100 timesheets. To add new timesheets, go to the order details page.
+            </p>
+            {% else %}
+            <div class="empty-state">
+                <i class="bi bi-clock" style="font-size: 3rem; color: #6c757d;"></i>
+                <p>No timesheets recorded yet.</p>
+                <p class="text-muted">Timesheets can be added from order detail pages.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row" style="display: flex; gap: 20px; flex-wrap: wrap;">
+        <!-- Factory Workers Section -->
+        <div class="card" style="flex: 1; min-width: 400px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3><i class="bi bi-person-gear"></i> Factory Workers</h3>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">
+                    <i class="bi bi-plus-lg"></i> Add Worker
+                </button>
+            </div>
+            <div class="card-body">
+                {% if factory_workers %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Hourly Rate</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="factory-workers-table">
+                            {% for worker in factory_workers %}
+                            <tr id="worker-row-{{ worker.id }}" class="{% if not worker.active %}text-muted{% endif %}">
+                                <td>
+                                    <input type="text" class="form-input form-input-sm worker-name" 
+                                           data-id="{{ worker.id }}" value="{{ worker.name }}"
+                                           style="max-width: 150px;">
+                                </td>
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 3px;">
+                                        <span>£</span>
+                                        <input type="number" step="0.01" min="0" 
+                                               class="form-input form-input-sm worker-rate" 
+                                               data-id="{{ worker.id }}" value="{{ worker.hourly_rate }}"
+                                               style="max-width: 80px;">
+                                        <span>/hr</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" class="worker-active" 
+                                               data-id="{{ worker.id }}" {% if worker.active %}checked{% endif %}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-success btn-sm" onclick="saveWorker({{ worker.id }})" title="Save">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteWorker({{ worker.id }}, '{{ worker.name }}')" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state" id="no-workers-message">
+                    <i class="bi bi-person-x" style="font-size: 3rem; color: #6c757d;"></i>
+                    <p>No factory workers added yet.</p>
+                    <button type="button" class="btn btn-primary" onclick="openAddWorkerModal()">
+                        <i class="bi bi-plus-lg"></i> Add First Worker
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Fitters Section (Read-only info) -->
+        <div class="card" style="flex: 1; min-width: 400px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3><i class="bi bi-people"></i> Fitters (Installation)</h3>
+                <small class="text-muted">Fixed pricing per job</small>
+            </div>
+            <div class="card-body">
+                {% if fitters %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for fitter in fitters %}
+                            <tr class="{% if not fitter.active %}text-muted{% endif %}">
+                                <td>{{ fitter.name }}</td>
+                                <td>
+                                    {% if fitter.active %}
+                                    <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                    <span class="badge badge-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted" style="margin-top: 15px; font-size: 0.85rem;">
+                    <i class="bi bi-info-circle"></i> Fitters are paid a fixed price per installation job. 
+                    They can be added when creating installation timesheets on order pages.
+                </p>
+                {% else %}
+                <div class="empty-state">
+                    <i class="bi bi-people" style="font-size: 3rem; color: #6c757d;"></i>
+                    <p>No fitters added yet.</p>
+                    <p class="text-muted">Fitters can be added from order pages.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Worker Modal -->
+<div class="modal" id="addWorkerModal">
+    <div class="modal-overlay" onclick="closeModal('addWorkerModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Factory Worker</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addWorkerModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="new_worker_name">Name *</label>
+                    <input type="text" class="form-input" id="new_worker_name" placeholder="Worker name" required>
+                </div>
+                <div class="form-group">
+                    <label for="new_worker_rate">Hourly Rate (£) *</label>
+                    <input type="number" step="0.01" min="0" class="form-input" id="new_worker_rate" placeholder="15.00" value="15.00" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addWorkerModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addWorker()">Add Worker</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal" id="deleteConfirmModal">
+    <div class="modal-overlay" onclick="closeModal('deleteConfirmModal')"></div>
+    <div class="modal-dialog" style="max-width: 400px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Delete</h3>
+                <button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete <strong id="delete-worker-name"></strong>?</p>
+                <p class="text-muted">This action cannot be undone. Any timesheets associated with this worker will remain but will no longer be linked.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn" onclick="deleteWorker()">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .3s;
+    border-radius: 24px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: #059669;
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(26px);
+}
+
+/* Badge styles */
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 4px;
+}
+
+.badge-success {
+    background-color: #d1fae5;
+    color: #065f46;
+}
+
+.badge-secondary {
+    background-color: #e5e7eb;
+    color: #4b5563;
+}
+
+.badge-blue {
+    background-color: #dbeafe;
+    color: #1e40af;
+}
+
+.badge-purple {
+    background-color: #ede9fe;
+    color: #5b21b6;
+}
+
+/* Form input small */
+.form-input-sm {
+    padding: 4px 8px;
+    font-size: 0.85rem;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.empty-state p {
+    margin: 10px 0;
+    color: #6c757d;
+}
+
+/* Muted text for inactive rows */
+tr.text-muted td {
+    opacity: 0.6;
+}
+</style>
+
+<script>
+let deleteWorkerId = null;
+
+// Modal functions
+function openModal(modalId) {
+    document.getElementById(modalId).classList.add('active');
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).classList.remove('active');
+}
+
+function openAddWorkerModal() {
+    document.getElementById('new_worker_name').value = '';
+    document.getElementById('new_worker_rate').value = '15.00';
+    openModal('addWorkerModal');
+}
+
+function addWorker() {
+    const name = document.getElementById('new_worker_name').value.trim();
+    const hourlyRate = document.getElementById('new_worker_rate').value;
+    
+    if (!name) {
+        alert('Please enter a worker name');
+        return;
+    }
+    
+    fetch('/api/add-factory-worker/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+        },
+        body: JSON.stringify({
+            name: name,
+            hourly_rate: hourlyRate
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('addWorkerModal');
+            // Reload page to show new worker
+            location.reload();
+        } else {
+            alert('Error adding worker: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error adding worker');
+    });
+}
+
+function saveWorker(workerId) {
+    const row = document.getElementById('worker-row-' + workerId);
+    const name = row.querySelector('.worker-name').value.trim();
+    const hourlyRate = row.querySelector('.worker-rate').value;
+    const active = row.querySelector('.worker-active').checked;
+    
+    if (!name) {
+        alert('Name cannot be empty');
+        return;
+    }
+    
+    fetch('/api/factory-worker/' + workerId + '/update/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+        },
+        body: JSON.stringify({
+            name: name,
+            hourly_rate: hourlyRate,
+            active: active
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success feedback
+            const btn = row.querySelector('.btn-success');
+            btn.innerHTML = '<i class="bi bi-check-circle-fill"></i>';
+            setTimeout(() => {
+                btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+            }, 1500);
+            
+            // Update row styling based on active status
+            if (data.worker.active) {
+                row.classList.remove('text-muted');
+            } else {
+                row.classList.add('text-muted');
+            }
+        } else {
+            alert('Error saving worker: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error saving worker');
+    });
+}
+
+function confirmDeleteWorker(workerId, workerName) {
+    deleteWorkerId = workerId;
+    document.getElementById('delete-worker-name').textContent = workerName;
+    openModal('deleteConfirmModal');
+}
+
+function deleteWorker() {
+    if (!deleteWorkerId) return;
+    
+    fetch('/api/factory-worker/' + deleteWorkerId + '/delete/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('deleteConfirmModal');
+            // Remove row from table
+            const row = document.getElementById('worker-row-' + deleteWorkerId);
+            if (row) {
+                row.remove();
+            }
+            deleteWorkerId = null;
+        } else {
+            alert('Error deleting worker: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error deleting worker');
+    });
+}
+
+function getCsrfToken() {
+    const name = 'csrftoken';
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+</script>
+{% endblock %}
