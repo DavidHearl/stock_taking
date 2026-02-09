@@ -41,3 +41,12 @@ def sum_expenses(expenses):
     for expense in expenses:
         total += float(expense.amount or 0)
     return total
+
+
+@register.filter
+def multiply(value, arg):
+    """Multiply two numbers. Usage: {{ cost_price|multiply:quantity }}"""
+    try:
+        return f"{float(value) * float(arg):.2f}"
+    except (ValueError, TypeError):
+        return '0.00'

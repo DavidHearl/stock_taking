@@ -66,7 +66,7 @@ class OSDoorForm(forms.ModelForm):
         model = OSDoor
         fields = [
             'door_style', 'style_colour', 'item_description',
-            'height', 'width', 'colour', 'quantity',
+            'height', 'width', 'colour', 'quantity', 'cost_price',
             'po_number', 'ordered', 'received'
         ]
         widgets = {
@@ -77,6 +77,7 @@ class OSDoorForm(forms.ModelForm):
             'width': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': 'Width in mm'}),
             'colour': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Oak'}),
             'quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': '1'}),
+            'cost_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'placeholder': '0.00'}),
             'po_number': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'PO Number'}),
             'ordered': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'received': forms.CheckboxInput(attrs={'class': 'form-check-input'}),

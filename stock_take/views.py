@@ -157,22 +157,55 @@ def search_customers(request):
     if len(query) < 2:
         return JsonResponse({'customers': []})
     
-    # Search by first name, last name, address, or postcode
-    customers = Customer.objects.filter(
+    # Search in Customer table
+    customers_from_table = Customer.objects.filter(
         Q(first_name__icontains=query) |
         Q(last_name__icontains=query) |
         Q(address__icontains=query) |
         Q(postcode__icontains=query)
-    )[:10]  # Limit to 10 results
+    )
     
-    customer_list = [{
-        'id': c.id,
-        'first_name': c.first_name,
-        'last_name': c.last_name,
-        'anthill_customer_id': c.anthill_customer_id,
-        'address': c.address,
-        'postcode': c.postcode
-    } for c in customers]
+    # Also search in Order legacy fields (for customers not yet migrated to Customer table)
+    orders_with_matching_customers = Order.objects.filter(
+        Q(first_name__icontains=query) |
+        Q(last_name__icontains=query) |
+        Q(address__icontains=query) |
+        Q(postcode__icontains=query)
+    ).exclude(
+        Q(first_name='') & Q(last_name='')  # Skip orders with no customer data
+    ).order_by('-order_date')  # Most recent first
+    
+    # Build results dictionary to deduplicate
+    customer_dict = {}
+    
+    # Add customers from Customer table
+    for c in customers_from_table:
+        key = f"{c.first_name}|{c.last_name}|{c.postcode}"
+        if key not in customer_dict:
+            customer_dict[key] = {
+                'id': c.id,
+                'first_name': c.first_name,
+                'last_name': c.last_name,
+                'anthill_customer_id': c.anthill_customer_id,
+                'address': c.address,
+                'postcode': c.postcode
+            }
+    
+    # Add customers from Order legacy fields
+    for o in orders_with_matching_customers:
+        key = f"{o.first_name}|{o.last_name}|{o.postcode}"
+        if key not in customer_dict:
+            customer_dict[key] = {
+                'id': o.customer.id if o.customer else None,
+                'first_name': o.first_name,
+                'last_name': o.last_name,
+                'anthill_customer_id': o.anthill_id,
+                'address': o.address,
+                'postcode': o.postcode
+            }
+    
+    # Convert to list and sort by last name
+    customer_list = sorted(customer_dict.values(), key=lambda x: (x['last_name'], x['first_name']))[:50]
     
     return JsonResponse({'customers': customer_list})
 
@@ -1903,6 +1936,10 @@ def update_os_doors_batch(request):
                         if 'cost_price' in updates:
                             os_door.cost_price = Decimal(str(updates['cost_price']))
                         
+                        # Update quantity if provided
+                        if 'quantity' in updates:
+                            os_door.quantity = int(updates['quantity'])
+                        
                         # Update received quantity if provided
                         if 'received_quantity' in updates:
                             received_quantity = Decimal(str(updates['received_quantity']))
@@ -1924,6 +1961,41 @@ def update_os_doors_batch(request):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def delete_os_doors_batch(request):
+    """Delete multiple OS Door items by ID"""
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+            ids = data.get('ids', [])
+            if not ids:
+                return JsonResponse({'success': False, 'error': 'No items selected'})
+            deleted_count, _ = OSDoor.objects.filter(id__in=[int(i) for i in ids]).delete()
+            return JsonResponse({'success': True, 'deleted': deleted_count})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def delete_accessories_batch(request):
+    """Delete multiple Accessory items by ID"""
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+            ids = data.get('ids', [])
+            if not ids:
+                return JsonResponse({'success': False, 'error': 'No items selected'})
+            deleted_count, _ = Accessory.objects.filter(id__in=[int(i) for i in ids]).delete()
+            return JsonResponse({'success': True, 'deleted': deleted_count})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
 
 @login_required
 def replace_pnx_file(request, boards_po_id):
@@ -5131,139 +5203,164 @@ def download_pnx_as_csv(request, order_id):
 
 @login_required
 def push_accessories_to_workguru(request, order_id):
-    """Push accessories to WorkGuru project via API"""
-    import requests
-    import json
-    
+    """Push accessories to WorkGuru project via API."""
+    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
+    from .services.workguru_accessories import push_accessories_to_project
+
     order = get_object_or_404(Order, id=order_id)
-    
+
     if not order.workguru_id:
         messages.error(request, 'This order does not have a WorkGuru Project ID.')
         return redirect('order_details', order_id=order_id)
-    
+
     if not order.accessories.exists():
         messages.error(request, 'No accessories to push to WorkGuru.')
         return redirect('order_details', order_id=order_id)
-    
-    # Get API credentials from environment
-    api_key = os.getenv('WORKGURU_API_KEY')
-    secret_key = os.getenv('WORKGURU_SECRET_KEY')
-    
-    if not api_key or not secret_key:
-        messages.error(request, 'WorkGuru API credentials not configured.')
-        return redirect('order_details', order_id=order_id)
-    
-    # Step 1: Authenticate to get access token
-    auth_url = "https://ukapi.workguru.io/api/ClientTokenAuth/Authenticate/api/client/v1/tokenauth"
-    auth_payload = {
-        'apiKey': api_key,
-        'secret': secret_key
-    }
-    
+
     try:
-        logger.info(f'Authenticating with WorkGuru using endpoint: {auth_url}')
-        logger.info(f'Auth payload keys: {list(auth_payload.keys())}')
-        auth_response = requests.post(auth_url, json=auth_payload, timeout=10)
-        
-        if auth_response.status_code != 200:
-            messages.error(request, f'WorkGuru authentication failed: {auth_response.status_code} - {auth_response.text[:200]}')
-            logger.error(f'WorkGuru auth failed: {auth_response.text}')
-            return redirect('order_details', order_id=order_id)
-        
-        auth_data = auth_response.json()
-        access_token = auth_data.get('result', {}).get('accessToken') or auth_data.get('accessToken')
-        
-        if not access_token:
-            messages.error(request, f'No access token received from WorkGuru. Response: {auth_response.text[:200]}')
-            return redirect('order_details', order_id=order_id)
-            
-        logger.info(f'Successfully authenticated with WorkGuru')
-        
-    except requests.exceptions.RequestException as e:
-        messages.error(request, f'Error authenticating with WorkGuru: {str(e)}')
-        logger.error(f'WorkGuru auth error: {str(e)}')
+        api = WorkGuruAPI.authenticate()
+        result = push_accessories_to_project(api, order)
+
+        if result['success_count'] > 0:
+            messages.success(
+                request,
+                f"Successfully pushed {result['success_count']} item(s) to WorkGuru "
+                f"project {order.workguru_id} ({result['method']} mode)."
+            )
+        if result['error_count'] > 0:
+            error_summary = f"Failed to push {result['error_count']} item(s). "
+            error_summary += '; '.join(result['errors'][:3])
+            if len(result['errors']) > 3:
+                error_summary += f'... and {len(result["errors"]) - 3} more'
+            messages.error(request, error_summary)
+
+    except WorkGuruAPIError as e:
+        messages.error(request, str(e))
+
+    return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def create_workguru_po(request, order_id):
+    """Create a Purchase Order in WorkGuru and link it as the Boards PO for this order."""
+    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
+    from .services.workguru_boards import create_boards_po_in_workguru
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.workguru_id:
+        messages.error(request, 'This order does not have a WorkGuru Project ID. Set it first.')
         return redirect('order_details', order_id=order_id)
-    
-    # Step 2: Use token to push accessories
-    base_url = "https://ukapi.workguru.io"
-    endpoint = "/api/services/app/Project/AddProductToProject"
-    url = f"{base_url}{endpoint}"
-    
-    # Prepare headers with Bearer token
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {access_token}',
-        'Abp.TenantId': '1'
-    }
-    
-    success_count = 0
-    error_count = 0
-    errors = []
-    
-    # First, add BOARDS_CH (Carnehill Boards Order) - always required for every job
-    # Only add if it doesn't already exist
-    boards_ch_payload = {
-        'projectId': int(order.workguru_id),
-        'sku': 'BOARDS_CH',
-        'description': 'Carnehill Boards Order per Job',
-        'quantity': 1,
-        'billable': False,  # Not billable
-        'isStock': False  # This is a non-stock item
-    }
-    
+
+    if order.boards_po:
+        messages.warning(request, f'This order already has a Boards PO ({order.boards_po.po_number}).')
+        return redirect('order_details', order_id=order_id)
+
     try:
-        response = requests.post(url, headers=headers, json=boards_ch_payload, timeout=10)
-        if response.status_code in [200, 201]:
-            success_count += 1
-            logger.info(f"Successfully added BOARDS_CH to WorkGuru project {order.workguru_id}")
-        elif response.status_code == 400 and 'already exists' in response.text.lower():
-            # BOARDS_CH already exists, skip it
-            logger.info(f"BOARDS_CH already exists in project {order.workguru_id}, skipping")
-        else:
-            logger.warning(f"Failed to add BOARDS_CH: {response.status_code} - {response.text[:200]}")
-    except Exception as e:
-        logger.warning(f"Error adding BOARDS_CH: {str(e)}")
-    
-    # Push each accessory to WorkGuru
-    for accessory in order.accessories.all():
-        payload = {
-            'projectId': int(order.workguru_id),
-            'sku': accessory.sku,
-            'name': accessory.name,
-            'description': accessory.description or accessory.name,
-            'quantity': float(accessory.quantity),
-            'costPrice': float(accessory.cost_price),
-            'sellPrice': float(accessory.sell_price),
-            'billable': False  # All imported items are not billable
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            
-            if response.status_code in [200, 201]:
-                success_count += 1
-                logger.info(f"Successfully pushed {accessory.sku} to WorkGuru project {order.workguru_id}")
-            else:
-                error_count += 1
-                error_msg = f"{accessory.sku}: {response.status_code} - {response.text[:100]}"
-                errors.append(error_msg)
-                logger.error(f"Failed to push {accessory.sku}: {response.status_code} - {response.text}")
-        except requests.exceptions.RequestException as e:
-            error_count += 1
-            error_msg = f"{accessory.sku}: {str(e)}"
-            errors.append(error_msg)
-            logger.error(f"Error pushing {accessory.sku} to WorkGuru: {str(e)}")
-    
-    # Show results to user
-    if success_count > 0:
-        messages.success(request, f'Successfully pushed {success_count} accessory/accessories to WorkGuru project {order.workguru_id}.')
-    
-    if error_count > 0:
-        error_summary = f'Failed to push {error_count} item(s). Errors: ' + '; '.join(errors[:3])
-        if len(errors) > 3:
-            error_summary += f'... and {len(errors) - 3} more'
-        messages.error(request, error_summary)
-    
+        api = WorkGuruAPI.authenticate()
+        po_number = create_boards_po_in_workguru(api, order)
+        messages.success(request, f'WorkGuru PO {po_number} created and linked to this order.')
+    except WorkGuruAPIError as e:
+        messages.error(request, str(e))
+
+    return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def push_boards_to_workguru_po(request, order_id):
+    """Push board line items and PNX/CSV files to the WorkGuru Purchase Order."""
+    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
+    from .services.workguru_boards import push_boards_to_po
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.workguru_id:
+        messages.error(request, 'This order does not have a WorkGuru Project ID.')
+        return redirect('order_details', order_id=order_id)
+
+    if not order.boards_po:
+        messages.error(request, 'This order does not have a Boards PO. Create one first.')
+        return redirect('order_details', order_id=order_id)
+
+    try:
+        api = WorkGuruAPI.authenticate()
+        summary = push_boards_to_po(api, order)
+
+        msg_parts = [f"{summary['line_count']} board line item(s) added to PO {order.boards_po.po_number}"]
+        if summary['stock_count']:
+            msg_parts.append(f"{summary['stock_count']} existing stock")
+        if summary['adhoc_count']:
+            msg_parts.append(f"{summary['adhoc_count']} using generic boards product")
+        if summary['files_uploaded']:
+            msg_parts.append(f"{summary['files_uploaded']} file(s) uploaded")
+        messages.success(request, ' | '.join(msg_parts))
+
+    except WorkGuruAPIError as e:
+        messages.error(request, str(e))
+
+    return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def create_workguru_os_doors_po(request, order_id):
+    """Create a Purchase Order in WorkGuru for OS Doors."""
+    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
+    from .services.workguru_os_doors import create_os_doors_po_in_workguru
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.workguru_id:
+        messages.error(request, 'This order does not have a WorkGuru Project ID. Set it first.')
+        return redirect('order_details', order_id=order_id)
+
+    if order.os_doors_po:
+        messages.warning(request, f'This order already has an OS Doors PO ({order.os_doors_po}).')
+        return redirect('order_details', order_id=order_id)
+
+    try:
+        api = WorkGuruAPI.authenticate()
+        po_number = create_os_doors_po_in_workguru(api, order)
+        messages.success(request, f'WorkGuru OS Doors PO {po_number} created and linked to this order.')
+    except WorkGuruAPIError as e:
+        messages.error(request, str(e))
+
+    return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def push_os_doors_to_workguru_po(request, order_id):
+    """Push OS Door line items to the WorkGuru Purchase Order."""
+    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
+    from .services.workguru_os_doors import push_os_doors_to_po
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.workguru_id:
+        messages.error(request, 'This order does not have a WorkGuru Project ID.')
+        return redirect('order_details', order_id=order_id)
+
+    if not order.os_doors_po:
+        messages.error(request, 'This order does not have an OS Doors PO. Create one first.')
+        return redirect('order_details', order_id=order_id)
+
+    if not order.os_doors.exists():
+        messages.error(request, 'No OS door items found for this order.')
+        return redirect('order_details', order_id=order_id)
+
+    try:
+        api = WorkGuruAPI.authenticate()
+        summary = push_os_doors_to_po(api, order)
+
+        msg_parts = [f"{summary['line_count']} OS door line item(s) added to PO {order.os_doors_po}"]
+        if summary['stock_count']:
+            msg_parts.append(f"{summary['stock_count']} stock")
+        if summary['adhoc_count']:
+            msg_parts.append(f"{summary['adhoc_count']} adhoc")
+        messages.success(request, ' | '.join(msg_parts))
+
+    except WorkGuruAPIError as e:
+        messages.error(request, str(e))
+
     return redirect('order_details', order_id=order_id)
 
 

@@ -265,6 +265,14 @@
                                             <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddBoardsPOInline()" title="Add new boards PO">
                                                 <i class="bi bi-plus-lg"></i>
                                             </button>
+                                            {% if order.workguru_id and not order.boards_po %}
+                                            <a href="{% url 'create_workguru_po' order.id %}" 
+                                               class="btn btn-sm btn-primary btn-icon-add" 
+                                               title="Create PO in WorkGuru"
+                                               onclick="return confirm('Create a new Purchase Order in WorkGuru for this order?');">
+                                                <i class="bi bi-cloud-plus"></i>
+                                            </a>
+                                            {% endif %}
                                         </div>
                                         <div id="new-boards-po-inline" class="new-person-inline">
                                             <input type="text" id="new-po-number" class="form-input new-person-input" placeholder="PO number (e.g., PO1234)">
@@ -676,8 +684,8 @@
                         {% if order.boards_po and order.boards_po.file %}
                         <div class="summary-row download-row">
                             <dd class="grid-col-full">
-                                <a href="{{ order.boards_po.file.url }}" download class="btn btn-primary download-button btn-download-full">
-                                    <i class="bi bi-file-earmark-arrow-down"></i> Download PNX File
+                                <a href="{{ order.boards_po.file.url }}" download class="btn btn-sm btn-success">
+                                    <i class="bi bi-download"></i> Download PNX File
                                 </a>
                             </dd>
                         </div>
@@ -770,6 +778,12 @@
                             <button type="button" class="btn btn-primary btn-sm" onclick="openModal('addBoardModal')">
                                 <i class="bi bi-plus-circle"></i> Add Board
                             </button>
+                        {% endif %}
+                        {% if order_pnx_items and order.boards_po.po_number %}
+                            <a href="{% url 'push_boards_to_workguru_po' order.id %}" class="btn btn-info btn-sm"
+                               onclick="return confirm('Push {{ order_pnx_items|length }} board items and files to WorkGuru PO {{ order.boards_po.po_number }}?');">
+                                <i class="bi bi-cloud-upload"></i> Push Boards to PO
+                            </a>
                         {% endif %}
                         {% if order_pnx_items %}
                             <button type="button" class="btn btn-warning btn-save-changes" id="save-pnx-dimensions" style="display: none;">
@@ -918,7 +932,7 @@
                 <h3>
                     OS Doors
                     {% if order.os_doors_po %}
-                        <span class="badge badge-info badge-ml">PO: {{ order.os_doors_po }}</span>
+                        <span class="badge badge-info badge-ml">{{ order.os_doors_po }}</span>
                     {% endif %}
                     {% if order.os_doors_required %}
                         {% if order.os_doors_po %}
@@ -929,11 +943,29 @@
                     {% endif %}
                 </h3>
                 <div class="header-actions">
+                    {% if order.workguru_id and not order.os_doors_po %}
+                    <a href="{% url 'create_workguru_os_doors_po' order.id %}" 
+                       class="btn btn-sm btn-primary"
+                       title="Create OS Doors PO in WorkGuru"
+                       onclick="return confirm('Create a new OS Doors Purchase Order in WorkGuru for this order?');">
+                        <i class="bi bi-cloud-plus"></i> Create PO
+                    </a>
+                    {% endif %}
+                    {% if order.os_doors.exists and order.os_doors_po %}
+                    <a href="{% url 'push_os_doors_to_workguru_po' order.id %}" 
+                       class="btn btn-sm btn-info"
+                       onclick="return confirm('Push {{ order.os_doors.count }} OS door item(s) to WorkGuru PO {{ order.os_doors_po }}?');">
+                        <i class="bi bi-cloud-upload"></i> Push to PO
+                    </a>
+                    {% endif %}
                     {% if order.os_doors.exists or order.os_doors_required %}
                     <button type="button" class="btn btn-sm btn-primary" onclick="openModal('updateOSDModal')">
                         <i class="bi bi-pencil"></i> Update Order PO
                     </button>
                     {% endif %}
+                    <button class="btn btn-sm btn-success" type="button" onclick="openModal('pasteOSDoorModal')">
+                        <i class="bi bi-clipboard"></i> Paste OS Door
+                    </button>
                     <button class="btn btn-sm btn-primary" type="button" onclick="toggleCollapse('addOSDoorForm')">
                         <i class="bi bi-plus-lg"></i> Add OS Door
                     </button>
@@ -943,12 +975,14 @@
                 <!-- Existing OS Doors -->
                 {% if order.os_doors.all %}
                 <div class="table-container">
-                    <table class="table">
+                    <table class="table" id="os-doors-table">
                         <thead>
                             <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="os-door-select-all" title="Select all"></th>
                                 <th>Door Style</th>
                                 <th>Style Colour</th>
-                                <th>Dimensions</th>
+                                <th>Height</th>
+                                <th>Width</th>
                                 <th>Colour</th>
                                 <th>Qty</th>
                                 <th>Cost Price</th>
@@ -960,12 +994,18 @@
                         </thead>
                         <tbody>
                             {% for os_door in order.os_doors.all %}
-                            <tr>
+                            <tr data-os-door-id="{{ os_door.id }}">
+                                <td><input type="checkbox" class="checkbox-input os-door-select" data-os-door-id="{{ os_door.id }}"></td>
                                 <td>{{ os_door.door_style }}</td>
                                 <td>{{ os_door.style_colour }}</td>
-                                <td>{{ os_door.height }} x {{ os_door.width }}</td>
+                                <td>{{ os_door.height|floatformat:0 }}</td>
+                                <td>{{ os_door.width|floatformat:0 }}</td>
                                 <td>{{ os_door.colour }}</td>
-                                <td>{{ os_door.quantity|floatformat:0 }}</td>
+                                <td>
+                                    <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60" 
+                                           data-os-door-id="{{ os_door.id }}" 
+                                           value="{{ os_door.quantity }}">
+                                </td>
                                 <td>
                                     <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100" 
                                            data-os-door-id="{{ os_door.id }}" 
@@ -973,7 +1013,7 @@
                                            placeholder="£0.00">
                                 </td>
                                 <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
-                                    £{% widthratio os_door.cost_price 1 os_door.quantity %}
+                                    £{{ os_door.cost_price|multiply:os_door.quantity }}
                                 </td>
                                 <td>{{ os_door.po_number|default:"-" }}</td>
                                 <td>
@@ -992,9 +1032,12 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="form-actions">
+                <div class="form-actions" style="display: flex; gap: 0.5rem;">
                     <button type="button" class="btn btn-primary" id="save-os-doors-changes">
                         💾 Save OS Doors Changes
+                    </button>
+                    <button type="button" class="btn btn-danger hidden" id="delete-os-doors-selected">
+                        <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
                     </button>
                 </div>
                 {% else %}
@@ -1057,7 +1100,7 @@
                                 </label>
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-success">
+                        <button type="submit" class="btn btn-success" id="add-os-door-submit">
                             <i class="bi bi-plus-lg"></i> Add OS Door
                         </button>
                     </form>
@@ -1075,7 +1118,7 @@
                     {% endif %}
                 </h3>
                 <div class="header-actions">
-                    <button class="btn btn-sm btn-primary" type="button" onclick="toggleCollapse('addGlassForm')">
+                    <button class="btn btn-sm btn-primary" type="button" onclick="openModal('addGlassModal')">
                         <i class="bi bi-plus-lg"></i> Add Glass
                     </button>
                 </div>
@@ -1140,7 +1183,7 @@
                                 </td>
                                 <td>
                                     <button type="button" class="btn btn-primary btn-sm" title="Swap Item" 
-                                        onclick="openSwapModal({{ glass.id }}, '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
+                                        onclick="openSwapModal('{{ glass.id }}', '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
                                         <i class="bi bi-arrow-repeat"></i>
                                     </button>
                                     <form method="POST" action="{% url 'delete_accessory' glass.id %}" class="inline-delete-form" 
@@ -1164,41 +1207,6 @@
                 {% else %}
                 <p class="text-muted">No glass items added yet.</p>
                 {% endif %}
-
-                <!-- Add Glass Form -->
-                <div class="collapsible-form" id="addGlassForm">
-                    <hr>
-                    <h4>Add New Glass Item</h4>
-                    <form method="POST" action="{% url 'add_accessory_item' order.id %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="sku_prefix" value="GLS">
-                        <div class="form-grid-2col">
-                            <div class="form-group">
-                                <label for="glass_sku">SKU</label>
-                                <input type="text" class="form-input" id="glass_sku" name="sku" placeholder="GLS_..." required>
-                            </div>
-                            <div class="form-group">
-                                <label for="glass_name">Name</label>
-                                <input type="text" class="form-input" id="glass_name" name="name" required>
-                            </div>
-                            <div class="form-group form-group-span-2">
-                                <label for="glass_description">Description</label>
-                                <input type="text" class="form-input" id="glass_description" name="description">
-                            </div>
-                            <div class="form-group">
-                                <label for="glass_quantity">Quantity</label>
-                                <input type="number" class="form-input" id="glass_quantity" name="quantity" value="1" min="1" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="glass_cost_price">Cost Price (£)</label>
-                                <input type="number" class="form-input" id="glass_cost_price" name="cost_price" step="0.01" min="0" value="0.00">
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-success">
-                            <i class="bi bi-plus-lg"></i> Add Glass
-                        </button>
-                    </form>
-                </div>
             </div>
         </div>
 
@@ -1207,42 +1215,35 @@
                 <div class="card-header">
                     <h3>Accessories</h3>
                     <div class="header-actions">
-                        <button class="btn btn-success" type="button" onclick="openModal('addItemModal')">
+                        <button class="btn btn-sm btn-success" type="button" onclick="openModal('addItemModal')">
                             <i class="bi bi-plus-lg"></i> Add Item
                         </button>
-                        <button class="btn btn-primary" type="button" onclick="openModal('uploadAccessoriesModal')">
-                            <i class="bi bi-upload"></i> Upload CSV
-                        </button>
-                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-info btn-info-styled">
+                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-sm btn-info">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
                         </a>
                         {% if order.accessories.exists %}
-                        <a href="{% url 'download_current_accessories_csv' order.id %}" class="btn btn-success">
+                        <a href="{% url 'download_current_accessories_csv' order.id %}" class="btn btn-sm btn-success">
                             <i class="bi bi-download"></i> Download CSV
                         </a>
                         {% if order.workguru_id %}
-                        <a href="{% url 'push_accessories_to_workguru' order.id %}" class="btn btn-primary" 
+                        <a href="{% url 'push_accessories_to_workguru' order.id %}" class="btn btn-sm btn-info" 
                            onclick="return confirm('Push {{ order.accessories.count }} accessory/accessories to WorkGuru Project {{ order.workguru_id }}?');">
                             <i class="bi bi-cloud-upload"></i> Push to WorkGuru
                         </a>
                         {% endif %}
                         {% endif %}
                         {% if order.original_csv %}
-                        <button class="btn btn-warning" type="button" onclick="regenerateCSV({{ order.id }})">
+                        <button class="btn btn-sm btn-warning" type="button" onclick="regenerateCSV({{ order.id }})">
                             <i class="bi bi-arrow-repeat"></i> Regenerate CSV
                         </button>
                         {% endif %}
                         {% if order.accessories.exists %}
-                        <button type="button" class="btn btn-success btn-save-changes" id="save-accessory-changes">
+                        <button type="button" class="btn btn-sm btn-primary" id="save-accessory-changes">
                             <i class="bi bi-save"></i> Save Changes
                         </button>
-                        <form method="POST" action="{% url 'delete_all_accessories' order.id %}" class="inline-delete-form" 
-                            onsubmit="return confirm('Are you sure you want to remove ALL accessories from this order? This action cannot be undone.');">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-danger">
-                                <i class="bi bi-trash"></i> Remove All
-                            </button>
-                        </form>
+                        <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected">
+                            <i class="bi bi-trash"></i> Delete Selected (<span id="accessory-selected-count">0</span>)
+                        </button>
                         {% endif %}
                     </div>
                 </div>
@@ -1251,9 +1252,10 @@
                     <!-- Existing Accessories -->
                     {% if non_glass_accessories %}
                     <div class="table-container">
-                        <table class="table">
+                        <table class="table" id="accessories-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 30px;"><input type="checkbox" id="accessory-select-all" title="Select all"></th>
                                     <th>SKU</th>
                                     <th>Name</th>
                                     <th>Qty</th>
@@ -1269,7 +1271,8 @@
                             </thead>
                             <tbody>
                                 {% for accessory in non_glass_accessories %}
-                                <tr>
+                                <tr data-accessory-id="{{ accessory.id }}">
+                                    <td><input type="checkbox" class="checkbox-input accessory-select" data-accessory-id="{{ accessory.id }}"></td>
                                     <td>{{ accessory.sku }}</td>
                                     <td>{{ accessory.name }}</td>
                                     <td>
@@ -1327,22 +1330,15 @@
                                     </td>
                                     {% endif %}
                                     <td>
-                                        <button type="button" class="btn btn-primary btn-sm" title="Swap Item" 
+                                        <button type="button" class="btn btn-sm btn-primary" title="Swap Item" 
                                             onclick="openSwapModal({{ accessory.id }}, '{{ accessory.sku }}', '{{ accessory.name|escapejs }}')">
                                             <i class="bi bi-arrow-repeat"></i>
                                         </button>
-                                        <form method="POST" action="{% url 'delete_accessory' accessory.id %}" class="inline-delete-form" 
-                                            onsubmit="return confirm('Are you sure you want to remove this accessory?');">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-danger btn-sm" title="Remove Accessory">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </form>
                                     </td>
                                 </tr>
                                 {% endfor %}
                                 <tr class="table-total-row">
-                                    <td colspan="3" class="text-right">Total:</td>
+                                    <td colspan="4" class="text-right">Total:</td>
                                     <td>£{{ non_glass_accessories|sum_accessory_costs }}</td>
                                     <td colspan="{% if has_os_door_accessories %}4{% else %}2{% endif %}"></td>
                                 </tr>
@@ -1551,6 +1547,121 @@
                     <button type="submit" class="btn btn-primary">Update PO</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Pasting OS Door Data -->
+<div class="modal" id="pasteOSDoorModal">
+    <div class="modal-overlay" onclick="closeModal('pasteOSDoorModal')"></div>
+    <div class="modal-dialog modal-dialog-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Paste OS Door Data</h3>
+                <button type="button" class="modal-close" onclick="closeModal('pasteOSDoorModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="osd-paste-input">Paste row from supplier sheet</label>
+                    <textarea class="form-input" id="osd-paste-input" rows="3" 
+                              placeholder="e.g. Morris &#9;Superior Matt Light Grey Superior Matt Light Grey &#9;Morris Superior Matt Light Grey Drawer 210 x 960 (MTM) &#9;Light Grey Light Grey &#9;H &#9;£36.58"></textarea>
+                    <small class="form-help">Paste a tab-separated row directly from the supplier spreadsheet, then click Parse.</small>
+                </div>
+                <div class="flex-row-gap" style="margin-bottom: 1rem;">
+                    <button type="button" class="btn btn-primary" onclick="parseOSDoorPaste()">
+                        <i class="bi bi-magic"></i> Parse
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('osd-parse-rules').classList.toggle('hidden')">
+                        <i class="bi bi-info-circle"></i> Parsing Rules
+                    </button>
+                </div>
+
+                <!-- Parsing rules reference (hidden by default) -->
+                <div id="osd-parse-rules" class="hidden" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem;">
+                    <h4 style="margin-bottom: 0.5rem;">Parsing Rules</h4>
+                    <p style="margin-bottom: 0.5rem;"><strong>Expected tab-separated columns:</strong></p>
+                    <ol style="margin: 0.5rem 0 1rem; padding-left: 1.5rem;">
+                        <li><strong>Door Style</strong> — e.g. Morris, Lanark</li>
+                        <li><strong>Style Colour</strong> — e.g. Superior Matt Light Grey (may be duplicated)</li>
+                        <li><strong>Item Description</strong> — full description including dimensions</li>
+                        <li><strong>Colour</strong> — e.g. Light Grey (may be duplicated)</li>
+                        <li><strong>Handing</strong> — H (ignored)</li>
+                        <li><strong>Unit Price</strong> — e.g. £18.29</li>
+                        <li><strong>Quantity</strong> — e.g. 2</li>
+                        <li><strong>Total Price</strong> — e.g. £36.58</li>
+                    </ol>
+                    <p style="margin-bottom: 0.25rem;"><strong>Dimensions</strong> are extracted from the description (e.g. "210 x 960").</p>
+                    <p style="margin-bottom: 0.5rem;">Empty leading columns are automatically skipped.</p>
+                    <hr style="border-color: var(--border-color); margin: 0.75rem 0;">
+                    <div class="form-grid-2col" style="gap: 0.5rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="osd-rules-styles" style="font-size: 0.85rem;"><strong>Known Door Styles</strong> (comma-separated)</label>
+                            <input type="text" class="form-input" id="osd-rules-styles" 
+                                   value="Morris, Lanark" style="font-size: 0.85rem;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="osd-rules-colours" style="font-size: 0.85rem;"><strong>Known Style Colours</strong> (comma-separated)</label>
+                            <input type="text" class="form-input" id="osd-rules-colours" 
+                                   value="Superior Matt Light Grey, Superior Matt White, Superior Matt Cashmere, Superior Matt Anthracite, Superior Matt Dust Grey, Superior Matt Graphite" 
+                                   style="font-size: 0.85rem;">
+                        </div>
+                    </div>
+                    <small class="form-help" style="margin-top: 0.25rem; display: block;">Edit these lists to add new door styles or colours. Changes are used immediately when you click Parse.</small>
+                </div>
+
+                <!-- Parsed result preview -->
+                <div id="osd-parse-result" class="hidden">
+                    <h4 style="margin-bottom: 0.5rem;">Parsed Result</h4>
+                    <form method="POST" id="osd-parsed-form">
+                        {% csrf_token %}
+                        <div class="form-grid-2col">
+                            <div class="form-group">
+                                <label for="osd-parsed-door-style">Door Style</label>
+                                <input type="text" class="form-input" id="osd-parsed-door-style" name="door_style" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-style-colour">Style Colour</label>
+                                <input type="text" class="form-input" id="osd-parsed-style-colour" name="style_colour" required>
+                            </div>
+                            <div class="form-group form-group-span-2">
+                                <label for="osd-parsed-description">Item Description</label>
+                                <textarea class="form-input" id="osd-parsed-description" name="item_description" rows="2" required></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-height">Height (mm)</label>
+                                <input type="number" class="form-input" id="osd-parsed-height" name="height" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-width">Width (mm)</label>
+                                <input type="number" class="form-input" id="osd-parsed-width" name="width" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-colour">Colour</label>
+                                <input type="text" class="form-input" id="osd-parsed-colour" name="colour" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-quantity">Quantity</label>
+                                <input type="number" class="form-input" id="osd-parsed-quantity" name="quantity" min="1" value="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-cost-price">Cost Price (£)</label>
+                                <input type="number" class="form-input" id="osd-parsed-cost-price" name="cost_price" step="0.01" min="0" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="osd-parsed-total-price">Total Price (£)</label>
+                                <input type="number" class="form-input" id="osd-parsed-total-price" step="0.01" min="0" value="0" disabled 
+                                       style="background: var(--bg-tertiary); color: var(--text-secondary);">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('pasteOSDoorModal')">Cancel</button>
+                <button type="button" class="btn btn-success" id="osd-parsed-submit" onclick="submitParsedOSDoor()" disabled>
+                    <i class="bi bi-plus-lg"></i> Add OS Door
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -1832,6 +1943,32 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('addItemModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Glass Modal -->
+<div class="modal" id="addGlassModal">
+    <div class="modal-overlay" onclick="closeModal('addGlassModal')"></div>
+    <div class="modal-dialog modal-dialog-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Glass Item</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addGlassModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="add-glass-search">Search for Item</label>
+                    <input type="text" class="form-input" id="add-glass-search" 
+                           placeholder="Search by SKU or Name..." onkeyup="searchGlassToAdd()">
+                </div>
+                <div id="add-glass-results" class="search-results-container">
+                    <p class="text-muted">Type to search for items...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addGlassModal')">Cancel</button>
             </div>
         </div>
     </div>
@@ -2557,6 +2694,72 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // ─── Accessories select / bulk delete ─────────────────────────────────────
+    const accessorySelectAll = document.getElementById('accessory-select-all');
+    const deleteAccessoriesBtn = document.getElementById('delete-accessories-selected');
+    const accessoryCountSpan = document.getElementById('accessory-selected-count');
+
+    function updateAccessoryDeleteButton() {
+        const checked = document.querySelectorAll('.accessory-select:checked');
+        const count = checked.length;
+        if (accessoryCountSpan) accessoryCountSpan.textContent = count;
+        if (deleteAccessoriesBtn) {
+            if (count > 0) {
+                deleteAccessoriesBtn.classList.remove('hidden');
+            } else {
+                deleteAccessoriesBtn.classList.add('hidden');
+            }
+        }
+    }
+
+    if (accessorySelectAll) {
+        accessorySelectAll.addEventListener('change', function() {
+            document.querySelectorAll('.accessory-select').forEach(cb => cb.checked = this.checked);
+            updateAccessoryDeleteButton();
+        });
+    }
+
+    document.querySelectorAll('.accessory-select').forEach(function(cb) {
+        cb.addEventListener('change', updateAccessoryDeleteButton);
+    });
+
+    if (deleteAccessoriesBtn) {
+        deleteAccessoriesBtn.addEventListener('click', function() {
+            const checked = document.querySelectorAll('.accessory-select:checked');
+            const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
+            if (ids.length === 0) return;
+            if (!confirm(`Delete ${ids.length} accessory item(s)? This cannot be undone.`)) return;
+
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> Deleting...';
+
+            fetch('/stock-take/delete-accessories-batch/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ ids: ids })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`${data.deleted} accessory item(s) deleted.`, 'success');
+                    location.reload();
+                } else {
+                    showAlert('Error deleting items: ' + data.error, 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected (<span id="accessory-selected-count">' + ids.length + '</span>)';
+                }
+            })
+            .catch(error => {
+                showAlert('Error deleting items.', 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected';
+            });
+        });
+    }
+
     // Handle save button click
     const savePnxBtn = document.getElementById('save-pnx-changes');
     if (savePnxBtn) {
@@ -2611,44 +2814,114 @@ document.addEventListener('DOMContentLoaded', function() {
     // Track OS Doors changes
     let osDoorsChanges = {};
 
+    function recalcOsDoorTotal(row) {
+        const costInput = row.querySelector('.os-door-cost-input');
+        const qtyInput = row.querySelector('.os-door-qty-input');
+        const costPrice = parseFloat(costInput.value) || 0;
+        const quantity = parseInt(qtyInput.value) || 0;
+        const totalCostCell = row.querySelector('.os-door-total-cost');
+        totalCostCell.textContent = '£' + (costPrice * quantity).toFixed(2);
+    }
+
     // Handle OS Doors cost price input changes
     document.querySelectorAll('.os-door-cost-input').forEach(function(input) {
         input.addEventListener('input', function() {
             const osDoorId = this.getAttribute('data-os-door-id');
             const costPrice = parseFloat(this.value) || 0;
-            
-            // Track the cost change
-            if (!osDoorsChanges[osDoorId]) {
-                osDoorsChanges[osDoorId] = {};
-            }
+            if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
             osDoorsChanges[osDoorId].cost_price = costPrice;
-            
-            // Update the total cost display for this row
-            const row = this.closest('tr');
-            const quantityCell = row.querySelector('td:nth-child(5)'); // Qty column (5th column)
-            const quantity = parseInt(quantityCell.textContent.trim()) || 0;
-            const totalCost = costPrice * quantity;
-            const totalCostCell = row.querySelector('.os-door-total-cost');
-            totalCostCell.textContent = '£' + totalCost.toFixed(2);
+            recalcOsDoorTotal(this.closest('tr'));
         });
     });
 
-    // Handle OS Doors received checkbox changes (just track changes, don't save)
+    // Handle OS Doors quantity input changes
+    document.querySelectorAll('.os-door-qty-input').forEach(function(input) {
+        input.addEventListener('input', function() {
+            const osDoorId = this.getAttribute('data-os-door-id');
+            const quantity = parseInt(this.value) || 0;
+            if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
+            osDoorsChanges[osDoorId].quantity = quantity;
+            recalcOsDoorTotal(this.closest('tr'));
+        });
+    });
+
+    // Handle OS Doors received checkbox changes
     document.querySelectorAll('.os-door-received-checkbox').forEach(function(checkbox) {
         checkbox.addEventListener('change', function() {
             const osDoorId = this.getAttribute('data-os-door-id');
-            const received = this.checked;
-            // Find the corresponding quantity from the table
             const row = this.closest('tr');
-            const quantityCell = row.querySelector('td:nth-child(5)'); // Qty column
-            const quantity = parseInt(quantityCell.textContent.trim()) || 0;
-            
-            if (!osDoorsChanges[osDoorId]) {
-                osDoorsChanges[osDoorId] = {};
-            }
-            osDoorsChanges[osDoorId].received_quantity = received ? quantity : 0;
+            const qtyInput = row.querySelector('.os-door-qty-input');
+            const quantity = parseInt(qtyInput.value) || 0;
+            if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
+            osDoorsChanges[osDoorId].received_quantity = this.checked ? quantity : 0;
         });
     });
+
+    // ─── Select / bulk delete ─────────────────────────────────────
+    const selectAllCheckbox = document.getElementById('os-door-select-all');
+    const deleteBtn = document.getElementById('delete-os-doors-selected');
+    const selectedCountSpan = document.getElementById('os-door-selected-count');
+
+    function updateDeleteButton() {
+        const checked = document.querySelectorAll('.os-door-select:checked');
+        const count = checked.length;
+        if (selectedCountSpan) selectedCountSpan.textContent = count;
+        if (deleteBtn) {
+            if (count > 0) {
+                deleteBtn.classList.remove('hidden');
+            } else {
+                deleteBtn.classList.add('hidden');
+            }
+        }
+    }
+
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            document.querySelectorAll('.os-door-select').forEach(cb => cb.checked = this.checked);
+            updateDeleteButton();
+        });
+    }
+
+    document.querySelectorAll('.os-door-select').forEach(function(cb) {
+        cb.addEventListener('change', updateDeleteButton);
+    });
+
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function() {
+            const checked = document.querySelectorAll('.os-door-select:checked');
+            const ids = Array.from(checked).map(cb => cb.getAttribute('data-os-door-id'));
+            if (ids.length === 0) return;
+            if (!confirm(`Delete ${ids.length} OS door item(s)? This cannot be undone.`)) return;
+
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass"></i> Deleting...';
+
+            fetch('/stock-take/delete-os-doors-batch/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ ids: ids })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`${data.deleted} OS door item(s) deleted.`, 'success');
+                    location.reload();
+                } else {
+                    showAlert('Error deleting items: ' + data.error, 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">' + ids.length + '</span>)';
+                }
+            })
+            .catch(error => {
+                showAlert('Error deleting items.', 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected';
+            });
+        });
+    }
 
     // Handle save button click for OS Doors
     const saveOsDoorsBtn = document.getElementById('save-os-doors-changes');
@@ -2693,6 +2966,15 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // Add loading state to the regular Add OS Door form submit
+    const addOsDoorBtn = document.getElementById('add-os-door-submit');
+    if (addOsDoorBtn) {
+        addOsDoorBtn.closest('form').addEventListener('submit', function() {
+            addOsDoorBtn.disabled = true;
+            addOsDoorBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Adding...';
+        });
+    }
 });
 
 // Alert functions (global scope so they can be used by all functions)
@@ -2729,6 +3011,242 @@ function toggleCollapse(elementId) {
             element.style.display = 'none';
         }
     }
+}
+
+// ─── OS Door paste-to-parse ───────────────────────────────────────
+
+function getKnownStyles() {
+    const input = document.getElementById('osd-rules-styles');
+    if (input) return input.value.split(',').map(s => s.trim()).filter(s => s);
+    return ['Morris', 'Lanark'];
+}
+
+function getKnownColours() {
+    const input = document.getElementById('osd-rules-colours');
+    if (input) return input.value.split(',').map(s => s.trim()).filter(s => s);
+    return ['Superior Matt Light Grey', 'Superior Matt White', 'Superior Matt Cashmere'];
+}
+
+function parseOSDoorPaste() {
+    const raw = document.getElementById('osd-paste-input').value.trim();
+    if (!raw) {
+        showAlert('Paste some data first.', 'warning');
+        return;
+    }
+
+    // Split by tab characters, keep empty entries to preserve column positions
+    const rawCols = raw.split('\t').map(c => c.trim());
+    // Strip leading empty columns
+    const cols = rawCols.slice(rawCols.findIndex(c => c.length > 0));
+
+    let doorStyle = '';
+    let styleColour = '';
+    let itemDescription = '';
+    let colour = '';
+    let height = 0;
+    let width = 0;
+    let costPrice = 0;
+    let quantity = 1;
+    let totalPrice = 0;
+
+    const knownStyles = getKnownStyles();
+    const knownColours = getKnownColours();
+
+    // ── Strategy: tab-separated columns ──
+    // Expected layout after stripping leading empties:
+    //   [0] Door Style        e.g. "Morris"
+    //   [1] Style Colour      e.g. "Superior Matt Light Grey Superior Matt Light Grey"
+    //   [2] Item Description  e.g. "Morris Superior Matt Light Grey Drawer 210 x 960 (MTM)"
+    //   [3] Colour            e.g. "Light Grey Light Grey"
+    //   [4] Handing           e.g. "H"  (ignored)
+    //   [5] Unit Price        e.g. "£18.29"
+    //   [6] Quantity          e.g. "2"
+    //   [7] Total Price       e.g. "£36.58"
+
+    if (cols.length >= 4) {
+        // Column 0 → Door Style
+        doorStyle = cols[0];
+
+        // Column 1 → Style Colour (may be duplicated)
+        styleColour = deduplicateColour(cols[1]);
+
+        // Column 2 → Item Description
+        itemDescription = cols[2];
+
+        // Column 3 → Colour (may be duplicated)
+        colour = deduplicateColour(cols[3]);
+
+        // Extract dimensions from description
+        const dims = extractDimensions(itemDescription);
+        height = dims.height;
+        width = dims.width;
+
+        // Scan remaining columns for price, quantity, total
+        // Strategy: find £ values and pure numbers
+        let pricesFound = [];
+        let numbersFound = [];
+
+        for (let i = 4; i < cols.length; i++) {
+            const val = cols[i];
+            // Skip handing indicators (single letter)
+            if (/^[A-Z]$/.test(val)) continue;
+            // Skip X buttons, empty strings
+            if (val === 'X' || val === '') continue;
+
+            const price = extractPrice(val);
+            if (price > 0) {
+                pricesFound.push({ index: i, value: price });
+            } else if (/^\d+$/.test(val)) {
+                numbersFound.push({ index: i, value: parseInt(val) });
+            }
+        }
+
+        // Assign: first price = unit cost, pure number = quantity, second price = total
+        if (pricesFound.length >= 1) costPrice = pricesFound[0].value;
+        if (numbersFound.length >= 1) quantity = numbersFound[0].value;
+        if (pricesFound.length >= 2) {
+            totalPrice = pricesFound[pricesFound.length - 1].value;
+        } else {
+            totalPrice = costPrice * quantity;
+        }
+    } else {
+        // Fallback: try to parse the whole string
+        for (const style of knownStyles) {
+            if (raw.includes(style)) {
+                doorStyle = style;
+                break;
+            }
+        }
+
+        for (const c of knownColours) {
+            if (raw.includes(c)) {
+                styleColour = c;
+                const parts = c.split(' ');
+                colour = parts.slice(-2).join(' ');
+                break;
+            }
+        }
+
+        const dims = extractDimensions(raw);
+        height = dims.height;
+        width = dims.width;
+        costPrice = extractPrice(raw);
+        totalPrice = costPrice;
+        itemDescription = raw;
+    }
+
+    // Populate the parsed form
+    document.getElementById('osd-parsed-door-style').value = doorStyle;
+    document.getElementById('osd-parsed-style-colour').value = styleColour;
+    document.getElementById('osd-parsed-description').value = itemDescription;
+    document.getElementById('osd-parsed-height').value = height || '';
+    document.getElementById('osd-parsed-width').value = width || '';
+    document.getElementById('osd-parsed-colour').value = colour;
+    document.getElementById('osd-parsed-quantity').value = quantity;
+    document.getElementById('osd-parsed-cost-price').value = costPrice || '';
+    document.getElementById('osd-parsed-total-price').value = totalPrice ? totalPrice.toFixed(2) : '';
+
+    // Recalculate total when qty or cost changes
+    updateParsedTotal();
+
+    // Show result and enable submit
+    document.getElementById('osd-parse-result').classList.remove('hidden');
+    document.getElementById('osd-parsed-submit').disabled = false;
+}
+
+// Live total recalculation
+function updateParsedTotal() {
+    const qty = parseFloat(document.getElementById('osd-parsed-quantity').value) || 0;
+    const cost = parseFloat(document.getElementById('osd-parsed-cost-price').value) || 0;
+    document.getElementById('osd-parsed-total-price').value = (qty * cost).toFixed(2);
+}
+
+// Attach live recalc listeners after DOM load
+document.addEventListener('DOMContentLoaded', function() {
+    const qtyInput = document.getElementById('osd-parsed-quantity');
+    const costInput = document.getElementById('osd-parsed-cost-price');
+    if (qtyInput) qtyInput.addEventListener('input', updateParsedTotal);
+    if (costInput) costInput.addEventListener('input', updateParsedTotal);
+});
+
+function deduplicateColour(str) {
+    // "Superior Matt Light Grey Superior Matt Light Grey" → "Superior Matt Light Grey"
+    // "Light Grey Light Grey" → "Light Grey"
+    if (!str) return '';
+    const half = Math.floor(str.length / 2);
+    const first = str.substring(0, half).trim();
+    const second = str.substring(half).trim();
+    if (first === second) return first;
+
+    // Also try word-based dedup
+    const words = str.split(/\s+/);
+    if (words.length % 2 === 0) {
+        const mid = words.length / 2;
+        const firstHalf = words.slice(0, mid).join(' ');
+        const secondHalf = words.slice(mid).join(' ');
+        if (firstHalf === secondHalf) return firstHalf;
+    }
+    return str;
+}
+
+function extractDimensions(str) {
+    // Match patterns like "210 x 960", "210x960", "210 X 960"
+    const match = str.match(/(\d+)\s*[xX×]\s*(\d+)/);
+    if (match) {
+        return { height: parseInt(match[1]), width: parseInt(match[2]) };
+    }
+    return { height: 0, width: 0 };
+}
+
+function extractPrice(str) {
+    // Match £12.34 or 12.34
+    const match = str.match(/£?([\d]+\.[\d]{2})/);
+    if (match) return parseFloat(match[1]);
+    return 0;
+}
+
+function submitParsedOSDoor() {
+    const form = document.getElementById('osd-parsed-form');
+    const formData = new FormData(form);
+    const btn = document.getElementById('osd-parsed-submit');
+
+    // Validate required fields
+    const requiredFields = ['door_style', 'style_colour', 'item_description', 'height', 'width', 'colour', 'quantity'];
+    for (const field of requiredFields) {
+        if (!formData.get(field)) {
+            showAlert(`Please fill in the ${field.replace('_', ' ')} field.`, 'warning');
+            return;
+        }
+    }
+
+    // Show loading state
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Adding...';
+
+    // Submit via fetch to the same add-door endpoint
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    fetch(window.location.href, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken
+        },
+        body: formData
+    })
+    .then(response => {
+        if (response.redirected) {
+            window.location.href = response.url;
+        } else {
+            return response.text().then(html => {
+                location.reload();
+            });
+        }
+    })
+    .catch(error => {
+        showAlert('Error adding OS Door: ' + error, 'danger');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-plus-lg"></i> Add OS Door';
+    });
 }
 
 // Modal functions (defined outside DOMContentLoaded so onclick handlers can access them)
@@ -2977,6 +3495,7 @@ function performSwap(newStockItemId, newSku, newName) {
 
 // Add new item functionality
 let addItemSearchTimeout = null;
+let addGlassSearchTimeout = null;
 
 function searchItemsToAdd() {
     const searchTerm = document.getElementById('add-item-search').value.trim();
@@ -3002,6 +3521,106 @@ function searchItemsToAdd() {
             });
     }, 300);
 }
+
+function searchGlassToAdd() {
+    const searchTerm = document.getElementById('add-glass-search').value.trim();
+    
+    if (addGlassSearchTimeout) {
+        clearTimeout(addGlassSearchTimeout);
+    }
+    
+    if (searchTerm.length < 2) {
+        document.getElementById('add-glass-results').innerHTML = '<p class="text-muted">Type at least 2 characters to search...</p>';
+        return;
+    }
+    
+    addGlassSearchTimeout = setTimeout(function() {
+        fetch(`/stock-take/search-stock-items/?q=${encodeURIComponent(searchTerm)}`)
+            .then(response => response.json())
+            .then(data => {
+                displayAddGlassResults(data.results);
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                document.getElementById('add-glass-results').innerHTML = '<p class="text-danger">Error searching items</p>';
+            });
+    }, 300);
+}
+
+function displayAddGlassResults(results) {
+    const container = document.getElementById('add-glass-results');
+    
+    if (results.length === 0) {
+        container.innerHTML = '<p class="text-muted">No items found</p>';
+        return;
+    }
+    
+    let html = '<table class="table table-hover"><thead><tr><th>SKU</th><th>Name</th><th>Stock</th><th>Action</th></tr></thead><tbody>';
+    
+    results.forEach(item => {
+        const stockBadge = item.quantity > 0 
+            ? `<span class="badge badge-success">${item.quantity}</span>` 
+            : `<span class="badge badge-danger">0</span>`;
+        
+        html += `
+            <tr>
+                <td>${item.sku}</td>
+                <td>${item.name}</td>
+                <td>${stockBadge}</td>
+                <td>
+                    <button type="button" class="btn btn-primary btn-sm" 
+                            onclick="addGlassToOrder(${item.id}, '${item.sku}', '${item.name.replace(/'/g, "\\'")}')">
+                        Add
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function addGlassToOrder(stockItemId, sku, name) {
+    const quantity = prompt(`How many ${sku} do you want to add?`, '1');
+    
+    if (quantity === null || quantity === '') {
+        return;
+    }
+    
+    const qty = parseFloat(quantity);
+    if (isNaN(qty) || qty <= 0) {
+        showAlert('Please enter a valid quantity', 'danger');
+        return;
+    }
+    
+    fetch(`/stock-take/add-accessory-item/{{ order.id }}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ 
+            stock_item_id: stockItemId,
+            quantity: qty
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('addGlassModal');
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + (data.error || 'Unknown error'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error adding glass:', error);
+        showAlert('Error adding glass item', 'danger');
+    });
+}
+
 
 function displayAddItemResults(results) {
     const container = document.getElementById('add-item-results');
