@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ supplier.name }} - Supplier{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_suppliers_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/suppliers.css' %}">
+<link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="supplier-detail-header">
+        <div class="supplier-detail-title">
+            <a href="{% url 'suppliers_list' %}" class="back-link" title="Back to Suppliers">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <h1>{{ supplier.name }}</h1>
+            {% if supplier.is_active %}
+            <span class="supplier-active-badge active">Active</span>
+            {% else %}
+            <span class="supplier-active-badge inactive">Inactive</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Supplier Info Grid -->
+    <div class="supplier-info-grid">
+        <div class="supplier-info-section">
+            <h3>Contact Information</h3>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Email</span>
+                <span class="supplier-info-value">
+                    {% if supplier.email %}
+                    <a href="mailto:{{ supplier.email }}">{{ supplier.email }}</a>
+                    {% else %}-{% endif %}
+                </span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Phone</span>
+                <span class="supplier-info-value">{{ supplier.phone|default:"-" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Website</span>
+                <span class="supplier-info-value">
+                    {% if supplier.website %}
+                    <a href="{{ supplier.website }}" target="_blank">{{ supplier.website }}</a>
+                    {% else %}-{% endif %}
+                </span>
+            </div>
+        </div>
+
+        <div class="supplier-info-section">
+            <h3>Address</h3>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Address 1</span>
+                <span class="supplier-info-value">{{ supplier.address_1|default:"-" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Address 2</span>
+                <span class="supplier-info-value">{{ supplier.address_2|default:"-" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">City</span>
+                <span class="supplier-info-value">{{ supplier.city|default:"-" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Postcode</span>
+                <span class="supplier-info-value">{{ supplier.postcode|default:"-" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Country</span>
+                <span class="supplier-info-value">{{ supplier.country|default:"-" }}</span>
+            </div>
+        </div>
+
+        <div class="supplier-info-section">
+            <h3>Financial</h3>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Currency</span>
+                <span class="supplier-info-value">{{ supplier.currency|default:"GBP" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Credit Limit</span>
+                <span class="supplier-info-value">£{{ supplier.credit_limit|floatformat:2 }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Credit Days</span>
+                <span class="supplier-info-value">{{ supplier.credit_days|default:"-" }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Total Spend</span>
+                <span class="supplier-info-value supplier-total-spend">£{{ total_spend|floatformat:2 }}</span>
+            </div>
+            <div class="supplier-info-row">
+                <span class="supplier-info-label">Purchase Orders</span>
+                <span class="supplier-info-value">{{ po_count }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase Orders for this supplier -->
+    <div class="supplier-po-section">
+        <h2><i class="bi bi-clipboard-check"></i> Purchase Orders ({{ po_count }})</h2>
+
+        {% if purchase_orders %}
+        <div class="po-table-container">
+            <table class="po-table">
+                <thead>
+                    <tr>
+                        <th>PO Number</th>
+                        <th>Project</th>
+                        <th>Description</th>
+                        <th>Issue Date</th>
+                        <th>Expected Date</th>
+                        <th class="text-right">Total</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for po in purchase_orders %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="po-number">
+                                {{ po.display_number|default:"-" }}
+                            </a>
+                        </td>
+                        <td>{{ po.project_name|default:"-" }}</td>
+                        <td class="po-desc-cell">{{ po.description|default:"-"|truncatewords:10 }}</td>
+                        <td>{{ po.issue_date|default:"-" }}</td>
+                        <td>{{ po.expected_date|default:"-" }}</td>
+                        <td class="text-right">£{{ po.total|floatformat:2 }}</td>
+                        <td>
+                            <span class="po-status {% if po.status == 'Draft' %}draft{% elif po.status == 'Sent' %}sent{% elif po.status == 'Received' %}received{% elif po.status == 'Approved' %}approved{% elif po.status == 'Cancelled' %}cancelled{% endif %}">
+                                {{ po.status|default:"Draft" }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="po-empty-state">
+            <p>No purchase orders found for this supplier.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,780 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Product Details - {{ product.name }}{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/order_details.css' %}">
+<link rel="stylesheet" href="{% static 'css/product_detail.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <!-- Product Header -->
+    <div class="product-header">
+        <div class="product-title-section">
+            <div class="product-sku">{{ product.sku }}</div>
+            <h1>Product Details</h1>
+        </div>
+        <div class="product-actions">
+            <button class="btn btn-sm btn-primary" id="editProductBtn" onclick="toggleEditMode()">
+                <i class="bi bi-pencil"></i> Edit Product
+            </button>
+            <button class="btn btn-sm btn-success" id="saveProductBtn" onclick="saveProduct()" style="display: none;">
+                <i class="bi bi-save"></i> Save Changes
+            </button>
+            <button class="btn btn-sm btn-secondary" id="cancelEditBtn" onclick="cancelEdit()" style="display: none;">
+                <i class="bi bi-x-circle"></i> Cancel
+            </button>
+            <a href="{% url 'stock_items_manager' %}" class="btn btn-sm btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Products
+            </a>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tab-navigation">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="price-history">Price History</button>
+        <button class="tab-btn" data-tab="stock-history">Stock History</button>
+        <button class="tab-btn" data-tab="notes">Notes <span class="tab-count">(0)</span></button>
+        <button class="tab-btn" data-tab="last-modified">Last Modified</button>
+        <button class="tab-btn" data-tab="purchase-orders">Purchase Orders <span class="tab-count">(0)</span></button>
+        <button class="tab-btn" data-tab="projects">Projects <span class="tab-count">(0)</span></button>
+    </div>
+
+    <!-- Overview Tab Content -->
+    <div class="tab-content" id="overview" style="display: block;">
+        <div class="info-grid">
+            <!-- Product Info Section -->
+            <div class="info-group">
+                <h3>Product Information</h3>
+                {% if product.image %}
+                <img src="{{ product.image.url }}" alt="{{ product.name }}" class="product-image" style="margin-bottom: 16px;">
+                {% else %}
+                <div class="product-image" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted); margin-bottom: 16px;">
+                    <i class="bi bi-image" style="font-size: 2rem;"></i>
+                </div>
+                {% endif %}
+                <div class="info-row">
+                    <div class="info-label">SKU</div>
+                    <div class="info-value" data-field="sku" data-value="{{ product.sku }}">{{ product.sku }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Name</div>
+                    <div class="info-value" data-field="name" data-value="{{ product.name }}">{{ product.name }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Description</div>
+                    <div class="info-value" data-field="description" data-value="{{ product.name }}">{{ product.name }}</div>
+                </div>
+            </div>
+
+            <!-- Pricing Section -->
+            <div class="info-group">
+                <h3>Pricing</h3>
+                <div class="info-row">
+                    <div class="info-label">Cost Price</div>
+                    <div class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:2 }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Average Landed Cost</div>
+                    <div class="info-value">£{{ product.cost|floatformat:2 }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Sell Price</div>
+                    <div class="info-value">£0.00</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">RRP</div>
+                    <div class="info-value">£0.00</div>
+                </div>
+            </div>
+
+            <!-- Product Details Section -->
+            <div class="info-group">
+                <h3>Product Details</h3>
+                <div class="info-row">
+                    <div class="info-label">Brand</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Is Active</div>
+                    <div class="info-value">True</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Barcode</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Category</div>
+                    <div class="info-value" data-field="category_id" data-value="{{ product.category.id }}">{{ product.category.name|default:"Not Set" }}</div>
+                </div>
+            </div>
+
+            <!-- Tax & Classification Section -->
+            <div class="info-group">
+                <h3>Tax &amp; Classification</h3>
+                <div class="info-row">
+                    <div class="info-label">Tracking Type</div>
+                    <div class="info-value" data-field="tracking_type" data-value="{{ product.tracking_type }}">{{ product.get_tracking_type_display }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Sell Tax Code</div>
+                    <div class="info-value">20% (VAT on Income)</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Purchase Tax Code</div>
+                    <div class="info-value">20% (VAT on Expenses)</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Show On Kiosk</div>
+                    <div class="info-value">False</div>
+                </div>
+            </div>
+
+            <!-- Supplier Section -->
+            <div class="info-group">
+                <h3>Supplier Information</h3>
+                <div class="info-row">
+                    <div class="info-label">Supplier</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Supplier Code</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Minimum Order Quantity</div>
+                    <div class="info-value" data-field="min_order_qty" data-value="{{ product.min_order_qty }}">{{ product.min_order_qty|default:"-" }}</div>
+                </div>
+            </div>
+
+            <!-- Accounting Section -->
+            <div class="info-group">
+                <h3>Accounting</h3>
+                <div class="info-row">
+                    <div class="info-label">Revenue Account</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Expense Account</div>
+                    <div class="info-value">-</div>
+                </div>
+            </div>
+
+            <!-- Dimensions Section -->
+            <div class="info-group">
+                <h3>Dimensions</h3>
+                <div class="info-row">
+                    <div class="info-label">Length</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Width</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Height</div>
+                    <div class="info-value">-</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Weight</div>
+                    <div class="info-value">-</div>
+                </div>
+            </div>
+
+            <!-- Stock Levels Section -->
+            <div class="info-group">
+                <h3>Stock Levels &amp; Location</h3>
+                <div class="info-row">
+                    <div class="info-label">Current Quantity</div>
+                    <div class="info-value" data-field="quantity" data-value="{{ product.quantity }}">{{ product.quantity }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Allocated to Jobs</div>
+                    <div class="info-value" style="color: #ffc107;">{{ allocated }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Remaining Available</div>
+                    <div class="info-value" style="{% if remaining < product.par_level %}color: #dc3545; font-weight: 600;{% else %}color: #28a745;{% endif %}">{{ remaining }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Par Level</div>
+                    <div class="info-value" data-field="par_level" data-value="{{ product.par_level }}">{{ product.par_level|default:"0" }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Stock Take Group</div>
+                    <div class="info-value" data-field="stock_take_group_id" data-value="{{ product.stock_take_group.id }}">{{ product.stock_take_group.name|default:"Not Set" }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Location</div>
+                    <div class="info-value" data-field="location" data-value="{{ product.location }}">{{ product.location|default:"-" }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Serial/Batch</div>
+                    <div class="info-value" data-field="serial_or_batch" data-value="{{ product.serial_or_batch }}">{{ product.serial_or_batch|default:"-" }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Price History Tab -->
+    <div class="tab-content" id="price-history" style="display: none;">
+        <div class="info-group">
+            <h3>Price Change History</h3>
+            <p class="text-muted">No price history available yet.</p>
+        </div>
+    </div>
+
+    <!-- Notes Tab -->
+    <div class="tab-content" id="notes" style="display: none;">
+        <div class="info-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0;">Notes</h3>
+                <button class="btn btn-sm btn-primary" onclick="openAddNoteModal()">
+                    <i class="bi bi-plus-circle"></i> Add Note
+                </button>
+            </div>
+            <div id="notesList">
+                <p class="text-muted">No notes added yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Last Modified Tab -->
+    <div class="tab-content" id="last-modified" style="display: none;">
+        <div class="modification-timeline">
+            <!-- Sample modification entries - these will be populated from database -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="bi bi-pencil"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="timeline-header">
+                        <span class="timeline-action">Product Updated</span>
+                        <span class="timeline-date">09/02/2026 14:30</span>
+                    </div>
+                    <div class="timeline-user">Modified by {{ user.username }}</div>
+                    <div class="timeline-changes">
+                        <div class="change-item">
+                            <span class="change-field">Cost Price:</span>
+                            <span class="change-old">£45.00</span>
+                            <span>→</span>
+                            <span class="change-new">£{{ product.cost|floatformat:2 }}</span>
+                        </div>
+                        <div class="change-item">
+                            <span class="change-field">Quantity:</span>
+                            <span class="change-old">0</span>
+                            <span>→</span>
+                            <span class="change-new">{{ product.quantity }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="bi bi-plus-circle"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="timeline-header">
+                        <span class="timeline-action">Product Created</span>
+                        <span class="timeline-date">08/02/2026 09:15</span>
+                    </div>
+                    <div class="timeline-user">Created by {{ user.username }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stock History Tab -->
+    <div class="tab-content" id="stock-history" style="display: none;">
+        <div class="info-group" style="padding: 24px;">
+            <h3 style="margin-bottom: 20px;">Stock Level History</h3>
+            <div style="position: relative; height: 400px;">
+                <canvas id="stockHistoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase Orders Tab -->
+    <div class="tab-content" id="purchase-orders" style="display: none;">
+        <div class="info-group">
+            <h3>Purchase Orders</h3>
+            <p class="text-muted">No purchase orders linked yet.</p>
+        </div>
+    </div>
+
+    <!-- Projects Tab -->
+    <div class="tab-content" id="projects" style="display: none;">
+        <div class="info-group">
+            <h3>Projects Using This Product</h3>
+            <p class="text-muted">No projects linked yet.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Add Note Modal -->
+<div class="modal" id="addNoteModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5>Add Note</h5>
+                <button type="button" class="btn-close" onclick="closeAddNoteModal()"></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Note</label>
+                    <textarea class="form-control" id="noteText" rows="4" placeholder="Enter your note..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeAddNoteModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveNote()">Save Note</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.show {
+    display: flex;
+}
+
+.modal-dialog {
+    max-width: 500px;
+    width: 90%;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h5 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.btn-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.modal-body {
+    padding: 16px;
+}
+
+.modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.form-group textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
+    resize: vertical;
+}
+</style>
+
+<script>
+let isEditMode = false;
+const originalValues = {};
+
+// Categories and groups data
+const categoriesData = {{ categories|safe }};
+const stockTakeGroupsData = {{ stock_take_groups|safe }};
+const trackingChoices = {{ tracking_choices|safe }};
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.style.display = 'none';
+        });
+        
+        const tabId = this.dataset.tab;
+        document.getElementById(tabId).style.display = 'block';
+        
+        // Initialize stock history chart when tab is opened
+        if (tabId === 'stock-history' && !window.stockHistoryChartInitialized) {
+            initStockHistoryChart();
+            window.stockHistoryChartInitialized = true;
+        }
+    });
+});
+
+// Stock History Chart
+function initStockHistoryChart() {
+    const ctx = document.getElementById('stockHistoryChart').getContext('2d');
+    
+    // Get real data from backend
+    const stockHistoryData = {{ stock_history|safe }};
+    const parLevel = {{ product.par_level }};
+    
+    // Create gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, 'rgba(23, 162, 184, 0.4)');    // Cyan with opacity at top
+    gradient.addColorStop(1, 'rgba(23, 162, 184, 0.05)');   // Nearly transparent at bottom
+    
+    // Create datasets
+    const datasets = [
+        {
+            label: 'Stock Level',
+            data: stockHistoryData.quantities,
+            borderColor: '#17a2b8',           // Cyan blue line
+            backgroundColor: gradient,          // Gradient fill
+            borderWidth: 3,
+            fill: true,
+            tension: 0.4,                      // Smooth curves
+            pointBackgroundColor: '#17a2b8',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            pointHoverBackgroundColor: '#17a2b8',
+            pointHoverBorderColor: '#fff',
+            pointHoverBorderWidth: 3,
+            order: 1
+        }
+    ];
+    
+    // Add par level line if it's set
+    if (parLevel > 0) {
+        datasets.push({
+            label: 'Par Level (Minimum Stock)',
+            data: Array(stockHistoryData.labels.length).fill(parLevel),
+            borderColor: '#dc3545',           // Red line
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            borderDash: [5, 5],              // Dashed line
+            pointRadius: 0,                   // No points
+            fill: false,
+            tension: 0,
+            order: 0
+        });
+    }
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: stockHistoryData.labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: parLevel > 0,    // Only show legend if par level exists
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                        color: '#6c757d',
+                        font: {
+                            size: 11
+                        },
+                        usePointStyle: true,
+                        padding: 15,
+                        filter: function(item, chart) {
+                            // Only show par level in legend
+                            return item.text.includes('Par Level');
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#17a2b8',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            if (context.dataset.label === 'Stock Level') {
+                                return 'Stock: ' + context.parsed.y + ' units';
+                            }
+                            return null;  // Don't show tooltip for par level line
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 12
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        color: function(context) {
+                            // Highlight the "today" line
+                            if (context.index === stockHistoryData.today_index) {
+                                return 'rgba(255, 193, 7, 0.5)';  // Yellow/orange for today
+                            }
+                            return 'rgba(255, 255, 255, 0.05)';
+                        },
+                        lineWidth: function(context) {
+                            if (context.index === stockHistoryData.today_index) {
+                                return 3;  // Thicker line for today
+                            }
+                            return 1;
+                        },
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: function(context) {
+                            // Highlight today's label
+                            if (context.index === stockHistoryData.today_index) {
+                                return '#ffc107';  // Yellow for today
+                            }
+                            return '#6c757d';
+                        },
+                        font: function(context) {
+                            if (context.index === stockHistoryData.today_index) {
+                                return {
+                                    size: 12,
+                                    weight: 'bold'
+                                };
+                            }
+                            return {
+                                size: 12
+                            };
+                        },
+                        maxRotation: 45,
+                        minRotation: 45
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                annotation: {
+                    annotations: {
+                        todayLine: {
+                            type: 'line',
+                            xMin: stockHistoryData.today_index,
+                            xMax: stockHistoryData.today_index,
+                            borderColor: '#ffc107',
+                            borderWidth: 3,
+                            borderDash: [10, 5],
+                            label: {
+                                display: true,
+                                content: 'Today',
+                                position: 'start',
+                                backgroundColor: '#ffc107',
+                                color: '#000',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function toggleEditMode() {
+    isEditMode = true;
+    document.getElementById('editProductBtn').style.display = 'none';
+    document.getElementById('saveProductBtn').style.display = 'inline-block';
+    document.getElementById('cancelEditBtn').style.display = 'inline-block';
+    
+    // Make all fields editable
+    document.querySelectorAll('.info-value[data-field]').forEach(field => {
+        const fieldName = field.dataset.field;
+        const value = field.dataset.value || field.textContent.trim();
+        originalValues[fieldName] = value;
+        
+        let input;
+        
+        if (fieldName === 'category_id') {
+            input = document.createElement('select');
+            input.className = 'form-select';
+            input.innerHTML = '<option value="">Not Set</option>';
+            categoriesData.forEach(cat => {
+                const selected = value == cat.id ? 'selected' : '';
+                input.innerHTML += `<option value="${cat.id}" ${selected}>${cat.name}</option>`;
+            });
+        } else if (fieldName === 'stock_take_group_id') {
+            input = document.createElement('select');
+            input.className = 'form-select';
+            input.innerHTML = '<option value="">Not Set</option>';
+            stockTakeGroupsData.forEach(group => {
+                const selected = value == group.id ? 'selected' : '';
+                input.innerHTML += `<option value="${group.id}" ${selected}>${group.name}</option>`;
+            });
+        } else if (fieldName === 'tracking_type') {
+            input = document.createElement('select');
+            input.className = 'form-select';
+            trackingChoices.forEach(choice => {
+                const selected = value == choice[0] ? 'selected' : '';
+                input.innerHTML += `<option value="${choice[0]}" ${selected}>${choice[1]}</option>`;
+            });
+        } else if (fieldName === 'description') {
+            input = document.createElement('textarea');
+            input.value = value;
+            input.rows = 3;
+        } else if (fieldName === 'cost' || fieldName === 'quantity' || fieldName === 'min_order_qty' || fieldName === 'par_level') {
+            input = document.createElement('input');
+            input.type = 'number';
+            input.step = fieldName === 'cost' ? '0.01' : '1';
+            input.value = value.replace('£', '').replace('-', '');
+        } else {
+            input = document.createElement('input');
+            input.type = 'text';
+            input.value = value;
+        }
+        
+        field.innerHTML = '';
+        field.appendChild(input);
+    });
+}
+
+function cancelEdit() {
+    isEditMode = false;
+    document.getElementById('editProductBtn').style.display = 'inline-block';
+    document.getElementById('saveProductBtn').style.display = 'none';
+    document.getElementById('cancelEditBtn').style.display = 'none';
+    
+    // Restore original values
+    document.querySelectorAll('.info-value[data-field]').forEach(field => {
+        const fieldName = field.dataset.field;
+        let displayValue = originalValues[fieldName];
+        
+        if (fieldName === 'cost') {
+            displayValue = '£' + parseFloat(displayValue).toFixed(2);
+        } else if (fieldName === 'category_id') {
+            const cat = categoriesData.find(c => c.id == displayValue);
+            displayValue = cat ? cat.name : 'Not Set';
+        } else if (fieldName === 'stock_take_group_id') {
+            const group = stockTakeGroupsData.find(g => g.id == displayValue);
+            displayValue = group ? group.name : 'Not Set';
+        } else if (fieldName === 'tracking_type') {
+            const choice = trackingChoices.find(c => c[0] == displayValue);
+            displayValue = choice ? choice[1] : displayValue;
+        }
+        
+        field.textContent = displayValue || '-';
+    });
+}
+
+async function saveProduct() {
+    const updates = {};
+    
+    document.querySelectorAll('.info-value[data-field]').forEach(field => {
+        const fieldName = field.dataset.field;
+        const input = field.querySelector('input, select, textarea');
+        if (input) {
+            updates[fieldName] = input.value;
+        }
+    });
+    
+    try {
+        const response = await fetch('{% url "update_stock_items_batch" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({
+                items: [{
+                    id: {{ product.id }},
+                    ...updates
+                }]
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Product updated successfully!');
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to update product'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to save changes: ' + error);
+    }
+}
+
+function openAddNoteModal() {
+    document.getElementById('addNoteModal').classList.add('show');
+}
+
+function closeAddNoteModal() {
+    document.getElementById('addNoteModal').classList.remove('show');
+    document.getElementById('noteText').value = '';
+}
+
+function saveNote() {
+    const noteText = document.getElementById('noteText').value.trim();
+    if (!noteText) {
+        alert('Please enter a note');
+        return;
+    }
+    
+    alert('Note functionality will be implemented soon');
+    closeAddNoteModal();
+}
+</script>
+{% endblock %}

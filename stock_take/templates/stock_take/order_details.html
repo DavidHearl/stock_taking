@@ -679,17 +679,18 @@
                                 {% else %}
                                     <span class="text-muted">Not assigned</span>
                                 {% endif %}
+                                {% if order.boards_po and order.boards_po.file %}
+                                    <span class="file-status" title="PNX File">
+                                        {% if order.boards_po.file %}
+                                            <a href="{{ order.boards_po.file.url }}" download class="btn-icon" title="Download PNX">
+                                                <i class="bi bi-download"></i>
+                                            </a>
+                                        {% endif %}
+                                        PNX
+                                    </span>
+                                {% endif %}
                             </dd>
                         </div>
-                        {% if order.boards_po and order.boards_po.file %}
-                        <div class="summary-row download-row">
-                            <dd class="grid-col-full">
-                                <a href="{{ order.boards_po.file.url }}" download class="btn btn-sm btn-success">
-                                    <i class="bi bi-download"></i> Download PNX File
-                                </a>
-                            </dd>
-                        </div>
-                        {% endif %}
                         <div class="summary-row">
                             <dt>Boards Ordered:</dt>
                             <dd>
@@ -1215,22 +1216,31 @@
                 <div class="card-header">
                     <h3>Accessories</h3>
                     <div class="header-actions">
+                        {% if order.accessories.exists %}
+                            <span class="file-status" title="CSV File">
+                                CSV
+                                {% if order.boards_po.csv_file %}
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                    <a href="{% url 'download_current_accessories_csv' order.id %}" download class="btn-icon" title="Download CSV">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                {% else %}
+                                    <i class="bi bi-x-circle-fill text-danger"></i>
+                                {% endif %}
+                            </span>
+                            
+                        {% endif %}
                         <button class="btn btn-sm btn-success" type="button" onclick="openModal('addItemModal')">
                             <i class="bi bi-plus-lg"></i> Add Item
                         </button>
                         <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-sm btn-info">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
                         </a>
-                        {% if order.accessories.exists %}
-                        <a href="{% url 'download_current_accessories_csv' order.id %}" class="btn btn-sm btn-success">
-                            <i class="bi bi-download"></i> Download CSV
-                        </a>
                         {% if order.workguru_id %}
-                        <a href="{% url 'push_accessories_to_workguru' order.id %}" class="btn btn-sm btn-info" 
-                           onclick="return confirm('Push {{ order.accessories.count }} accessory/accessories to WorkGuru Project {{ order.workguru_id }}?');">
-                            <i class="bi bi-cloud-upload"></i> Push to WorkGuru
-                        </a>
-                        {% endif %}
+                            <a href="{% url 'push_accessories_to_workguru' order.id %}" class="btn btn-sm btn-info" 
+                            onclick="return confirm('Push {{ order.accessories.count }} accessory/accessories to WorkGuru Project {{ order.workguru_id }}?');">
+                                <i class="bi bi-cloud-upload"></i> Push to WorkGuru
+                            </a>
                         {% endif %}
                         {% if order.original_csv %}
                         <button class="btn btn-sm btn-warning" type="button" onclick="regenerateCSV({{ order.id }})">
@@ -1238,7 +1248,7 @@
                         </button>
                         {% endif %}
                         {% if order.accessories.exists %}
-                        <button type="button" class="btn btn-sm btn-primary" id="save-accessory-changes">
+                        <button type="button" class="btn btn-sm btn-primary" id="save-accessory-changes" style="display: none;">
                             <i class="bi bi-save"></i> Save Changes
                         </button>
                         <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected">

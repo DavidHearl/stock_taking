@@ -11,6 +11,7 @@
     <!-- Custom CSS -->
     {% load static %}
     <link href="{% static 'css/styles.css' %}" rel="stylesheet">
+    <link href="{% static 'css/light-mode.css' %}" rel="stylesheet">
     
     {% block extra_css %}{% endblock %}
 </head>
@@ -18,7 +19,7 @@
     <!-- Vertical Sidebar Navigation -->
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <h3>Atlas CRM & ERP</h3>
+            <h3>ATLAS CRM & ERP</h3>
             <button class="sidebar-toggle" id="sidebarToggle">
                 <span></span>
                 <span></span>
@@ -55,12 +56,15 @@
             <!-- Stock Section -->
             <div class="nav-section">
                 <div class="nav-section-header" onclick="toggleSection('stock')" title="Stock Management">
-                    <span><i class="bi bi-boxes"></i> Stock Management (5)</span>
+                    <span><i class="bi bi-boxes"></i> Stock Management (8)</span>
                     <span class="section-arrow">▼</span>
                 </div>
                 <div class="nav-section-content" id="stock-section">
-                    <a href="{% url 'stock_list' %}" class="nav-link {% block nav_stock_active %}{% endblock %}" title="Stock Manager"><i class="bi bi-list-ul"></i> Stock Manager</a>
-                    <a href="{% url 'stock_items_manager' %}" class="nav-link {% block nav_stock_items_manager_active %}{% endblock %}" title="Item Manager"><i class="bi bi-pencil-square"></i> Item Manager</a>
+                    <a href="{% url 'stock_list' %}" class="nav-link {% block nav_stock_active %}{% endblock %}" title="Stock Management"><i class="bi bi-list-ul"></i> Stock Management</a>
+                    <a href="{% url 'stock_items_manager' %}" class="nav-link {% block nav_stock_items_manager_active %}{% endblock %}" title="Products"><i class="bi bi-box-seam"></i> Products</a>
+                    <a href="{% url 'purchase_orders_list' %}" class="nav-link {% block nav_purchase_orders_active %}{% endblock %}" title="Purchase Orders"><i class="bi bi-clipboard-check"></i> Purchase Orders</a>
+                    <a href="{% url 'suppliers_list' %}" class="nav-link {% block nav_suppliers_active %}{% endblock %}" title="Suppliers"><i class="bi bi-building"></i> Suppliers</a>
+                    <a href="{% url 'customers_list' %}" class="nav-link {% block nav_customers_active %}{% endblock %}" title="Customers"><i class="bi bi-people"></i> Customers</a>
                     <a href="{% url 'category_list' %}" class="nav-link {% block nav_categories_active %}{% endblock %}" title="Categories"><i class="bi bi-tags"></i> Categories</a>
                     <a href="{% url 'schedule_list' %}" class="nav-link {% block nav_schedules_active %}{% endblock %}" title="Stock Take"><i class="bi bi-clipboard-check"></i> Stock Take</a>
                     <a href="{% url 'completed_stock_takes' %}" class="nav-link {% block nav_completed_stock_takes_active %}{% endblock %}" title="Completed Stock Takes"><i class="bi bi-check2-circle"></i> Completed Stock Takes</a>
@@ -128,6 +132,9 @@
                     <span class="user-icon"><i class="bi bi-person-circle"></i></span>
                     <span>{{ user.username }}</span>
                 </div>
+                <button onclick="toggleDarkMode()" class="theme-toggle-btn" id="themeToggle">
+                    <i class="bi bi-sun-fill"></i> <span id="themeToggleText">Light Mode</span>
+                </button>
                 {% if user.is_staff %}
                 <a href="/admin/" class="admin-btn" target="_blank">
                     <i class="bi bi-gear-fill"></i> Admin Panel
@@ -213,6 +220,52 @@
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
         }
+
+        // Dark mode toggle
+        function toggleDarkMode() {
+            fetch("{% url 'toggle_dark_mode' %}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'Content-Type': 'application/json',
+                },
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Toggle dark mode class on body
+                    document.body.classList.toggle('light-mode', !data.dark_mode);
+                    
+                    // Update button text and icon
+                    const icon = document.querySelector('#themeToggle i');
+                    const text = document.getElementById('themeToggleText');
+                    if (data.dark_mode) {
+                        icon.className = 'bi bi-sun-fill';
+                        text.textContent = 'Light Mode';
+                    } else {
+                        icon.className = 'bi bi-moon-fill';
+                        text.textContent = 'Dark Mode';
+                    }
+                }
+            })
+            .catch(error => console.error('Error toggling dark mode:', error));
+        }
+
+        // Set initial theme on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            {% if user.is_authenticated and user.profile %}
+            const isDarkMode = {{ user.profile.dark_mode|lower }};
+            if (!isDarkMode) {
+                document.body.classList.add('light-mode');
+                const icon = document.querySelector('#themeToggle i');
+                const text = document.getElementById('themeToggleText');
+                if (icon && text) {
+                    icon.className = 'bi bi-moon-fill';
+                    text.textContent = 'Dark Mode';
+                }
+            }
+            {% endif %}
+        });
     </script>
     
     {% block extra_js %}{% endblock %}

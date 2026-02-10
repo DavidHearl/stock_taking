@@ -21,12 +21,13 @@ class OrderForm(forms.ModelForm):
     class Meta:
         model = Order
         fields = [
-            'first_name', 'last_name', 'sale_number', 'customer_number',
+            'customer', 'first_name', 'last_name', 'sale_number', 'customer_number',
             'order_date', 'fit_date', 'designer', 'boards_po',
             'job_finished', 'address', 'postcode', 'order_type', 'os_doors_required', 'all_items_ordered',
             'anthill_id', 'workguru_id'
         ]
         widgets = {
+            'customer': forms.HiddenInput(),
             'first_name': forms.TextInput(attrs={'class': 'form-input'}),
             'last_name': forms.TextInput(attrs={'class': 'form-input'}),
             'sale_number': forms.TextInput(attrs={'class': 'form-input'}),

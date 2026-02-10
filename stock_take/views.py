@@ -157,55 +157,44 @@ def search_customers(request):
     if len(query) < 2:
         return JsonResponse({'customers': []})
     
-    # Search in Customer table
+    # Search in Customer table — include the name field from WorkGuru
     customers_from_table = Customer.objects.filter(
+        Q(name__icontains=query) |
         Q(first_name__icontains=query) |
         Q(last_name__icontains=query) |
         Q(address__icontains=query) |
-        Q(postcode__icontains=query)
+        Q(postcode__icontains=query) |
+        Q(code__icontains=query) |
+        Q(email__icontains=query) |
+        Q(phone__icontains=query) |
+        Q(city__icontains=query)
     )
-    
-    # Also search in Order legacy fields (for customers not yet migrated to Customer table)
-    orders_with_matching_customers = Order.objects.filter(
-        Q(first_name__icontains=query) |
-        Q(last_name__icontains=query) |
-        Q(address__icontains=query) |
-        Q(postcode__icontains=query)
-    ).exclude(
-        Q(first_name='') & Q(last_name='')  # Skip orders with no customer data
-    ).order_by('-order_date')  # Most recent first
     
     # Build results dictionary to deduplicate
     customer_dict = {}
     
     # Add customers from Customer table
     for c in customers_from_table:
-        key = f"{c.first_name}|{c.last_name}|{c.postcode}"
+        key = c.pk
         if key not in customer_dict:
+            # Use name field if available, fall back to first/last
+            display_name = c.name or f"{c.first_name} {c.last_name}".strip()
             customer_dict[key] = {
                 'id': c.id,
+                'customer_id': c.id,
                 'first_name': c.first_name,
                 'last_name': c.last_name,
+                'name': display_name,
                 'anthill_customer_id': c.anthill_customer_id,
-                'address': c.address,
-                'postcode': c.postcode
+                'address': c.address or c.address_1 or '',
+                'postcode': c.postcode,
+                'city': c.city or '',
+                'phone': c.phone or '',
+                'email': c.email or '',
             }
     
-    # Add customers from Order legacy fields
-    for o in orders_with_matching_customers:
-        key = f"{o.first_name}|{o.last_name}|{o.postcode}"
-        if key not in customer_dict:
-            customer_dict[key] = {
-                'id': o.customer.id if o.customer else None,
-                'first_name': o.first_name,
-                'last_name': o.last_name,
-                'anthill_customer_id': o.anthill_id,
-                'address': o.address,
-                'postcode': o.postcode
-            }
-    
-    # Convert to list and sort by last name
-    customer_list = sorted(customer_dict.values(), key=lambda x: (x['last_name'], x['first_name']))[:50]
+    # Convert to list and sort by name
+    customer_list = sorted(customer_dict.values(), key=lambda x: x.get('name', ''))[:50]
     
     return JsonResponse({'customers': customer_list})
 
@@ -5573,6 +5562,9 @@ def update_stock_items_batch(request):
                     if 'min_order_qty' in item_data:
                         value = item_data['min_order_qty']
                         item.min_order_qty = int(value) if value else None
+                    if 'par_level' in item_data:
+                        value = item_data['par_level']
+                        item.par_level = int(value) if value else 0
                     if 'category_id' in item_data:
                         value = item_data['category_id']
                         item.category_id = int(value) if value else None

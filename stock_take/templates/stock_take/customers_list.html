@@ -1,0 +1,202 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Customers{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_customers_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="customers-header">
+        <h1><i class="bi bi-people"></i> Customers</h1>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="customers-stats">
+        <div class="customer-stat-item">
+            <span class="customer-stat-value">{{ total_count }}</span>
+            <span>Total</span>
+        </div>
+        <div class="customer-stat-item">
+            <span class="customer-stat-value active">{{ active_count }}</span>
+            <span>Active</span>
+        </div>
+        <div class="customer-stat-item">
+            <span class="customer-stat-value inactive">{{ inactive_count }}</span>
+            <span>Inactive</span>
+        </div>
+    </div>
+
+    <!-- Search & Filters -->
+    <div class="customers-controls">
+        <div class="customers-search">
+            <form method="GET" action="" class="search-form">
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <div class="search-input-wrapper">
+                    <i class="bi bi-search"></i>
+                    <input type="text" name="q" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode...">
+                </div>
+                <button type="submit" class="search-submit">Search</button>
+                {% if search_query %}
+                <a href="?status={{ status_filter }}" class="search-clear">Clear</a>
+                {% endif %}
+            </form>
+        </div>
+        <div class="customers-filter-tabs">
+            <a href="?q={{ search_query }}&status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">All ({{ total_count }})</a>
+            <a href="?q={{ search_query }}&status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">Active ({{ active_count }})</a>
+            <a href="?q={{ search_query }}&status=inactive" class="filter-tab {% if status_filter == 'inactive' %}active{% endif %}">Inactive ({{ inactive_count }})</a>
+        </div>
+    </div>
+
+    {% if customers %}
+    <div class="customers-result-bar">
+        <p class="customers-result-count">Showing {{ filtered_count }} customer{{ filtered_count|pluralize }}</p>
+        <div class="bulk-delete-bar" id="bulk-delete-bar" style="display:none;">
+            <span id="selected-count">0 selected</span>
+            <button class="bulk-delete-btn" onclick="bulkDelete()">
+                <i class="bi bi-trash"></i> Delete Selected
+            </button>
+        </div>
+    </div>
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-col"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Postcode</th>
+                    <th>Orders</th>
+                    <th>Active</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for customer in customers %}
+                <tr data-id="{{ customer.pk }}">
+                    <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ customer.pk }}" onclick="updateSelection()"></td>
+                    <td>
+                        {% if customer.workguru_id %}
+                        <a href="{% url 'customer_detail' customer.workguru_id %}" class="customer-name-link">
+                            {{ customer.name|default:customer|default:"-" }}
+                        </a>
+                        {% else %}
+                        <span>{{ customer.name|default:customer|default:"-" }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if customer.email %}
+                        <a href="mailto:{{ customer.email }}" class="customer-email">{{ customer.email }}</a>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ customer.phone|default:"-" }}</td>
+                    <td>{{ customer.city|default:"-" }}</td>
+                    <td>{{ customer.postcode|default:"-" }}</td>
+                    <td class="customer-orders-cell">
+                        {% for order in customer.orders.all %}
+                        <a href="{% url 'order_details' order.id %}" class="customer-order-badge" title="{{ order.get_order_type_display }}">{{ order.sale_number }}</a>
+                        {% empty %}-
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if customer.is_active %}
+                        <span class="customer-active-badge active">Active</span>
+                        {% else %}
+                        <span class="customer-active-badge inactive">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        <button class="customer-delete-btn" onclick="deleteCustomer({{ customer.pk }}, '{{ customer.name|escapejs }}')" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="customers-empty-state">
+        <i class="bi bi-people"></i>
+        <p>No customers found.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function deleteCustomer(id, name) {
+    if (!confirm('Delete customer "' + name + '"?')) return;
+
+    fetch('/customer/' + id + '/delete/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+
+function toggleSelectAll(el) {
+    document.querySelectorAll('.row-select').forEach(cb => cb.checked = el.checked);
+    updateSelection();
+}
+
+function updateSelection() {
+    const checked = document.querySelectorAll('.row-select:checked');
+    const bar = document.getElementById('bulk-delete-bar');
+    const countEl = document.getElementById('selected-count');
+    const selectAll = document.getElementById('select-all');
+    const allBoxes = document.querySelectorAll('.row-select');
+
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        countEl.textContent = checked.length + ' selected';
+    } else {
+        bar.style.display = 'none';
+    }
+    selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
+    selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
+}
+
+function bulkDelete() {
+    const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value));
+    if (ids.length === 0) return;
+    if (!confirm('Delete ' + ids.length + ' customer(s)? This cannot be undone.')) return;
+
+    fetch('{% url "customers_bulk_delete" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ids: ids}),
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+</script>
+{% endblock %}

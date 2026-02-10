@@ -1,6 +1,10 @@
 from django.urls import path
 from . import views
 from django.contrib.auth import views as auth_views
+from .dark_mode_view import toggle_dark_mode
+from .product_view import product_detail
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, sync_purchase_orders_stream, suppliers_list, supplier_detail
+from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete
 
 urlpatterns = [
     path('', views.stock_list, name='stock_list'),
@@ -8,7 +12,24 @@ urlpatterns = [
     path('export/', views.export_csv, name='export_csv'),
     path('update/<int:item_id>/', views.update_item, name='update_item'),
     
-
+    # Purchase Orders
+    path('purchase-orders/', purchase_orders_list, name='purchase_orders_list'),
+    path('purchase-orders/sync/', sync_purchase_orders_stream, name='sync_purchase_orders'),
+    path('purchase-order/<int:po_id>/', purchase_order_detail, name='purchase_order_detail'),
+    path('purchase-order/<int:po_id>/save/', purchase_order_save, name='purchase_order_save'),
+    path('purchase-order/<int:po_id>/receive/', purchase_order_receive, name='purchase_order_receive'),
+    
+    # Suppliers
+    path('suppliers/', suppliers_list, name='suppliers_list'),
+    path('supplier/<int:supplier_id>/', supplier_detail, name='supplier_detail'),
+    
+    # Customers
+    path('customers/', customers_list, name='customers_list'),
+    path('customer/<int:customer_id>/', customer_detail, name='customer_detail'),
+    path('customer/<int:customer_id>/save/', customer_save, name='customer_save'),
+    path('customer/<int:customer_id>/delete/', customer_delete, name='customer_delete'),
+    path('customers/bulk-delete/', customers_bulk_delete, name='customers_bulk_delete'),
+    
     # Import management
     path('import-history/', views.import_history, name='import_history'),
     path('import/delete/<int:import_id>/', views.delete_import, name='delete_import'),
@@ -171,6 +192,12 @@ urlpatterns = [
     
     # Timesheets
     path('timesheets/', views.timesheets, name='timesheets'),
+
+    # Dark mode toggle
+    path('toggle-dark-mode/', toggle_dark_mode, name='toggle_dark_mode'),
+
+    # Product detail
+    path('product/<int:item_id>/', product_detail, name='product_detail'),
 
     # Password reset views
     path('password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),

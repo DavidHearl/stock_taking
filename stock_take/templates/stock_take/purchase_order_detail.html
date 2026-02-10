@@ -1,0 +1,523 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ purchase_order.display_number }} - Purchase Order{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_purchase_orders_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    {% if error %}
+    <div class="po-error">
+        <i class="bi bi-exclamation-triangle"></i> {{ error }}
+    </div>
+    <a href="{% url 'purchase_orders_list' %}" class="btn btn-sm btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Purchase Orders
+    </a>
+    {% elif purchase_order %}
+    
+    <!-- Header -->
+    <div class="po-detail-header">
+        <div class="po-detail-title">
+            <h1>{{ purchase_order.display_number }}</h1>
+            <div class="po-detail-meta">
+                <span class="po-status {% if purchase_order.status == 'Draft' %}draft{% elif purchase_order.status == 'Approved' %}approved{% elif purchase_order.status == 'Received' %}received{% elif purchase_order.status == 'Cancelled' %}cancelled{% endif %}">
+                    {{ purchase_order.status }}
+                </span>
+                {% if purchase_order.creator_name %}
+                <span class="po-meta-sep">|</span>
+                <span>Created by {{ purchase_order.creator_name }}</span>
+                {% endif %}
+                <span class="po-meta-sep">|</span>
+                <span>Last synced: {{ purchase_order.last_synced|date:"d/m/Y H:i" }}</span>
+            </div>
+        </div>
+        <div class="po-detail-actions">
+            {% if purchase_order.status != 'Received' %}
+            <button class="btn btn-sm btn-receive" id="receive-btn" onclick="receivePO()">
+                <i class="bi bi-box-arrow-in-down"></i> Receive
+            </button>
+            {% endif %}
+            <button class="btn btn-sm btn-edit" id="edit-toggle-btn" onclick="toggleEditMode()">
+                <i class="bi bi-pencil"></i> Edit
+            </button>
+            <button class="btn btn-sm btn-save" id="save-btn" onclick="savePO()" style="display:none;">
+                <i class="bi bi-check-lg"></i> Save
+            </button>
+            <button class="btn btn-sm btn-secondary" id="cancel-btn" onclick="cancelEdit()" style="display:none;">
+                <i class="bi bi-x-lg"></i> Cancel
+            </button>
+            <a href="{% url 'purchase_orders_list' %}" class="btn btn-sm btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+    </div>
+
+    <!-- Save Notification -->
+    <div class="po-save-notification" id="save-notification" style="display: none;"></div>
+
+    <!-- Overview Grid - 3 columns -->
+    <div class="po-overview-grid" id="po-overview">
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Supplier</span>
+                <span class="po-overview-value highlight po-view-val" data-field="supplier_name">{{ purchase_order.supplier_name|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="supplier_name" value="{{ purchase_order.supplier_name|default:'' }}" style="display:none;" list="supplier-options">
+                <datalist id="supplier-options">
+                    {% for s in all_suppliers %}
+                    <option value="{{ s }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Supplier Invoice #</span>
+                <span class="po-overview-value po-view-val" data-field="supplier_invoice_number">{{ purchase_order.supplier_invoice_number|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="supplier_invoice_number" value="{{ purchase_order.supplier_invoice_number|default:'' }}" style="display:none;">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Description</span>
+                <span class="po-overview-value po-view-val" data-field="description">{{ purchase_order.description|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="description" value="{{ purchase_order.description|default:'' }}" style="display:none;">
+            </div>
+        </div>
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Project</span>
+                <span class="po-overview-value po-view-val" data-field="project_name">
+                    {% if linked_order %}
+                        <a href="{% url 'order_details' linked_order.id %}" class="po-project-link" title="View order {{ linked_order.sale_number }}">
+                            <i class="bi bi-box-arrow-up-right"></i> {{ purchase_order.project_number }} - {{ purchase_order.project_name }}
+                        </a>
+                    {% elif purchase_order.project_name %}
+                        {{ purchase_order.project_number }} - {{ purchase_order.project_name }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </span>
+                <input class="po-edit-input po-edit-val" data-field="project_name" value="{{ purchase_order.project_name|default:'' }}" style="display:none;" placeholder="Project name">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Issue Date</span>
+                <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="issue_date" type="text" value="{{ purchase_order.issue_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Expected Date</span>
+                <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="expected_date" type="text" value="{{ purchase_order.expected_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+            </div>
+        </div>
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Received Date</span>
+                <span class="po-overview-value po-view-val" data-field="received_date">{{ purchase_order.received_date|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="received_date" type="text" value="{{ purchase_order.received_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Invoice Date</span>
+                <span class="po-overview-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="invoice_date" type="text" value="{{ purchase_order.invoice_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Received By</span>
+                <span class="po-overview-value po-view-val" data-field="received_by_name">{{ purchase_order.received_by_name|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="received_by_name" value="{{ purchase_order.received_by_name|default:'' }}" style="display:none;">
+            </div>
+        </div>
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Delivery Instructions</span>
+                <span class="po-overview-value po-view-val" data-field="delivery_instructions">{{ purchase_order.delivery_instructions|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="delivery_instructions" value="{{ purchase_order.delivery_instructions|default:'' }}" style="display:none;">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Delivery Address</span>
+                <span class="po-overview-value po-view-val" data-field="delivery_address_1">
+                    {% if purchase_order.delivery_address_1 %}
+                        {{ purchase_order.delivery_address_1 }}{% if purchase_order.delivery_address_2 %}<br>{{ purchase_order.delivery_address_2 }}{% endif %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </span>
+                <input class="po-edit-input po-edit-val" data-field="delivery_address_1" value="{{ purchase_order.delivery_address_1|default:'' }}" style="display:none;" placeholder="Address line 1">
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Billable</span>
+                <span class="po-overview-value po-view-val" data-field="billable">{% if purchase_order.billable %}Yes{% else %}No{% endif %}</span>
+                <label class="po-edit-checkbox po-edit-val" data-field="billable" style="display:none;">
+                    <input type="checkbox" id="billable-check" {% if purchase_order.billable %}checked{% endif %}>
+                    <span>Billable</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Products Section -->
+    <div class="po-products-section">
+        <h3><i class="bi bi-box-seam"></i> Products</h3>
+        {% if products %}
+        <div class="po-table-container">
+            <table class="po-products-table" id="products-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Supplier Code</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th class="text-right">Order Price</th>
+                        <th class="text-right">Order Qty</th>
+                        <th class="text-right">Rec'd Qty</th>
+                        <th class="text-right">Invoice Price</th>
+                        <th class="text-right">Line Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for product in products %}
+                    <tr data-product-id="{{ product.id }}">
+                        <td>
+                            <span class="po-product-sku po-view-val">{% if product.stock_item %}<a href="{% url 'product_detail' product.stock_item.id %}" class="po-sku-link">{{ product.sku|default:"-" }}</a>{% else %}{{ product.sku|default:"-" }}{% endif %}</span>
+                            <input class="po-edit-input po-edit-val po-edit-narrow" data-field="sku" value="{{ product.sku|default:'' }}" style="display:none;">
+                        </td>
+                        <td>
+                            <span class="po-view-val">{{ product.supplier_code|default:"-" }}</span>
+                            <input class="po-edit-input po-edit-val po-edit-narrow" data-field="supplier_code" value="{{ product.supplier_code|default:'' }}" style="display:none;">
+                        </td>
+                        <td>
+                            <span class="po-view-val">{{ product.name|default:"-" }}</span>
+                            <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
+                        </td>
+                        <td class="po-desc-cell">
+                            <span class="po-view-val">{{ product.description|default:"-" }}</span>
+                            <input class="po-edit-input po-edit-val" data-field="description" value="{{ product.description|default:'' }}" style="display:none;">
+                        </td>
+                        <td class="text-right">
+                            <span class="po-view-val">£{{ product.order_price|floatformat:2 }}</span>
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price }}" style="display:none;">
+                        </td>
+                        <td class="text-right">
+                            <span class="po-view-val">{{ product.order_quantity|floatformat:2 }}</span>
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="0.01" value="{{ product.order_quantity }}" style="display:none;">
+                        </td>
+                        <td class="text-right">
+                            <span class="po-view-val">{{ product.received_quantity|floatformat:2 }}</span>
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="0.01" value="{{ product.received_quantity }}" style="display:none;">
+                        </td>
+                        <td class="text-right">
+                            <span class="po-view-val">£{{ product.invoice_price|floatformat:2 }}</span>
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price }}" style="display:none;">
+                        </td>
+                        <td class="text-right">
+                            <span class="po-view-val">£{{ product.line_total|floatformat:2 }}</span>
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="line_total" type="number" step="0.01" value="{{ product.line_total }}" style="display:none;">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Totals -->
+        <div class="po-totals">
+            <div class="po-totals-table">
+                <div class="po-totals-row total">
+                    <div class="po-totals-label">Total</div>
+                    <div class="po-totals-value" id="po-total-display">£{{ purchase_order.total|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
+        {% elif pnx_items %}
+        <!-- Board Order Products (from PNX file) -->
+        {% if boards_po %}
+        <div class="po-boards-meta">
+            <span class="po-boards-badge {% if boards_po.boards_ordered %}ordered{% else %}not-ordered{% endif %}">
+                <i class="bi bi-{% if boards_po.boards_ordered %}check-circle{% else %}clock{% endif %}"></i>
+                {% if boards_po.boards_ordered %}Ordered{% else %}Not Ordered{% endif %}
+            </span>
+            <span class="po-boards-badge {% if boards_po.boards_received %}received{% else %}pending{% endif %}">
+                <i class="bi bi-{% if boards_po.boards_received %}box-seam{% else %}hourglass-split{% endif %}"></i>
+                {% if boards_po.boards_received %}All Received{% else %}Pending{% endif %}
+            </span>
+            {% if boards_po.file %}
+            <a href="{{ boards_po.file.url }}" class="po-boards-file-link" download>
+                <i class="bi bi-file-earmark-arrow-down"></i> PNX File
+            </a>
+            {% endif %}
+            {% if boards_po.csv_file %}
+            <a href="{{ boards_po.csv_file.url }}" class="po-boards-file-link" download>
+                <i class="bi bi-filetype-csv"></i> CSV File
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="po-table-container">
+            <table class="po-products-table po-pnx-table">
+                <thead>
+                    <tr>
+                        <th>Material</th>
+                        <th>Customer</th>
+                        <th class="text-right">Length (mm)</th>
+                        <th class="text-right">Width (mm)</th>
+                        <th class="text-right">Qty</th>
+                        <th class="text-right">Received</th>
+                        <th class="text-right">Cost</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in pnx_items %}
+                    <tr class="{% if item.is_fully_received %}pnx-received{% endif %}">
+                        <td>{{ item.matname }}</td>
+                        <td>{{ item.customer }}</td>
+                        <td class="text-right">{{ item.cleng|floatformat:0 }}</td>
+                        <td class="text-right">{{ item.cwidth|floatformat:0 }}</td>
+                        <td class="text-right">{{ item.cnt|floatformat:0 }}</td>
+                        <td class="text-right">{{ item.received_quantity|floatformat:0 }}</td>
+                        <td class="text-right">£{{ item.calculated_cost|floatformat:2 }}</td>
+                        <td>
+                            {% if item.is_fully_received %}
+                            <span class="pnx-status-badge received"><i class="bi bi-check-circle"></i> Received</span>
+                            {% else %}
+                            <span class="pnx-status-badge pending"><i class="bi bi-clock"></i> Pending</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Totals -->
+        <div class="po-totals">
+            <div class="po-totals-table">
+                <div class="po-totals-row total">
+                    <div class="po-totals-label">Total</div>
+                    <div class="po-totals-value" id="po-total-display">£{{ pnx_total_cost|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
+        {% elif os_door_items %}
+        <!-- OS Door Products -->
+        <div class="po-table-container">
+            <table class="po-products-table po-osdoor-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Style</th>
+                        <th>Colour</th>
+                        <th class="text-right">Height</th>
+                        <th class="text-right">Width</th>
+                        <th class="text-right">Qty</th>
+                        <th class="text-right">Received</th>
+                        <th class="text-right">Cost</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for door in os_door_items %}
+                    <tr class="{% if door.is_fully_received %}pnx-received{% endif %}">
+                        <td>{{ door.customer.sale_number }}</td>
+                        <td>{{ door.door_style }}</td>
+                        <td>{{ door.colour }}</td>
+                        <td class="text-right">{{ door.height|floatformat:0 }}</td>
+                        <td class="text-right">{{ door.width|floatformat:0 }}</td>
+                        <td class="text-right">{{ door.quantity }}</td>
+                        <td class="text-right">{{ door.received_quantity|floatformat:0 }}</td>
+                        <td class="text-right">£{{ door.cost_price|floatformat:2 }}</td>
+                        <td>
+                            {% if door.is_fully_received %}
+                            <span class="pnx-status-badge received"><i class="bi bi-check-circle"></i> Received</span>
+                            {% else %}
+                            <span class="pnx-status-badge pending"><i class="bi bi-clock"></i> Pending</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Totals -->
+        <div class="po-totals">
+            <div class="po-totals-table">
+                <div class="po-totals-row total">
+                    <div class="po-totals-label">Total</div>
+                    <div class="po-totals-value" id="po-total-display">£{{ purchase_order.total|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="po-empty-products">
+            <i class="bi bi-inbox"></i>
+            <p>No products found. Click <strong>Sync</strong> on the list page to fetch product data.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if related_pos %}
+    <!-- Related POs Section -->
+    <div class="po-products-section po-related-section">
+        <h3><i class="bi bi-link-45deg"></i> Related Purchase Orders</h3>
+        <p class="po-related-subtitle">Other POs on the same project ({{ purchase_order.project_number }})</p>
+        <div class="po-table-container">
+            <table class="po-products-table po-related-table">
+                <thead>
+                    <tr>
+                        <th>PO Number</th>
+                        <th>Supplier</th>
+                        <th>Status</th>
+                        <th class="text-right">Total</th>
+                        <th class="text-right">Products</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rpo in related_pos %}
+                    <tr>
+                        <td><a href="{% url 'purchase_order_detail' rpo.workguru_id %}" class="po-project-link">{{ rpo.display_number }}</a></td>
+                        <td>{{ rpo.supplier_name|default:"-" }}</td>
+                        <td>
+                            <span class="po-status {% if rpo.status == 'Draft' %}draft{% elif rpo.status == 'Approved' %}approved{% elif rpo.status == 'Received' %}received{% elif rpo.status == 'Cancelled' %}cancelled{% endif %}">
+                                {{ rpo.status }}
+                            </span>
+                        </td>
+                        <td class="text-right">£{{ rpo.total|floatformat:2 }}</td>
+                        <td class="text-right">{{ rpo.products.count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+
+<script>
+let editMode = false;
+
+function toggleEditMode() {
+    editMode = true;
+    document.querySelectorAll('.po-view-val').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.po-edit-val').forEach(el => el.style.display = '');
+    document.getElementById('edit-toggle-btn').style.display = 'none';
+    document.getElementById('save-btn').style.display = '';
+    document.getElementById('cancel-btn').style.display = '';
+    document.getElementById('po-overview').classList.add('editing');
+    document.getElementById('products-table')?.classList.add('editing');
+}
+
+function cancelEdit() {
+    editMode = false;
+    document.querySelectorAll('.po-view-val').forEach(el => el.style.display = '');
+    document.querySelectorAll('.po-edit-val').forEach(el => el.style.display = 'none');
+    document.getElementById('edit-toggle-btn').style.display = '';
+    document.getElementById('save-btn').style.display = 'none';
+    document.getElementById('cancel-btn').style.display = 'none';
+    document.getElementById('po-overview').classList.remove('editing');
+    document.getElementById('products-table')?.classList.remove('editing');
+}
+
+function savePO() {
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
+    
+    // Gather header fields
+    const data = {};
+    document.querySelectorAll('#po-overview .po-edit-val[data-field]').forEach(input => {
+        if (input.tagName === 'LABEL') return;  // checkbox handled separately
+        data[input.dataset.field] = input.value;
+    });
+    data.billable = document.getElementById('billable-check')?.checked || false;
+    
+    // Gather product line edits
+    const products = [];
+    document.querySelectorAll('#products-table tbody tr[data-product-id]').forEach(row => {
+        const prod = { id: row.dataset.productId };
+        row.querySelectorAll('.po-edit-val[data-field]').forEach(input => {
+            prod[input.dataset.field] = input.value;
+        });
+        products.push(prod);
+    });
+    data.products = products;
+    
+    fetch('{% url "purchase_order_save" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify(data),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Purchase order saved successfully.', 'success');
+            // Update total display
+            if (result.total) {
+                document.getElementById('po-total-display').textContent = '£' + parseFloat(result.total).toFixed(2);
+            }
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+        }
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+    });
+}
+
+function showNotification(message, type) {
+    const el = document.getElementById('save-notification');
+    el.textContent = message;
+    el.className = 'po-save-notification ' + type;
+    el.style.display = 'block';
+    if (type === 'success') {
+        setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+}
+
+function receivePO() {
+    if (!confirm('Mark this PO as received? This will update all linked items (boards/doors) as received.')) {
+        return;
+    }
+    const btn = document.getElementById('receive-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Receiving...';
+    
+    fetch('{% url "purchase_order_receive" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({}),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('PO marked as received. ' + result.received_items + ' items updated.', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-box-arrow-in-down"></i> Receive';
+        }
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-box-arrow-in-down"></i> Receive';
+    });
+}
+</script>
+{% endblock %}

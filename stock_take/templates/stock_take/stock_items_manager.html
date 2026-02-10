@@ -12,10 +12,7 @@
 {% block content %}
 <div class="container-fluid">
     <div class="page-header">
-        <h1><i class="bi bi-box-seam"></i> Stock Items Manager</h1>
-        <button type="button" id="saveChangesBtn" class="btn btn-success" onclick="saveAllChanges()" style="display: none;">
-            <i class="bi bi-save"></i> Save All Changes <span id="changesCount" class="badge bg-light text-dark">0</span>
-        </button>
+        <h1><i class="bi bi-box-seam"></i> Products</h1>
     </div>
 
     <!-- Items Table -->
@@ -23,36 +20,10 @@
         <div class="card-header">
             <div class="header-content">
                 <div class="header-left">
-                    <i class="bi bi-list-ul"></i> Stock Items ({{ items.count }})
-                    <span class="text-muted">Click on any cell to edit</span>
+                    <i class="bi bi-list-ul"></i> Products (<span id="itemCount">{{ items.count }}</span>)
                 </div>
                 <div class="header-right">
-                    <form method="get" class="filter-form">
-                        <input type="text" class="form-control" id="search" name="search" 
-                            value="{{ search }}" placeholder="Search...">
-                        <select class="form-select" id="category" name="category">
-                            <option value="">All Categories</option>
-                            {% for category in categories %}
-                                <option value="{{ category.id }}" {% if selected_category == category.id|stringformat:"s" %}selected{% endif %}>
-                                    {{ category.name }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                        <select class="form-select" id="tracking_type" name="tracking_type">
-                            <option value="">All Types</option>
-                            {% for value, label in tracking_choices %}
-                                <option value="{{ value }}" {% if selected_tracking_type == value %}selected{% endif %}>
-                                    {{ label }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-search"></i> Filter
-                        </button>
-                        <a href="{% url 'stock_items_manager' %}" class="btn btn-secondary">
-                            <i class="bi bi-x-circle"></i> Clear
-                        </a>
-                    </form>
+                    <input type="text" class="form-control" id="searchInput" placeholder="Search products..." style="width: 300px;">
                 </div>
             </div>
         </div>
@@ -74,19 +45,19 @@
                 <tbody>
                     {% for item in items %}
                     <tr data-item-id="{{ item.id }}" class="item-row">
-                        <td class="editable-cell" data-field="sku">{{ item.sku }}</td>
-                        <td class="editable-cell" data-field="name">{{ item.name }}</td>
-                        <td class="editable-cell" data-field="cost">{{ item.cost }}</td>
-                        <td class="editable-cell" data-field="location">{{ item.location }}</td>
-                        <td class="editable-cell" data-field="quantity">{{ item.quantity }}</td>
-                        <td class="editable-cell" data-field="min_order_qty">{{ item.min_order_qty|default:"" }}</td>
-                        <td class="editable-cell" data-field="category_id" data-original-value="{{ item.category.id|default:'' }}">
-                            {{ item.category.name|default:"Not Set" }}
+                        <td>
+                            <a href="{% url 'product_detail' item.id %}" style="color: var(--primary-color); text-decoration: none;" title="View product details">
+                                {{ item.sku }}
+                            </a>
                         </td>
-                        <td class="editable-cell" data-field="stock_take_group_id" data-original-value="{{ item.stock_take_group.id|default:'' }}">
-                            {{ item.stock_take_group.name|default:"Not Set" }}
-                        </td>
-                        <td class="editable-cell" data-field="tracking_type">{{ item.get_tracking_type_display }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>£{{ item.cost|floatformat:2 }}</td>
+                        <td>{{ item.location }}</td>
+                        <td>{{ item.quantity }}</td>
+                        <td>{{ item.min_order_qty|default:"" }}</td>
+                        <td>{{ item.category.name|default:"Not Set" }}</td>
+                        <td>{{ item.stock_take_group.name|default:"Not Set" }}</td>
+                        <td>{{ item.get_tracking_type_display }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -96,246 +67,27 @@
 </div>
 
 <script>
-const changedItems = new Map(); // Store changes by item ID
+// Live search functionality
+const searchInput = document.getElementById('searchInput');
+const itemsTable = document.getElementById('itemsTable');
+const itemCount = document.getElementById('itemCount');
+const rows = itemsTable.querySelectorAll('tbody tr');
 
-// Prepare data from Django template
-const categoriesData = [
-    {% for category in categories %}
-    {id: {{ category.id }}, name: "{{ category.name|escapejs }}"},
-    {% endfor %}
-];
-
-const stockTakeGroupsData = [
-    {% for group in stock_take_groups %}
-    {id: {{ group.id }}, name: "{{ group.name|escapejs }}"},
-    {% endfor %}
-];
-
-const trackingChoicesData = [
-    {% for value, label in tracking_choices %}
-    {value: "{{ value }}", label: "{{ label }}"},
-    {% endfor %}
-];
-
-// Make cells editable
-document.querySelectorAll('.editable-cell').forEach(cell => {
-    cell.addEventListener('click', function() {
-        if (this.classList.contains('editing')) return;
-        
-        const field = this.dataset.field;
-        const currentValue = this.textContent.trim();
-        const originalValue = field === 'category_id' || field === 'stock_take_group_id' 
-            ? this.dataset.originalValue 
-            : currentValue;
-        const row = this.closest('tr');
-        const itemId = row.dataset.itemId;
-        
-        this.classList.add('editing');
-        
-        if (field === 'category_id') {
-            const select = document.createElement('select');
-            select.className = 'form-select form-select-sm';
-            select.innerHTML = '<option value="">Not Set</option>';
-            
-            categoriesData.forEach(cat => {
-                const selected = this.dataset.originalValue == cat.id ? 'selected' : '';
-                select.innerHTML += `<option value="${cat.id}" ${selected}>${cat.name}</option>`;
-            });
-            
-            this.innerHTML = '';
-            this.appendChild(select);
-            select.focus();
-            
-            select.addEventListener('blur', () => finishEdit(this, field, itemId, originalValue, select.value, select.options[select.selectedIndex].text));
-            select.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    finishEdit(this, field, itemId, originalValue, select.value, select.options[select.selectedIndex].text);
-                }
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelEdit(this, currentValue);
-                }
-            });
-        } else if (field === 'stock_take_group_id') {
-            const select = document.createElement('select');
-            select.className = 'form-select form-select-sm';
-            select.innerHTML = '<option value="">Not Set</option>';
-            
-            stockTakeGroupsData.forEach(group => {
-                const selected = this.dataset.originalValue == group.id ? 'selected' : '';
-                select.innerHTML += `<option value="${group.id}" ${selected}>${group.name}</option>`;
-            });
-            
-            this.innerHTML = '';
-            this.appendChild(select);
-            select.focus();
-            
-            select.addEventListener('blur', () => finishEdit(this, field, itemId, originalValue, select.value, select.options[select.selectedIndex].text));
-            select.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    finishEdit(this, field, itemId, originalValue, select.value, select.options[select.selectedIndex].text);
-                }
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelEdit(this, currentValue);
-                }
-            });
-        } else if (field === 'tracking_type') {
-            const select = document.createElement('select');
-            select.className = 'form-select form-select-sm';
-            
-            trackingChoicesData.forEach(choice => {
-                const selected = currentValue == choice.label ? 'selected' : '';
-                select.innerHTML += `<option value="${choice.value}" ${selected}>${choice.label}</option>`;
-            });
-            
-            this.innerHTML = '';
-            this.appendChild(select);
-            select.focus();
-            
-            select.addEventListener('blur', () => finishEdit(this, field, itemId, currentValue, select.value, select.options[select.selectedIndex].text));
-            select.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    finishEdit(this, field, itemId, currentValue, select.value, select.options[select.selectedIndex].text);
-                }
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelEdit(this, currentValue);
-                }
-            });
+searchInput.addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+            row.style.display = '';
+            visibleCount++;
         } else {
-            const input = document.createElement('input');
-            input.type = field === 'cost' ? 'number' : 'text';
-            if (field === 'cost') {
-                input.step = '0.01';
-            }
-            if (field === 'quantity' || field === 'min_order_qty') {
-                input.type = 'number';
-                input.step = '1';
-            }
-            input.value = currentValue;
-            input.className = 'form-control form-control-sm';
-            
-            this.innerHTML = '';
-            this.appendChild(input);
-            input.focus();
-            input.select();
-            
-            input.addEventListener('blur', () => finishEdit(this, field, itemId, originalValue, input.value, input.value));
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    finishEdit(this, field, itemId, originalValue, input.value, input.value);
-                }
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelEdit(this, currentValue);
-                }
-            });
+            row.style.display = 'none';
         }
     });
+    
+    itemCount.textContent = visibleCount;
 });
-
-function finishEdit(cell, field, itemId, originalValue, value, displayValue) {
-    cell.classList.remove('editing');
-    cell.textContent = displayValue || 'Not Set';
-    
-    // Only track the change if the value actually changed
-    const valueChanged = (field === 'category_id' || field === 'stock_take_group_id') 
-        ? originalValue != value 
-        : originalValue !== value;
-    
-    if (valueChanged) {
-        // Track the change
-        if (!changedItems.has(itemId)) {
-            changedItems.set(itemId, { id: itemId });
-        }
-        changedItems.get(itemId)[field] = value;
-        
-        // Mark row as changed
-        cell.closest('tr').classList.add('changed-row');
-    } else {
-        // If value didn't change, remove this field from tracked changes
-        if (changedItems.has(itemId)) {
-            delete changedItems.get(itemId)[field];
-            // If no more fields are tracked for this item, remove it entirely
-            const itemChanges = changedItems.get(itemId);
-            if (Object.keys(itemChanges).length === 1 && itemChanges.id) {
-                changedItems.delete(itemId);
-                cell.closest('tr').classList.remove('changed-row');
-            }
-        }
-    }
-    
-    updateSaveButton();
-}
-
-function cancelEdit(cell, originalValue) {
-    cell.classList.remove('editing');
-    cell.textContent = originalValue;
-}
-
-function updateSaveButton() {
-    const saveBtn = document.getElementById('saveChangesBtn');
-    const count = document.getElementById('changesCount');
-    
-    if (changedItems.size > 0) {
-        saveBtn.style.display = 'block';
-        count.textContent = changedItems.size;
-    } else {
-        saveBtn.style.display = 'none';
-        count.textContent = '0';
-    }
-}
-
-async function saveAllChanges() {
-    if (changedItems.size === 0) return;
-    
-    const saveBtn = document.getElementById('saveChangesBtn');
-    saveBtn.disabled = true;
-    saveBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
-    
-    try {
-        const response = await fetch('{% url "update_stock_items_batch" %}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token }}'
-            },
-            body: JSON.stringify({
-                items: Array.from(changedItems.values())
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            alert(`Successfully updated ${result.updated_count} item(s)!`);
-            
-            // Clear changed items and remove highlighting
-            changedItems.clear();
-            document.querySelectorAll('.changed-row').forEach(row => {
-                row.classList.remove('changed-row');
-            });
-            
-            if (result.errors && result.errors.length > 0) {
-                console.error('Errors:', result.errors);
-                alert('Some items had errors: ' + result.errors.join(', '));
-            }
-        } else {
-            alert('Error: ' + result.error);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Failed to save changes: ' + error);
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = '<i class="bi bi-save"></i> Save All Changes <span id="changesCount" class="badge bg-light text-dark">0</span>';
-        updateSaveButton();
-    }
-}
 </script>
 {% endblock %}

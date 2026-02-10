@@ -1,0 +1,306 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Purchase Orders{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_purchase_orders_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="purchase-orders-header">
+        <h1><i class="bi bi-clipboard-check"></i> Purchase Orders</h1>
+        <div class="po-stats">
+            <div class="po-stat-item">
+                <span class="po-stat-value">{{ total_filtered }}</span>
+                <span>Showing</span>
+            </div>
+        </div>
+        <div class="po-actions">
+            <button id="sync-btn" class="btn btn-primary" title="Sync from WorkGuru" onclick="startSync()">
+                <i class="bi bi-arrow-repeat" id="sync-icon"></i> <span id="sync-text">Sync</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Sync Progress -->
+    <div id="sync-progress" class="sync-progress" style="display: none;">
+        <div class="sync-progress-bar">
+            <div class="sync-progress-fill" id="sync-fill" style="width: 0%"></div>
+        </div>
+        <div class="sync-progress-text" id="sync-status">Starting sync...</div>
+    </div>
+
+    <!-- Search & Filter Bar -->
+    <div class="po-filter-bar">
+        <div class="po-search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" id="po-search" placeholder="Search PO number, supplier, project, description..." value="{{ search_query }}" autocomplete="off">
+            {% if search_query %}
+            <button class="po-search-clear" onclick="clearSearch()" title="Clear search">&times;</button>
+            {% endif %}
+        </div>
+
+        <div class="po-supplier-filter">
+            <button class="po-filter-btn" onclick="toggleSupplierDropdown()" id="supplier-filter-btn">
+                <i class="bi bi-funnel"></i>
+                Suppliers
+                {% if excluded_suppliers %}<span class="po-filter-badge">{{ excluded_suppliers|length }}</span>{% endif %}
+            </button>
+            <div class="po-supplier-dropdown" id="supplier-dropdown">
+                <div class="po-supplier-dropdown-header">
+                    <span>Filter Suppliers</span>
+                    <div class="po-supplier-dropdown-actions">
+                        <button onclick="setAllSuppliers(true)">All</button>
+                        <button onclick="setAllSuppliers(false)">None</button>
+                    </div>
+                </div>
+                <div class="po-supplier-search">
+                    <input type="text" id="supplier-search-input" placeholder="Search suppliers..." oninput="filterSupplierList()" autocomplete="off">
+                </div>
+                <div class="po-supplier-list" id="supplier-list">
+                    {% for supplier in all_suppliers %}
+                    <label class="po-supplier-item" data-name="{{ supplier|lower }}">
+                        <input type="checkbox" value="{{ supplier }}" {% if supplier not in excluded_suppliers %}checked{% endif %}>
+                        <span>{{ supplier }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <div class="po-supplier-dropdown-footer">
+                    <button class="po-filter-apply" onclick="applySupplierFilter()">Apply Filter</button>
+                </div>
+            </div>
+        </div>
+
+        <button class="po-filter-btn po-zero-btn {% if show_zero %}active{% endif %}" onclick="toggleZeroFilter()" title="Show POs with £0 total">
+            <i class="bi bi-exclamation-triangle"></i>
+            £0 <span class="po-filter-badge po-zero-badge">{{ zero_count }}</span>
+        </button>
+    </div>
+
+    <!-- Status Tabs -->
+    <div class="po-tabs">
+        <a href="javascript:void(0)" onclick="switchTab('all')" class="po-tab {% if status_filter == 'all' %}active{% endif %}">
+            All <span class="po-tab-count">{{ total_filtered }}</span>
+        </a>
+        <a href="javascript:void(0)" onclick="switchTab('draft')" class="po-tab {% if status_filter == 'draft' %}active{% endif %}">
+            Draft <span class="po-tab-count">{{ draft_count }}</span>
+        </a>
+        <a href="javascript:void(0)" onclick="switchTab('approved')" class="po-tab {% if status_filter == 'approved' %}active{% endif %}">
+            Approved <span class="po-tab-count">{{ approved_count }}</span>
+        </a>
+        <a href="javascript:void(0)" onclick="switchTab('received')" class="po-tab {% if status_filter == 'received' %}active{% endif %}">
+            Received <span class="po-tab-count">{{ received_count }}</span>
+        </a>
+        <a href="javascript:void(0)" onclick="switchTab('cancelled')" class="po-tab {% if status_filter == 'cancelled' %}active{% endif %}">
+            Cancelled <span class="po-tab-count">{{ cancelled_count }}</span>
+        </a>
+    </div>
+
+    {% if purchase_orders %}
+    <div class="po-table-container">
+        <table class="po-table">
+            <thead>
+                <tr>
+                    <th>PO Number</th>
+                    <th>Supplier</th>
+                    <th>Project</th>
+                    <th>Description</th>
+                    <th>Issue Date</th>
+                    <th>Expected Date</th>
+                    <th class="text-right">Total</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for po in purchase_orders %}
+                <tr>
+                    <td>
+                        <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="po-number">
+                            {{ po.display_number|default:"-" }}
+                        </a>
+                    </td>
+                    <td>{{ po.supplier_name|default:"-" }}</td>
+                    <td>{{ po.project_name|default:"-" }}</td>
+                    <td class="po-desc-cell">{{ po.description|default:"-"|truncatewords:10 }}</td>
+                    <td>{{ po.issue_date|default:"-" }}</td>
+                    <td>{{ po.expected_date|default:"-" }}</td>
+                    <td class="text-right">£{{ po.total|floatformat:2 }}</td>
+                    <td>
+                        <span class="po-status {% if po.status == 'Draft' %}draft{% elif po.status == 'Sent' %}sent{% elif po.status == 'Received' %}received{% elif po.status == 'Approved' %}approved{% elif po.status == 'Cancelled' %}cancelled{% endif %}">
+                            {{ po.status|default:"Draft" }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="po-results-count">
+        Showing {{ filtered_count }} of {{ total_count }} purchase orders
+    </div>
+    {% else %}
+    <div class="po-empty-state">
+        <i class="bi bi-clipboard-x"></i>
+        <p>No purchase orders found{% if status_filter != 'all' %} with status "{{ status_filter|title }}"{% endif %}{% if search_query %} matching "{{ search_query }}"{% endif %}.</p>
+        {% if total_count == 0 %}
+        <p>Click <strong>Sync</strong> to fetch purchase orders from WorkGuru.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+/* ── URL helper: builds URL preserving all current filters ── */
+function buildUrl(overrides) {
+    const params = new URLSearchParams(window.location.search);
+    
+    // Apply overrides
+    for (const [key, val] of Object.entries(overrides)) {
+        if (key === 'exclude_supplier') {
+            params.delete('exclude_supplier');
+            if (Array.isArray(val)) val.forEach(v => params.append('exclude_supplier', v));
+        } else if (val === null || val === '') {
+            params.delete(key);
+        } else {
+            params.set(key, val);
+        }
+    }
+    
+    return '?' + params.toString();
+}
+
+/* ── Tab switching (preserves search & supplier filters) ── */
+function switchTab(status) {
+    window.location.href = buildUrl({ status: status });
+}
+
+/* ── Search ── */
+let searchTimer;
+document.getElementById('po-search').addEventListener('input', function() {
+    clearTimeout(searchTimer);
+    const q = this.value.trim();
+    searchTimer = setTimeout(() => {
+        window.location.href = buildUrl({ q: q, status: 'all' });
+    }, 500);
+});
+
+document.getElementById('po-search').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+        clearTimeout(searchTimer);
+        window.location.href = buildUrl({ q: this.value.trim(), status: 'all' });
+    }
+});
+
+function clearSearch() {
+    window.location.href = buildUrl({ q: '' });
+}
+
+/* ── Supplier Filter Dropdown ── */
+function toggleSupplierDropdown() {
+    const dd = document.getElementById('supplier-dropdown');
+    dd.classList.toggle('open');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const filter = document.querySelector('.po-supplier-filter');
+    if (filter && !filter.contains(e.target)) {
+        document.getElementById('supplier-dropdown').classList.remove('open');
+    }
+});
+
+function filterSupplierList() {
+    const query = document.getElementById('supplier-search-input').value.toLowerCase();
+    document.querySelectorAll('.po-supplier-item').forEach(item => {
+        item.style.display = item.dataset.name.includes(query) ? '' : 'none';
+    });
+}
+
+function setAllSuppliers(checked) {
+    document.querySelectorAll('#supplier-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+
+function applySupplierFilter() {
+    const excluded = [];
+    document.querySelectorAll('#supplier-list input[type="checkbox"]').forEach(cb => {
+        if (!cb.checked) excluded.push(cb.value);
+    });
+    window.location.href = buildUrl({ exclude_supplier: excluded, status: 'all' });
+}
+
+/* ── Zero Total Filter ── */
+function toggleZeroFilter() {
+    const params = new URLSearchParams(window.location.search);
+    const isActive = params.get('zero') === '1';
+    if (isActive) {
+        params.delete('zero');
+    } else {
+        params.set('zero', '1');
+        params.set('status', 'all');
+    }
+    window.location.href = '?' + params.toString();
+}
+
+/* ── Sync ── */
+function startSync() {
+    const btn = document.getElementById('sync-btn');
+    const icon = document.getElementById('sync-icon');
+    const text = document.getElementById('sync-text');
+    const progressDiv = document.getElementById('sync-progress');
+    const fill = document.getElementById('sync-fill');
+    const status = document.getElementById('sync-status');
+    
+    btn.disabled = true;
+    icon.classList.add('spinning');
+    text.textContent = 'Syncing...';
+    progressDiv.style.display = 'block';
+    
+    const evtSource = new EventSource('{% url "sync_purchase_orders" %}');
+    
+    evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        
+        if (data.error) {
+            status.textContent = 'Error: ' + data.error;
+            fill.style.width = '100%';
+            fill.style.backgroundColor = '#dc3545';
+            evtSource.close();
+            btn.disabled = false;
+            icon.classList.remove('spinning');
+            text.textContent = 'Sync';
+            return;
+        }
+        
+        if (data.status === 'started') {
+            status.textContent = `Syncing 0 / ${data.total} purchase orders...`;
+        } else if (data.status === 'progress') {
+            const pct = Math.round((data.synced / data.total) * 100);
+            fill.style.width = pct + '%';
+            status.textContent = `Synced ${data.synced} / ${data.total} POs — ${data.products} products, ${data.suppliers} suppliers`;
+        } else if (data.status === 'complete') {
+            fill.style.width = '100%';
+            fill.style.backgroundColor = '#28a745';
+            status.textContent = `Done! ${data.synced} POs, ${data.products} products, ${data.suppliers} new suppliers`;
+            evtSource.close();
+            
+            setTimeout(() => { location.reload(); }, 1500);
+        }
+    };
+    
+    evtSource.onerror = function() {
+        evtSource.close();
+        status.textContent = 'Connection lost. Sync may still be running.';
+        btn.disabled = false;
+        icon.classList.remove('spinning');
+        text.textContent = 'Sync';
+    };
+}
+</script>
+{% endblock %}

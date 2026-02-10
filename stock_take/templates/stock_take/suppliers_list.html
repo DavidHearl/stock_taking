@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Suppliers{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_suppliers_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/suppliers.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="suppliers-header">
+        <h1><i class="bi bi-building"></i> Suppliers</h1>
+        <div class="supplier-stats">
+            <div class="supplier-stat-item">
+                <span class="supplier-stat-value">{{ total_count }}</span>
+                <span>Total Suppliers</span>
+            </div>
+        </div>
+    </div>
+
+    <p class="suppliers-note">
+        <i class="bi bi-info-circle"></i>
+        Supplier data is extracted from Purchase Orders during sync. Use the 
+        <a href="{% url 'purchase_orders_list' %}">Purchase Orders</a> page to sync.
+    </p>
+
+    {% if suppliers %}
+    <div class="suppliers-table-container">
+        <table class="suppliers-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Country</th>
+                    <th class="text-right">POs</th>
+                    <th class="text-right">Total Spend</th>
+                    <th>Active</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for supplier in suppliers %}
+                <tr>
+                    <td>
+                        <a href="{% url 'supplier_detail' supplier.workguru_id %}" class="supplier-name-link">
+                            {{ supplier.name|default:"-" }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if supplier.email %}
+                        <a href="mailto:{{ supplier.email }}" class="supplier-email">{{ supplier.email }}</a>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ supplier.phone|default:"-" }}</td>
+                    <td>{{ supplier.city|default:"-" }}</td>
+                    <td>{{ supplier.country|default:"-" }}</td>
+                    <td class="text-right">{{ supplier.po_count }}</td>
+                    <td class="text-right">£{{ supplier.total_spend|floatformat:2 }}</td>
+                    <td>
+                        {% if supplier.is_active %}
+                        <span class="supplier-active-badge active">Active</span>
+                        {% else %}
+                        <span class="supplier-active-badge inactive">Inactive</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="suppliers-empty-state">
+        <i class="bi bi-building"></i>
+        <p>No suppliers found. Sync Purchase Orders to populate supplier data.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

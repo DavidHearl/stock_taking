@@ -3,7 +3,8 @@ from django.db.models import F, ExpressionWrapper, DecimalField
 from .models import (
     Customer, BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
     Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
-    OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense
+    OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense, UserProfile,
+    StockHistory
 )
 
 @admin.register(Customer)
@@ -61,16 +62,19 @@ class ImportHistoryAdmin(admin.ModelAdmin):
 
 @admin.register(StockItem)
 class StockItemAdmin(admin.ModelAdmin):
-    list_display = ['sku', 'name', 'quantity', 'tracking_type', 'cost', 'total_value', 'location', 'category']
+    list_display = ['sku', 'name', 'quantity', 'par_level', 'tracking_type', 'cost', 'total_value', 'location', 'category']
     search_fields = ['sku', 'name', 'location', 'serial_or_batch']
     list_filter = ['tracking_type', 'category', 'stock_take_group']
-    list_editable = ['tracking_type', 'quantity']
+    list_editable = ['tracking_type', 'quantity', 'par_level']
     ordering = ['sku']
     list_per_page = 50
     
     fieldsets = (
         ('Product Information', {
             'fields': ('sku', 'name', 'cost', 'quantity', 'category', 'stock_take_group')
+        }),
+        ('Stock Management', {
+            'fields': ('par_level', 'min_order_qty')
         }),
         ('Classification', {
             'fields': ('tracking_type',)
@@ -91,6 +95,33 @@ class StockItemAdmin(admin.ModelAdmin):
         return qs.select_related('category', 'stock_take_group')
     
     actions = ['mark_as_stock', 'mark_as_non_stock', 'mark_as_not_classified']
+
+
+@admin.register(StockHistory)
+class StockHistoryAdmin(admin.ModelAdmin):
+    list_display = ['stock_item', 'quantity', 'change_amount', 'change_type', 'reference', 'created_at', 'created_by']
+    search_fields = ['stock_item__sku', 'stock_item__name', 'reference']
+    list_filter = ['change_type', 'created_at']
+    readonly_fields = ['created_at']
+    ordering = ['-created_at']
+    list_per_page = 100
+    
+    fieldsets = (
+        ('Stock Information', {
+            'fields': ('stock_item', 'quantity', 'change_amount', 'change_type')
+        }),
+        ('Reference', {
+            'fields': ('reference', 'notes')
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'created_by'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('stock_item', 'created_by')
     
     @admin.action(description='Mark as Stock')
     def mark_as_stock(self, request, queryset):
@@ -211,3 +242,9 @@ class ExpenseAdmin(admin.ModelAdmin):
     list_filter = ['expense_type', 'date', 'fitter']
     date_hierarchy = 'date'
 
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'dark_mode']
+    search_fields = ['user__username', 'user__email']
+    list_filter = ['dark_mode']

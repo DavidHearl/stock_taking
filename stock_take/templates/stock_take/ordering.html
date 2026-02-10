@@ -482,10 +482,11 @@
                         <h4 class="section-title customer-title">
                             <i class="bi bi-person"></i> Customer Information
                         </h4>
+                        {{ form.customer }}
                         <div class="form-grid">
                             <div class="form-group full-width">
                                 <label for="customer-search">Search Existing Customer</label>
-                                <input type="text" id="customer-search" class="form-input" placeholder="Type to search by name..." autocomplete="off">
+                                <input type="text" id="customer-search" class="form-input" placeholder="Type to search by name, email, phone..." autocomplete="off">
                                 <div id="customer-results" class="search-results"></div>
                             </div>
                         </div>
@@ -1384,12 +1385,16 @@
                         .then(response => response.json())
                         .then(data => {
                             if (data.customers && data.customers.length > 0) {
-                                customerResults.innerHTML = data.customers.map(customer => `
-                                    <div class="search-result-item" onclick="selectCustomer(${customer.id}, '${customer.first_name}', '${customer.last_name}', '${customer.anthill_customer_id || ''}', '${customer.address || ''}', '${customer.postcode || ''}')">
-                                        <div class="search-result-name">${customer.first_name} ${customer.last_name}</div>
-                                        <div class="search-result-details">${customer.address || 'No address'} ${customer.postcode || ''}</div>
-                                    </div>
-                                `).join('');
+                                customerResults.innerHTML = data.customers.map(customer => {
+                                    const name = customer.name || `${customer.first_name} ${customer.last_name}`.trim();
+                                    const escapedName = name.replace(/'/g, "\\'");
+                                    const details = [customer.address, customer.city, customer.postcode].filter(Boolean).join(', ') || 'No address';
+                                    return `
+                                    <div class="search-result-item" onclick="selectCustomer(${customer.customer_id}, '${escapedName}', '${(customer.anthill_customer_id || '').replace(/'/g, "\\'")}', '${(customer.address || '').replace(/'/g, "\\'")}', '${customer.postcode || ''}')">
+                                        <div class="search-result-name">${name}</div>
+                                        <div class="search-result-details">${details}${customer.phone ? ' · ' + customer.phone : ''}</div>
+                                    </div>`;
+                                }).join('');
                                 customerResults.classList.add('show');
                             } else {
                                 customerResults.innerHTML = '<div class="search-result-item">No customers found</div>';
@@ -1450,14 +1455,20 @@
         }
     });
     
-    function selectCustomer(id, firstName, lastName, anthillId, address, postcode) {
+    function selectCustomer(customerId, name, anthillId, address, postcode) {
+        // Set the Customer FK
+        document.getElementById('id_customer').value = customerId;
+        // Split name into first/last for legacy fields
+        const parts = name.split(' ');
+        const firstName = parts[0] || '';
+        const lastName = parts.slice(1).join(' ') || '';
         document.getElementById('id_first_name').value = firstName;
         document.getElementById('id_last_name').value = lastName;
         document.getElementById('id_anthill_id').value = anthillId;
         document.getElementById('id_address').value = address;
         document.getElementById('id_postcode').value = postcode;
         document.getElementById('customer-results').classList.remove('show');
-        document.getElementById('customer-search').value = `${firstName} ${lastName}`;
+        document.getElementById('customer-search').value = name;
     }
     
     // Designer management functions

@@ -1,20 +1,69 @@
 from django.db import models
 from django.utils import timezone
 from decimal import Decimal
+from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 class Customer(models.Model):
-    """Customer model to store customer information"""
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    """Customer model to store customer information synced from WorkGuru"""
+    # WorkGuru identifiers
+    workguru_id = models.IntegerField(unique=True, null=True, blank=True, help_text='WorkGuru Client ID')
+    
+    # Legacy fields
+    first_name = models.CharField(max_length=100, blank=True)
+    last_name = models.CharField(max_length=100, blank=True)
     anthill_customer_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
+    
+    # Core details (from WorkGuru)
+    name = models.CharField(max_length=255, blank=True, help_text='Client name from WorkGuru')
+    code = models.CharField(max_length=50, blank=True, null=True, help_text='Client code')
+    email = models.EmailField(max_length=254, blank=True, null=True)
+    phone = models.CharField(max_length=50, blank=True, null=True)
+    fax = models.CharField(max_length=50, blank=True, null=True)
+    website = models.URLField(max_length=300, blank=True, null=True)
+    abn = models.CharField(max_length=50, blank=True, null=True, help_text='Tax / ABN / VAT number')
+    
+    # Address fields
     address = models.CharField(max_length=255, blank=True)
+    address_1 = models.CharField(max_length=255, blank=True, null=True)
+    address_2 = models.CharField(max_length=255, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    suburb = models.CharField(max_length=100, blank=True, null=True)
     postcode = models.CharField(max_length=20, blank=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+    
+    # Financial fields
+    currency = models.CharField(max_length=10, blank=True, null=True)
+    credit_days = models.CharField(max_length=20, blank=True, null=True)
+    credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    credit_terms_type = models.CharField(max_length=50, blank=True, null=True)
+    price_tier = models.CharField(max_length=100, blank=True, null=True)
+    price_tier_id = models.IntegerField(null=True, blank=True)
+    
+    # Billing & templates
+    billing_client = models.CharField(max_length=255, blank=True, null=True)
+    billing_client_id = models.IntegerField(null=True, blank=True)
+    default_invoice_template_id = models.IntegerField(null=True, blank=True)
+    default_quote_template_id = models.IntegerField(null=True, blank=True)
+    
+    # Status
+    is_active = models.BooleanField(default=True)
+    xero_id = models.CharField(max_length=100, blank=True, null=True, help_text='Xero integration ID')
+    
+    # Metadata
+    creation_time = models.DateTimeField(null=True, blank=True)
+    last_modification_time = models.DateTimeField(null=True, blank=True)
+    raw_data = models.JSONField(null=True, blank=True, help_text='Full raw API response')
     
     def __str__(self):
-        return f"{self.first_name} {self.last_name}"
+        if self.name:
+            return self.name
+        return f"{self.first_name} {self.last_name}".strip() or f"Customer #{self.pk}"
     
     class Meta:
-        ordering = ['last_name', 'first_name']
+        ordering = ['name', 'last_name', 'first_name']
 
 class Designer(models.Model):
     """Designer model to store designer information"""
@@ -410,6 +459,7 @@ class StockItem(models.Model):
     last_checked = models.DateTimeField(null=True, blank=True)
     tracking_type = models.CharField(max_length=30, choices=TRACKING_CHOICES, default='not-classified', db_index=True)
     min_order_qty = models.IntegerField(blank=True, null=True)
+    par_level = models.IntegerField(default=0, help_text='Minimum stock level - alerts when stock falls below this')
     
     class Meta:
         indexes = [
@@ -430,6 +480,164 @@ class StockItem(models.Model):
     
     def __str__(self):
         return f"{self.sku} - {self.name}"
+
+
+class StockHistory(models.Model):
+    """Track stock level changes over time for graphing and analysis"""
+    stock_item = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='stock_history')
+    quantity = models.IntegerField(help_text='Stock quantity at this point in time')
+    change_amount = models.IntegerField(help_text='Amount changed (positive for additions, negative for usage)')
+    change_type = models.CharField(max_length=50, choices=[
+        ('stock_take', 'Stock Take'),
+        ('purchase', 'Purchase Order'),
+        ('sale', 'Sale/Usage'),
+        ('adjustment', 'Manual Adjustment'),
+        ('initial', 'Initial Stock'),
+    ], default='adjustment')
+    reference = models.CharField(max_length=100, blank=True, help_text='PO number, order number, etc.')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['stock_item', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.stock_item.sku} - {self.quantity} units ({self.created_at.strftime('%Y-%m-%d')})"
+
+
+class Supplier(models.Model):
+    """Local copy of WorkGuru Suppliers - extracted from PO details"""
+    workguru_id = models.IntegerField(unique=True, help_text='WorkGuru Supplier ID')
+    name = models.CharField(max_length=255)
+    
+    # Contact info
+    email = models.CharField(max_length=255, blank=True, null=True)
+    phone = models.CharField(max_length=100, blank=True, null=True)
+    website = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Address
+    address_1 = models.CharField(max_length=255, blank=True, null=True)
+    address_2 = models.CharField(max_length=255, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    postcode = models.CharField(max_length=20, blank=True, null=True)
+    country = models.CharField(max_length=10, blank=True, null=True)
+    
+    # Financial
+    currency = models.CharField(max_length=10, blank=True, null=True)
+    credit_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    credit_days = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Status
+    is_active = models.BooleanField(default=True)
+    
+    # Tracking
+    last_synced = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    raw_data = models.JSONField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['workguru_id']),
+            models.Index(fields=['name']),
+        ]
+    
+    def __str__(self):
+        return self.name
+
+
+class PurchaseOrder(models.Model):
+    """Local copy of WorkGuru Purchase Orders"""
+    workguru_id = models.IntegerField(unique=True, help_text='WorkGuru PO ID')
+    number = models.CharField(max_length=50, blank=True, null=True)
+    display_number = models.CharField(max_length=50, blank=True, null=True)
+    revision = models.IntegerField(default=0)
+    description = models.TextField(blank=True, null=True)
+    
+    # Project/Customer
+    project_id = models.IntegerField(null=True, blank=True)
+    project_number = models.CharField(max_length=100, blank=True, null=True)
+    project_name = models.CharField(max_length=200, blank=True, null=True)
+    
+    # Supplier
+    supplier_id = models.IntegerField(null=True, blank=True)
+    supplier_name = models.CharField(max_length=200, blank=True, null=True)
+    supplier_invoice_number = models.CharField(max_length=100, blank=True, null=True)
+    
+    # Dates
+    issue_date = models.CharField(max_length=20, blank=True, null=True)
+    expected_date = models.CharField(max_length=20, blank=True, null=True)
+    received_date = models.CharField(max_length=20, blank=True, null=True)
+    invoice_date = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Status and Financials
+    status = models.CharField(max_length=50, default='Draft', blank=True, null=True)
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    forecast_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    base_currency_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    currency = models.CharField(max_length=10, default='GBP', blank=True, null=True)
+    exchange_rate = models.DecimalField(max_digits=10, decimal_places=4, default=1.0)
+    
+    # Delivery
+    warehouse_id = models.IntegerField(null=True, blank=True)
+    delivery_address_1 = models.CharField(max_length=255, blank=True, null=True)
+    delivery_address_2 = models.CharField(max_length=255, blank=True, null=True)
+    delivery_instructions = models.TextField(blank=True, null=True)
+    
+    # Flags
+    sent_to_supplier = models.CharField(max_length=50, blank=True, null=True)
+    sent_to_accounting = models.CharField(max_length=50, blank=True, null=True)
+    billable = models.BooleanField(default=False)
+    is_advanced = models.BooleanField(default=False)
+    is_rfq = models.BooleanField(default=False)
+    
+    # Metadata
+    creator_name = models.CharField(max_length=200, blank=True, null=True)
+    received_by_name = models.CharField(max_length=200, blank=True, null=True)
+    
+    # Local tracking
+    last_synced = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    # Raw JSON data for reference
+    raw_data = models.JSONField(null=True, blank=True, help_text='Full JSON from WorkGuru API')
+    
+    class Meta:
+        ordering = ['-workguru_id']
+        indexes = [
+            models.Index(fields=['workguru_id']),
+            models.Index(fields=['number']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"{self.display_number} - {self.supplier_name}"
+
+
+class PurchaseOrderProduct(models.Model):
+    """Products/line items in a purchase order"""
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='products')
+    sku = models.CharField(max_length=100, blank=True)
+    supplier_code = models.CharField(max_length=100, blank=True)
+    name = models.CharField(max_length=200, blank=True)
+    description = models.TextField(blank=True)
+    
+    order_price = models.DecimalField(max_digits=10, decimal_places=5, default=0)
+    order_quantity = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    received_quantity = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    invoice_price = models.DecimalField(max_digits=10, decimal_places=5, default=0)
+    line_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
+    # Link to local stock item if available
+    stock_item = models.ForeignKey(StockItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_order_lines')
+    
+    def __str__(self):
+        return f"{self.purchase_order.display_number} - {self.sku} - {self.name}"
 
 
 class Remedial(models.Model):
@@ -875,3 +1083,26 @@ class Expense(models.Model):
     
     class Meta:
         ordering = ['-date', '-created_at']
+
+
+class UserProfile(models.Model):
+    """User profile to store user preferences"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    dark_mode = models.BooleanField(default=True, help_text='Enable dark mode theme')
+    
+    def __str__(self):
+        return f"{self.user.username}'s profile"
+
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    """Create a UserProfile when a new User is created"""
+    if created:
+        UserProfile.objects.create(user=instance)
+
+
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    """Save the UserProfile when the User is saved"""
+    if hasattr(instance, 'profile'):
+        instance.profile.save()
