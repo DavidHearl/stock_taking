@@ -1,7 +1,9 @@
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render, get_object_or_404
-from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory
+from django.shortcuts import render, get_object_or_404, redirect
+from django.http import JsonResponse
+from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier
 import json
+from decimal import Decimal
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.db.models import Sum
@@ -15,6 +17,7 @@ def product_detail(request, item_id):
     # Get categories and groups for the edit dropdowns
     categories = list(Category.objects.values('id', 'name').order_by('name'))
     stock_take_groups = list(StockTakeGroup.objects.values('id', 'name').order_by('name'))
+    suppliers = list(Supplier.objects.values('id', 'name').order_by('name'))
     
     # Calculate stock trajectory based on order fit dates
     today = timezone.now().date()
@@ -56,12 +59,167 @@ def product_detail(request, item_id):
     allocated = int(future_accessories.aggregate(total=Sum('quantity'))['total'] or 0)
     remaining = current_stock - allocated
     
+    # Purchase orders containing this product
+    po_lines = PurchaseOrderProduct.objects.filter(
+        stock_item=product
+    ).select_related('purchase_order').order_by('-purchase_order__workguru_id')
+    
+    # Orders/projects using this product (via accessories)
+    order_accessories = Accessory.objects.filter(
+        stock_item=product
+    ).select_related('order', 'order__customer').order_by('-order__order_date')
+    
+    # Stock change history for the Last Modified tab
+    stock_changes = StockHistory.objects.filter(
+        stock_item=product
+    ).select_related('created_by').order_by('-created_at')[:50]
+    
     return render(request, 'stock_take/product_detail.html', {
         'product': product,
         'categories': json.dumps(categories),
         'stock_take_groups': json.dumps(stock_take_groups),
+        'suppliers': json.dumps(suppliers),
         'tracking_choices': json.dumps(list(StockItem.TRACKING_CHOICES)),
         'stock_history': json.dumps(history_data),
         'allocated': allocated,
         'remaining': remaining,
+        'po_lines': po_lines,
+        'order_accessories': order_accessories,
+        'stock_changes': stock_changes,
     })
+
+
+@login_required
+def add_product(request):
+    """Create a new product - renders an editable form, saves on POST"""
+    if request.method == 'POST':
+        try:
+            # Support both FormData (multipart) and JSON
+            if request.content_type and 'multipart' in request.content_type:
+                data = request.POST
+                image_file = request.FILES.get('image')
+            else:
+                data = json.loads(request.body)
+                image_file = None
+            
+            # Required fields
+            sku = data.get('sku', '').strip()
+            name = data.get('name', '').strip()
+            
+            if not sku:
+                return JsonResponse({'success': False, 'error': 'SKU is required'})
+            if not name:
+                return JsonResponse({'success': False, 'error': 'Name is required'})
+            
+            # Check for duplicate SKU
+            if StockItem.objects.filter(sku=sku).exists():
+                return JsonResponse({'success': False, 'error': f'A product with SKU "{sku}" already exists'})
+            
+            # Build the product
+            product = StockItem(
+                sku=sku,
+                name=name,
+                description=data.get('description', ''),
+                cost=Decimal(str(data.get('cost', '0') or '0')),
+                location=data.get('location', ''),
+                quantity=int(data.get('quantity', 0) or 0),
+                tracking_type=data.get('tracking_type', 'not-classified'),
+                min_order_qty=int(data['min_order_qty']) if data.get('min_order_qty') else None,
+                par_level=int(data.get('par_level', 0) or 0),
+                serial_or_batch=data.get('serial_or_batch', ''),
+            )
+            
+            # Optional FK fields
+            category_id = data.get('category_id')
+            if category_id:
+                product.category_id = int(category_id)
+            
+            group_id = data.get('stock_take_group_id')
+            if group_id:
+                product.stock_take_group_id = int(group_id)
+            
+            supplier_id = data.get('supplier_id')
+            if supplier_id:
+                product.supplier_id = int(supplier_id)
+            
+            # Product dimensions
+            for field in ('length', 'width', 'height', 'weight'):
+                val = data.get(field)
+                if val:
+                    setattr(product, field, Decimal(str(val)))
+            
+            # Box dimensions
+            for field in ('box_length', 'box_width', 'box_height'):
+                val = data.get(field)
+                if val:
+                    setattr(product, field, Decimal(str(val)))
+            
+            box_qty = data.get('box_quantity')
+            if box_qty:
+                product.box_quantity = int(box_qty)
+            
+            # Image
+            if image_file:
+                product.image = image_file
+            
+            product.save()
+            
+            # Create initial stock history entry
+            if product.quantity != 0:
+                StockHistory.objects.create(
+                    stock_item=product,
+                    quantity=product.quantity,
+                    change_amount=product.quantity,
+                    change_type='initial',
+                    reference='Product created',
+                    notes=f'Initial stock of {product.quantity} units',
+                    created_by=request.user,
+                )
+            
+            return JsonResponse({
+                'success': True,
+                'product_id': product.id,
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+    
+    # GET - render the add product page
+    categories = list(Category.objects.values('id', 'name').order_by('name'))
+    stock_take_groups = list(StockTakeGroup.objects.values('id', 'name').order_by('name'))
+    suppliers = list(Supplier.objects.values('id', 'name').order_by('name'))
+    
+    return render(request, 'stock_take/add_product.html', {
+        'categories': json.dumps(categories),
+        'stock_take_groups': json.dumps(stock_take_groups),
+        'suppliers': json.dumps(suppliers),
+        'tracking_choices': json.dumps(list(StockItem.TRACKING_CHOICES)),
+    })
+
+
+@login_required
+def upload_product_image(request, item_id):
+    """Upload or remove a product image"""
+    product = get_object_or_404(StockItem, id=item_id)
+    
+    if request.method == 'POST':
+        image_file = request.FILES.get('image')
+        if not image_file:
+            return JsonResponse({'success': False, 'error': 'No image file provided'})
+        
+        # Delete old image if exists
+        if product.image:
+            product.image.delete(save=False)
+        
+        product.image = image_file
+        product.save()
+        return JsonResponse({'success': True})
+    
+    elif request.method == 'DELETE':
+        if product.image:
+            product.image.delete(save=False)
+            product.image = None
+            product.save()
+        return JsonResponse({'success': True})
+    
+    return JsonResponse({'success': False, 'error': 'Invalid method'}, status=405)

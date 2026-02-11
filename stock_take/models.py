@@ -448,10 +448,12 @@ class StockItem(models.Model):
 
     sku = models.CharField(max_length=100, db_index=True)
     name = models.CharField(max_length=200, db_index=True)
+    description = models.TextField(blank=True, default='')
     cost = models.DecimalField(max_digits=10, decimal_places=2)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     stock_take_group = models.ForeignKey(StockTakeGroup, on_delete=models.SET_NULL, 
                                        null=True, blank=True, related_name='stock_items')
+    supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_items')
     category_name = models.CharField(max_length=100, blank=True)  # For CSV compatibility
     location = models.CharField(max_length=100)
     quantity = models.IntegerField(db_index=True)
@@ -460,6 +462,19 @@ class StockItem(models.Model):
     tracking_type = models.CharField(max_length=30, choices=TRACKING_CHOICES, default='not-classified', db_index=True)
     min_order_qty = models.IntegerField(blank=True, null=True)
     par_level = models.IntegerField(default=0, help_text='Minimum stock level - alerts when stock falls below this')
+    image = models.ImageField(upload_to='product_images/', blank=True, null=True)
+    
+    # Product dimensions
+    length = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Length in mm')
+    width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Width in mm')
+    height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Height in mm')
+    weight = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Weight in kg')
+    
+    # Box / packaging dimensions for storage planning
+    box_length = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Box length in mm')
+    box_width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Box width in mm')
+    box_height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Box height in mm')
+    box_quantity = models.IntegerField(null=True, blank=True, help_text='Number of items per box')
     
     class Meta:
         indexes = [
@@ -517,6 +532,7 @@ class Supplier(models.Model):
     # Contact info
     email = models.CharField(max_length=255, blank=True, null=True)
     phone = models.CharField(max_length=100, blank=True, null=True)
+    fax = models.CharField(max_length=100, blank=True, null=True)
     website = models.CharField(max_length=255, blank=True, null=True)
     
     # Address
@@ -525,12 +541,18 @@ class Supplier(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     state = models.CharField(max_length=100, blank=True, null=True)
     postcode = models.CharField(max_length=20, blank=True, null=True)
-    country = models.CharField(max_length=10, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
     
     # Financial
     currency = models.CharField(max_length=10, blank=True, null=True)
+    abn = models.CharField(max_length=50, blank=True, null=True, help_text='Tax / ABN / VAT number')
     credit_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     credit_days = models.CharField(max_length=20, blank=True, null=True)
+    number_of_credit_days = models.IntegerField(null=True, blank=True)
+    credit_terms_type = models.CharField(max_length=50, blank=True, null=True)
+    price_tier = models.CharField(max_length=100, blank=True, null=True)
+    supplier_tax_rate = models.CharField(max_length=100, blank=True, null=True)
+    estimate_lead_time = models.IntegerField(null=True, blank=True, help_text='Estimated lead time in days')
     
     # Status
     is_active = models.BooleanField(default=True)
@@ -570,10 +592,10 @@ class PurchaseOrder(models.Model):
     supplier_invoice_number = models.CharField(max_length=100, blank=True, null=True)
     
     # Dates
-    issue_date = models.CharField(max_length=20, blank=True, null=True)
-    expected_date = models.CharField(max_length=20, blank=True, null=True)
-    received_date = models.CharField(max_length=20, blank=True, null=True)
-    invoice_date = models.CharField(max_length=20, blank=True, null=True)
+    issue_date = models.CharField(max_length=50, blank=True, null=True)
+    expected_date = models.CharField(max_length=50, blank=True, null=True)
+    received_date = models.CharField(max_length=50, blank=True, null=True)
+    invoice_date = models.CharField(max_length=50, blank=True, null=True)
     
     # Status and Financials
     status = models.CharField(max_length=50, default='Draft', blank=True, null=True)
@@ -583,11 +605,36 @@ class PurchaseOrder(models.Model):
     currency = models.CharField(max_length=10, default='GBP', blank=True, null=True)
     exchange_rate = models.DecimalField(max_digits=10, decimal_places=4, default=1.0)
     
+    # Financials - extended
+    tax_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    base_currency_tax_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    invoiced_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    amount_outstanding = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    volume = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    weight = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    cis_deduction = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
     # Delivery
     warehouse_id = models.IntegerField(null=True, blank=True)
+    warehouse_name = models.CharField(max_length=200, blank=True, null=True)
     delivery_address_1 = models.CharField(max_length=255, blank=True, null=True)
     delivery_address_2 = models.CharField(max_length=255, blank=True, null=True)
     delivery_instructions = models.TextField(blank=True, null=True)
+    suburb = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    postcode = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Dates - extended
+    approved_date = models.CharField(max_length=50, blank=True, null=True)
+    invoice_due_date = models.CharField(max_length=50, blank=True, null=True)
+    
+    # Client/Contact
+    client_id_wg = models.IntegerField(null=True, blank=True, help_text='WorkGuru Client ID')
+    client_name = models.CharField(max_length=200, blank=True, null=True)
+    contact_name = models.CharField(max_length=200, blank=True, null=True)
+    
+    # Accounting
+    accounting_system_number = models.CharField(max_length=100, blank=True, null=True)
     
     # Flags
     sent_to_supplier = models.CharField(max_length=50, blank=True, null=True)
@@ -595,10 +642,15 @@ class PurchaseOrder(models.Model):
     billable = models.BooleanField(default=False)
     is_advanced = models.BooleanField(default=False)
     is_rfq = models.BooleanField(default=False)
+    is_landed_costs_po = models.BooleanField(default=False)
+    stock_used_on_projects = models.BooleanField(default=False)
     
     # Metadata
     creator_name = models.CharField(max_length=200, blank=True, null=True)
     received_by_name = models.CharField(max_length=200, blank=True, null=True)
+    approved_by_name = models.CharField(max_length=200, blank=True, null=True)
+    creation_time_wg = models.CharField(max_length=50, blank=True, null=True, help_text='WorkGuru creation timestamp')
+    last_modification_time_wg = models.CharField(max_length=50, blank=True, null=True, help_text='WorkGuru last modification timestamp')
     
     # Local tracking
     last_synced = models.DateTimeField(auto_now=True)
@@ -622,19 +674,44 @@ class PurchaseOrder(models.Model):
 class PurchaseOrderProduct(models.Model):
     """Products/line items in a purchase order"""
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='products')
+    workguru_id = models.IntegerField(null=True, blank=True, help_text='WorkGuru product line ID')
+    product_id = models.IntegerField(null=True, blank=True, help_text='WorkGuru Product ID')
     sku = models.CharField(max_length=100, blank=True)
     supplier_code = models.CharField(max_length=100, blank=True)
     name = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
+    notes = models.TextField(blank=True, null=True)
     
+    # Pricing
     order_price = models.DecimalField(max_digits=10, decimal_places=5, default=0)
     order_quantity = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    quantity = models.DecimalField(max_digits=10, decimal_places=4, default=0, help_text='Quantity field from API')
     received_quantity = models.DecimalField(max_digits=10, decimal_places=4, default=0)
     invoice_price = models.DecimalField(max_digits=10, decimal_places=5, default=0)
     line_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    unit_cost = models.DecimalField(max_digits=10, decimal_places=5, default=0)
+    minimum_order_quantity = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    
+    # Tax
+    tax_type = models.CharField(max_length=50, blank=True, null=True)
+    tax_name = models.CharField(max_length=100, blank=True, null=True)
+    tax_rate = models.DecimalField(max_digits=6, decimal_places=4, default=0)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
+    # Accounting
+    account_code = models.CharField(max_length=50, blank=True, null=True)
+    expense_account_code = models.CharField(max_length=50, blank=True, null=True)
+    
+    # Ordering
+    sort_order = models.IntegerField(default=0)
+    weight = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    received_date = models.CharField(max_length=50, blank=True, null=True)
     
     # Link to local stock item if available
     stock_item = models.ForeignKey(StockItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_order_lines')
+    
+    class Meta:
+        ordering = ['sort_order', 'id']
     
     def __str__(self):
         return f"{self.purchase_order.display_number} - {self.sku} - {self.name}"
@@ -1106,3 +1183,34 @@ def save_user_profile(sender, instance, **kwargs):
     """Save the UserProfile when the User is saved"""
     if hasattr(instance, 'profile'):
         instance.profile.save()
+
+
+class Ticket(models.Model):
+    """Support ticket for reporting issues"""
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('in_progress', 'In Progress'),
+        ('resolved', 'Resolved'),
+        ('closed', 'Closed'),
+    ]
+    
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    image = models.ImageField(upload_to='ticket_images/', blank=True, null=True)
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='open')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tickets')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"#{self.id} - {self.title}"

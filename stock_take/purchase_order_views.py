@@ -12,6 +12,222 @@ import time
 logger = logging.getLogger(__name__)
 
 
+def _build_po_defaults_from_list(po_data):
+    """Build the defaults dict for PurchaseOrder from list endpoint data.
+    Captures ALL available fields from the GetPurchaseOrdersForMob response."""
+    return {
+        'number': po_data.get('number'),
+        'display_number': po_data.get('displayNumber'),
+        'revision': po_data.get('revision', 0),
+        'description': po_data.get('description'),
+        'project_id': po_data.get('projectId'),
+        'project_number': po_data.get('projectNumber'),
+        'project_name': po_data.get('projectName'),
+        'supplier_id': po_data.get('supplierId'),
+        'supplier_name': po_data.get('supplierName'),
+        'supplier_invoice_number': po_data.get('supplierInvoiceNumber'),
+        'issue_date': po_data.get('issueDate'),
+        'expected_date': po_data.get('expectedDate'),
+        'received_date': po_data.get('receivedDate'),
+        'invoice_date': po_data.get('invoiceDate'),
+        'status': po_data.get('status', 'Draft'),
+        'total': po_data.get('total') or 0,
+        'forecast_total': po_data.get('forecastTotal') or 0,
+        'base_currency_total': po_data.get('baseCurrencyTotal') or 0,
+        'currency': po_data.get('currency', 'GBP'),
+        'exchange_rate': po_data.get('exchangeRate') or 1.0,
+        'warehouse_id': po_data.get('warehouseId'),
+        'delivery_address_1': po_data.get('deliveryAddress1'),
+        'delivery_address_2': po_data.get('deliveryAddress2'),
+        'delivery_instructions': po_data.get('deliveryInstructions'),
+        'sent_to_supplier': po_data.get('sentToSupplier'),
+        'sent_to_accounting': po_data.get('sentToAccounting'),
+        'billable': po_data.get('billable', False),
+        'is_advanced': po_data.get('isAdvancedPurchaseOrder', False),
+        'is_rfq': po_data.get('isRFQ', False),
+        'creator_name': po_data.get('creatorUserFullName'),
+        'received_by_name': po_data.get('receivedByUserFullName'),
+        # Fields previously missing from list endpoint
+        'accounting_system_number': po_data.get('accountingSystemNumber'),
+        'client_id_wg': po_data.get('clientId'),
+        'client_name': po_data.get('client'),
+        'suburb': po_data.get('suburb'),
+        'state': po_data.get('state'),
+        'cis_deduction': po_data.get('cisDeduction') or 0,
+        'raw_data': po_data,
+    }
+
+
+def _update_po_from_detail(po, detail_data):
+    """Update a PurchaseOrder with the richer detail endpoint data.
+    Captures ALL available fields from GetPurchaseOrderByIdForMob."""
+    po.total = detail_data.get('total') if detail_data.get('total') is not None else po.total
+    po.forecast_total = detail_data.get('forecastTotal') or po.forecast_total
+    po.base_currency_total = detail_data.get('baseCurrencyTotal') or po.base_currency_total
+    po.tax_total = detail_data.get('taxTotal') or 0
+    po.base_currency_tax_total = detail_data.get('baseCurrencyTaxTotal') or 0
+    po.invoiced_amount = detail_data.get('invoicedAmount') or 0
+    po.amount_outstanding = detail_data.get('amountOutstanding') or 0
+    po.volume = detail_data.get('volume') or 0
+    po.weight = detail_data.get('weight') or 0
+    po.cis_deduction = detail_data.get('cisDeduction') or 0
+    po.is_landed_costs_po = detail_data.get('isLandedCostsPo', False)
+    po.stock_used_on_projects = detail_data.get('stockUsedOnProjects', False)
+    
+    # Dates from detail (may be ISO format)
+    po.approved_date = detail_data.get('approvedDate')
+    po.invoice_due_date = detail_data.get('invoiceDueDate')
+    
+    # Detail gives richer date info (ISO format) - update if present
+    if detail_data.get('issueDate'):
+        po.issue_date = detail_data.get('issueDate')
+    if detail_data.get('expectedDate'):
+        po.expected_date = detail_data.get('expectedDate')
+    if detail_data.get('receivedDate'):
+        po.received_date = detail_data.get('receivedDate')
+    if detail_data.get('invoiceDate'):
+        po.invoice_date = detail_data.get('invoiceDate')
+    
+    # Delivery detail
+    po.suburb = detail_data.get('suburb') or po.suburb
+    po.state = detail_data.get('state') or po.state
+    po.postcode = detail_data.get('postcode') or po.postcode
+    po.delivery_address_1 = detail_data.get('deliveryAddress1') or po.delivery_address_1
+    po.delivery_address_2 = detail_data.get('deliveryAddress2') or po.delivery_address_2
+    po.delivery_instructions = detail_data.get('deliveryInstructions') or po.delivery_instructions
+    
+    # Warehouse
+    warehouse = detail_data.get('warehouse')
+    if warehouse and isinstance(warehouse, dict):
+        po.warehouse_name = warehouse.get('name')
+    
+    # Contact
+    contact = detail_data.get('contact')
+    if contact and isinstance(contact, dict):
+        full_name = contact.get('fullName', '').strip()
+        if full_name:
+            po.contact_name = full_name
+    
+    # Client
+    po.client_id_wg = detail_data.get('clientId') or po.client_id_wg
+    client = detail_data.get('client')
+    if client and isinstance(client, dict):
+        po.client_name = client.get('name')
+    
+    # Approved/received by
+    approved_by = detail_data.get('approvedByUser')
+    if approved_by and isinstance(approved_by, dict):
+        po.approved_by_name = approved_by.get('fullName') or approved_by.get('name')
+    received_by = detail_data.get('receivedByUser')
+    if received_by and isinstance(received_by, dict):
+        name = received_by.get('fullName') or received_by.get('name')
+        if name:
+            po.received_by_name = name
+    creator = detail_data.get('creatorUser')
+    if creator and isinstance(creator, dict):
+        name = creator.get('fullName') or creator.get('name')
+        if name:
+            po.creator_name = name
+    
+    # Accounting
+    po.accounting_system_number = detail_data.get('accountingSystemNumber') or po.accounting_system_number
+    po.supplier_invoice_number = detail_data.get('supplierInvoiceNumber') or po.supplier_invoice_number
+    
+    # WorkGuru timestamps
+    po.creation_time_wg = detail_data.get('creationTime')
+    po.last_modification_time_wg = detail_data.get('lastModificationTime')
+    
+    # Store full detail as raw
+    po.raw_data = detail_data
+    po.save()
+
+
+def _sync_supplier_from_detail(supplier_data):
+    """Sync supplier data from PO detail response. Returns (supplier, created)."""
+    if not supplier_data or not supplier_data.get('id'):
+        return None, False
+    
+    sup, sup_created = Supplier.objects.update_or_create(
+        workguru_id=supplier_data['id'],
+        defaults={
+            'name': supplier_data.get('name', ''),
+            'email': supplier_data.get('email'),
+            'phone': supplier_data.get('phone'),
+            'fax': supplier_data.get('fax'),
+            'website': supplier_data.get('website'),
+            'address_1': supplier_data.get('address1'),
+            'address_2': supplier_data.get('address2'),
+            'city': supplier_data.get('city'),
+            'state': supplier_data.get('state'),
+            'postcode': supplier_data.get('postcode'),
+            'country': supplier_data.get('country'),
+            'currency': supplier_data.get('currency'),
+            'abn': supplier_data.get('abn'),
+            'credit_limit': supplier_data.get('creditLimit') or 0,
+            'credit_days': supplier_data.get('creditDays'),
+            'number_of_credit_days': supplier_data.get('numberOfCreditDays'),
+            'credit_terms_type': supplier_data.get('creditTermsType'),
+            'price_tier': supplier_data.get('priceTier'),
+            'supplier_tax_rate': supplier_data.get('supplierTaxRate'),
+            'estimate_lead_time': supplier_data.get('estimateLeadTime'),
+            'is_active': supplier_data.get('isActive', True),
+            'raw_data': supplier_data,
+        }
+    )
+    return sup, sup_created
+
+
+def _sync_products_for_po(po, po_products):
+    """Sync product line items for a purchase order. Returns count of products synced."""
+    if not po_products:
+        return 0
+    
+    # Build new products first, only delete old ones if build succeeds
+    new_products = []
+    for prod in po_products:
+        if prod.get('isDeleted'):
+            continue
+        
+        sku = prod.get('sku', '')
+        stock_item = StockItem.objects.filter(sku=sku).first() if sku else None
+        
+        new_products.append(PurchaseOrderProduct(
+            purchase_order=po,
+            workguru_id=prod.get('id'),
+            product_id=prod.get('productId'),
+            sku=prod.get('sku') or '',
+            supplier_code=prod.get('supplierCode') or '',
+            name=prod.get('name') or '',
+            description=prod.get('description') or '',
+            notes=prod.get('notes') or '',
+            order_price=prod.get('buyPrice') or prod.get('orderPrice') or 0,
+            order_quantity=prod.get('orderQuantity') or 0,
+            quantity=prod.get('quantity') or 0,
+            received_quantity=prod.get('receivedQuantity') or 0,
+            invoice_price=prod.get('invoicePrice') or 0,
+            line_total=prod.get('lineTotal') or 0,
+            unit_cost=prod.get('unitCost') or 0,
+            minimum_order_quantity=prod.get('minimumOrderQuantity') or 0,
+            tax_type=prod.get('taxType'),
+            tax_name=prod.get('taxName'),
+            tax_rate=prod.get('taxRate') or 0,
+            tax_amount=prod.get('taxAmount') or 0,
+            account_code=prod.get('accountCode'),
+            expense_account_code=prod.get('expenseAccountCode'),
+            sort_order=prod.get('sortOrder') or 0,
+            weight=prod.get('weight') or 0,
+            received_date=prod.get('receivedDate'),
+            stock_item=stock_item,
+        ))
+    
+    # Only delete and recreate if we successfully built products
+    if new_products:
+        po.products.all().delete()
+        PurchaseOrderProduct.objects.bulk_create(new_products)
+    
+    return len(new_products)
+
+
 def sync_purchase_orders_from_workguru():
     """Sync purchase orders from WorkGuru API to local database, including products and suppliers"""
     try:
@@ -43,43 +259,10 @@ def sync_purchase_orders_from_workguru():
         for po_data in po_list:
             wg_id = po_data.get('id')
             
-            # Create/update PO from list data first
+            # Create/update PO from list data
             po, created = PurchaseOrder.objects.update_or_create(
                 workguru_id=wg_id,
-                defaults={
-                    'number': po_data.get('number'),
-                    'display_number': po_data.get('displayNumber'),
-                    'revision': po_data.get('revision', 0),
-                    'description': po_data.get('description'),
-                    'project_id': po_data.get('projectId'),
-                    'project_number': po_data.get('projectNumber'),
-                    'project_name': po_data.get('projectName'),
-                    'supplier_id': po_data.get('supplierId'),
-                    'supplier_name': po_data.get('supplierName'),
-                    'supplier_invoice_number': po_data.get('supplierInvoiceNumber'),
-                    'issue_date': po_data.get('issueDate'),
-                    'expected_date': po_data.get('expectedDate'),
-                    'received_date': po_data.get('receivedDate'),
-                    'invoice_date': po_data.get('invoiceDate'),
-                    'status': po_data.get('status', 'Draft'),
-                    'total': po_data.get('total') or 0,
-                    'forecast_total': po_data.get('forecastTotal') or 0,
-                    'base_currency_total': po_data.get('baseCurrencyTotal') or 0,
-                    'currency': po_data.get('currency', 'GBP'),
-                    'exchange_rate': po_data.get('exchangeRate') or 1.0,
-                    'warehouse_id': po_data.get('warehouseId'),
-                    'delivery_address_1': po_data.get('deliveryAddress1'),
-                    'delivery_address_2': po_data.get('deliveryAddress2'),
-                    'delivery_instructions': po_data.get('deliveryInstructions'),
-                    'sent_to_supplier': po_data.get('sentToSupplier'),
-                    'sent_to_accounting': po_data.get('sentToAccounting'),
-                    'billable': po_data.get('billable', False),
-                    'is_advanced': po_data.get('isAdvancedPurchaseOrder', False),
-                    'is_rfq': po_data.get('isRFQ', False),
-                    'creator_name': po_data.get('creatorUserFullName'),
-                    'received_by_name': po_data.get('receivedByUserFullName'),
-                    'raw_data': po_data,
-                }
+                defaults=_build_po_defaults_from_list(po_data),
             )
             synced_count += 1
             
@@ -91,69 +274,24 @@ def sync_purchase_orders_from_workguru():
                 if detail_resp.status_code == 200:
                     detail_data = detail_resp.json().get('result', {})
                     
-                    # Update PO with richer detail data (totals etc)
-                    detail_total = detail_data.get('total')
-                    if detail_total is not None:
-                        po.total = detail_total
-                        po.forecast_total = detail_data.get('forecastTotal') or po.forecast_total
-                        po.base_currency_total = detail_data.get('baseCurrencyTotal') or po.base_currency_total
-                        po.raw_data = detail_data  # Store full detail as raw
-                        po.save(update_fields=['total', 'forecast_total', 'base_currency_total', 'raw_data'])
+                    # Update PO with richer detail data
+                    _update_po_from_detail(po, detail_data)
                     
-                    # Extract supplier data
+                    # Sync supplier
                     supplier_data = detail_data.get('supplier')
-                    if supplier_data and supplier_data.get('id'):
-                        sup, sup_created = Supplier.objects.update_or_create(
-                            workguru_id=supplier_data['id'],
-                            defaults={
-                                'name': supplier_data.get('name', ''),
-                                'email': supplier_data.get('email'),
-                                'phone': supplier_data.get('phone'),
-                                'website': supplier_data.get('website'),
-                                'address_1': supplier_data.get('address1'),
-                                'address_2': supplier_data.get('address2'),
-                                'city': supplier_data.get('city'),
-                                'state': supplier_data.get('state'),
-                                'postcode': supplier_data.get('postcode'),
-                                'country': supplier_data.get('country'),
-                                'currency': supplier_data.get('currency'),
-                                'credit_limit': supplier_data.get('creditLimit') or 0,
-                                'credit_days': supplier_data.get('creditDays'),
-                                'is_active': supplier_data.get('isActive', True),
-                                'raw_data': supplier_data,
-                            }
-                        )
-                        if sup_created:
-                            suppliers_synced += 1
+                    _, sup_created = _sync_supplier_from_detail(supplier_data)
+                    if sup_created:
+                        suppliers_synced += 1
                     
-                    # Extract products (key is 'products', NOT 'purchaseOrderProducts')
+                    # Sync products
                     po_products = detail_data.get('products', [])
-                    if po_products:
-                        po.products.all().delete()
-                        
-                        for prod in po_products:
-                            sku = prod.get('sku', '')
-                            stock_item = None
-                            if sku:
-                                stock_item = StockItem.objects.filter(sku=sku).first()
-                            
-                            PurchaseOrderProduct.objects.create(
-                                purchase_order=po,
-                                sku=sku,
-                                supplier_code=prod.get('supplierCode', ''),
-                                name=prod.get('name', ''),
-                                description=prod.get('description', ''),
-                                order_price=prod.get('buyPrice') or prod.get('orderPrice') or 0,
-                                order_quantity=prod.get('orderQuantity') or 0,
-                                received_quantity=prod.get('receivedQuantity') or 0,
-                                invoice_price=prod.get('invoicePrice') or 0,
-                                line_total=prod.get('lineTotal') or 0,
-                                stock_item=stock_item,
-                            )
-                            products_synced += 1
+                    products_synced += _sync_products_for_po(po, po_products)
+                else:
+                    api.log(f"  Warning: Detail fetch for PO {wg_id} returned {detail_resp.status_code}\n")
                             
             except Exception as e:
                 api.log(f"  Warning: Could not fetch detail for PO {wg_id}: {e}\n")
+                logger.warning(f"Could not fetch detail for PO {wg_id}: {e}")
         
         msg = f"Synced {synced_count} POs, {products_synced} product lines, {suppliers_synced} new suppliers"
         api.log(f"{msg}\n\n")
@@ -193,43 +331,10 @@ def sync_purchase_orders_stream(request):
             for i, po_data in enumerate(po_list):
                 wg_id = po_data.get('id')
                 
-                # Save PO from list data
+                # Save PO from list data using shared helper
                 po, _ = PurchaseOrder.objects.update_or_create(
                     workguru_id=wg_id,
-                    defaults={
-                        'number': po_data.get('number'),
-                        'display_number': po_data.get('displayNumber'),
-                        'revision': po_data.get('revision', 0),
-                        'description': po_data.get('description'),
-                        'project_id': po_data.get('projectId'),
-                        'project_number': po_data.get('projectNumber'),
-                        'project_name': po_data.get('projectName'),
-                        'supplier_id': po_data.get('supplierId'),
-                        'supplier_name': po_data.get('supplierName'),
-                        'supplier_invoice_number': po_data.get('supplierInvoiceNumber'),
-                        'issue_date': po_data.get('issueDate'),
-                        'expected_date': po_data.get('expectedDate'),
-                        'received_date': po_data.get('receivedDate'),
-                        'invoice_date': po_data.get('invoiceDate'),
-                        'status': po_data.get('status', 'Draft'),
-                        'total': po_data.get('total') or 0,
-                        'forecast_total': po_data.get('forecastTotal') or 0,
-                        'base_currency_total': po_data.get('baseCurrencyTotal') or 0,
-                        'currency': po_data.get('currency', 'GBP'),
-                        'exchange_rate': po_data.get('exchangeRate') or 1.0,
-                        'warehouse_id': po_data.get('warehouseId'),
-                        'delivery_address_1': po_data.get('deliveryAddress1'),
-                        'delivery_address_2': po_data.get('deliveryAddress2'),
-                        'delivery_instructions': po_data.get('deliveryInstructions'),
-                        'sent_to_supplier': po_data.get('sentToSupplier'),
-                        'sent_to_accounting': po_data.get('sentToAccounting'),
-                        'billable': po_data.get('billable', False),
-                        'is_advanced': po_data.get('isAdvancedPurchaseOrder', False),
-                        'is_rfq': po_data.get('isRFQ', False),
-                        'creator_name': po_data.get('creatorUserFullName'),
-                        'received_by_name': po_data.get('receivedByUserFullName'),
-                        'raw_data': po_data,
-                    }
+                    defaults=_build_po_defaults_from_list(po_data),
                 )
                 
                 # Fetch detail for products + supplier
@@ -240,64 +345,20 @@ def sync_purchase_orders_stream(request):
                     if detail_resp.status_code == 200:
                         detail_data = detail_resp.json().get('result', {})
                         
-                        # Update totals
-                        detail_total = detail_data.get('total')
-                        if detail_total is not None:
-                            po.total = detail_total
-                            po.forecast_total = detail_data.get('forecastTotal') or po.forecast_total
-                            po.base_currency_total = detail_data.get('baseCurrencyTotal') or po.base_currency_total
-                            po.raw_data = detail_data
-                            po.save(update_fields=['total', 'forecast_total', 'base_currency_total', 'raw_data'])
+                        # Update PO with detail data
+                        _update_po_from_detail(po, detail_data)
                         
                         # Supplier
                         supplier_data = detail_data.get('supplier')
-                        if supplier_data and supplier_data.get('id'):
-                            _, sup_created = Supplier.objects.update_or_create(
-                                workguru_id=supplier_data['id'],
-                                defaults={
-                                    'name': supplier_data.get('name', ''),
-                                    'email': supplier_data.get('email'),
-                                    'phone': supplier_data.get('phone'),
-                                    'website': supplier_data.get('website'),
-                                    'address_1': supplier_data.get('address1'),
-                                    'address_2': supplier_data.get('address2'),
-                                    'city': supplier_data.get('city'),
-                                    'state': supplier_data.get('state'),
-                                    'postcode': supplier_data.get('postcode'),
-                                    'country': supplier_data.get('country'),
-                                    'currency': supplier_data.get('currency'),
-                                    'credit_limit': supplier_data.get('creditLimit') or 0,
-                                    'credit_days': supplier_data.get('creditDays'),
-                                    'is_active': supplier_data.get('isActive', True),
-                                    'raw_data': supplier_data,
-                                }
-                            )
-                            if sup_created:
-                                suppliers_total += 1
+                        _, sup_created = _sync_supplier_from_detail(supplier_data)
+                        if sup_created:
+                            suppliers_total += 1
                         
                         # Products
                         po_products = detail_data.get('products', [])
-                        if po_products:
-                            po.products.all().delete()
-                            for prod in po_products:
-                                sku = prod.get('sku', '')
-                                stock_item = StockItem.objects.filter(sku=sku).first() if sku else None
-                                PurchaseOrderProduct.objects.create(
-                                    purchase_order=po,
-                                    sku=sku,
-                                    supplier_code=prod.get('supplierCode', ''),
-                                    name=prod.get('name', ''),
-                                    description=prod.get('description', ''),
-                                    order_price=prod.get('buyPrice') or prod.get('orderPrice') or 0,
-                                    order_quantity=prod.get('orderQuantity') or 0,
-                                    received_quantity=prod.get('receivedQuantity') or 0,
-                                    invoice_price=prod.get('invoicePrice') or 0,
-                                    line_total=prod.get('lineTotal') or 0,
-                                    stock_item=stock_item,
-                                )
-                                products_total += 1
-                except Exception:
-                    pass
+                        products_total += _sync_products_for_po(po, po_products)
+                except Exception as e:
+                    logger.warning(f"Could not fetch detail for PO {wg_id}: {e}")
                 
                 synced += 1
                 

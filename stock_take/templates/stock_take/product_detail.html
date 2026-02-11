@@ -17,7 +17,6 @@
     <div class="product-header">
         <div class="product-title-section">
             <div class="product-sku">{{ product.sku }}</div>
-            <h1>Product Details</h1>
         </div>
         <div class="product-actions">
             <button class="btn btn-sm btn-primary" id="editProductBtn" onclick="toggleEditMode()">
@@ -42,8 +41,8 @@
         <button class="tab-btn" data-tab="stock-history">Stock History</button>
         <button class="tab-btn" data-tab="notes">Notes <span class="tab-count">(0)</span></button>
         <button class="tab-btn" data-tab="last-modified">Last Modified</button>
-        <button class="tab-btn" data-tab="purchase-orders">Purchase Orders <span class="tab-count">(0)</span></button>
-        <button class="tab-btn" data-tab="projects">Projects <span class="tab-count">(0)</span></button>
+        <button class="tab-btn" data-tab="purchase-orders">Purchase Orders <span class="tab-count">({{ po_lines|length }})</span></button>
+        <button class="tab-btn" data-tab="projects">Projects <span class="tab-count">({{ order_accessories|length }})</span></button>
     </div>
 
     <!-- Overview Tab Content -->
@@ -52,13 +51,26 @@
             <!-- Product Info Section -->
             <div class="info-group">
                 <h3>Product Information</h3>
-                {% if product.image %}
-                <img src="{{ product.image.url }}" alt="{{ product.name }}" class="product-image" style="margin-bottom: 16px;">
-                {% else %}
-                <div class="product-image" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted); margin-bottom: 16px;">
-                    <i class="bi bi-image" style="font-size: 2rem;"></i>
+                <div class="product-image-wrapper" style="margin-bottom: 16px; position: relative;">
+                    {% if product.image %}
+                    <img src="{{ product.image.url }}" alt="{{ product.name }}" class="product-image" id="productImagePreview">
+                    {% else %}
+                    <div class="product-image" id="productImagePreview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+                        <i class="bi bi-image" style="font-size: 2rem;"></i>
+                    </div>
+                    {% endif %}
+                    <div class="image-upload-overlay" id="imageUploadOverlay" style="display: none;">
+                        <label for="imageUploadInput" class="image-upload-label">
+                            <i class="bi bi-camera"></i> Change Image
+                        </label>
+                        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;" onchange="uploadProductImage(this)">
+                        {% if product.image %}
+                        <button class="btn btn-sm btn-danger" onclick="removeProductImage()" style="margin-top: 6px; font-size: 0.75rem;">
+                            <i class="bi bi-trash"></i> Remove
+                        </button>
+                        {% endif %}
+                    </div>
                 </div>
-                {% endif %}
                 <div class="info-row">
                     <div class="info-label">SKU</div>
                     <div class="info-value" data-field="sku" data-value="{{ product.sku }}">{{ product.sku }}</div>
@@ -69,7 +81,7 @@
                 </div>
                 <div class="info-row">
                     <div class="info-label">Description</div>
-                    <div class="info-value" data-field="description" data-value="{{ product.name }}">{{ product.name }}</div>
+                    <div class="info-value" data-field="description" data-value="{{ product.description }}">{{ product.description|default:"-" }}</div>
                 </div>
             </div>
 
@@ -141,11 +153,7 @@
                 <h3>Supplier Information</h3>
                 <div class="info-row">
                     <div class="info-label">Supplier</div>
-                    <div class="info-value">-</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Supplier Code</div>
-                    <div class="info-value">-</div>
+                    <div class="info-value" data-field="supplier_id" data-value="{{ product.supplier_id|default:'' }}">{{ product.supplier.name|default:"-" }}</div>
                 </div>
                 <div class="info-row">
                     <div class="info-label">Minimum Order Quantity</div>
@@ -168,22 +176,43 @@
 
             <!-- Dimensions Section -->
             <div class="info-group">
-                <h3>Dimensions</h3>
+                <h3>Product Dimensions</h3>
                 <div class="info-row">
-                    <div class="info-label">Length</div>
-                    <div class="info-value">-</div>
+                    <div class="info-label">Length (mm)</div>
+                    <div class="info-value" data-field="length" data-value="{{ product.length|default:'' }}">{{ product.length|default:"-" }}</div>
                 </div>
                 <div class="info-row">
-                    <div class="info-label">Width</div>
-                    <div class="info-value">-</div>
+                    <div class="info-label">Width (mm)</div>
+                    <div class="info-value" data-field="width" data-value="{{ product.width|default:'' }}">{{ product.width|default:"-" }}</div>
                 </div>
                 <div class="info-row">
-                    <div class="info-label">Height</div>
-                    <div class="info-value">-</div>
+                    <div class="info-label">Height (mm)</div>
+                    <div class="info-value" data-field="height" data-value="{{ product.height|default:'' }}">{{ product.height|default:"-" }}</div>
                 </div>
                 <div class="info-row">
-                    <div class="info-label">Weight</div>
-                    <div class="info-value">-</div>
+                    <div class="info-label">Weight (kg)</div>
+                    <div class="info-value" data-field="weight" data-value="{{ product.weight|default:'' }}">{{ product.weight|default:"-" }}</div>
+                </div>
+            </div>
+
+            <!-- Box Dimensions Section -->
+            <div class="info-group">
+                <h3>Box / Packaging</h3>
+                <div class="info-row">
+                    <div class="info-label">Box Length (mm)</div>
+                    <div class="info-value" data-field="box_length" data-value="{{ product.box_length|default:'' }}">{{ product.box_length|default:"-" }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Box Width (mm)</div>
+                    <div class="info-value" data-field="box_width" data-value="{{ product.box_width|default:'' }}">{{ product.box_width|default:"-" }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Box Height (mm)</div>
+                    <div class="info-value" data-field="box_height" data-value="{{ product.box_height|default:'' }}">{{ product.box_height|default:"-" }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Items Per Box</div>
+                    <div class="info-value" data-field="box_quantity" data-value="{{ product.box_quantity|default:'' }}">{{ product.box_quantity|default:"-" }}</div>
                 </div>
             </div>
 
@@ -226,7 +255,7 @@
     <div class="tab-content" id="price-history" style="display: none;">
         <div class="info-group">
             <h3>Price Change History</h3>
-            <p class="text-muted">No price history available yet.</p>
+            <p class="text-muted fill-text">No price history available yet.</p>
         </div>
     </div>
 
@@ -248,46 +277,63 @@
     <!-- Last Modified Tab -->
     <div class="tab-content" id="last-modified" style="display: none;">
         <div class="modification-timeline">
-            <!-- Sample modification entries - these will be populated from database -->
+            {% if stock_changes %}
+            {% for change in stock_changes %}
             <div class="timeline-item">
                 <div class="timeline-icon">
+                    {% if change.change_type == 'stock_take' %}
+                    <i class="bi bi-clipboard-check"></i>
+                    {% elif change.change_type == 'purchase' %}
+                    <i class="bi bi-cart-plus"></i>
+                    {% elif change.change_type == 'sale' %}
+                    <i class="bi bi-cart-dash"></i>
+                    {% elif change.change_type == 'initial' %}
+                    <i class="bi bi-plus-circle"></i>
+                    {% else %}
                     <i class="bi bi-pencil"></i>
+                    {% endif %}
                 </div>
                 <div class="timeline-content">
                     <div class="timeline-header">
-                        <span class="timeline-action">Product Updated</span>
-                        <span class="timeline-date">09/02/2026 14:30</span>
+                        <span class="timeline-action">{{ change.get_change_type_display }}</span>
+                        <span class="timeline-date">{{ change.created_at|date:"d/m/Y H:i" }}</span>
                     </div>
-                    <div class="timeline-user">Modified by {{ user.username }}</div>
+                    <div class="timeline-user">
+                        {% if change.created_by %}
+                        By {{ change.created_by.username }}
+                        {% else %}
+                        System
+                        {% endif %}
+                    </div>
                     <div class="timeline-changes">
                         <div class="change-item">
-                            <span class="change-field">Cost Price:</span>
-                            <span class="change-old">£45.00</span>
-                            <span>→</span>
-                            <span class="change-new">£{{ product.cost|floatformat:2 }}</span>
+                            <span class="change-field">Change:</span>
+                            <span class="{% if change.change_amount > 0 %}change-new{% else %}change-old{% endif %}">
+                                {% if change.change_amount > 0 %}+{% endif %}{{ change.change_amount }}
+                            </span>
+                            <span style="color: var(--text-secondary);">→ {{ change.quantity }} units</span>
                         </div>
+                        {% if change.reference %}
                         <div class="change-item">
-                            <span class="change-field">Quantity:</span>
-                            <span class="change-old">0</span>
-                            <span>→</span>
-                            <span class="change-new">{{ product.quantity }}</span>
+                            <span class="change-field">Reference:</span>
+                            <span style="color: var(--text-primary);">{{ change.reference }}</span>
                         </div>
+                        {% endif %}
+                        {% if change.notes %}
+                        <div class="change-item">
+                            <span class="change-field">Notes:</span>
+                            <span style="color: var(--text-primary);">{{ change.notes }}</span>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
-            
-            <div class="timeline-item">
-                <div class="timeline-icon">
-                    <i class="bi bi-plus-circle"></i>
-                </div>
-                <div class="timeline-content">
-                    <div class="timeline-header">
-                        <span class="timeline-action">Product Created</span>
-                        <span class="timeline-date">08/02/2026 09:15</span>
-                    </div>
-                    <div class="timeline-user">Created by {{ user.username }}</div>
-                </div>
+            {% endfor %}
+            {% else %}
+            <div class="info-group">
+                <p class="text-muted fill-text">No modification history recorded yet.</p>
             </div>
+            {% endif %}
         </div>
     </div>
 
@@ -305,7 +351,50 @@
     <div class="tab-content" id="purchase-orders" style="display: none;">
         <div class="info-group">
             <h3>Purchase Orders</h3>
-            <p class="text-muted">No purchase orders linked yet.</p>
+            {% if po_lines %}
+            <div class="po-table-container" style="margin-top: 16px;">
+                <table class="linked-table">
+                    <thead>
+                        <tr>
+                            <th>PO Number</th>
+                            <th>Supplier</th>
+                            <th>Status</th>
+                            <th>Issue Date</th>
+                            <th>Expected Date</th>
+                            <th class="text-right">Order Price</th>
+                            <th class="text-right">Order Qty</th>
+                            <th class="text-right">Rec'd Qty</th>
+                            <th class="text-right">Line Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in po_lines %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'purchase_order_detail' line.purchase_order.workguru_id %}" class="link-highlight">
+                                    {{ line.purchase_order.display_number }}
+                                </a>
+                            </td>
+                            <td>{{ line.purchase_order.supplier_name|default:"-" }}</td>
+                            <td>
+                                <span class="status-badge {% if line.purchase_order.status == 'Draft' %}draft{% elif line.purchase_order.status == 'Approved' %}approved{% elif line.purchase_order.status == 'Received' %}received{% elif line.purchase_order.status == 'Cancelled' %}cancelled{% endif %}">
+                                    {{ line.purchase_order.status }}
+                                </span>
+                            </td>
+                            <td>{{ line.purchase_order.issue_date|default:"-" }}</td>
+                            <td>{{ line.purchase_order.expected_date|default:"-" }}</td>
+                            <td class="text-right">£{{ line.order_price|floatformat:2 }}</td>
+                            <td class="text-right">{{ line.order_quantity|floatformat:0 }}</td>
+                            <td class="text-right">{{ line.received_quantity|floatformat:0 }}</td>
+                            <td class="text-right">£{{ line.line_total|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">This product has not appeared in any purchase orders.</p>
+            {% endif %}
         </div>
     </div>
 
@@ -313,7 +402,54 @@
     <div class="tab-content" id="projects" style="display: none;">
         <div class="info-group">
             <h3>Projects Using This Product</h3>
-            <p class="text-muted">No projects linked yet.</p>
+            {% if order_accessories %}
+            <div class="po-table-container" style="margin-top: 16px;">
+                <table class="linked-table">
+                    <thead>
+                        <tr>
+                            <th>Sale Number</th>
+                            <th>Customer</th>
+                            <th>Order Date</th>
+                            <th>Fit Date</th>
+                            <th class="text-right">Qty Used</th>
+                            <th class="text-right">Cost</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for acc in order_accessories %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'order_details' acc.order.id %}" class="link-highlight">
+                                    {{ acc.order.sale_number }}
+                                </a>
+                            </td>
+                            <td>
+                                {% if acc.order.customer %}
+                                    {{ acc.order.customer.name|default:acc.order.first_name }}
+                                {% else %}
+                                    {{ acc.order.first_name }} {{ acc.order.last_name }}
+                                {% endif %}
+                            </td>
+                            <td>{{ acc.order.order_date|date:"d/m/Y" }}</td>
+                            <td>{{ acc.order.fit_date|date:"d/m/Y" }}</td>
+                            <td class="text-right">{{ acc.quantity|floatformat:0 }}</td>
+                            <td class="text-right">£{{ acc.cost_price|floatformat:2 }}</td>
+                            <td>
+                                {% if acc.order.job_finished %}
+                                <span class="status-badge received">Completed</span>
+                                {% else %}
+                                <span class="status-badge approved">Active</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">This product has not been used in any projects.</p>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -427,6 +563,7 @@ const originalValues = {};
 const categoriesData = {{ categories|safe }};
 const stockTakeGroupsData = {{ stock_take_groups|safe }};
 const trackingChoices = {{ tracking_choices|safe }};
+const suppliersData = {{ suppliers|safe }};
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -638,6 +775,14 @@ function toggleEditMode() {
     document.getElementById('saveProductBtn').style.display = 'inline-block';
     document.getElementById('cancelEditBtn').style.display = 'inline-block';
     
+    // Show image upload overlay
+    const overlay = document.getElementById('imageUploadOverlay');
+    if (overlay) overlay.style.display = 'flex';
+    
+    // Numeric fields that use step 0.01
+    const decimalFields = ['cost', 'length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'];
+    const integerFields = ['quantity', 'min_order_qty', 'par_level', 'box_quantity'];
+    
     // Make all fields editable
     document.querySelectorAll('.info-value[data-field]').forEach(field => {
         const fieldName = field.dataset.field;
@@ -653,6 +798,14 @@ function toggleEditMode() {
             categoriesData.forEach(cat => {
                 const selected = value == cat.id ? 'selected' : '';
                 input.innerHTML += `<option value="${cat.id}" ${selected}>${cat.name}</option>`;
+            });
+        } else if (fieldName === 'supplier_id') {
+            input = document.createElement('select');
+            input.className = 'form-select';
+            input.innerHTML = '<option value="">Not Set</option>';
+            suppliersData.forEach(sup => {
+                const selected = value == sup.id ? 'selected' : '';
+                input.innerHTML += `<option value="${sup.id}" ${selected}>${sup.name}</option>`;
             });
         } else if (fieldName === 'stock_take_group_id') {
             input = document.createElement('select');
@@ -673,10 +826,15 @@ function toggleEditMode() {
             input = document.createElement('textarea');
             input.value = value;
             input.rows = 3;
-        } else if (fieldName === 'cost' || fieldName === 'quantity' || fieldName === 'min_order_qty' || fieldName === 'par_level') {
+        } else if (decimalFields.includes(fieldName)) {
             input = document.createElement('input');
             input.type = 'number';
-            input.step = fieldName === 'cost' ? '0.01' : '1';
+            input.step = '0.01';
+            input.value = value.replace('£', '').replace('-', '');
+        } else if (integerFields.includes(fieldName)) {
+            input = document.createElement('input');
+            input.type = 'number';
+            input.step = '1';
             input.value = value.replace('£', '').replace('-', '');
         } else {
             input = document.createElement('input');
@@ -695,6 +853,10 @@ function cancelEdit() {
     document.getElementById('saveProductBtn').style.display = 'none';
     document.getElementById('cancelEditBtn').style.display = 'none';
     
+    // Hide image upload overlay
+    const overlay = document.getElementById('imageUploadOverlay');
+    if (overlay) overlay.style.display = 'none';
+    
     // Restore original values
     document.querySelectorAll('.info-value[data-field]').forEach(field => {
         const fieldName = field.dataset.field;
@@ -705,6 +867,9 @@ function cancelEdit() {
         } else if (fieldName === 'category_id') {
             const cat = categoriesData.find(c => c.id == displayValue);
             displayValue = cat ? cat.name : 'Not Set';
+        } else if (fieldName === 'supplier_id') {
+            const sup = suppliersData.find(s => s.id == displayValue);
+            displayValue = sup ? sup.name : '-';
         } else if (fieldName === 'stock_take_group_id') {
             const group = stockTakeGroupsData.find(g => g.id == displayValue);
             displayValue = group ? group.name : 'Not Set';
@@ -775,6 +940,54 @@ function saveNote() {
     
     alert('Note functionality will be implemented soon');
     closeAddNoteModal();
+}
+
+async function uploadProductImage(input) {
+    if (!input.files || !input.files[0]) return;
+    
+    const formData = new FormData();
+    formData.append('image', input.files[0]);
+    
+    try {
+        const response = await fetch('{% url "upload_product_image" product.id %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: formData
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to upload image'));
+        }
+    } catch (error) {
+        alert('Failed to upload image: ' + error);
+    }
+}
+
+async function removeProductImage() {
+    if (!confirm('Remove the product image?')) return;
+    
+    try {
+        const response = await fetch('{% url "upload_product_image" product.id %}', {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            }
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to remove image'));
+        }
+    } catch (error) {
+        alert('Failed to remove image: ' + error);
+    }
 }
 </script>
 {% endblock %}

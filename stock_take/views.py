@@ -330,6 +330,57 @@ def search_orders(request):
     })
 
 @login_required
+def global_search(request):
+    """Global search across orders, products, POs, customers"""
+    from .models import PurchaseOrder, Customer, Supplier
+    
+    query = request.GET.get('q', '').strip()
+    results = {
+        'orders': [],
+        'products': [],
+        'purchase_orders': [],
+        'customers': [],
+        'suppliers': [],
+    }
+    
+    if query:
+        # Search orders
+        results['orders'] = Order.objects.filter(
+            Q(first_name__icontains=query) |
+            Q(last_name__icontains=query) |
+            Q(sale_number__icontains=query) |
+            Q(customer_number__icontains=query)
+        ).order_by('-order_date')[:5]
+        
+        # Search products/stock items
+        results['products'] = StockItem.objects.filter(
+            Q(sku__icontains=query) |
+            Q(name__icontains=query)
+        ).order_by('name')[:5]
+        
+        # Search purchase orders
+        results['purchase_orders'] = PurchaseOrder.objects.filter(
+            Q(number__icontains=query) |
+            Q(supplier_name__icontains=query)
+        ).order_by('-issue_date')[:5]
+        
+        # Search customers
+        results['customers'] = Customer.objects.filter(
+            Q(name__icontains=query) |
+            Q(email__icontains=query)
+        ).order_by('name')[:5]
+        
+        # Search suppliers
+        results['suppliers'] = Supplier.objects.filter(
+            Q(name__icontains=query)
+        ).order_by('name')[:5]
+    
+    return render(request, 'stock_take/global_search_results.html', {
+        'query': query,
+        **results,
+    })
+
+@login_required
 def material_report(request):
     """Display aggregated material usage report with filtering"""
     from datetime import datetime, timedelta
@@ -5571,6 +5622,19 @@ def update_stock_items_batch(request):
                     if 'stock_take_group_id' in item_data:
                         value = item_data['stock_take_group_id']
                         item.stock_take_group_id = int(value) if value else None
+                    if 'supplier_id' in item_data:
+                        value = item_data['supplier_id']
+                        item.supplier_id = int(value) if value else None
+                    if 'description' in item_data:
+                        item.description = item_data['description']
+                    # Product dimensions
+                    for dim_field in ('length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'):
+                        if dim_field in item_data:
+                            value = item_data[dim_field]
+                            setattr(item, dim_field, Decimal(str(value)) if value else None)
+                    if 'box_quantity' in item_data:
+                        value = item_data['box_quantity']
+                        item.box_quantity = int(value) if value else None
                     
                     item.save()
                     updated_count += 1

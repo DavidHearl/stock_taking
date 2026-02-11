@@ -3,37 +3,15 @@
 
 {% block title %}Ordering{% endblock %}
 
+{% block page_title %}Orders{% endblock %}
+
 {% block extra_css %}
 <link href="{% static 'css/ordering.css' %}" rel="stylesheet">
 <link href="{% static 'css/ordering_modal.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<!-- Page Header -->
-<div class="page-header">
-    <h1>Orders</h1>
-    <div class="header-actions">
-        <form method="post" action="{% url 'ordering' %}" class="price-form">
-            {% csrf_token %}
-            <div class="input-group-compact">
-                <span class="input-prefix">£/m²</span>
-                <input type="number" step="0.1" min="1" max="100" name="price_per_sqm" value="{{ price_per_sqm|default:12 }}" placeholder="12.00">
-                <button type="submit" class="btn btn-primary btn-sm">Update</button>
-            </div>
-        </form>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="togglePOSection('manageBoardsSection')">
-            <i class="bi bi-clipboard-check"></i> Manage Boards
-        </button>
-        <button type="button" class="btn btn-info btn-sm" onclick="togglePOSection('manageAccessoriesSection')">
-            <i class="bi bi-box-seam"></i> Manage Accessories
-        </button>
-        <button type="button" class="btn btn-success btn-sm" onclick="openModal('addOrderModal')">
-            <i class="bi bi-plus-lg"></i> Add Order
-        </button>
-    </div>
-</div>
-
-<!-- Tabs -->
+<!-- Tabs with Add Order button on the right -->
 <div class="tabs">
     <div class="tab-nav">
         <a href="?tab=wip{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
@@ -42,173 +20,15 @@
         </a>
         <a href="?tab=completed{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
            class="tab-button {% if current_tab == 'completed' %}active{% endif %}">
-            Completed ({{ completed_orders }})
+            COMPLETED ({{ completed_orders }})
         </a>
         <a href="?tab=all{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
            class="tab-button {% if current_tab == 'all' %}active{% endif %}">
-            All Jobs ({{ total_orders }})
+            ALL ORDERS ({{ total_orders }})
         </a>
-    </div>
-</div>
-
-<!-- Manage Boards Section -->
-<div class="collapsible-section hidden" id="manageBoardsSection">
-    <div class="card">
-        <div class="card-header">
-            <div class="section-header-with-button">
-                <span>Manage Boards PO <span class="count-badge">({{ boards_pos.count }})</span></span>
-                <button type="button" class="btn btn-primary" onclick="openModal('createPOModal')">
-                    <i class="bi bi-plus-lg"></i> Add Boards PO
-                </button>
-            </div>
-        </div>
-        <div class="card-body">
-            {% if boards_pos %}
-            <div class="boards-po-scroll-container">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>PO Number</th>
-                            <th>Status</th>
-                            <th>Current File</th>
-                            <th>Mark Ordered</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for po in boards_pos %}
-                        <tr class="{% if po.boards_ordered %}row-success{% endif %}">
-                            <td class="sku-cell">
-                                <input type="text" 
-                                       class="editable-po-number" 
-                                       value="{{ po.po_number }}" 
-                                       data-po-id="{{ po.id }}"
-                                       onblur="updatePONumber({{ po.id }}, this.value)"
-                                       style="border: none; background: transparent; color: inherit; font-weight: inherit;">
-                            </td>
-                            <td>
-                                {% if po.boards_ordered %}
-                                    <span class="badge badge-success">Ordered</span>
-                                {% else %}
-                                    <span class="badge badge-danger">Not Ordered</span>
-                                {% endif %}
-                            </td>
-                            <td class="file-cell">
-                                {% if po.file %}
-                                    {{ po.file.name|slice:":30" }}{% if po.file.name|length > 30 %}...{% endif %}
-                                {% else %}
-                                    <span class="text-muted">No file</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <label class="checkbox-label">
-                                    <input class="boards-ordered-toggle" type="checkbox"
-                                           id="po-{{ po.id }}" {% if po.boards_ordered %}checked{% endif %}
-                                           data-po-id="{{ po.id }}">
-                                    Ordered
-                                </label>
-                            </td>
-                            <td>
-                                <div class="action-buttons">
-                                    {% if po.file %}
-                                    <button type="button" class="btn btn-secondary" onclick="previewPNX({{ po.id }})" title="Preview PNX">
-                                        <i class="bi bi-eye"></i> Preview PNX
-                                    </button>
-                                    <a href="{{ po.file.url }}" download class="btn btn-info" title="Download PNX">
-                                        <i class="bi bi-download"></i> PNX
-                                    </a>
-                                    {% endif %}
-                                    {% if po.csv_file %}
-                                    <button type="button" class="btn btn-secondary" onclick="previewCSV({{ po.id }})" title="Preview CSV">
-                                        <i class="bi bi-eye"></i> Preview CSV
-                                    </button>
-                                    <a href="{{ po.csv_file.url }}" download class="btn btn-success" title="Download CSV">
-                                        <i class="bi bi-download"></i> CSV
-                                    </a>
-                                    {% elif po.file %}
-                                    <button type="button" class="btn btn-warning" onclick="generateCSV({{ po.id }})" title="Generate CSV">
-                                        <i class="bi bi-gear"></i> Generate CSV
-                                    </button>
-                                    {% endif %}
-                                    <button type="button" class="btn btn-primary" onclick="openReplaceFileModal({{ po.id }})" title="Replace PNX">
-                                        <i class="bi bi-upload"></i> Replace
-                                    </button>
-                                    <form method="POST" action="{% url 'delete_boards_po' po.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete PO {{ po.po_number }}?');">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-danger" title="Delete PO">
-                                            <i class="bi bi-trash"></i> Delete
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="text-muted">No Boards POs found.</p>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<!-- Manage Accessories Section -->
-<div class="collapsible-section hidden" id="manageAccessoriesSection">
-    <div class="card">
-        <div class="card-header">
-            <div class="section-header-with-button">
-                <span>Manage Accessories CSV <span class="count-badge">({{ accessories_csvs.count }})</span></span>
-                <button type="button" class="btn btn-primary" onclick="openModal('uploadAccessoriesModal')">
-                    <i class="bi bi-plus-lg"></i> Upload CSV
-                </button>
-            </div>
-        </div>
-        <div class="card-body">
-            {% if accessories_csvs %}
-            <div class="boards-po-scroll-container">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Sale Number</th>
-                            <th>Customer</th>
-                            <th>File Name</th>
-                            <th>Upload Date</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for csv in accessories_csvs %}
-                        <tr>
-                            <td class="sku-cell">{{ csv.sale_number }}</td>
-                            <td>{{ csv.first_name }} {{ csv.last_name }}</td>
-                            <td class="file-cell">{{ csv.original_csv.name|slice:":40" }}{% if csv.original_csv.name|length > 40 %}...{% endif %}</td>
-                            <td>{{ csv.original_csv_uploaded_at|date:"Y-m-d H:i"|default:"N/A" }}</td>
-                            <td>
-                                <div class="action-buttons">
-                                    <button type="button" class="btn btn-sm btn-primary" onclick="previewAccessoryCSV({{ csv.id }})" title="Preview CSV">
-                                        <i class="bi bi-eye"></i> Preview
-                                    </button>
-                                    <a href="{{ csv.original_csv.url }}" download class="btn btn-sm btn-success" title="Download CSV">
-                                        <i class="bi bi-download"></i> Download
-                                    </a>
-                                    <form method="POST" action="{% url 'delete_accessory_csv' csv.id %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this CSV for sale {{ csv.sale_number }}?');">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-sm btn-danger" title="Delete CSV">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="text-muted">No Accessories CSVs found.</p>
-            {% endif %}
-        </div>
+        <button type="button" class="btn btn-success btn-add-order" onclick="openModal('addOrderModal')">
+            <i class="bi bi-plus-lg"></i> Add Order
+        </button>
     </div>
 </div>
 
@@ -256,18 +76,6 @@
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="sortable text-center" data-sort="customer_number">
-                    Customer # 
-                    {% if current_sort == 'customer_number' %}
-                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
-                    {% endif %}
-                </th>
-                <th class="sortable text-center" data-sort="order_date">
-                    Order Date 
-                    {% if current_sort == 'order_date' %}
-                        {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
-                    {% endif %}
-                </th>
                 <th class="sortable text-center" data-sort="fit_date">
                     Fit Date 
                     {% if current_sort == 'fit_date' %}
@@ -282,11 +90,10 @@
                     {% endif %}
                 </th>
                 <th class="text-center">OS Doors</th>
-                <th class="text-center">Addr</th>
                 <th class="text-center">CSV</th>
+                <th class="text-center">Acc</th>
                 <th class="text-center">Ord</th>
                 <th class="text-center">Ant</th>
-                <th class="text-center">Wrk</th>
                 <th class="text-center">Actions</th>
             </tr>
         </thead>
@@ -301,9 +108,7 @@
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
                 <td class="text-center">{{ order.sale_number }}</td>
-                <td class="text-center">{{ order.customer_number }}</td>
-                <td class="text-center">{{ order.order_date }}</td>
-                <td class="text-center">{{ order.fit_date }}</td>
+                <td class="text-center">{{ order.fit_date|date:"d F" }}</td>
                 <td class="text-center">{{ order.time_allowance }}</td>
                 <!-- Boards -->
                 <td class="text-center">
@@ -372,26 +177,18 @@
                 <td class="text-center" onclick="event.stopPropagation();">
                     {% if order.anthill_id %}
                         <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" 
-                           target="_blank" class="btn btn-sm btn-success" title="Open in Anthill CRM">
+                           target="_blank" class="btn btn-sm btn-outline-success" title="Open in Anthill CRM">
                             👤
                         </a>
                     {% endif %}
                 </td>
                 <td class="text-center" onclick="event.stopPropagation();">
-                    {% if order.workguru_id %}
-                        <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" 
-                           target="_blank" class="btn btn-sm btn-primary" title="Open in WorkGuru">
-                            🛠️
-                        </a>
-                    {% endif %}
-                </td>
-                <td class="text-center" onclick="event.stopPropagation();">
-                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-primary">Edit</a>
+                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary">Details</a>
                 </td>
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="15" class="detail-cell">
+                <td colspan="12" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
@@ -401,70 +198,6 @@
 </div>
 
 <!-- Modal for Creating New Boards PO -->
-<div class="modal" id="createPOModal">
-    <div class="modal-overlay" onclick="closeModal('createPOModal')"></div>
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST" action="{% url 'create_boards_po' %}" enctype="multipart/form-data">
-                {% csrf_token %}
-                <div class="modal-header">
-                    <h3>Add New Boards PO</h3>
-                    <button type="button" class="modal-close" onclick="closeModal('createPOModal')">✕</button>
-                </div>
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="id_po_number">PO Number</label>
-                        {{ po_form.po_number }}
-                        <small class="form-help">Must start with "PO"</small>
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            {{ po_form.boards_ordered }}
-                            <span>Boards Ordered</span>
-                        </label>
-                        <small class="form-help">Check if boards have already been ordered</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="id_file">Attach File (Optional)</label>
-                        {{ po_form.file }}
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('createPOModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create PO</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal for Uploading Accessories CSV -->
-<div class="modal" id="uploadAccessoriesModal">
-    <div class="modal-overlay" onclick="closeModal('uploadAccessoriesModal')"></div>
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST" action="{% url 'upload_accessories_csv' %}" enctype="multipart/form-data">
-                {% csrf_token %}
-                <div class="modal-header">
-                    <h3>Upload Accessories CSV (Auto-Order Detection)</h3>
-                    <button type="button" class="modal-close" onclick="closeModal('uploadAccessoriesModal')">✕</button>
-                </div>
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="id_csv_file">CSV File</label>
-                        <input type="file" class="form-input" id="id_csv_file" name="csv_file" accept=".csv" required>
-                        <small class="form-help">CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from customer number in filename.</small>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('uploadAccessoriesModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Upload & Process</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <!-- Modal for Adding New Order -->
 <div class="modal" id="addOrderModal">
     <div class="modal-overlay" onclick="closeModal('addOrderModal')"></div>

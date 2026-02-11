@@ -2,12 +2,16 @@ from django.urls import path
 from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
-from .product_view import product_detail
+from .dashboard_view import dashboard
+from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, sync_purchase_orders_stream, suppliers_list, supplier_detail
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete
+from .admin_views import admin_users, admin_templates, admin_roles, admin_settings
+from .ticket_views import tickets_list, ticket_update_status, ticket_delete
 
 urlpatterns = [
-    path('', views.stock_list, name='stock_list'),
+    path('', dashboard, name='dashboard'),
+    path('stock/', views.stock_list, name='stock_list'),
     path('import/', views.import_csv, name='import_csv'),
     path('export/', views.export_csv, name='export_csv'),
     path('update/<int:item_id>/', views.update_item, name='update_item'),
@@ -69,6 +73,7 @@ urlpatterns = [
     path('search-customers/', views.search_customers, name='search_customers'),
     path('add-designer/', views.add_designer, name='add_designer'),
     path('search/', views.search_orders, name='search_orders'),
+    path('global-search/', views.global_search, name='global_search'),
     path('material-report/', views.material_report, name='material_report'),
     path('material-shortage/', views.material_shortage, name='material_shortage'),
     path('raumplus-storage/', views.raumplus_storage, name='raumplus_storage'),
@@ -197,11 +202,24 @@ urlpatterns = [
     path('toggle-dark-mode/', toggle_dark_mode, name='toggle_dark_mode'),
 
     # Product detail
+    path('product/add/', add_product, name='add_product'),
     path('product/<int:item_id>/', product_detail, name='product_detail'),
+    path('product/<int:item_id>/upload-image/', upload_product_image, name='upload_product_image'),
+
+    # Admin pages
+    path('admin-panel/users/', admin_users, name='admin_users'),
+    path('admin-panel/templates/', admin_templates, name='admin_templates'),
+    path('admin-panel/roles/', admin_roles, name='admin_roles'),
+    path('admin-panel/settings/', admin_settings, name='admin_settings'),
 
     # Password reset views
     path('password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),
     path('password_reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
     path('reset/<uidb64>/<token>/', auth_views.PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('reset/done/', auth_views.PasswordResetCompleteView.as_view(), name='password_reset_complete'),
+
+    # Tickets
+    path('tickets/', tickets_list, name='tickets_list'),
+    path('tickets/<int:ticket_id>/update-status/', ticket_update_status, name='ticket_update_status'),
+    path('tickets/<int:ticket_id>/delete/', ticket_delete, name='ticket_delete'),
 ]

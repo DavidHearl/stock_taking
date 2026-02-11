@@ -33,6 +33,10 @@
                 <span class="po-meta-sep">|</span>
                 <span>Created by {{ purchase_order.creator_name }}</span>
                 {% endif %}
+                {% if purchase_order.warehouse_name %}
+                <span class="po-meta-sep">|</span>
+                <span><i class="bi bi-building"></i> {{ purchase_order.warehouse_name }}</span>
+                {% endif %}
                 <span class="po-meta-sep">|</span>
                 <span>Last synced: {{ purchase_order.last_synced|date:"d/m/Y H:i" }}</span>
             </div>
@@ -155,6 +159,38 @@
                 </label>
             </div>
         </div>
+        {% if purchase_order.currency and purchase_order.currency != 'GBP' %}
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Currency</span>
+                <span class="po-overview-value">{{ purchase_order.currency }}</span>
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Exchange Rate</span>
+                <span class="po-overview-value">{{ purchase_order.exchange_rate }}</span>
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Base Currency Total (GBP)</span>
+                <span class="po-overview-value">£{{ purchase_order.base_currency_total|floatformat:2 }}</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if purchase_order.approved_by_name or purchase_order.approved_date or purchase_order.contact_name %}
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Approved By</span>
+                <span class="po-overview-value">{{ purchase_order.approved_by_name|default:"-" }}</span>
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Approved Date</span>
+                <span class="po-overview-value">{{ purchase_order.approved_date|default:"-" }}</span>
+            </div>
+            <div class="po-overview-item">
+                <span class="po-overview-label">Contact</span>
+                <span class="po-overview-value">{{ purchase_order.contact_name|default:"-" }}</span>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Products Section -->
@@ -224,10 +260,38 @@
         <!-- Totals -->
         <div class="po-totals">
             <div class="po-totals-table">
+                <div class="po-totals-row">
+                    <div class="po-totals-label">Sub Total</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2 }}</div>
+                </div>
+                {% if purchase_order.tax_total %}
+                <div class="po-totals-row">
+                    <div class="po-totals-label">Tax Total</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.tax_total|floatformat:2 }}</div>
+                </div>
+                {% endif %}
                 <div class="po-totals-row total">
                     <div class="po-totals-label">Total</div>
-                    <div class="po-totals-value" id="po-total-display">£{{ purchase_order.total|floatformat:2 }}</div>
+                    <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2 }}</div>
                 </div>
+                {% if purchase_order.currency and purchase_order.currency != 'GBP' and purchase_order.base_currency_total %}
+                <div class="po-totals-row">
+                    <div class="po-totals-label">GBP Equivalent</div>
+                    <div class="po-totals-value">£{{ purchase_order.base_currency_total|floatformat:2 }}</div>
+                </div>
+                {% endif %}
+                {% if purchase_order.invoiced_amount %}
+                <div class="po-totals-row">
+                    <div class="po-totals-label">Invoiced</div>
+                    <div class="po-totals-value">£{{ purchase_order.invoiced_amount|floatformat:2 }}</div>
+                </div>
+                {% endif %}
+                {% if purchase_order.amount_outstanding %}
+                <div class="po-totals-row">
+                    <div class="po-totals-label">Outstanding</div>
+                    <div class="po-totals-value">£{{ purchase_order.amount_outstanding|floatformat:2 }}</div>
+                </div>
+                {% endif %}
             </div>
         </div>
         {% elif pnx_items %}

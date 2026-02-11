@@ -1,0 +1,365 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Add New Product{% endblock %}
+
+{% block nav_stock_items_manager_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/order_details.css' %}">
+<link rel="stylesheet" href="{% static 'css/product_detail.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <!-- Product Header -->
+    <div class="product-header">
+        <div class="product-title-section">
+            <div class="product-sku">New Product</div>
+        </div>
+        <div class="product-actions">
+            <button class="btn btn-sm btn-success" id="saveProductBtn" onclick="saveNewProduct()">
+                <i class="bi bi-save"></i> Create Product
+            </button>
+            <a href="{% url 'stock_items_manager' %}" class="btn btn-sm btn-secondary">
+                <i class="bi bi-x-circle"></i> Cancel
+            </a>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tab-navigation">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+    </div>
+
+    <!-- Overview Tab Content -->
+    <div class="tab-content" id="overview" style="display: block;">
+        <div class="info-grid">
+            <!-- Product Info Section -->
+            <div class="info-group">
+                <h3>Product Information</h3>
+                <div class="product-image-wrapper" style="margin-bottom: 16px; position: relative;">
+                    <div class="product-image" id="productImagePreview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+                        <i class="bi bi-image" style="font-size: 2rem;" id="imagePlaceholderIcon"></i>
+                        <img id="imagePreviewImg" style="display: none; width: 100%; height: 100%; object-fit: contain;">
+                    </div>
+                    <div class="image-upload-overlay" style="display: flex;">
+                        <label for="imageUploadInput" class="image-upload-label">
+                            <i class="bi bi-camera"></i> Add Image
+                        </label>
+                        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;" onchange="previewImage(this)">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">SKU <span style="color: #dc3545;">*</span></div>
+                    <div class="info-value">
+                        <input type="text" id="field-sku" placeholder="Enter SKU..." required>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Name <span style="color: #dc3545;">*</span></div>
+                    <div class="info-value">
+                        <input type="text" id="field-name" placeholder="Enter product name..." required>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Description</div>
+                    <div class="info-value">
+                        <textarea id="field-description" rows="3" placeholder="Enter description..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pricing Section -->
+            <div class="info-group">
+                <h3>Pricing</h3>
+                <div class="info-row">
+                    <div class="info-label">Cost Price</div>
+                    <div class="info-value">
+                        <input type="number" id="field-cost" step="0.01" min="0" value="0.00" placeholder="0.00">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product Details Section -->
+            <div class="info-group">
+                <h3>Product Details</h3>
+                <div class="info-row">
+                    <div class="info-label">Category</div>
+                    <div class="info-value">
+                        <select id="field-category_id">
+                            <option value="">Not Set</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tax & Classification Section -->
+            <div class="info-group">
+                <h3>Tax &amp; Classification</h3>
+                <div class="info-row">
+                    <div class="info-label">Tracking Type</div>
+                    <div class="info-value">
+                        <select id="field-tracking_type">
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock Levels Section -->
+            <div class="info-group">
+                <h3>Stock Levels &amp; Location</h3>
+                <div class="info-row">
+                    <div class="info-label">Initial Quantity</div>
+                    <div class="info-value">
+                        <input type="number" id="field-quantity" step="1" min="0" value="0">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Par Level</div>
+                    <div class="info-value">
+                        <input type="number" id="field-par_level" step="1" min="0" value="0">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Stock Take Group</div>
+                    <div class="info-value">
+                        <select id="field-stock_take_group_id">
+                            <option value="">Not Set</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Location</div>
+                    <div class="info-value">
+                        <input type="text" id="field-location" placeholder="Enter location...">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Serial/Batch</div>
+                    <div class="info-value">
+                        <input type="text" id="field-serial_or_batch" placeholder="Enter serial or batch...">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Supplier Section -->
+            <div class="info-group">
+                <h3>Supplier Information</h3>
+                <div class="info-row">
+                    <div class="info-label">Supplier</div>
+                    <div class="info-value">
+                        <select id="field-supplier_id">
+                            <option value="">Not Set</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Minimum Order Quantity</div>
+                    <div class="info-value">
+                        <input type="number" id="field-min_order_qty" step="1" min="0" placeholder="Optional">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product Dimensions Section -->
+            <div class="info-group">
+                <h3>Product Dimensions</h3>
+                <div class="info-row">
+                    <div class="info-label">Length (mm)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-length" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Width (mm)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-width" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Height (mm)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-height" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Weight (kg)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-weight" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Box Dimensions Section -->
+            <div class="info-group">
+                <h3>Box / Packaging</h3>
+                <div class="info-row">
+                    <div class="info-label">Box Length (mm)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-box_length" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Box Width (mm)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-box_width" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Box Height (mm)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-box_height" step="0.01" min="0" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Items Per Box</div>
+                    <div class="info-value">
+                        <input type="number" id="field-box_quantity" step="1" min="0" placeholder="Optional">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Populate dropdowns from server data
+const categoriesData = {{ categories|safe }};
+const stockTakeGroupsData = {{ stock_take_groups|safe }};
+const trackingChoices = {{ tracking_choices|safe }};
+const suppliersData = {{ suppliers|safe }};
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Populate categories
+    const catSelect = document.getElementById('field-category_id');
+    categoriesData.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat.id;
+        option.textContent = cat.name;
+        catSelect.appendChild(option);
+    });
+
+    // Populate stock take groups
+    const groupSelect = document.getElementById('field-stock_take_group_id');
+    stockTakeGroupsData.forEach(group => {
+        const option = document.createElement('option');
+        option.value = group.id;
+        option.textContent = group.name;
+        groupSelect.appendChild(option);
+    });
+
+    // Populate tracking type
+    const trackingSelect = document.getElementById('field-tracking_type');
+    trackingChoices.forEach(choice => {
+        const option = document.createElement('option');
+        option.value = choice[0];
+        option.textContent = choice[1];
+        if (choice[0] === 'not-classified') option.selected = true;
+        trackingSelect.appendChild(option);
+    });
+
+    // Populate suppliers
+    const supplierSelect = document.getElementById('field-supplier_id');
+    suppliersData.forEach(sup => {
+        const option = document.createElement('option');
+        option.value = sup.id;
+        option.textContent = sup.name;
+        supplierSelect.appendChild(option);
+    });
+
+    // Focus SKU field
+    document.getElementById('field-sku').focus();
+});
+
+async function saveNewProduct() {
+    const sku = document.getElementById('field-sku').value.trim();
+    const name = document.getElementById('field-name').value.trim();
+
+    if (!sku) {
+        alert('SKU is required');
+        document.getElementById('field-sku').focus();
+        return;
+    }
+    if (!name) {
+        alert('Product name is required');
+        document.getElementById('field-name').focus();
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('sku', sku);
+    formData.append('name', name);
+    formData.append('description', document.getElementById('field-description').value.trim());
+    formData.append('cost', document.getElementById('field-cost').value || '0');
+    formData.append('quantity', document.getElementById('field-quantity').value || '0');
+    formData.append('par_level', document.getElementById('field-par_level').value || '0');
+    formData.append('location', document.getElementById('field-location').value.trim());
+    formData.append('serial_or_batch', document.getElementById('field-serial_or_batch').value.trim());
+    formData.append('tracking_type', document.getElementById('field-tracking_type').value);
+    formData.append('min_order_qty', document.getElementById('field-min_order_qty').value || '');
+    formData.append('category_id', document.getElementById('field-category_id').value || '');
+    formData.append('stock_take_group_id', document.getElementById('field-stock_take_group_id').value || '');
+    formData.append('supplier_id', document.getElementById('field-supplier_id').value || '');
+    formData.append('length', document.getElementById('field-length').value || '');
+    formData.append('width', document.getElementById('field-width').value || '');
+    formData.append('height', document.getElementById('field-height').value || '');
+    formData.append('weight', document.getElementById('field-weight').value || '');
+    formData.append('box_length', document.getElementById('field-box_length').value || '');
+    formData.append('box_width', document.getElementById('field-box_width').value || '');
+    formData.append('box_height', document.getElementById('field-box_height').value || '');
+    formData.append('box_quantity', document.getElementById('field-box_quantity').value || '');
+
+    // Attach image if selected
+    const imageInput = document.getElementById('imageUploadInput');
+    if (imageInput.files && imageInput.files[0]) {
+        formData.append('image', imageInput.files[0]);
+    }
+
+    // Disable button while saving
+    const btn = document.getElementById('saveProductBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating...';
+
+    try {
+        const response = await fetch('{% url "add_product" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Redirect to the new product's detail page
+            window.location.href = '/product/' + result.product_id + '/';
+        } else {
+            alert('Error: ' + (result.error || 'Failed to create product'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-save"></i> Create Product';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to create product: ' + error);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-save"></i> Create Product';
+    }
+}
+
+function previewImage(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const preview = document.getElementById('imagePreviewImg');
+            const icon = document.getElementById('imagePlaceholderIcon');
+            preview.src = e.target.result;
+            preview.style.display = 'block';
+            if (icon) icon.style.display = 'none';
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+</script>
+{% endblock %}

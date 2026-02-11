@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Dashboard - Atlas{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block nav_dashboard_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-page">
+    <!-- Stats Cards -->
+    <div class="dashboard-grid">
+        <div class="dashboard-card">
+            <div class="card-icon">
+                <i class="bi bi-receipt"></i>
+            </div>
+            <div class="card-label">Pending Purchase Orders</div>
+            <div class="card-value">{{ pending_pos_count }}</div>
+            <div class="card-subtext">Approved and awaiting arrival</div>
+        </div>
+    </div>
+
+    <!-- Fits Per Week Chart -->
+    <div class="chart-container">
+        <h3><i class="bi bi-calendar-week"></i> Fits Per Week</h3>
+        <div class="chart-wrapper">
+            <canvas id="fitsPerWeekChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Job Profit Per Week Chart -->
+    <div class="chart-container">
+        <h3><i class="bi bi-currency-pound"></i> Job Profit Per Week</h3>
+        <div class="chart-wrapper">
+            <canvas id="profitPerWeekChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+// Fits Per Week Chart
+document.addEventListener('DOMContentLoaded', function() {
+    const fitsCtx = document.getElementById('fitsPerWeekChart').getContext('2d');
+    const fitsChartData = {{ fits_chart_data|safe }};
+    
+    // Create gradient for fits
+    const fitsGradient = fitsCtx.createLinearGradient(0, 0, 0, 400);
+    fitsGradient.addColorStop(0, 'rgba(23, 162, 184, 0.4)');
+    fitsGradient.addColorStop(1, 'rgba(23, 162, 184, 0.05)');
+    
+    new Chart(fitsCtx, {
+        type: 'line',
+        data: {
+            labels: fitsChartData.labels,
+            datasets: [{
+                label: 'Fits',
+                data: fitsChartData.values,
+                borderColor: '#17a2b8',
+                backgroundColor: fitsGradient,
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#17a2b8',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointHoverBackgroundColor: '#17a2b8',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 3,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#17a2b8',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            return 'Fits: ' + context.parsed.y;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1,
+                        color: '#6c757d',
+                        font: {
+                            size: 11
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(108, 117, 125, 0.1)',
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 10
+                        },
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: {
+                        display: false,
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            }
+        }
+    });
+
+    // Profit Per Week Chart
+    const profitCtx = document.getElementById('profitPerWeekChart').getContext('2d');
+    const profitChartData = {{ profit_chart_data|safe }};
+    
+    // Create gradient for profit
+    const profitGradient = profitCtx.createLinearGradient(0, 0, 0, 400);
+    profitGradient.addColorStop(0, 'rgba(40, 167, 69, 0.4)');
+    profitGradient.addColorStop(1, 'rgba(40, 167, 69, 0.05)');
+    
+    new Chart(profitCtx, {
+        type: 'line',
+        data: {
+            labels: profitChartData.labels,
+            datasets: [{
+                label: 'Profit',
+                data: profitChartData.values,
+                borderColor: '#28a745',
+                backgroundColor: profitGradient,
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#28a745',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointHoverBackgroundColor: '#28a745',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 3,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#28a745',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            return 'Profit: £' + context.parsed.y.toFixed(2);
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 11
+                        },
+                        callback: function(value) {
+                            return '£' + value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(108, 117, 125, 0.1)',
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 10
+                        },
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: {
+                        display: false,
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
