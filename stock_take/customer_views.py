@@ -368,3 +368,44 @@ def customers_bulk_delete(request):
 
     deleted_count, _ = Customer.objects.filter(pk__in=ids).delete()
     return JsonResponse({'success': True, 'deleted': deleted_count})
+
+
+@login_required
+def customer_create(request):
+    """Create a new customer manually"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Customer name is required.')
+        return redirect('customers_list')
+    
+    # Check for duplicate name
+    if Customer.objects.filter(name__iexact=name).exists():
+        messages.error(request, f'A customer named "{name}" already exists.')
+        return redirect('customers_list')
+    
+    # Generate a unique positive workguru_id for manually created customers
+    # Use 700000+ range to avoid collisions with real WorkGuru IDs
+    max_id = Customer.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 700000)
+    
+    customer = Customer.objects.create(
+        workguru_id=manual_id,
+        name=name,
+        email=request.POST.get('email', '').strip() or None,
+        phone=request.POST.get('phone', '').strip() or None,
+        website=request.POST.get('website', '').strip() or None,
+        address_1=request.POST.get('address_1', '').strip() or None,
+        city=request.POST.get('city', '').strip() or None,
+        postcode=request.POST.get('postcode', '').strip() or None,
+        country=request.POST.get('country', '').strip() or None,
+        is_active=True,
+    )
+    
+    messages.success(request, f'Customer "{customer.name}" created successfully.')
+    return redirect('customer_detail', customer_id=customer.workguru_id)

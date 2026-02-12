@@ -54,6 +54,35 @@ def ticket_update_status(request, ticket_id):
 
 
 @login_required
+def ticket_edit(request, ticket_id):
+    """Edit a ticket – only the submitter or staff can edit."""
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+
+    if request.user != ticket.submitted_by and not request.user.is_staff:
+        messages.error(request, 'You can only edit your own tickets.')
+        return redirect('tickets_list')
+
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        priority = request.POST.get('priority', ticket.priority)
+        image = request.FILES.get('image')
+
+        if title and description:
+            ticket.title = title
+            ticket.description = description
+            ticket.priority = priority
+            if image:
+                ticket.image = image
+            ticket.save()
+            messages.success(request, f'Ticket #{ticket.id} updated successfully.')
+        else:
+            messages.error(request, 'Title and description are required.')
+
+    return redirect('tickets_list')
+
+
+@login_required
 def ticket_delete(request, ticket_id):
     """Delete a ticket."""
     ticket = get_object_or_404(Ticket, id=ticket_id)

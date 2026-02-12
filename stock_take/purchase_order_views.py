@@ -1,9 +1,12 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse, StreamingHttpResponse
+from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
+from django.core.mail import EmailMessage
+from django.conf import settings
 from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
 from .models import BoardsPO, Order, OSDoor, PurchaseOrder, PurchaseOrderProduct, StockItem, Supplier
+from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
 import json
@@ -450,6 +453,9 @@ def purchase_orders_list(request):
         )
     zero_count = zero_base.filter(total=0).count()
     
+    # Supplier objects for the create PO modal
+    supplier_objects = Supplier.objects.filter(is_active=True).order_by('name')
+    
     context = {
         'purchase_orders': queryset,
         'total_count': total_count,
@@ -459,6 +465,7 @@ def purchase_orders_list(request):
         'search_query': search_query,
         'excluded_suppliers': excluded_suppliers,
         'all_suppliers': all_suppliers,
+        'supplier_objects': supplier_objects,
         'show_zero': show_zero,
         'zero_count': zero_count,
         'draft_count': status_counts.get('Draft', 0),
@@ -516,6 +523,13 @@ def purchase_order_detail(request, po_id):
         for order in linked_orders:
             os_door_items.extend(list(order.os_doors.all()))
     
+    # Get supplier email for the send modal
+    supplier_email = ''
+    if purchase_order.supplier_id:
+        supplier_obj = Supplier.objects.filter(workguru_id=purchase_order.supplier_id).first()
+        if supplier_obj and supplier_obj.email:
+            supplier_email = supplier_obj.email
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -526,6 +540,7 @@ def purchase_order_detail(request, po_id):
         'pnx_total_cost': pnx_total_cost,
         'related_pos': related_pos,
         'os_door_items': os_door_items,
+        'supplier_email': supplier_email,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -633,6 +648,197 @@ def purchase_order_receive(request, po_id):
     """Receive a purchase order - marks PO as received and updates linked items (AJAX)"""
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    from django.utils import timezone
+    today = timezone.now().strftime('%d/%m/%Y')
+    received_items = 0
+
+    # Update PO status
+    po.status = 'Received'
+    po.received_date = today
+    po.save(update_fields=['status', 'received_date'])
+
+    # Handle Carnehill (boards) POs — mark PNX items as received
+    boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+    if boards_po:
+        for pnx_item in boards_po.pnx_items.all():
+            if not pnx_item.is_fully_received:
+                pnx_item.received = True
+                pnx_item.received_quantity = pnx_item.cnt
+                pnx_item.save(update_fields=['received', 'received_quantity'])
+                received_items += 1
+
+    # Handle OS Doors POs — mark OSDoor items as received
+    linked_orders = Order.objects.filter(os_doors_po=po.display_number)
+    for order in linked_orders:
+        for door in order.os_doors.all():
+            if not door.is_fully_received:
+                door.received = True
+                door.received_quantity = door.quantity
+                door.save(update_fields=['received', 'received_quantity'])
+                received_items += 1
+
+    # Mark regular product lines as received
+    for product in po.products.all():
+        if product.received_quantity < product.order_quantity:
+            product.received_quantity = product.order_quantity
+            product.save(update_fields=['received_quantity'])
+            received_items += 1
+
+    return JsonResponse({
+        'success': True,
+        'received_items': received_items,
+        'status': po.status,
+        'received_date': po.received_date,
+    })
+
+
+@login_required
+def purchase_order_create(request):
+    """Create a new purchase order manually"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from django.contrib import messages
+    from django.shortcuts import redirect
+
+    supplier_id = request.POST.get('supplier_id', '').strip()
+    description = request.POST.get('description', '').strip()
+    expected_date = request.POST.get('expected_date', '').strip()
+    delivery_address = request.POST.get('delivery_address', '').strip()
+    delivery_instructions = request.POST.get('delivery_instructions', '').strip()
+
+    if not supplier_id:
+        messages.error(request, 'Please select a supplier.')
+        return redirect('purchase_orders_list')
+
+    try:
+        supplier = Supplier.objects.get(workguru_id=int(supplier_id))
+    except (Supplier.DoesNotExist, ValueError):
+        messages.error(request, 'Supplier not found.')
+        return redirect('purchase_orders_list')
+
+    # Generate a unique workguru_id in the 800000+ range for manual POs
+    max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 800000)
+
+    # Generate display number: POXXXX (continue from highest existing PO number)
+    import re
+    last_num = 0
+    for po_obj in PurchaseOrder.objects.filter(display_number__startswith='PO').order_by('-display_number'):
+        match = re.match(r'^PO(\d+)$', po_obj.display_number or '')
+        if match:
+            last_num = max(last_num, int(match.group(1)))
+    display_number = f'PO{last_num + 1}'
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_id,
+        number=display_number,
+        display_number=display_number,
+        description=description or None,
+        supplier_id=supplier.workguru_id,
+        supplier_name=supplier.name,
+        expected_date=expected_date or None,
+        delivery_address_1=delivery_address or None,
+        delivery_instructions=delivery_instructions or None,
+        status='Draft',
+        currency='GBP',
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
+
+    messages.success(request, f'Purchase order {display_number} created.')
+    return redirect('purchase_order_detail', po_id=po.workguru_id)
+
+
+@login_required
+def purchase_order_add_product(request, po_id):
+    """Add a product line item to a purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    name = data.get('name', '').strip()
+    if not name:
+        return JsonResponse({'error': 'Product name is required'}, status=400)
+
+    try:
+        order_price = float(data.get('order_price', 0) or 0)
+        order_quantity = float(data.get('order_quantity', 0) or 0)
+    except (ValueError, TypeError):
+        order_price = 0
+        order_quantity = 0
+
+    line_total = round(order_price * order_quantity, 2)
+
+    # Determine sort order
+    max_sort = po.products.order_by('-sort_order').values_list('sort_order', flat=True).first() or 0
+
+    product = PurchaseOrderProduct.objects.create(
+        purchase_order=po,
+        sku=data.get('sku', '').strip(),
+        supplier_code=data.get('supplier_code', '').strip(),
+        name=name,
+        description=data.get('description', '').strip(),
+        order_price=order_price,
+        order_quantity=order_quantity,
+        line_total=line_total,
+        sort_order=max_sort + 1,
+        stock_item_id=data.get('stock_item_id') or None,
+    )
+
+    # Recalculate PO total
+    new_total = po.products.aggregate(total=Sum('line_total'))['total'] or 0
+    po.total = new_total
+    po.save(update_fields=['total'])
+
+    return JsonResponse({
+        'success': True,
+        'product': {
+            'id': product.id,
+            'sku': product.sku,
+            'supplier_code': product.supplier_code,
+            'name': product.name,
+            'description': product.description,
+            'order_price': str(product.order_price),
+            'order_quantity': str(product.order_quantity),
+            'line_total': str(product.line_total),
+        },
+        'po_total': str(new_total),
+    })
+
+
+@login_required
+def purchase_order_delete_product(request, po_id, product_id):
+    """Delete a product line item from a purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    product = get_object_or_404(PurchaseOrderProduct, id=product_id, purchase_order=po)
+    product.delete()
+
+    # Recalculate PO total
+    new_total = po.products.aggregate(total=Sum('line_total'))['total'] or 0
+    po.total = new_total
+    po.save(update_fields=['total'])
+
+    return JsonResponse({'success': True, 'po_total': str(new_total)})
+    """Receive a purchase order - marks PO as received and updates linked items (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
     
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
     
@@ -705,6 +911,72 @@ def suppliers_list(request):
 
 
 @login_required
+def supplier_create(request):
+    """Create a new supplier manually"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Supplier name is required.')
+        return redirect('suppliers_list')
+    
+    # Check for duplicate name
+    if Supplier.objects.filter(name__iexact=name).exists():
+        messages.error(request, f'A supplier named "{name}" already exists.')
+        return redirect('suppliers_list')
+    
+    # Generate a unique positive workguru_id for manually created suppliers
+    # Use 900000+ range to avoid collisions with real WorkGuru IDs
+    max_id = Supplier.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 900000)
+    
+    supplier = Supplier.objects.create(
+        workguru_id=manual_id,
+        name=name,
+        email=request.POST.get('email', '').strip() or None,
+        phone=request.POST.get('phone', '').strip() or None,
+        website=request.POST.get('website', '').strip() or None,
+        address_1=request.POST.get('address_1', '').strip() or None,
+        city=request.POST.get('city', '').strip() or None,
+        country=request.POST.get('country', '').strip() or None,
+        is_active=True,
+    )
+    
+    messages.success(request, f'Supplier "{supplier.name}" created successfully.')
+    return redirect('supplier_detail', supplier_id=supplier.workguru_id)
+
+
+@login_required
+def product_search(request):
+    """Search stock items for autocomplete when adding products to POs (AJAX)"""
+    q = request.GET.get('q', '').strip()
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+
+    items = StockItem.objects.filter(
+        Q(sku__icontains=q) |
+        Q(name__icontains=q) |
+        Q(description__icontains=q)
+    ).order_by('name')[:20]
+
+    results = []
+    for item in items:
+        results.append({
+            'id': item.id,
+            'sku': item.sku,
+            'name': item.name,
+            'cost': str(item.cost),
+            'description': item.description or '',
+        })
+
+    return JsonResponse({'results': results})
+
+
+@login_required
 def supplier_detail(request, supplier_id):
     """Display detailed view of a single supplier"""
     supplier = get_object_or_404(Supplier, workguru_id=supplier_id)
@@ -730,3 +1002,81 @@ def supplier_detail(request, supplier_id):
     }
     
     return render(request, 'stock_take/supplier_detail.html', context)
+
+
+@login_required
+def purchase_order_download_pdf(request, po_id):
+    """Download a Purchase Order as a PDF"""
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    products = po.products.all()
+
+    pdf_buffer = generate_purchase_order_pdf(po, products)
+
+    response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
+    filename = f'Purchase_Order_{po.display_number}.pdf'
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+def purchase_order_send_email(request, po_id):
+    """Send the Purchase Order PDF to the supplier via email (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    recipient = data.get('to', '').strip()
+    cc_list = [e.strip() for e in data.get('cc', '').split(',') if e.strip()]
+    subject = data.get('subject', '').strip()
+    body = data.get('body', '').strip()
+
+    if not recipient:
+        # Fall back to supplier email
+        supplier = Supplier.objects.filter(workguru_id=po.supplier_id).first()
+        if supplier and supplier.email:
+            recipient = supplier.email
+        else:
+            return JsonResponse({'error': 'No recipient email provided and supplier has no email on file.'}, status=400)
+
+    if not subject:
+        subject = f'Purchase Order {po.display_number} - Sliderobes'
+
+    if not body:
+        body = (
+            f'Dear {po.supplier_name or "Supplier"},\n\n'
+            f'Please find attached Purchase Order {po.display_number}.\n\n'
+            f'If you have any questions, please do not hesitate to contact us.\n\n'
+            f'Kind regards,\n'
+            f'Sliderobes'
+        )
+
+    # Generate the PDF
+    products = po.products.all()
+    pdf_buffer = generate_purchase_order_pdf(po, products)
+    pdf_filename = f'Purchase_Order_{po.display_number}.pdf'
+
+    try:
+        email = EmailMessage(
+            subject=subject,
+            body=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[recipient],
+            cc=cc_list if cc_list else None,
+        )
+        email.attach(pdf_filename, pdf_buffer.read(), 'application/pdf')
+        email.send(fail_silently=False)
+
+        logger.info(f'PO {po.display_number} emailed to {recipient} by {request.user}')
+        return JsonResponse({
+            'success': True,
+            'message': f'Purchase order sent to {recipient}',
+        })
+    except Exception as e:
+        logger.error(f'Failed to send PO {po.display_number} email: {e}')
+        return JsonResponse({'error': f'Failed to send email: {str(e)}'}, status=500)

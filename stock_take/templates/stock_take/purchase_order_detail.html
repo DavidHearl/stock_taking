@@ -47,6 +47,12 @@
                 <i class="bi bi-box-arrow-in-down"></i> Receive
             </button>
             {% endif %}
+            <a href="{% url 'purchase_order_download_pdf' purchase_order.workguru_id %}" class="btn btn-sm btn-secondary" title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="btn btn-sm btn-send" id="send-btn" onclick="openSendModal()">
+                <i class="bi bi-envelope"></i> Send
+            </button>
             <button class="btn btn-sm btn-edit" id="edit-toggle-btn" onclick="toggleEditMode()">
                 <i class="bi bi-pencil"></i> Edit
             </button>
@@ -195,24 +201,50 @@
 
     <!-- Products Section -->
     <div class="po-products-section">
-        <h3><i class="bi bi-box-seam"></i> Products</h3>
-        {% if products %}
+        <div class="po-products-header-row">
+            <h3><i class="bi bi-box-seam"></i> Products</h3>
+            <button class="btn btn-sm btn-add-product" onclick="toggleAddProductRow()">
+                <i class="bi bi-plus-lg"></i> Add Product
+            </button>
+        </div>
+
         <div class="po-table-container">
             <table class="po-products-table" id="products-table">
                 <thead>
                     <tr>
                         <th>SKU</th>
-                        <th>Supplier Code</th>
                         <th>Name</th>
-                        <th>Description</th>
                         <th class="text-right">Order Price</th>
                         <th class="text-right">Order Qty</th>
                         <th class="text-right">Rec'd Qty</th>
                         <th class="text-right">Invoice Price</th>
                         <th class="text-right">Line Total</th>
+                        <th class="text-center po-col-actions" style="display:none;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
+                    <!-- Add Product Row (hidden by default) -->
+                    <tr id="add-product-row" style="display:none;" class="add-product-row">
+                        <td colspan="2" id="search-cell">
+                            <input type="text" class="po-inline-input" id="product-search" placeholder="Search products by SKU or name..." autocomplete="off" oninput="searchProducts(this.value)">
+                            <input type="hidden" id="new-stock-item-id">
+                        </td>
+                        <td id="selected-sku" class="selected-product-cell" style="display:none;"><span id="display-sku"></span></td>
+                        <td id="selected-name" class="selected-product-cell" style="display:none;"><span id="display-name"></span></td>
+                        <input type="hidden" id="new-sku">
+                        <input type="hidden" id="new-supplier-code">
+                        <input type="hidden" id="new-name">
+                        <input type="hidden" id="new-description">
+                        <td><input type="number" class="po-inline-input text-right" id="new-order-price" placeholder="0.00" step="0.01" min="0" onchange="calcNewLineTotal()"></td>
+                        <td><input type="number" class="po-inline-input text-right" id="new-order-qty" placeholder="0" step="1" min="0" onchange="calcNewLineTotal()"></td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">-</td>
+                        <td class="text-right" id="new-line-total">£0.00</td>
+                        <td class="text-center">
+                            <button class="btn-inline-save" onclick="saveNewProduct()" title="Save"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn-inline-cancel" onclick="toggleAddProductRow()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </td>
+                    </tr>
                     {% for product in products %}
                     <tr data-product-id="{{ product.id }}">
                         <td>
@@ -220,16 +252,8 @@
                             <input class="po-edit-input po-edit-val po-edit-narrow" data-field="sku" value="{{ product.sku|default:'' }}" style="display:none;">
                         </td>
                         <td>
-                            <span class="po-view-val">{{ product.supplier_code|default:"-" }}</span>
-                            <input class="po-edit-input po-edit-val po-edit-narrow" data-field="supplier_code" value="{{ product.supplier_code|default:'' }}" style="display:none;">
-                        </td>
-                        <td>
                             <span class="po-view-val">{{ product.name|default:"-" }}</span>
                             <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
-                        </td>
-                        <td class="po-desc-cell">
-                            <span class="po-view-val">{{ product.description|default:"-" }}</span>
-                            <input class="po-edit-input po-edit-val" data-field="description" value="{{ product.description|default:'' }}" style="display:none;">
                         </td>
                         <td class="text-right">
                             <span class="po-view-val">£{{ product.order_price|floatformat:2 }}</span>
@@ -250,6 +274,16 @@
                         <td class="text-right">
                             <span class="po-view-val">£{{ product.line_total|floatformat:2 }}</span>
                             <input class="po-edit-input po-edit-val po-edit-number" data-field="line_total" type="number" step="0.01" value="{{ product.line_total }}" style="display:none;">
+                        </td>
+                        <td class="text-center po-col-actions" style="display:none;">
+                            <button class="btn-inline-delete" onclick="deleteProduct({{ product.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="no-products-row">
+                        <td colspan="7" class="text-center" style="padding: 24px; color: var(--text-secondary);">
+                            <i class="bi bi-inbox" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                            No products yet. Click <strong>Add Product</strong> above to get started.
                         </td>
                     </tr>
                     {% endfor %}
@@ -294,8 +328,12 @@
                 {% endif %}
             </div>
         </div>
-        {% elif pnx_items %}
-        <!-- Board Order Products (from PNX file) -->
+    </div>
+
+    {% if pnx_items %}
+    <!-- Board Order Products (from PNX file) -->
+    <div class="po-products-section">
+        <h3><i class="bi bi-grid-3x3"></i> Board Order Items</h3>
         {% if boards_po %}
         <div class="po-boards-meta">
             <span class="po-boards-badge {% if boards_po.boards_ordered %}ordered{% else %}not-ordered{% endif %}">
@@ -354,18 +392,21 @@
                 </tbody>
             </table>
         </div>
-        
-        <!-- Totals -->
         <div class="po-totals">
             <div class="po-totals-table">
                 <div class="po-totals-row total">
-                    <div class="po-totals-label">Total</div>
-                    <div class="po-totals-value" id="po-total-display">£{{ pnx_total_cost|floatformat:2 }}</div>
+                    <div class="po-totals-label">Board Total</div>
+                    <div class="po-totals-value">£{{ pnx_total_cost|floatformat:2 }}</div>
                 </div>
             </div>
         </div>
-        {% elif os_door_items %}
-        <!-- OS Door Products -->
+    </div>
+    {% endif %}
+
+    {% if os_door_items %}
+    <!-- OS Door Products -->
+    <div class="po-products-section">
+        <h3><i class="bi bi-door-open"></i> OS Door Items</h3>
         <div class="po-table-container">
             <table class="po-products-table po-osdoor-table">
                 <thead>
@@ -404,23 +445,8 @@
                 </tbody>
             </table>
         </div>
-        
-        <!-- Totals -->
-        <div class="po-totals">
-            <div class="po-totals-table">
-                <div class="po-totals-row total">
-                    <div class="po-totals-label">Total</div>
-                    <div class="po-totals-value" id="po-total-display">£{{ purchase_order.total|floatformat:2 }}</div>
-                </div>
-            </div>
-        </div>
-        {% else %}
-        <div class="po-empty-products">
-            <i class="bi bi-inbox"></i>
-            <p>No products found. Click <strong>Sync</strong> on the list page to fetch product data.</p>
-        </div>
-        {% endif %}
     </div>
+    {% endif %}
 
     {% if related_pos %}
     <!-- Related POs Section -->
@@ -459,6 +485,53 @@
     {% endif %}
 
     {% endif %}
+</div>
+
+<!-- Product search dropdown (outside table container to avoid overflow clipping) -->
+<div class="product-search-results" id="product-search-results" style="display:none;"></div>
+
+<!-- Send Email Modal -->
+<div class="modal-overlay" id="send-modal" style="display:none;" onclick="closeSendModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-envelope"></i> Send Purchase Order</h3>
+            <button class="modal-close" onclick="closeSendModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-form-group">
+                <label for="send-to">To <span class="required">*</span></label>
+                <input type="email" id="send-to" class="modal-input" placeholder="supplier@example.com" value="{{ supplier_email|default:'' }}">
+            </div>
+            <div class="modal-form-group">
+                <label for="send-cc">CC</label>
+                <input type="text" id="send-cc" class="modal-input" placeholder="Optional, comma-separated" value="orders@sliderobes.com">
+            </div>
+            <div class="modal-form-group">
+                <label for="send-subject">Subject</label>
+                <input type="text" id="send-subject" class="modal-input" value="Purchase Order {{ purchase_order.display_number }} - Sliderobes">
+            </div>
+            <div class="modal-form-group">
+                <label for="send-body">Message</label>
+                <textarea id="send-body" class="modal-textarea" rows="8">Dear {{ purchase_order.supplier_name|default:"Supplier" }},
+
+Please find attached Purchase Order {{ purchase_order.display_number }}.
+
+If you have any questions, please do not hesitate to contact us.
+
+Kind regards,
+Sliderobes</textarea>
+            </div>
+            <div class="modal-info">
+                <i class="bi bi-paperclip"></i> Purchase_Order_{{ purchase_order.display_number }}.pdf will be attached automatically
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-sm btn-secondary" onclick="closeSendModal()">Cancel</button>
+            <button class="btn btn-sm btn-send" id="send-email-btn" onclick="sendPOEmail()">
+                <i class="bi bi-send"></i> Send Email
+            </button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -583,5 +656,265 @@ function receivePO() {
         btn.innerHTML = '<i class="bi bi-box-arrow-in-down"></i> Receive';
     });
 }
+
+/* ── Add Product ─────────────────────────────────── */
+let addRowVisible = false;
+
+function toggleAddProductRow() {
+    const row = document.getElementById('add-product-row');
+    const actionCols = document.querySelectorAll('.po-col-actions');
+    addRowVisible = !addRowVisible;
+    row.style.display = addRowVisible ? '' : 'none';
+    actionCols.forEach(col => col.style.display = addRowVisible ? '' : 'none');
+
+    // Hide the empty-state row when adding
+    const emptyRow = document.getElementById('no-products-row');
+    if (emptyRow && addRowVisible) emptyRow.style.display = 'none';
+    if (emptyRow && !addRowVisible) {
+        const hasProducts = document.querySelectorAll('#products-table tbody tr[data-product-id]').length > 0;
+        emptyRow.style.display = hasProducts ? 'none' : '';
+    }
+
+    if (addRowVisible) {
+        document.getElementById('product-search').focus();
+    } else {
+        // Reset to search mode
+        document.getElementById('search-cell').style.display = '';
+        document.getElementById('search-cell').setAttribute('colspan', '2');
+        document.getElementById('selected-sku').style.display = 'none';
+        document.getElementById('selected-name').style.display = 'none';
+        document.getElementById('product-search').value = '';
+        document.getElementById('new-sku').value = '';
+        document.getElementById('new-supplier-code').value = '';
+        document.getElementById('new-name').value = '';
+        document.getElementById('new-stock-item-id').value = '';
+        document.getElementById('new-description').value = '';
+        document.getElementById('display-sku').textContent = '';
+        document.getElementById('display-name').textContent = '';
+        ['new-order-price','new-order-qty'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('new-line-total').textContent = '£0.00';
+        document.getElementById('product-search-results').style.display = 'none';
+    }
+}
+
+function calcNewLineTotal() {
+    const price = parseFloat(document.getElementById('new-order-price').value) || 0;
+    const qty = parseFloat(document.getElementById('new-order-qty').value) || 0;
+    document.getElementById('new-line-total').textContent = '£' + (price * qty).toFixed(2);
+}
+
+/* ── Product Search ─────────────────────────────── */
+let searchTimeout = null;
+
+function searchProducts(query) {
+    const resultsDiv = document.getElementById('product-search-results');
+    if (query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        const url = '{% url "product_search" %}?q=' + encodeURIComponent(query);
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                // Position the dropdown below the search input using fixed positioning
+                const input = document.getElementById('product-search');
+                const rect = input.getBoundingClientRect();
+                resultsDiv.style.top = (rect.bottom + 2) + 'px';
+                resultsDiv.style.left = rect.left + 'px';
+                resultsDiv.style.width = rect.width + 'px';
+
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="product-search-item no-results">No products found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                resultsDiv.innerHTML = data.results.map(item => {
+                    const safeSku = (item.sku || '').replace(/'/g, "\\'");
+                    const safeName = (item.name || '').replace(/'/g, "\\'");
+                    const safeDesc = (item.description || '').replace(/'/g, "\\'").replace(/\n/g, ' ');
+                    return `<div class="product-search-item" onclick="selectProduct(${item.id}, '${safeSku}', '${safeName}', '${item.cost}', '${safeDesc}')">
+                        <span class="product-search-sku">${item.sku}</span>
+                        <span class="product-search-name">${item.name}</span>
+                        <span class="product-search-cost">£${parseFloat(item.cost).toFixed(2)}</span>
+                    </div>`;
+                }).join('');
+                resultsDiv.style.display = 'block';
+            })
+            .catch(err => {
+                console.error('Product search error:', err);
+                resultsDiv.style.display = 'none';
+            });
+    }, 250);
+}
+
+function selectProduct(id, sku, name, cost, description) {
+    // Hide search, show selected product in correct columns
+    document.getElementById('search-cell').style.display = 'none';
+    document.getElementById('selected-sku').style.display = '';
+    document.getElementById('selected-name').style.display = '';
+    document.getElementById('display-sku').textContent = sku;
+    document.getElementById('display-name').textContent = name;
+
+    document.getElementById('new-sku').value = sku;
+    document.getElementById('new-name').value = name;
+    document.getElementById('new-stock-item-id').value = id;
+    document.getElementById('new-description').value = description;
+    document.getElementById('new-order-price').value = parseFloat(cost).toFixed(2);
+    document.getElementById('product-search-results').style.display = 'none';
+    document.getElementById('new-order-qty').focus();
+    calcNewLineTotal();
+}
+
+// Close search results when clicking outside
+document.addEventListener('click', function(e) {
+    const resultsDiv = document.getElementById('product-search-results');
+    const searchInput = document.getElementById('product-search');
+    if (resultsDiv && searchInput && !resultsDiv.contains(e.target) && e.target !== searchInput) {
+        resultsDiv.style.display = 'none';
+    }
+});
+
+function saveNewProduct() {
+    const name = document.getElementById('new-name').value.trim();
+    if (!name) {
+        showNotification('Please search and select a product first.', 'error');
+        document.getElementById('product-search').focus();
+        return;
+    }
+
+    const stockItemId = document.getElementById('new-stock-item-id').value;
+    const data = {
+        sku: document.getElementById('new-sku').value.trim(),
+        supplier_code: document.getElementById('new-supplier-code').value.trim(),
+        name: name,
+        description: document.getElementById('new-description').value.trim(),
+        order_price: document.getElementById('new-order-price').value || 0,
+        order_quantity: document.getElementById('new-order-qty').value || 0,
+        stock_item_id: stockItemId ? parseInt(stockItemId) : null,
+    };
+
+    fetch('{% url "purchase_order_add_product" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify(data),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Product added.', 'success');
+            // Update total
+            if (result.po_total) {
+                const el = document.getElementById('po-total-display');
+                if (el) el.textContent = '{{ purchase_order.currency|default:"GBP" }} ' + parseFloat(result.po_total).toFixed(2);
+            }
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showNotification('Error: ' + (result.error || 'Unknown'), 'error');
+        }
+    })
+    .catch(err => showNotification('Network error: ' + err.message, 'error'));
+}
+
+function deleteProduct(productId, btn) {
+    if (!confirm('Delete this product line?')) return;
+    btn.disabled = true;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-product/${productId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({}),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Product removed.', 'success');
+            // Remove the table row
+            const row = btn.closest('tr');
+            if (row) row.remove();
+            // Update total
+            if (result.po_total) {
+                const el = document.getElementById('po-total-display');
+                if (el) el.textContent = '{{ purchase_order.currency|default:"GBP" }} ' + parseFloat(result.po_total).toFixed(2);
+            }
+        } else {
+            showNotification('Error: ' + (result.error || 'Unknown'), 'error');
+            btn.disabled = false;
+        }
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+    });
+}
+
+/* ── Send PO Email ──────────────────────────────── */
+function openSendModal() {
+    document.getElementById('send-modal').style.display = 'flex';
+}
+
+function closeSendModal(event) {
+    if (event && event.target !== document.getElementById('send-modal')) return;
+    document.getElementById('send-modal').style.display = 'none';
+}
+
+function sendPOEmail() {
+    const btn = document.getElementById('send-email-btn');
+    const to = document.getElementById('send-to').value.trim();
+    const cc = document.getElementById('send-cc').value.trim();
+    const subject = document.getElementById('send-subject').value.trim();
+    const body = document.getElementById('send-body').value.trim();
+
+    if (!to) {
+        showNotification('Please enter a recipient email address.', 'error');
+        document.getElementById('send-to').focus();
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Sending...';
+
+    fetch('{% url "purchase_order_send_email" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ to, cc, subject, body }),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification(result.message || 'Email sent successfully!', 'success');
+            closeSendModal();
+        } else {
+            showNotification('Error: ' + (result.error || 'Failed to send'), 'error');
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send"></i> Send Email';
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send"></i> Send Email';
+    });
+}
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        document.getElementById('send-modal').style.display = 'none';
+    }
+});
 </script>
 {% endblock %}

@@ -1336,6 +1336,7 @@ PAGE_SECTIONS = [
     ]),
     ('Other', [
         ('tickets', 'Tickets'),
+        ('admin_panel', 'Admin Panel'),
     ]),
 ]
 

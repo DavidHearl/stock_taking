@@ -3,6 +3,10 @@
 
 {% block title %}Suppliers{% endblock %}
 
+{% block page_title %}
+    Suppliers <span class="page-title-count">{{ total_count }}</span>
+{% endblock %}
+
 {% block nav_stock_active %}active{% endblock %}
 {% block nav_suppliers_active %}active{% endblock %}
 
@@ -12,21 +16,16 @@
 
 {% block content %}
 <div class="content-card">
-    <div class="suppliers-header">
-        <h1><i class="bi bi-building"></i> Suppliers</h1>
-        <div class="supplier-stats">
-            <div class="supplier-stat-item">
-                <span class="supplier-stat-value">{{ total_count }}</span>
-                <span>Total Suppliers</span>
-            </div>
-        </div>
+    <div class="suppliers-toolbar">
+        <p class="suppliers-note">
+            <i class="bi bi-info-circle"></i>
+            Supplier data is extracted from Purchase Orders during sync. You can also
+            <a href="{% url 'purchase_orders_list' %}">sync Purchase Orders</a> or add suppliers manually.
+        </p>
+        <button class="btn-add-supplier" onclick="document.getElementById('addSupplierModal').style.display='flex'">
+            <i class="bi bi-plus-lg"></i> Add Supplier
+        </button>
     </div>
-
-    <p class="suppliers-note">
-        <i class="bi bi-info-circle"></i>
-        Supplier data is extracted from Purchase Orders during sync. Use the 
-        <a href="{% url 'purchase_orders_list' %}">Purchase Orders</a> page to sync.
-    </p>
 
     {% if suppliers %}
     <div class="suppliers-table-container">
@@ -79,5 +78,56 @@
         <p>No suppliers found. Sync Purchase Orders to populate supplier data.</p>
     </div>
     {% endif %}
+</div>
+
+<!-- Add Supplier Modal -->
+<div class="modal-overlay" id="addSupplierModal" style="display:none;">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-building-add"></i> Add Supplier</h2>
+            <button class="modal-close" onclick="document.getElementById('addSupplierModal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{% url 'supplier_create' %}">
+            {% csrf_token %}
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="supplier-name">Name <span class="required">*</span></label>
+                    <input type="text" id="supplier-name" name="name" required placeholder="Supplier name">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="supplier-email">Email</label>
+                        <input type="email" id="supplier-email" name="email" placeholder="email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="supplier-phone">Phone</label>
+                        <input type="text" id="supplier-phone" name="phone" placeholder="Phone number">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="supplier-website">Website</label>
+                    <input type="url" id="supplier-website" name="website" placeholder="https://...">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="supplier-address">Address</label>
+                        <input type="text" id="supplier-address" name="address_1" placeholder="Street address">
+                    </div>
+                    <div class="form-group">
+                        <label for="supplier-city">City</label>
+                        <input type="text" id="supplier-city" name="city" placeholder="City">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="supplier-country">Country</label>
+                    <input type="text" id="supplier-country" name="country" placeholder="Country">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('addSupplierModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn-save"><i class="bi bi-check-lg"></i> Create Supplier</button>
+            </div>
+        </form>
+    </div>
 </div>
 {% endblock %}

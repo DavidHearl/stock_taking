@@ -16,6 +16,18 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    {% if is_impersonating %}
+    <!-- Impersonation Banner -->
+    <div class="impersonation-banner">
+        <div class="impersonation-inner">
+            <i class="bi bi-eye-fill"></i>
+            <span>You are viewing as <strong>{{ user.get_full_name|default:user.username }}</strong></span>
+            <a href="{% url 'impersonate_stop' %}" class="impersonation-stop">
+                <i class="bi bi-x-circle"></i> Stop Impersonating
+            </a>
+        </div>
+    </div>
+    {% endif %}
     <!-- Vertical Sidebar Navigation -->
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
@@ -204,7 +216,7 @@
             </div>
             {% endif %}
 
-            {% if user.is_staff %}
+            {% if role_perms.admin_panel.can_view or is_role_admin %}
             <!-- Admin Section -->
             <div class="nav-section">
                 <div class="nav-section-header" onclick="toggleSection('admin')" title="Admin">
@@ -273,6 +285,18 @@
             {% block content %}{% endblock %}
         </div>
     </div>
+
+    <!-- Global Toast Notifications -->
+    {% if messages %}
+    <div class="toast-container" id="toastContainer">
+        {% for message in messages %}
+        <div class="toast toast-{{ message.tags }}" role="alert">
+            <span class="toast-text">{{ message }}</span>
+            <button type="button" class="toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     {% if user.is_authenticated %}
     <!-- Import Modal -->
@@ -379,5 +403,21 @@
     </script>
     
     {% block extra_js %}{% endblock %}
+
+    <script>
+    // ── Toast auto-dismiss ──────────────────────────────────
+    function dismissToast(el) {
+        el.classList.add('toast-hiding');
+        setTimeout(() => el.remove(), 300);
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.toast').forEach(function(toast, i) {
+            // Stagger the appearance slightly
+            setTimeout(() => toast.classList.add('toast-visible'), i * 80);
+            // Auto-dismiss after 4 seconds
+            setTimeout(() => dismissToast(toast), 4000 + i * 500);
+        });
+    });
+    </script>
 </body>
 </html>

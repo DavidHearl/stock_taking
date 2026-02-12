@@ -8,9 +8,55 @@ from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES
 
 
 def staff_required(view_func):
-    """Decorator that requires the user to be staff."""
-    decorated = user_passes_test(lambda u: u.is_staff)(view_func)
-    return login_required(decorated)
+    """Decorator that requires the *real* user (not impersonated) to be staff."""
+    def wrapper(request, *args, **kwargs):
+        real_user = getattr(request, 'real_user', request.user)
+        if not real_user.is_authenticated or not real_user.is_staff:
+            from django.contrib.auth.views import redirect_to_login
+            return redirect_to_login(request.get_full_path())
+        return view_func(request, *args, **kwargs)
+    wrapper.__name__ = view_func.__name__
+    wrapper.__doc__ = view_func.__doc__
+    return wrapper
+
+
+def _real_staff_required(view_func):
+    """Requires the *real* user (not impersonated) to be staff."""
+    def wrapper(request, *args, **kwargs):
+        real_user = getattr(request, 'real_user', request.user)
+        if not real_user.is_authenticated or not real_user.is_staff:
+            return redirect('dashboard')
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+# ── Impersonation ─────────────────────────────────────────────────
+@_real_staff_required
+@require_POST
+def impersonate_start(request, user_id):
+    """Begin impersonating another user. Staff only."""
+    target = get_object_or_404(User, pk=user_id)
+    real_user = getattr(request, 'real_user', request.user)
+
+    if target == real_user:
+        messages.info(request, "You cannot impersonate yourself.")
+        return redirect('admin_users')
+
+    request.session['_impersonate_user_id'] = target.pk
+    messages.success(
+        request,
+        f"Now impersonating {target.get_full_name() or target.username}."
+    )
+    return redirect('dashboard')
+
+
+@login_required
+def impersonate_stop(request):
+    """Stop impersonating and return to the real admin account."""
+    if '_impersonate_user_id' in request.session:
+        del request.session['_impersonate_user_id']
+        messages.success(request, "Impersonation ended.")
+    return redirect('dashboard')
 
 
 @staff_required

@@ -22,18 +22,6 @@
         </div>
     </div>
 
-    <!-- Messages Display -->
-    {% if messages %}
-    <div class="messages-container">
-        {% for message in messages %}
-        <div class="alert alert-{{ message.tags }}">
-            {{ message }}
-            <button type="button" class="alert-close" onclick="this.parentElement.remove()">✕</button>
-        </div>
-        {% endfor %}
-    </div>
-    {% endif %}
-
     <div class="order-details-grid">
         <div class="main-column">
             <!-- Workflow Stage Card -->
@@ -2992,26 +2980,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Alert functions (global scope so they can be used by all functions)
 function showAlert(message, type) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type}`;
-    alertDiv.innerHTML = `
-        ${message}
-        <button type="button" class="alert-close" onclick="this.parentElement.remove()">✕</button>
-    `;
-    const pageContent = document.querySelector('.page-content');
-    if (pageContent) {
-        const messagesContainer = document.querySelector('.messages-container') || createMessagesContainer();
-        messagesContainer.appendChild(alertDiv);
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        container.id = 'toastContainer';
+        document.body.appendChild(container);
     }
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = `
+        <span class="toast-text">${message}</span>
+        <button type="button" class="toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
+    `;
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('toast-visible'));
+    setTimeout(() => dismissToast(toast), 4000);
 }
 
-function createMessagesContainer() {
-    const container = document.createElement('div');
-    container.className = 'messages-container';
-    const pageContent = document.querySelector('.page-content');
-    const pageHeader = document.querySelector('.page-header');
-    pageContent.insertBefore(container, pageHeader.nextSibling);
-    return container;
+function dismissToast(el) {
+    if (!el) return;
+    el.classList.add('toast-hiding');
+    setTimeout(() => el.remove(), 300);
 }
 
 // Toggle collapse function for forms (global scope)

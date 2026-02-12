@@ -59,4 +59,7 @@ def user_permissions(request):
         'user_role_display': role.get_name_display() if role else 'No Role',
         'is_role_admin': is_admin,
         'nav_sections': nav_sections,
+        # Impersonation context
+        'is_impersonating': getattr(request, 'is_impersonating', False),
+        'real_user': getattr(request, 'real_user', request.user),
     }

@@ -4,11 +4,11 @@ from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, sync_purchase_orders_stream, suppliers_list, supplier_detail
-from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete
-from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email
+from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create
+from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
-from .ticket_views import tickets_list, ticket_update_status, ticket_delete
+from .ticket_views import tickets_list, ticket_update_status, ticket_edit, ticket_delete
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
@@ -24,17 +24,25 @@ urlpatterns = [
 
     # Purchase Orders
     path('purchase-orders/', purchase_orders_list, name='purchase_orders_list'),
+    path('purchase-orders/create/', purchase_order_create, name='purchase_order_create'),
     path('purchase-orders/sync/', sync_purchase_orders_stream, name='sync_purchase_orders'),
     path('purchase-order/<int:po_id>/', purchase_order_detail, name='purchase_order_detail'),
     path('purchase-order/<int:po_id>/save/', purchase_order_save, name='purchase_order_save'),
     path('purchase-order/<int:po_id>/receive/', purchase_order_receive, name='purchase_order_receive'),
+    path('purchase-order/<int:po_id>/add-product/', purchase_order_add_product, name='purchase_order_add_product'),
+    path('purchase-order/<int:po_id>/download-pdf/', purchase_order_download_pdf, name='purchase_order_download_pdf'),
+    path('purchase-order/<int:po_id>/send-email/', purchase_order_send_email, name='purchase_order_send_email'),
+    path('api/product-search/', product_search, name='product_search'),
+    path('purchase-order/<int:po_id>/delete-product/<int:product_id>/', purchase_order_delete_product, name='purchase_order_delete_product'),
     
     # Suppliers
     path('suppliers/', suppliers_list, name='suppliers_list'),
+    path('suppliers/create/', supplier_create, name='supplier_create'),
     path('supplier/<int:supplier_id>/', supplier_detail, name='supplier_detail'),
     
     # Customers
     path('customers/', customers_list, name='customers_list'),
+    path('customers/create/', customer_create, name='customer_create'),
     path('customer/<int:customer_id>/', customer_detail, name='customer_detail'),
     path('customer/<int:customer_id>/save/', customer_save, name='customer_save'),
     path('customer/<int:customer_id>/delete/', customer_delete, name='customer_delete'),
@@ -219,6 +227,8 @@ urlpatterns = [
     path('admin-panel/roles/', admin_roles, name='admin_roles'),
     path('admin-panel/roles/<int:role_id>/edit/', admin_role_edit, name='admin_role_edit'),
     path('admin-panel/roles/<int:role_id>/toggle-all/', admin_role_toggle_all, name='admin_role_toggle_all'),
+    path('admin-panel/impersonate/<int:user_id>/', impersonate_start, name='impersonate_start'),
+    path('admin-panel/impersonate/stop/', impersonate_stop, name='impersonate_stop'),
     path('admin-panel/settings/', admin_settings, name='admin_settings'),
 
     # Password reset views
@@ -230,5 +240,6 @@ urlpatterns = [
     # Tickets
     path('tickets/', tickets_list, name='tickets_list'),
     path('tickets/<int:ticket_id>/update-status/', ticket_update_status, name='ticket_update_status'),
+    path('tickets/<int:ticket_id>/edit/', ticket_edit, name='ticket_edit'),
     path('tickets/<int:ticket_id>/delete/', ticket_delete, name='ticket_delete'),
 ]

@@ -38,6 +38,25 @@
     .role-tag.user { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
     .role-tag.franchise { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
     .role-tag.none { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
+
+    .btn-impersonate {
+        padding: 4px 12px;
+        border-radius: 6px;
+        border: 1px solid rgba(217, 119, 6, 0.5);
+        background: transparent;
+        color: #d97706;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .btn-impersonate:hover {
+        background: rgba(217, 119, 6, 0.15);
+        border-color: #d97706;
+    }
 </style>
 {% endblock %}
 
@@ -72,6 +91,7 @@
                         <th>Staff</th>
                         <th>Active</th>
                         <th>Last Login</th>
+                        <th style="text-align: center;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -115,6 +135,18 @@
                             {% endif %}
                         </td>
                         <td>{{ u.last_login|date:"d M Y H:i"|default:"Never" }}</td>
+                        <td style="text-align: center;">
+                            {% if u != request.user and u != request.real_user %}
+                            <form method="POST" action="{% url 'impersonate_start' u.id %}" style="display: inline; margin: 0;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-impersonate" title="View as {{ u.username }}">
+                                    <i class="bi bi-eye"></i> Impersonate
+                                </button>
+                            </form>
+                            {% else %}
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

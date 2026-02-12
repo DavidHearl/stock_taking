@@ -1,16 +1,50 @@
 """
-Role-based access control middleware.
+Role-based access control middleware & user impersonation.
 
 Automatically checks page permissions based on the resolved URL name.
 This is applied globally so no individual view decorators are needed.
 Admin users and superusers bypass all checks.
 """
 
+from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.urls import resolve, Resolver404
 from .permissions import URL_TO_PAGE
 from .models import PAGE_CHOICES
+
+
+# ─── Impersonation Middleware ─────────────────────────────────────
+class ImpersonationMiddleware:
+    """
+    If the session contains ``_impersonate_user_id``, swap
+    ``request.user`` to that user so every downstream view, context
+    processor and permission check sees the impersonated identity.
+
+    The *real* admin user is stored as ``request.real_user`` so we can
+    always get back to it (e.g. to show the impersonation banner or to
+    stop impersonation).
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        request.real_user = request.user            # always available
+        request.is_impersonating = False
+
+        impersonated_id = request.session.get('_impersonate_user_id')
+        if impersonated_id and request.user.is_authenticated:
+            try:
+                impersonated_user = User.objects.get(pk=impersonated_id)
+                request.real_user = request.user    # the original admin
+                request.user = impersonated_user    # swap to target
+                request.is_impersonating = True
+            except User.DoesNotExist:
+                # Stale session key – clear it
+                del request.session['_impersonate_user_id']
+
+        return self.get_response(request)
 
 
 # URLs that should always be accessible (auth, admin panel, etc.)
