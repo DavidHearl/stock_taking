@@ -6,7 +6,8 @@ from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, sync_purchase_orders_stream, suppliers_list, supplier_detail
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete
-from .admin_views import admin_users, admin_templates, admin_roles, admin_settings
+from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all
+from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_update_status, ticket_delete
 
 urlpatterns = [
@@ -16,6 +17,11 @@ urlpatterns = [
     path('export/', views.export_csv, name='export_csv'),
     path('update/<int:item_id>/', views.update_item, name='update_item'),
     
+    # Invoices
+    path('invoices/', invoices_list, name='invoices_list'),
+    path('invoices/sync/', sync_invoices_stream, name='sync_invoices'),
+    path('invoices/<int:invoice_id>/', invoice_detail, name='invoice_detail'),
+
     # Purchase Orders
     path('purchase-orders/', purchase_orders_list, name='purchase_orders_list'),
     path('purchase-orders/sync/', sync_purchase_orders_stream, name='sync_purchase_orders'),
@@ -119,6 +125,7 @@ urlpatterns = [
     path('order/<int:order_id>/download-processed-csv/', views.download_processed_csv, name='download_processed_csv'),
     path('order/<int:order_id>/download-current-accessories-csv/', views.download_current_accessories_csv, name='download_current_accessories_csv'),
     path('order/<int:order_id>/download-pnx-csv/', views.download_pnx_as_csv, name='download_pnx_as_csv'),
+    path('order/<int:order_id>/summary-document/', views.generate_summary_document, name='generate_summary_document'),
     path('order/<int:order_id>/push-to-workguru/', views.push_accessories_to_workguru, name='push_accessories_to_workguru'),
     path('order/<int:order_id>/create-workguru-po/', views.create_workguru_po, name='create_workguru_po'),
     path('order/<int:order_id>/push-boards-to-workguru-po/', views.push_boards_to_workguru_po, name='push_boards_to_workguru_po'),
@@ -210,6 +217,8 @@ urlpatterns = [
     path('admin-panel/users/', admin_users, name='admin_users'),
     path('admin-panel/templates/', admin_templates, name='admin_templates'),
     path('admin-panel/roles/', admin_roles, name='admin_roles'),
+    path('admin-panel/roles/<int:role_id>/edit/', admin_role_edit, name='admin_role_edit'),
+    path('admin-panel/roles/<int:role_id>/toggle-all/', admin_role_toggle_all, name='admin_role_toggle_all'),
     path('admin-panel/settings/', admin_settings, name='admin_settings'),
 
     # Password reset views

@@ -4,7 +4,7 @@ from .models import (
     Customer, BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
     Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
     OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense, UserProfile,
-    StockHistory
+    StockHistory, Role, PagePermission
 )
 
 @admin.register(Customer)
@@ -245,6 +245,28 @@ class ExpenseAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ['user', 'dark_mode']
+    list_display = ['user', 'role', 'dark_mode']
     search_fields = ['user__username', 'user__email']
-    list_filter = ['dark_mode']
+    list_filter = ['dark_mode', 'role']
+
+
+class PagePermissionInline(admin.TabularInline):
+    model = PagePermission
+    extra = 0
+
+
+@admin.register(Role)
+class RoleAdmin(admin.ModelAdmin):
+    list_display = ['name', 'description', 'user_count', 'created_at']
+    inlines = [PagePermissionInline]
+
+    def user_count(self, obj):
+        return obj.users.count()
+    user_count.short_description = 'Users'
+
+
+@admin.register(PagePermission)
+class PagePermissionAdmin(admin.ModelAdmin):
+    list_display = ['role', 'page_codename', 'can_view', 'can_create', 'can_edit', 'can_delete']
+    list_filter = ['role', 'can_view', 'can_create', 'can_edit', 'can_delete']
+    list_editable = ['can_view', 'can_create', 'can_edit', 'can_delete']

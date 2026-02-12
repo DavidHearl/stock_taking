@@ -5242,6 +5242,22 @@ def download_pnx_as_csv(request, order_id):
 
 
 @login_required
+def generate_summary_document(request, order_id):
+    """Generate and download a Summary Document PDF for the order."""
+    from .pdf_generator import generate_summary_pdf
+
+    order = get_object_or_404(Order, id=order_id)
+    price_per_sqm = float(request.session.get('price_per_sqm', '12'))
+
+    pdf_buffer = generate_summary_pdf(order, price_per_sqm)
+
+    response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+    filename = f"Summary_Document_{order.sale_number}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
 def push_accessories_to_workguru(request, order_id):
     """Push accessories to WorkGuru project via API."""
     from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError

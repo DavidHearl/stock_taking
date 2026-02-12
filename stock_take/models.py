@@ -1162,13 +1162,294 @@ class Expense(models.Model):
         ordering = ['-date', '-created_at']
 
 
+# =============================================
+# Invoices (synced from WorkGuru)
+# =============================================
+
+class Invoice(models.Model):
+    """Invoice synced from WorkGuru."""
+
+    STATUS_CHOICES = [
+        ('Draft', 'Draft'),
+        ('Approved', 'Approved'),
+        ('Sent', 'Sent'),
+        ('Paid', 'Paid'),
+        ('Void', 'Void'),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        ('paid', 'Paid'),
+        ('partial', 'Partial'),
+        ('unpaid', 'Unpaid'),
+    ]
+
+    # WorkGuru identifiers
+    workguru_id = models.IntegerField(unique=True, help_text='WorkGuru Invoice ID')
+    invoice_number = models.CharField(max_length=50, db_index=True)
+
+    # Client
+    client_name = models.CharField(max_length=255, blank=True)
+    client_id = models.IntegerField(null=True, blank=True, help_text='WorkGuru Client ID')
+    customer = models.ForeignKey(
+        'Customer', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='invoices',
+        help_text='Link to local Customer record',
+    )
+
+    # Project
+    project_name = models.CharField(max_length=255, blank=True)
+    project_number = models.CharField(max_length=100, blank=True)
+    project_id = models.IntegerField(null=True, blank=True, help_text='WorkGuru Project ID')
+    order = models.ForeignKey(
+        'Order', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='invoices',
+        help_text='Link to local Order record',
+    )
+
+    # Dates
+    date = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+    sent_to_accounting = models.DateField(null=True, blank=True)
+
+    # Details
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
+    description = models.TextField(blank=True)
+    invoice_reference = models.CharField(max_length=255, blank=True)
+    client_po = models.CharField(max_length=100, blank=True, help_text='Client PO number')
+
+    # Financial
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_tax = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_outstanding = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
+    is_overdue = models.BooleanField(default=False)
+
+    # Xero / accounting integration
+    xero_id = models.CharField(max_length=100, blank=True, null=True)
+
+    # Metadata
+    raw_data = models.JSONField(null=True, blank=True, help_text='Full API response')
+    synced_at = models.DateTimeField(null=True, blank=True, help_text='Last sync timestamp')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.invoice_number} – {self.client_name}"
+
+    class Meta:
+        ordering = ['-date', '-created_at']
+
+
+class InvoiceLineItem(models.Model):
+    """Line item on a WorkGuru invoice."""
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='line_items')
+    workguru_id = models.IntegerField(null=True, blank=True)
+
+    name = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    quantity = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    tax_name = models.CharField(max_length=100, blank=True)
+    tax_rate = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return f"{self.name} ({self.invoice.invoice_number})"
+
+
+class InvoicePayment(models.Model):
+    """Payment recorded against a WorkGuru invoice."""
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='payments')
+    workguru_id = models.IntegerField(null=True, blank=True)
+
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    name = models.CharField(max_length=255, blank=True, help_text='Payment name / note')
+    date = models.DateTimeField(null=True, blank=True)
+    sent_to_accounting = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"£{self.amount} – {self.name} ({self.invoice.invoice_number})"
+
+
+# =============================================
+# Role-Based Access Control
+# =============================================
+
+# All page codenames organised by nav section
+PAGE_SECTIONS = [
+    ('Dashboard', [
+        ('dashboard', 'Dashboard'),
+    ]),
+    ('Projects', [
+        ('orders', 'Orders'),
+        ('order_details', 'Order Details'),
+        ('customers', 'Customers'),
+        ('customer_details', 'Customer Details'),
+        ('remedials', 'Remedials'),
+    ]),
+    ('Accounting', [
+        ('invoices', 'Invoices'),
+    ]),
+    ('Purchase', [
+        ('purchase_orders', 'Purchase Orders'),
+        ('purchase_order_details', 'Purchase Order Details'),
+        ('suppliers', 'Suppliers'),
+        ('supplier_details', 'Supplier Details'),
+        ('boards_summary', 'Boards Summary'),
+        ('os_doors_summary', 'OS Doors Summary'),
+        ('material_shortage', 'Stock Shortage Report'),
+        ('raumplus_storage', 'Raumplus Shortage'),
+    ]),
+    ('Products & Stock', [
+        ('products', 'Products'),
+        ('product_details', 'Product Details'),
+        ('stock_list', 'Stock List'),
+        ('stock_take', 'Stock Take'),
+        ('completed_stock_takes', 'Completed Stock Takes'),
+        ('categories', 'Categories'),
+        ('substitutions', 'Substitutions'),
+    ]),
+    ('Calendar', [
+        ('fit_board', 'Fit Board'),
+        ('timesheets', 'Timesheets'),
+        ('workflow', 'Workflow'),
+    ]),
+    ('Tools', [
+        ('map', 'Map'),
+        ('generate_materials', 'Generate PNX & CSV'),
+        ('database_check', 'Database Check'),
+    ]),
+    ('Reports', [
+        ('material_report', 'Material Report'),
+        ('costing_report', 'Costing Report'),
+        ('remedial_report', 'Remedial Report'),
+    ]),
+    ('Other', [
+        ('tickets', 'Tickets'),
+    ]),
+]
+
+# Flat list of all page choices
+PAGE_CHOICES = []
+for section_name, pages in PAGE_SECTIONS:
+    for codename, label in pages:
+        PAGE_CHOICES.append((codename, label))
+
+
+class Role(models.Model):
+    """User role defining access permissions across the application."""
+    ROLE_CHOICES = [
+        ('admin', 'Admin'),
+        ('accounting', 'Accounting'),
+        ('director', 'Director'),
+        ('user', 'User'),
+        ('franchise', 'Franchise'),
+    ]
+
+    name = models.CharField(max_length=20, choices=ROLE_CHOICES, unique=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.get_name_display()
+
+    def is_admin(self):
+        return self.name == 'admin'
+
+    def has_page_permission(self, page_codename, action='view'):
+        """Check if this role has a specific permission on a page."""
+        if self.name == 'admin':
+            return True
+        try:
+            perm = self.page_permissions.get(page_codename=page_codename)
+            return getattr(perm, f'can_{action}', False)
+        except PagePermission.DoesNotExist:
+            return False
+
+    def get_accessible_pages(self):
+        """Return set of page codenames this role can view."""
+        if self.name == 'admin':
+            return {codename for codename, _ in PAGE_CHOICES}
+        return set(
+            self.page_permissions
+                .filter(can_view=True)
+                .values_list('page_codename', flat=True)
+        )
+
+    class Meta:
+        ordering = ['name']
+
+
+class PagePermission(models.Model):
+    """Defines CRUD permissions for a specific page within a role."""
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='page_permissions')
+    page_codename = models.CharField(max_length=50, choices=PAGE_CHOICES)
+    can_view = models.BooleanField(default=False)
+    can_create = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+    can_delete = models.BooleanField(default=False)
+
+    def __str__(self):
+        perms = []
+        if self.can_view: perms.append('View')
+        if self.can_create: perms.append('Create')
+        if self.can_edit: perms.append('Edit')
+        if self.can_delete: perms.append('Delete')
+        return f"{self.role} - {self.get_page_codename_display()} [{', '.join(perms) or 'None'}]"
+
+    class Meta:
+        unique_together = ('role', 'page_codename')
+        ordering = ['role', 'page_codename']
+
+
 class UserProfile(models.Model):
-    """User profile to store user preferences"""
+    """User profile to store user preferences and role assignment"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     dark_mode = models.BooleanField(default=True, help_text='Enable dark mode theme')
-    
+    role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
+
     def __str__(self):
-        return f"{self.user.username}'s profile"
+        role_display = self.role.get_name_display() if self.role else 'No Role'
+        return f"{self.user.username}'s profile ({role_display})"
+
+    def has_page_permission(self, page_codename, action='view'):
+        """Check if the user has a specific permission on a page."""
+        if self.user.is_superuser:
+            return True
+        if not self.role:
+            return False
+        return self.role.has_page_permission(page_codename, action)
+
+    def get_accessible_pages(self):
+        """Return set of page codenames this user can view."""
+        if self.user.is_superuser:
+            return {codename for codename, _ in PAGE_CHOICES}
+        if not self.role:
+            return set()
+        return self.role.get_accessible_pages()
+
+    def can_view(self, page_codename):
+        return self.has_page_permission(page_codename, 'view')
+
+    def can_create(self, page_codename):
+        return self.has_page_permission(page_codename, 'create')
+
+    def can_edit(self, page_codename):
+        return self.has_page_permission(page_codename, 'edit')
+
+    def can_delete(self, page_codename):
+        return self.has_page_permission(page_codename, 'delete')
 
 
 @receiver(post_save, sender=User)

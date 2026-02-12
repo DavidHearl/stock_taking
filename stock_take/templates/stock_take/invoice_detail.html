@@ -1,0 +1,208 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}{{ invoice.invoice_number }} – Invoice Detail{% endblock %}
+{% block page_title %}{{ invoice.invoice_number }}{% endblock %}
+
+{% block nav_invoices_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/invoices.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<!-- Back link -->
+<div class="inv-detail-back">
+    <a href="{% url 'invoices_list' %}" class="inv-back-link">
+        <i class="bi bi-arrow-left"></i> Back to Invoice List
+    </a>
+</div>
+
+<!-- Header card -->
+<div class="inv-detail-header">
+    <div class="inv-detail-title-row">
+        <div>
+            <h2 class="inv-detail-number">{{ invoice.invoice_number }}</h2>
+            <span class="inv-status {{ invoice.status|lower }}">{{ invoice.status }}</span>
+            {% if invoice.is_overdue %}
+            <span class="inv-payment overdue">Overdue</span>
+            {% elif invoice.payment_status == 'paid' %}
+            <span class="inv-payment paid">Paid</span>
+            {% elif invoice.payment_status == 'partial' %}
+            <span class="inv-payment partial">Partial</span>
+            {% else %}
+            <span class="inv-payment unpaid">Unpaid</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="inv-detail-meta">
+        <div class="inv-meta-group">
+            <div class="inv-meta-item">
+                <span class="meta-label">Client</span>
+                <span class="meta-value">
+                    {% if invoice.customer %}
+                    <a href="{% url 'customer_detail' invoice.customer.id %}">{{ invoice.client_name }}</a>
+                    {% else %}
+                    {{ invoice.client_name|default:"—" }}
+                    {% endif %}
+                </span>
+            </div>
+            <div class="inv-meta-item">
+                <span class="meta-label">Invoice Date</span>
+                <span class="meta-value">{{ invoice.date|date:"d/m/Y"|default:"—" }}</span>
+            </div>
+            <div class="inv-meta-item">
+                <span class="meta-label">Due Date</span>
+                <span class="meta-value {% if invoice.is_overdue %}text-danger{% endif %}">
+                    {{ invoice.due_date|date:"d/m/Y"|default:"—" }}
+                </span>
+            </div>
+        </div>
+        <div class="inv-meta-group">
+            <div class="inv-meta-item">
+                <span class="meta-label">Invoice Description</span>
+                <span class="meta-value">{{ invoice.description|default:"—" }}</span>
+            </div>
+            <div class="inv-meta-item">
+                <span class="meta-label">Project</span>
+                <span class="meta-value">
+                    {% if invoice.order %}
+                    <a href="{% url 'purchase_order_detail' invoice.order.id %}">{{ invoice.project_number|default:invoice.project_name|default:"—" }}</a>
+                    {% else %}
+                    {{ invoice.project_number|default:invoice.project_name|default:"—" }}
+                    {% endif %}
+                </span>
+            </div>
+            <div class="inv-meta-item">
+                <span class="meta-label">Sent to Accounting</span>
+                <span class="meta-value">{{ invoice.sent_to_accounting|date:"d/m/Y"|default:"—" }}</span>
+            </div>
+        </div>
+        {% if invoice.invoice_reference or invoice.client_po %}
+        <div class="inv-meta-group">
+            {% if invoice.invoice_reference %}
+            <div class="inv-meta-item">
+                <span class="meta-label">Invoice Reference</span>
+                <span class="meta-value">{{ invoice.invoice_reference }}</span>
+            </div>
+            {% endif %}
+            {% if invoice.client_po %}
+            <div class="inv-meta-item">
+                <span class="meta-label">Client PO</span>
+                <span class="meta-value">{{ invoice.client_po }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Line Items -->
+<div class="inv-detail-section">
+    <h3 class="inv-section-title">Line Items</h3>
+    <div class="inv-table-container" style="max-height: none;">
+        {% if line_items %}
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th style="text-align: right;">Rate</th>
+                    <th style="text-align: right;">Quantity</th>
+                    <th>Tax</th>
+                    <th style="text-align: right;">Tax Amount</th>
+                    <th style="text-align: right;">Line Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in line_items %}
+                <tr>
+                    <td>
+                        <span class="line-item-name">{{ item.name|default:"—" }}</span>
+                    </td>
+                    <td>
+                        <span class="line-item-desc">{{ item.description|default:"" }}</span>
+                    </td>
+                    <td class="number-cell">£{{ item.rate|floatformat:2|intcomma }}</td>
+                    <td class="number-cell">{{ item.quantity|floatformat:0|intcomma }}</td>
+                    <td>
+                        {% if item.tax_name %}
+                        <span class="tax-badge">{{ item.tax_name }}</span>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td class="number-cell">£{{ item.tax_amount|floatformat:2|intcomma }}</td>
+                    <td class="number-cell">£{{ item.line_total|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="inv-empty" style="padding: 30px;">
+            <p>No line items</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Financial Summary -->
+<div class="inv-detail-summary">
+    <div class="inv-summary-row">
+        <span class="summary-label">Subtotal</span>
+        <span class="summary-value">£{{ invoice.subtotal|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="inv-summary-row">
+        <span class="summary-label">Tax</span>
+        <span class="summary-value">£{{ invoice.total_tax|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="inv-summary-row total">
+        <span class="summary-label">Total</span>
+        <span class="summary-value">£{{ invoice.total|floatformat:2|intcomma }}</span>
+    </div>
+    {% if invoice.amount_paid > 0 %}
+    <div class="inv-summary-row paid">
+        <span class="summary-label">Paid</span>
+        <span class="summary-value">£{{ invoice.amount_paid|floatformat:2|intcomma }}</span>
+    </div>
+    {% endif %}
+    {% if invoice.amount_outstanding > 0 %}
+    <div class="inv-summary-row outstanding">
+        <span class="summary-label">Outstanding</span>
+        <span class="summary-value">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Payments -->
+{% if payments %}
+<div class="inv-detail-section">
+    <h3 class="inv-section-title">Payments</h3>
+    <div class="inv-table-container" style="max-height: none;">
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Name / Note</th>
+                    <th style="text-align: right;">Amount</th>
+                    <th>Sent to Accounting</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pmt in payments %}
+                <tr>
+                    <td>{{ pmt.date|date:"d/m/Y"|default:"—" }}</td>
+                    <td>{{ pmt.name|default:"—" }}</td>
+                    <td class="number-cell" style="color: #28a745; font-weight: 600;">£{{ pmt.amount|floatformat:2|intcomma }}</td>
+                    <td>{{ pmt.sent_to_accounting|date:"d/m/Y"|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

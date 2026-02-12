@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Invoices{% endblock %}
+{% block page_title %}Invoices{% endblock %}
+
+{% block nav_invoices_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/invoices.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<!-- Sync Bar -->
+<div class="inv-sync-bar">
+    <div class="inv-sync-info">
+        {% if last_sync %}
+        <span class="inv-sync-label">Last synced: {{ last_sync|date:"d M Y H:i" }}</span>
+        {% else %}
+        <span class="inv-sync-label">Never synced</span>
+        {% endif %}
+    </div>
+    <div class="inv-sync-actions">
+        <button class="inv-sync-btn secondary" id="full-sync-btn" onclick="syncInvoices(true)" title="Re-sync all invoices including payment data">
+            <i class="bi bi-arrow-clockwise"></i>
+            <span>Full Resync</span>
+        </button>
+        <button class="inv-sync-btn" id="sync-btn" onclick="syncInvoices(false)">
+            <i class="bi bi-arrow-repeat" id="sync-icon"></i>
+            <span id="sync-text">Sync from WorkGuru</span>
+        </button>
+    </div>
+</div>
+
+<!-- Sync Progress -->
+<div class="inv-sync-progress" id="sync-progress" style="display:none;">
+    <div class="inv-sync-progress-inner">
+        <div class="spinner"></div>
+        <span id="sync-message">Connecting to WorkGuru...</span>
+    </div>
+    <div class="inv-sync-log" id="sync-log"></div>
+</div>
+
+<!-- Stats Bar -->
+<div class="inv-stats-bar">
+    <div class="inv-stat-card">
+        <span class="stat-label">Total Invoices</span>
+        <span class="stat-value primary">{{ total_invoices|intcomma }}</span>
+    </div>
+    <div class="inv-stat-card">
+        <span class="stat-label">Total Value</span>
+        <span class="stat-value">£{{ total_value|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="inv-stat-card">
+        <span class="stat-label">Outstanding</span>
+        <span class="stat-value {% if total_outstanding > 0 %}danger{% else %}success{% endif %}">£{{ total_outstanding|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="inv-stat-card">
+        <span class="stat-label">Paid</span>
+        <span class="stat-value success">£{{ total_paid|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="inv-stat-card">
+        <span class="stat-label">Overdue</span>
+        <span class="stat-value {% if overdue_count > 0 %}danger{% else %}success{% endif %}">{{ overdue_count }}</span>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="inv-filter-bar">
+    <div class="inv-search-box">
+        <form method="get" action="">
+            {% if status_filter != 'all' %}
+            <input type="hidden" name="status" value="{{ status_filter }}">
+            {% endif %}
+            <input type="text" name="q" value="{{ search_query }}" placeholder="  Search invoices..." autocomplete="off">
+        </form>
+    </div>
+</div>
+
+<!-- Status Tabs -->
+<div class="inv-tabs">
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=all" 
+       class="inv-tab {% if status_filter == 'all' %}active{% endif %}">
+        All ({{ total_invoices }})
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=unpaid" 
+       class="inv-tab {% if status_filter == 'unpaid' %}active{% endif %}">
+        Unpaid ({{ unpaid_count }})
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=draft" 
+       class="inv-tab {% if status_filter == 'draft' %}active{% endif %}">
+        Draft
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=approved" 
+       class="inv-tab {% if status_filter == 'approved' %}active{% endif %}">
+        Approved
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=sent" 
+       class="inv-tab {% if status_filter == 'sent' %}active{% endif %}">
+        Sent
+    </a>
+</div>
+
+<!-- Invoices Table -->
+<div class="inv-table-container">
+    {% if invoices %}
+    <table class="inv-table" id="invoices-table">
+        <thead>
+            <tr>
+                <th>Invoice #</th>
+                <th>Client</th>
+                <th>Project</th>
+                <th>Date</th>
+                <th>Due Date</th>
+                <th>Status</th>
+                <th style="text-align: right;">Total</th>
+                <th style="text-align: right;">Outstanding</th>
+                <th>Payment</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr onclick="window.location='{% url 'invoice_detail' invoice.id %}'" style="cursor:pointer;">
+                <td>
+                    <a href="{% url 'invoice_detail' invoice.id %}" class="inv-number">{{ invoice.invoice_number }}</a>
+                </td>
+                <td>
+                    <span class="inv-client" title="{{ invoice.client_name }}">{{ invoice.client_name }}</span>
+                </td>
+                <td>
+                    {% if invoice.project_number %}
+                    <span class="inv-project">{{ invoice.project_number }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if invoice.date %}
+                    {{ invoice.date|date:"d M Y" }}
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+                <td>
+                    {% if invoice.due_date %}
+                    <span {% if invoice.is_overdue %}style="color: #dc3545; font-weight: 600;"{% endif %}>
+                        {{ invoice.due_date|date:"d M Y" }}
+                    </span>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="inv-status {{ invoice.status|lower }}">{{ invoice.status }}</span>
+                </td>
+                <td class="number-cell">
+                    £{{ invoice.total|floatformat:2|intcomma }}
+                </td>
+                <td class="number-cell">
+                    {% if invoice.amount_outstanding > 0 %}
+                    <span style="color: #dc3545;">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
+                    {% else %}
+                    <span style="color: #28a745;">£0.00</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if invoice.is_overdue %}
+                    <span class="inv-payment overdue">Overdue</span>
+                    {% elif invoice.payment_status == 'paid' %}
+                    <span class="inv-payment paid">Paid</span>
+                    {% elif invoice.payment_status == 'partial' %}
+                    <span class="inv-payment partial">Partial</span>
+                    {% else %}
+                    <span class="inv-payment unpaid">Unpaid</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="inv-empty">
+        <i class="bi bi-receipt"></i>
+        <p>No invoices found{% if not last_sync %} — click <strong>Sync from WorkGuru</strong> to import{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Sync via SSE ──────────────────────────────────────────────
+function syncInvoices(full) {
+    const btn = document.getElementById('sync-btn');
+    const fullBtn = document.getElementById('full-sync-btn');
+    const icon = document.getElementById('sync-icon');
+    const text = document.getElementById('sync-text');
+    const progress = document.getElementById('sync-progress');
+    const msgEl = document.getElementById('sync-message');
+    const logEl = document.getElementById('sync-log');
+
+    btn.disabled = true;
+    fullBtn.disabled = true;
+    icon.classList.add('spinning');
+    text.textContent = 'Syncing...';
+    progress.style.display = '';
+    logEl.innerHTML = '';
+
+    function addLog(msg) {
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement('div');
+        entry.className = 'sync-log-entry';
+        entry.innerHTML = '<span class="log-time">' + time + '</span> ' + msg;
+        logEl.appendChild(entry);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const url = '{% url "sync_invoices" %}' + (full ? '?full=1' : '');
+    const source = new EventSource(url);
+
+    source.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+
+        if (data.error) {
+            msgEl.textContent = 'Error: ' + data.error;
+            addLog('<span class="log-error">Error: ' + data.error + '</span>');
+            source.close();
+            setTimeout(() => location.reload(), 3000);
+            return;
+        }
+
+        if (data.message) {
+            msgEl.textContent = data.message;
+            addLog(data.message);
+        }
+
+        if (data.status === 'complete') {
+            const skipped = data.skipped || 0;
+            const summary =
+                'Done: ' + data.created + ' created, ' + data.updated + ' updated, ' +
+                skipped + ' skipped' +
+                (data.errors && data.errors.length ? ', ' + data.errors.length + ' errors' : '');
+            msgEl.textContent = summary;
+            addLog('<span class="log-complete">' + summary + '</span>');
+            source.close();
+            setTimeout(() => location.reload(), 2000);
+        }
+    };
+
+    source.onerror = function() {
+        source.close();
+        msgEl.textContent = 'Connection lost. Reloading...';
+        addLog('<span class="log-error">Connection lost</span>');
+        setTimeout(() => location.reload(), 2000);
+    };
+}
+
+// ── Client-side search filtering ──────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.querySelector('.inv-search-box input');
+    const table = document.getElementById('invoices-table');
+
+    if (searchInput && table) {
+        searchInput.addEventListener('input', function() {
+            const filter = this.value.toLowerCase();
+            const rows = table.querySelectorAll('tbody tr');
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(filter) ? '' : 'none';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,498 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Edit {{ role.get_name_display }} Role - Admin{% endblock %}
+
+{% block nav_admin_roles_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/admin_pages.css' %}" rel="stylesheet">
+<style>
+    .role-edit-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+
+    .role-edit-header .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 0.85rem;
+        transition: color 0.2s;
+    }
+
+    .role-edit-header .back-link:hover {
+        color: var(--accent-color);
+    }
+
+    .role-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .role-badge.admin { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    .role-badge.accounting { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+    .role-badge.director { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+    .role-badge.user { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+    .role-badge.franchise { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+
+    .description-field {
+        width: 100%;
+        padding: 10px 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 0.85rem;
+        resize: vertical;
+        min-height: 60px;
+        font-family: inherit;
+    }
+
+    .description-field:focus {
+        outline: none;
+        border-color: var(--accent-color);
+    }
+
+    /* Quick actions bar */
+    .quick-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+        padding: 12px 16px;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+    }
+
+    .quick-actions label {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-right: 8px;
+    }
+
+    .quick-btn {
+        padding: 4px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--card-bg);
+        color: var(--text-primary);
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .quick-btn:hover {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+
+    .quick-btn.danger:hover {
+        border-color: #ef4444;
+        color: #ef4444;
+    }
+
+    /* Permission sections */
+    .perm-section {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        margin-bottom: 16px;
+        overflow: hidden;
+    }
+
+    .perm-section-header {
+        padding: 14px 20px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .perm-section-header h3 {
+        margin: 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .perm-section-header .section-toggle-all {
+        display: flex;
+        gap: 6px;
+    }
+
+    .perm-section-header .section-toggle-btn {
+        padding: 2px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 0.7rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .perm-section-header .section-toggle-btn:hover {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+
+    /* Permission table */
+    .perm-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .perm-table thead th {
+        padding: 10px 16px;
+        text-align: center;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .perm-table thead th:first-child {
+        text-align: left;
+        width: 40%;
+    }
+
+    .perm-table tbody td {
+        padding: 10px 16px;
+        text-align: center;
+        font-size: 0.85rem;
+        color: var(--text-primary);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .perm-table tbody td:first-child {
+        text-align: left;
+        font-weight: 500;
+    }
+
+    .perm-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .perm-table tbody tr:hover {
+        background: var(--hover-bg);
+    }
+
+    .perm-table tbody tr.sub-page td:first-child {
+        padding-left: 40px;
+        color: var(--text-secondary);
+        font-weight: 400;
+    }
+
+    .perm-table tbody tr.sub-page td:first-child::before {
+        content: "└ ";
+        color: var(--border-color);
+    }
+
+    /* Custom checkbox */
+    .perm-checkbox {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        border: 2px solid var(--border-color);
+        border-radius: 4px;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.2s;
+        background: var(--card-bg);
+    }
+
+    .perm-checkbox:checked {
+        background: var(--accent-color);
+        border-color: var(--accent-color);
+    }
+
+    .perm-checkbox:checked::after {
+        content: "✓";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .perm-checkbox:hover {
+        border-color: var(--accent-color);
+    }
+
+    .perm-checkbox:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Save button */
+    .save-bar {
+        position: sticky;
+        bottom: 0;
+        background: var(--card-bg);
+        border-top: 1px solid var(--border-color);
+        padding: 16px 20px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        z-index: 10;
+        margin: 0 -20px -20px;
+        border-radius: 0 0 10px 10px;
+    }
+
+    .btn-save {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 24px;
+        background: var(--accent-color);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s;
+    }
+
+    .btn-save:hover {
+        opacity: 0.85;
+    }
+
+    .btn-cancel {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 24px;
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.2s;
+    }
+
+    .btn-cancel:hover {
+        border-color: var(--text-primary);
+        color: var(--text-primary);
+    }
+
+    /* Column header checkboxes */
+    .col-check-all {
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .col-check-all .col-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="role-edit-header">
+        <div>
+            <a href="{% url 'admin_roles' %}" class="back-link">
+                <i class="bi bi-arrow-left"></i> Back to Roles
+            </a>
+            <h1 style="margin: 8px 0 4px; font-size: 1.6rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 12px;">
+                <i class="bi bi-shield-lock" style="color: var(--accent-color);"></i>
+                Edit Role
+                <span class="role-badge {{ role.name }}">{{ role.get_name_display }}</span>
+            </h1>
+            <p class="page-subtitle" style="margin:0; color: var(--text-secondary); font-size: 0.9rem;">
+                Configure page access and CRUD permissions
+            </p>
+        </div>
+    </div>
+
+    <form method="post" id="permissionsForm">
+        {% csrf_token %}
+
+        <!-- Description -->
+        <div class="admin-card" style="margin-bottom: 20px;">
+            <div class="admin-card-header">
+                <h2>Role Description</h2>
+            </div>
+            <div class="admin-card-body">
+                <textarea name="description" class="description-field" placeholder="Describe the purpose of this role...">{{ role.description }}</textarea>
+            </div>
+        </div>
+
+        {% if role.name == 'admin' %}
+        <div class="admin-card" style="margin-bottom: 20px;">
+            <div class="admin-card-body" style="padding: 20px; display: flex; align-items: center; gap: 12px;">
+                <i class="bi bi-info-circle" style="font-size: 1.2rem; color: var(--accent-color);"></i>
+                <span style="color: var(--text-secondary); font-size: 0.85rem;">
+                    The <strong>Admin</strong> role always has full access to all pages and CRUD operations. Permissions below are shown for reference but cannot be restricted.
+                </span>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Quick Actions -->
+        {% if role.name != 'admin' %}
+        <div class="quick-actions">
+            <label>Quick Actions:</label>
+            <button type="button" class="quick-btn" onclick="toggleAll(true)">Select All</button>
+            <button type="button" class="quick-btn danger" onclick="toggleAll(false)">Deselect All</button>
+            <button type="button" class="quick-btn" onclick="toggleColumn('view', true)">All View</button>
+            <button type="button" class="quick-btn" onclick="toggleColumn('create', true)">All Create</button>
+            <button type="button" class="quick-btn" onclick="toggleColumn('edit', true)">All Edit</button>
+            <button type="button" class="quick-btn" onclick="toggleColumn('delete', true)">All Delete</button>
+        </div>
+        {% endif %}
+
+        <!-- Permissions by section -->
+        {% for section in sections_data %}
+        <div class="perm-section">
+            <div class="perm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <h3>
+                    <i class="bi bi-folder2-open"></i>
+                    {{ section.name }}
+                </h3>
+                {% if role.name != 'admin' %}
+                <div class="section-toggle-all" onclick="event.stopPropagation();">
+                    <button type="button" class="section-toggle-btn" onclick="toggleSection('{{ section.name }}', true)">All</button>
+                    <button type="button" class="section-toggle-btn" onclick="toggleSection('{{ section.name }}', false)">None</button>
+                </div>
+                {% endif %}
+            </div>
+            <table class="perm-table" data-section="{{ section.name }}">
+                <thead>
+                    <tr>
+                        <th>Page</th>
+                        <th>
+                            <div class="col-check-all">
+                                View
+                            </div>
+                        </th>
+                        <th>
+                            <div class="col-check-all">
+                                Create
+                            </div>
+                        </th>
+                        <th>
+                            <div class="col-check-all">
+                                Edit
+                            </div>
+                        </th>
+                        <th>
+                            <div class="col-check-all">
+                                Delete
+                            </div>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for page in section.pages %}
+                    <tr class="{% if 'details' in page.codename or 'detail' in page.codename %}sub-page{% endif %}">
+                        <td>{{ page.label }}</td>
+                        <td>
+                            <input type="checkbox" class="perm-checkbox perm-view"
+                                   name="{{ page.codename }}_view"
+                                   {% if page.can_view or role.name == 'admin' %}checked{% endif %}
+                                   {% if role.name == 'admin' %}disabled{% endif %}
+                                   data-page="{{ page.codename }}" data-perm="view">
+                        </td>
+                        <td>
+                            <input type="checkbox" class="perm-checkbox perm-create"
+                                   name="{{ page.codename }}_create"
+                                   {% if page.can_create or role.name == 'admin' %}checked{% endif %}
+                                   {% if role.name == 'admin' %}disabled{% endif %}
+                                   data-page="{{ page.codename }}" data-perm="create">
+                        </td>
+                        <td>
+                            <input type="checkbox" class="perm-checkbox perm-edit"
+                                   name="{{ page.codename }}_edit"
+                                   {% if page.can_edit or role.name == 'admin' %}checked{% endif %}
+                                   {% if role.name == 'admin' %}disabled{% endif %}
+                                   data-page="{{ page.codename }}" data-perm="edit">
+                        </td>
+                        <td>
+                            <input type="checkbox" class="perm-checkbox perm-delete"
+                                   name="{{ page.codename }}_delete"
+                                   {% if page.can_delete or role.name == 'admin' %}checked{% endif %}
+                                   {% if role.name == 'admin' %}disabled{% endif %}
+                                   data-page="{{ page.codename }}" data-perm="delete">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+
+        <!-- Save bar -->
+        <div class="save-bar">
+            <a href="{% url 'admin_roles' %}" class="btn-cancel">Cancel</a>
+            <button type="submit" class="btn-save">
+                <i class="bi bi-check-lg"></i> Save Permissions
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function toggleAll(checked) {
+        document.querySelectorAll('.perm-checkbox:not(:disabled)').forEach(cb => {
+            cb.checked = checked;
+        });
+    }
+
+    function toggleColumn(permType, checked) {
+        document.querySelectorAll(`.perm-${permType}:not(:disabled)`).forEach(cb => {
+            cb.checked = checked;
+        });
+    }
+
+    function toggleSection(sectionName, checked) {
+        const table = document.querySelector(`table[data-section="${sectionName}"]`);
+        if (table) {
+            table.querySelectorAll('.perm-checkbox:not(:disabled)').forEach(cb => {
+                cb.checked = checked;
+            });
+        }
+    }
+</script>
+{% endblock %}
