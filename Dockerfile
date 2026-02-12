@@ -27,6 +27,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Collect static files into /app/staticfiles
+# SECRET_KEY is needed by Django settings at build time; the real key is set at runtime via env vars
+RUN SECRET_KEY=build-placeholder python manage.py collectstatic --noinput
+
 # Search the name from WSGI in the settings file, ie WSGI_APPLICATION = 'stock_taking.wsgi.application'
 CMD ["gunicorn","stock_taking.wsgi:application","-w","3","-b",":8000"]
 
