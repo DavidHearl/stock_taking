@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% load static %}
+{% load custom_filters %}
+
+{% block title %}Ticket #{{ ticket.id }} - Atlas{% endblock %}
+
+{% block page_title %}Ticket #{{ ticket.id }}{% endblock %}
+
+{% block nav_tickets_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/tickets.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="ticket-detail-page">
+
+    <!-- Back link -->
+    <a href="{% url 'tickets_list' %}" class="back-link">
+        <i class="bi bi-arrow-left"></i> Back to Tickets
+    </a>
+
+    <!-- Ticket Header -->
+    <div class="ticket-detail-header">
+        <div class="ticket-detail-title-row">
+            <h2>{{ ticket.title }}</h2>
+            <div class="ticket-detail-actions">
+                {% if user.is_staff or user == ticket.submitted_by %}
+                <button type="button" class="btn-edit-ticket" title="Edit ticket" onclick="document.getElementById('editTicketModal').classList.add('active')">
+                    <i class="bi bi-pencil"></i> Edit
+                </button>
+                <form method="POST" action="{% url 'ticket_delete' ticket.id %}" style="margin: 0;" onsubmit="return confirm('Delete ticket #{{ ticket.id }}?');">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-delete-ticket" title="Delete ticket">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Ticket Info Grid -->
+    <div class="ticket-detail-grid">
+        <!-- Main Content -->
+        <div class="ticket-detail-main">
+            <div class="ticket-detail-card">
+                <h3>Description</h3>
+                <div class="ticket-detail-description">
+                    {{ ticket.description|linebreaksbr }}
+                </div>
+
+                {% if ticket.image %}
+                <div class="ticket-detail-image">
+                    <h3>Attachment</h3>
+                    <a href="{{ ticket.image.url }}" target="_blank">
+                        <img src="{{ ticket.image.url }}" alt="Ticket screenshot">
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="ticket-detail-sidebar">
+            <div class="ticket-detail-card">
+                <h3>Details</h3>
+                <div class="ticket-detail-meta">
+                    <div class="meta-row">
+                        <span class="meta-label">Status</span>
+                        {% if user.is_staff %}
+                        <form method="POST" action="{% url 'ticket_update_status' ticket.id %}" style="margin: 0;">
+                            {% csrf_token %}
+                            <select name="status" class="status-select" onchange="this.form.submit()">
+                                <option value="open" {% if ticket.status == 'open' %}selected{% endif %}>Open</option>
+                                <option value="in_progress" {% if ticket.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                                <option value="resolved" {% if ticket.status == 'resolved' %}selected{% endif %}>Resolved</option>
+                                <option value="closed" {% if ticket.status == 'closed' %}selected{% endif %}>Closed</option>
+                            </select>
+                        </form>
+                        {% else %}
+                        <span class="badge-status {{ ticket.status }}">{{ ticket.get_status_display }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Priority</span>
+                        <span class="badge-priority {{ ticket.priority }}">{{ ticket.get_priority_display }}</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Submitted By</span>
+                        <span class="meta-value">{{ ticket.submitted_by.get_full_name|default:ticket.submitted_by.username }}</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Created</span>
+                        <span class="meta-value">{{ ticket.created_at|date:"d M Y, H:i" }}</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Last Updated</span>
+                        <span class="meta-value">{{ ticket.updated_at|date:"d M Y, H:i" }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Ticket Modal -->
+<div class="modal-overlay" id="editTicketModal">
+    <div class="ticket-modal">
+        <div class="ticket-modal-header">
+            <h3><i class="bi bi-pencil-square"></i> Edit Ticket #{{ ticket.id }}</h3>
+            <button class="modal-close" onclick="document.getElementById('editTicketModal').classList.remove('active')">&times;</button>
+        </div>
+        <form method="POST" action="{% url 'ticket_edit' ticket.id %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="ticket-modal-body">
+                <div class="form-group">
+                    <label for="edit-title">Title</label>
+                    <input type="text" id="edit-title" name="title" value="{{ ticket.title }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-description">Description</label>
+                    <textarea id="edit-description" name="description" required>{{ ticket.description }}</textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-priority">Priority</label>
+                    <select id="edit-priority" name="priority">
+                        <option value="low" {% if ticket.priority == 'low' %}selected{% endif %}>Low</option>
+                        <option value="medium" {% if ticket.priority == 'medium' %}selected{% endif %}>Medium</option>
+                        <option value="high" {% if ticket.priority == 'high' %}selected{% endif %}>High</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="edit-image">Replace Screenshot (optional)</label>
+                    <input type="file" id="edit-image" name="image" accept="image/*">
+                </div>
+            </div>
+            <div class="ticket-modal-footer">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('editTicketModal').classList.remove('active')">Cancel</button>
+                <button type="submit" class="btn-submit-ticket">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

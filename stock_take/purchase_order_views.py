@@ -5,7 +5,7 @@ from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
 from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-from .models import BoardsPO, Order, OSDoor, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, StockItem, Supplier
+from .models import BoardsPO, Order, OSDoor, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, ProductCustomerAllocation, StockItem, Supplier
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -1616,3 +1616,97 @@ def _attach_boards_files_to_po(po, boards_po, user):
                 att.save()
         except Exception:
             pass
+
+
+@login_required
+def product_add_allocation(request, po_id, product_id):
+    """Add a customer/order allocation to a PO product line."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    product = get_object_or_404(PurchaseOrderProduct, id=product_id, purchase_order=po)
+
+    order_id = request.POST.get('order_id')
+    quantity = request.POST.get('quantity', '1')
+    notes = request.POST.get('notes', '').strip()
+
+    if not order_id:
+        return JsonResponse({'error': 'Order is required'}, status=400)
+
+    order = get_object_or_404(Order, id=order_id)
+
+    try:
+        qty = float(quantity)
+        if qty <= 0:
+            return JsonResponse({'error': 'Quantity must be positive'}, status=400)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid quantity'}, status=400)
+
+    allocation = ProductCustomerAllocation.objects.create(
+        product=product,
+        order=order,
+        quantity=qty,
+        notes=notes,
+    )
+
+    customer_name = f'{order.first_name} {order.last_name}'.strip()
+    if order.customer:
+        customer_name = str(order.customer) if order.customer.name else f'{order.customer.first_name} {order.customer.last_name}'.strip()
+    customer_name = customer_name or 'Unknown'
+
+    return JsonResponse({
+        'success': True,
+        'allocation': {
+            'id': allocation.id,
+            'order_id': order.id,
+            'sale_number': order.sale_number,
+            'customer_name': customer_name,
+            'quantity': float(allocation.quantity),
+            'notes': allocation.notes,
+        }
+    })
+
+
+@login_required
+def product_delete_allocation(request, po_id, product_id, allocation_id):
+    """Remove a customer allocation from a PO product line."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    product = get_object_or_404(PurchaseOrderProduct, id=product_id, purchase_order=po)
+    allocation = get_object_or_404(ProductCustomerAllocation, id=allocation_id, product=product)
+    allocation.delete()
+
+    return JsonResponse({'success': True})
+
+
+@login_required
+def order_search(request):
+    """Search orders by sale number or customer name. Returns JSON."""
+    q = request.GET.get('q', '').strip()
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+
+    orders = Order.objects.filter(
+        Q(sale_number__icontains=q) |
+        Q(first_name__icontains=q) |
+        Q(last_name__icontains=q) |
+        Q(customer__name__icontains=q) |
+        Q(customer__first_name__icontains=q) |
+        Q(customer__last_name__icontains=q)
+    ).select_related('customer').order_by('-order_date')[:20]
+
+    results = []
+    for o in orders:
+        name = f'{o.first_name} {o.last_name}'.strip()
+        if o.customer:
+            name = str(o.customer) if o.customer.name else f'{o.customer.first_name} {o.customer.last_name}'.strip()
+        results.append({
+            'id': o.id,
+            'sale_number': o.sale_number,
+            'customer_name': name or 'Unknown',
+        })
+
+    return JsonResponse({'results': results})

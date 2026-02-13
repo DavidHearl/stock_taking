@@ -50,3 +50,20 @@ def multiply(value, arg):
         return f"{float(value) * float(arg):.2f}"
     except (ValueError, TypeError):
         return '0.00'
+
+
+@register.filter
+def short_timesince(value):
+    """Show hours ago if under 48h, otherwise days ago."""
+    from django.utils import timezone
+    if not value:
+        return ''
+    now = timezone.now()
+    diff = now - value
+    total_hours = int(diff.total_seconds() / 3600)
+    if total_hours < 1:
+        return 'just now'
+    if total_hours < 48:
+        return f'{total_hours}h ago'
+    days = diff.days
+    return f'{days} days ago'

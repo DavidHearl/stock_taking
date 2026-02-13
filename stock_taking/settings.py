@@ -227,3 +227,6 @@ if CSRF_TRUSTED_ORIGINS_STRING:
     CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in CSRF_TRUSTED_ORIGINS_STRING.split(',') if origin.strip()]
 else:
     CSRF_TRUSTED_ORIGINS = ['https://atlas-gxbq5.ondigitalocean.app']
+
+# Claim Service API Key (for automated PDF uploads from remote PC)
+CLAIM_UPLOAD_API_KEY = os.getenv('CLAIM_UPLOAD_API_KEY', 'change-me-in-production')

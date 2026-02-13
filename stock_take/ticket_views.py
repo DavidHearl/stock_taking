@@ -22,7 +22,7 @@ def tickets_list(request):
                 submitted_by=request.user,
             )
             messages.success(request, f'Ticket #{ticket.id} created successfully.')
-            return redirect('tickets_list')
+            return redirect('ticket_detail', ticket_id=ticket.id)
         else:
             messages.error(request, 'Title and description are required.')
     
@@ -41,6 +41,16 @@ def tickets_list(request):
 
 
 @login_required
+def ticket_detail(request, ticket_id):
+    """View a single ticket's details."""
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+    context = {
+        'ticket': ticket,
+    }
+    return render(request, 'stock_take/ticket_detail.html', context)
+
+
+@login_required
 def ticket_update_status(request, ticket_id):
     """Update a ticket's status."""
     if request.method == 'POST':
@@ -50,7 +60,7 @@ def ticket_update_status(request, ticket_id):
             ticket.status = new_status
             ticket.save()
             messages.success(request, f'Ticket #{ticket.id} updated to {ticket.get_status_display()}.')
-    return redirect('tickets_list')
+    return redirect('ticket_detail', ticket_id=ticket_id)
 
 
 @login_required
@@ -60,7 +70,7 @@ def ticket_edit(request, ticket_id):
 
     if request.user != ticket.submitted_by and not request.user.is_staff:
         messages.error(request, 'You can only edit your own tickets.')
-        return redirect('tickets_list')
+        return redirect('ticket_detail', ticket_id=ticket_id)
 
     if request.method == 'POST':
         title = request.POST.get('title', '').strip()
@@ -79,7 +89,7 @@ def ticket_edit(request, ticket_id):
         else:
             messages.error(request, 'Title and description are required.')
 
-    return redirect('tickets_list')
+    return redirect('ticket_detail', ticket_id=ticket_id)
 
 
 @login_required

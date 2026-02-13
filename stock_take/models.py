@@ -733,6 +733,21 @@ class PurchaseOrderAttachment(models.Model):
         return f"{self.purchase_order.display_number} - {self.filename}"
 
 
+class ProductCustomerAllocation(models.Model):
+    """Links a quantity of a PO product line to a specific order/customer."""
+    product = models.ForeignKey(PurchaseOrderProduct, on_delete=models.CASCADE, related_name='allocations')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='po_allocations')
+    quantity = models.DecimalField(max_digits=10, decimal_places=4, default=1)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.product} -> {self.order.sale_number} (x{self.quantity})"
+
+
 class Remedial(models.Model):
     """Remedial work orders linked to original orders"""
     original_order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='remedials')
@@ -1512,3 +1527,23 @@ class Ticket(models.Model):
     
     def __str__(self):
         return f"#{self.id} - {self.title}"
+
+
+class ClaimDocument(models.Model):
+    """PDF document for the Claim Service."""
+    title = models.CharField(max_length=255, help_text='Display title for the claim')
+    file = models.FileField(upload_to='claim_documents/')
+    customer_name = models.CharField(max_length=255, blank=True, help_text='Customer name for search')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def filename(self):
+        import os
+        return os.path.basename(self.file.name) if self.file else ''

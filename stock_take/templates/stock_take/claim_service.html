@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Claim Service - Atlas{% endblock %}
+
+{% block page_title %}Claim Service{% endblock %}
+
+{% block nav_claim_service_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/claim_service.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="claims-page">
+
+    <!-- Header -->
+    <div class="claims-header">
+        <div class="claims-search-bar">
+            <i class="bi bi-search"></i>
+            <input type="text"
+                   id="claims-search"
+                   placeholder="Search claims by name or filename..."
+                   value="{{ search_query }}"
+                   autocomplete="off">
+            {% if search_query %}
+            <a href="{% url 'claim_service' %}" class="search-clear" title="Clear search">&times;</a>
+            {% endif %}
+        </div>
+        <div class="claims-header-right">
+            <span class="claims-count">{{ documents|length }}{% if search_query %} / {{ total_count }}{% endif %} documents</span>
+            <button class="btn-upload-claim" onclick="document.getElementById('uploadModal').classList.add('active')">
+                <i class="bi bi-cloud-upload"></i> Upload PDF
+            </button>
+        </div>
+    </div>
+
+    <!-- Documents Grid -->
+    {% if documents %}
+    <div class="claims-grid" id="claims-grid">
+        {% for doc in documents %}
+        <div class="claim-card" data-title="{{ doc.title|lower }}" data-customer="{{ doc.customer_name|lower }}" data-filename="{{ doc.filename|lower }}">
+            <a href="{{ doc.file.url }}" target="_blank" class="claim-card-link">
+                <div class="claim-card-icon">
+                    <i class="bi bi-file-earmark-pdf"></i>
+                </div>
+                <div class="claim-card-info">
+                    <h3 class="claim-title">{{ doc.title }}</h3>
+                    {% if doc.customer_name %}
+                    <span class="claim-customer"><i class="bi bi-person"></i> {{ doc.customer_name }}</span>
+                    {% endif %}
+                    <span class="claim-filename">{{ doc.filename }}</span>
+                </div>
+            </a>
+            <div class="claim-card-meta">
+                <span class="claim-date">{{ doc.uploaded_at|date:"d M Y" }}</span>
+                <button class="claim-delete-btn" onclick="event.preventDefault(); deleteClaim({{ doc.id }}, this)" title="Delete">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="claims-empty">
+        <i class="bi bi-file-earmark-pdf"></i>
+        <h3>No claim documents found</h3>
+        {% if search_query %}
+        <p>No documents match "<strong>{{ search_query }}</strong>". Try a different search term.</p>
+        {% else %}
+        <p>Upload your first claim PDF to get started.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Upload Modal -->
+<div class="modal-overlay" id="uploadModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Upload Claim Document</h2>
+            <button class="modal-close" onclick="document.getElementById('uploadModal').classList.remove('active')">&times;</button>
+        </div>
+        <form id="upload-form" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="claim-file">PDF File</label>
+                <div class="file-drop-zone" id="drop-zone">
+                    <i class="bi bi-cloud-upload"></i>
+                    <p>Drop PDF here or <span class="file-browse">browse</span></p>
+                    <span class="file-selected" id="file-selected"></span>
+                    <input type="file" id="claim-file" name="file" accept=".pdf" style="display:none;">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="claim-title">Title</label>
+                <input type="text" id="claim-title" name="title" placeholder="Auto-filled from filename if blank">
+            </div>
+            <div class="form-group">
+                <label for="claim-customer">Customer Name</label>
+                <input type="text" id="claim-customer" name="customer_name" placeholder="Optional - helps with search">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('uploadModal').classList.remove('active')">Cancel</button>
+                <button type="submit" class="btn-submit">
+                    <i class="bi bi-upload"></i> Upload
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Live search filtering
+const searchInput = document.getElementById('claims-search');
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        const q = this.value.toLowerCase().trim();
+        const cards = document.querySelectorAll('.claim-card');
+        let visibleCount = 0;
+
+        cards.forEach(card => {
+            const title = card.dataset.title || '';
+            const customer = card.dataset.customer || '';
+            const filename = card.dataset.filename || '';
+            const match = !q || title.includes(q) || customer.includes(q) || filename.includes(q);
+            card.style.display = match ? '' : 'none';
+            if (match) visibleCount++;
+        });
+    });
+}
+
+// File drop zone
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('claim-file');
+const fileSelected = document.getElementById('file-selected');
+const titleInput = document.getElementById('claim-title');
+
+if (dropZone) {
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            onFileSelected(e.dataTransfer.files[0]);
+        }
+    });
+
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length) {
+            onFileSelected(fileInput.files[0]);
+        }
+    });
+}
+
+function onFileSelected(file) {
+    fileSelected.textContent = file.name;
+    dropZone.classList.add('has-file');
+    // Auto-fill title from filename if blank
+    if (!titleInput.value.trim()) {
+        titleInput.value = file.name.replace(/\.pdf$/i, '');
+    }
+}
+
+// Upload form submit
+const uploadForm = document.getElementById('upload-form');
+if (uploadForm) {
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const submitBtn = this.querySelector('.btn-submit');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Uploading...';
+
+        fetch('{% url "claim_upload" %}', {
+            method: 'POST',
+            body: formData,
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert(data.error || 'Upload failed');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="bi bi-upload"></i> Upload';
+            }
+        })
+        .catch(err => {
+            alert('Error: ' + err.message);
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-upload"></i> Upload';
+        });
+    });
+}
+
+// Delete claim
+function deleteClaim(docId, btn) {
+    if (!confirm('Delete this claim document?')) return;
+
+    const card = btn.closest('.claim-card');
+    const formData = new FormData();
+    formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+    fetch(`/claims/${docId}/delete/`, {
+        method: 'POST',
+        body: formData,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.95)';
+            setTimeout(() => card.remove(), 200);
+        } else {
+            alert(data.error || 'Failed to delete');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+</script>
+{% endblock %}
