@@ -4,14 +4,20 @@ from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_update_status, ticket_edit, ticket_delete
+from .profile_views import user_profile, user_profile_save, user_change_password
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
+
+    # User Profile
+    path('profile/', user_profile, name='user_profile'),
+    path('profile/save/', user_profile_save, name='user_profile_save'),
+    path('profile/change-password/', user_change_password, name='user_change_password'),
     path('stock/', views.stock_list, name='stock_list'),
     path('import/', views.import_csv, name='import_csv'),
     path('export/', views.export_csv, name='export_csv'),
@@ -32,13 +38,21 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/add-product/', purchase_order_add_product, name='purchase_order_add_product'),
     path('purchase-order/<int:po_id>/download-pdf/', purchase_order_download_pdf, name='purchase_order_download_pdf'),
     path('purchase-order/<int:po_id>/send-email/', purchase_order_send_email, name='purchase_order_send_email'),
+    path('purchase-order/<int:po_id>/update-status/', purchase_order_update_status, name='purchase_order_update_status'),
     path('api/product-search/', product_search, name='product_search'),
     path('purchase-order/<int:po_id>/delete-product/<int:product_id>/', purchase_order_delete_product, name='purchase_order_delete_product'),
+    path('purchase-order/<int:po_id>/upload-attachment/', purchase_order_upload_attachment, name='purchase_order_upload_attachment'),
+    path('purchase-order/<int:po_id>/delete-attachment/<int:attachment_id>/', purchase_order_delete_attachment, name='purchase_order_delete_attachment'),
+    path('purchase-order/<int:po_id>/attach-boards-files/', purchase_order_attach_boards_files, name='purchase_order_attach_boards_files'),
+    path('purchase-order/<int:po_id>/delete/', purchase_order_delete, name='purchase_order_delete'),
+    path('purchase-order/<int:po_id>/media-files/', purchase_order_list_media_files, name='purchase_order_list_media_files'),
+    path('purchase-order/<int:po_id>/attach-media-file/', purchase_order_attach_media_file, name='purchase_order_attach_media_file'),
     
     # Suppliers
     path('suppliers/', suppliers_list, name='suppliers_list'),
     path('suppliers/create/', supplier_create, name='supplier_create'),
     path('supplier/<int:supplier_id>/', supplier_detail, name='supplier_detail'),
+    path('supplier/<int:supplier_id>/save/', supplier_save, name='supplier_save'),
     
     # Customers
     path('customers/', customers_list, name='customers_list'),
@@ -140,6 +154,8 @@ urlpatterns = [
     path('order/<int:order_id>/create-workguru-os-doors-po/', views.create_workguru_os_doors_po, name='create_workguru_os_doors_po'),
     path('order/<int:order_id>/push-os-doors-to-workguru-po/', views.push_os_doors_to_workguru_po, name='push_os_doors_to_workguru_po'),
     path('order/<int:order_id>/generate-pnx/', views.generate_and_attach_pnx, name='generate_and_attach_pnx'),
+    path('order/<int:order_id>/regenerate-boards-files/', views.regenerate_boards_po_files, name='regenerate_boards_po_files'),
+    path('order/<int:order_id>/create-boards-purchase-order/', create_boards_purchase_order, name='create_boards_purchase_order'),
     path('order/<int:order_id>/confirm-pnx/', views.confirm_pnx_generation, name='confirm_pnx_generation'),
     path('delete-pnx-items/', views.delete_pnx_items, name='delete_pnx_items'),
     path('order/<int:order_id>/generate-accessories-csv/', views.generate_and_upload_accessories_csv, name='generate_and_upload_accessories_csv'),

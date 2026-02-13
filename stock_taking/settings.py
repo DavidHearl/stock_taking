@@ -31,7 +31,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', '1') in ('1', 'True', 'true')
 
-ALLOWED_HOSTS = ['*', 'stock-taking.mediaservers.co.uk']
+ALLOWED_HOSTS = ['*', 'atlas-gxbq5.ondigitalocean.app']
 
 SITE_ID=1
 
@@ -114,7 +114,8 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ('true', '1')
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'david.hearl@sliderobes.com')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'orders@sliderobes.com')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'david.hearl@sliderobes.com')
+PO_FROM_EMAIL = os.getenv('PO_FROM_EMAIL', 'orders@sliderobes.com')
 
 WSGI_APPLICATION = 'stock_taking.wsgi.application'
 
@@ -225,4 +226,4 @@ CSRF_TRUSTED_ORIGINS_STRING = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
 if CSRF_TRUSTED_ORIGINS_STRING:
     CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in CSRF_TRUSTED_ORIGINS_STRING.split(',') if origin.strip()]
 else:
-    CSRF_TRUSTED_ORIGINS = ['https://stock-taking.mediaservers.co.uk']
+    CSRF_TRUSTED_ORIGINS = ['https://atlas-gxbq5.ondigitalocean.app']

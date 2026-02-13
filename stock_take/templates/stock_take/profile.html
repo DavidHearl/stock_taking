@@ -1,0 +1,225 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}My Profile{% endblock %}
+
+{% block page_title %}My Profile{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/profile.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="profile-page">
+
+    <div id="save-notification" class="profile-notification" style="display:none;"></div>
+
+    <!-- Account Information -->
+    <div class="profile-section">
+        <div class="profile-section-header">
+            <h2><i class="bi bi-person"></i> Account Information</h2>
+            <div class="profile-actions">
+                <button class="btn-edit-profile" id="btn-edit-info" onclick="toggleEditInfo()"><i class="bi bi-pencil"></i> Edit</button>
+                <button class="btn-save-profile" id="btn-save-info" style="display:none;" onclick="saveProfile()"><i class="bi bi-check-lg"></i> Save</button>
+                <button class="btn-cancel-profile" id="btn-cancel-info" style="display:none;" onclick="cancelEditInfo()"><i class="bi bi-x-lg"></i> Cancel</button>
+            </div>
+        </div>
+        <div class="profile-info-grid">
+            <div class="profile-info-row">
+                <span class="profile-label">Username</span>
+                <span class="profile-value view-val">{{ profile_user.username }}</span>
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">First Name</span>
+                <span class="profile-value view-val">{{ profile_user.first_name|default:"-" }}</span>
+                <input class="profile-edit-input edit-val" data-field="first_name" value="{{ profile_user.first_name|default:'' }}" placeholder="Enter first name" style="display:none;">
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">Last Name</span>
+                <span class="profile-value view-val">{{ profile_user.last_name|default:"-" }}</span>
+                <input class="profile-edit-input edit-val" data-field="last_name" value="{{ profile_user.last_name|default:'' }}" placeholder="Enter last name" style="display:none;">
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">Email</span>
+                <span class="profile-value view-val">
+                    {% if profile_user.email %}
+                    <a href="mailto:{{ profile_user.email }}">{{ profile_user.email }}</a>
+                    {% else %}-{% endif %}
+                </span>
+                <input class="profile-edit-input edit-val" data-field="email" type="email" value="{{ profile_user.email|default:'' }}" placeholder="Enter email" style="display:none;">
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">Role</span>
+                <span class="profile-value">
+                    {% if user_role_display %}
+                    <span class="profile-role-badge">{{ user_role_display }}</span>
+                    {% else %}
+                    <span class="profile-role-badge no-role">No Role</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">Date Joined</span>
+                <span class="profile-value">{{ profile_user.date_joined|date:"d M Y" }}</span>
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">Last Login</span>
+                <span class="profile-value">{{ profile_user.last_login|date:"d M Y, H:i"|default:"-" }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="profile-section">
+        <div class="profile-section-header">
+            <h2><i class="bi bi-shield-lock"></i> Change Password</h2>
+        </div>
+        <div class="password-form">
+            <div class="profile-info-row">
+                <span class="profile-label">Current Password</span>
+                <input class="profile-edit-input" id="current_password" type="password" placeholder="Enter current password">
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">New Password</span>
+                <input class="profile-edit-input" id="new_password" type="password" placeholder="Enter new password">
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-label">Confirm Password</span>
+                <input class="profile-edit-input" id="confirm_password" type="password" placeholder="Confirm new password">
+            </div>
+            <div class="password-actions">
+                <button class="btn-save-profile" onclick="changePassword()"><i class="bi bi-check-lg"></i> Update Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preferences -->
+    <div class="profile-section">
+        <div class="profile-section-header">
+            <h2><i class="bi bi-gear"></i> Preferences</h2>
+        </div>
+        <div class="profile-info-grid">
+            <div class="profile-info-row">
+                <span class="profile-label">Theme</span>
+                <span class="profile-value">
+                    {% if profile.dark_mode %}
+                    <span class="profile-theme-badge dark"><i class="bi bi-moon-fill"></i> Dark Mode</span>
+                    {% else %}
+                    <span class="profile-theme-badge light"><i class="bi bi-sun-fill"></i> Light Mode</span>
+                    {% endif %}
+                    <small class="text-muted" style="margin-left: 8px;">Use the <i class="bi bi-sun-fill"></i> button in the top bar to toggle</small>
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleEditInfo() {
+    document.querySelectorAll('.profile-info-grid .view-val').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.profile-info-grid .edit-val').forEach(el => el.style.display = 'block');
+    document.getElementById('btn-edit-info').style.display = 'none';
+    document.getElementById('btn-save-info').style.display = 'inline-flex';
+    document.getElementById('btn-cancel-info').style.display = 'inline-flex';
+}
+
+function cancelEditInfo() {
+    document.querySelectorAll('.profile-info-grid .view-val').forEach(el => el.style.display = '');
+    document.querySelectorAll('.profile-info-grid .edit-val').forEach(el => el.style.display = 'none');
+    document.getElementById('btn-edit-info').style.display = 'inline-flex';
+    document.getElementById('btn-save-info').style.display = 'none';
+    document.getElementById('btn-cancel-info').style.display = 'none';
+    document.querySelectorAll('.edit-val').forEach(input => { input.value = input.defaultValue; });
+    hideNotification();
+}
+
+function saveProfile() {
+    const data = {};
+    document.querySelectorAll('.edit-val[data-field]').forEach(input => {
+        data[input.dataset.field] = input.value;
+    });
+
+    fetch("{% url 'user_profile_save' %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Profile updated successfully!', 'success');
+            document.querySelectorAll('.edit-val[data-field]').forEach(input => {
+                const row = input.closest('.profile-info-row');
+                const viewVal = row.querySelector('.view-val');
+                if (viewVal) {
+                    const val = input.value || '-';
+                    if (input.dataset.field === 'email' && input.value) {
+                        viewVal.innerHTML = '<a href="mailto:' + input.value + '">' + input.value + '</a>';
+                    } else {
+                        viewVal.textContent = val;
+                    }
+                }
+                input.defaultValue = input.value;
+            });
+            cancelEditInfo();
+        } else {
+            showNotification('Error: ' + result.error, 'error');
+        }
+    })
+    .catch(() => showNotification('Error saving profile.', 'error'));
+}
+
+function changePassword() {
+    const current = document.getElementById('current_password').value;
+    const newPw = document.getElementById('new_password').value;
+    const confirm = document.getElementById('confirm_password').value;
+
+    if (!current || !newPw || !confirm) {
+        showNotification('Please fill in all password fields.', 'error');
+        return;
+    }
+
+    fetch("{% url 'user_change_password' %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({
+            current_password: current,
+            new_password: newPw,
+            confirm_password: confirm
+        })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Password changed successfully!', 'success');
+            document.getElementById('current_password').value = '';
+            document.getElementById('new_password').value = '';
+            document.getElementById('confirm_password').value = '';
+        } else {
+            showNotification(result.error, 'error');
+        }
+    })
+    .catch(() => showNotification('Error changing password.', 'error'));
+}
+
+function showNotification(message, type) {
+    const notif = document.getElementById('save-notification');
+    notif.textContent = message;
+    notif.className = 'profile-notification ' + type;
+    notif.style.display = 'block';
+    if (type === 'success') {
+        setTimeout(() => hideNotification(), 3000);
+    }
+}
+
+function hideNotification() {
+    document.getElementById('save-notification').style.display = 'none';
+}
+</script>
+{% endblock %}

@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder
 
 import csv
 import io
@@ -1822,9 +1822,11 @@ def reimport_pnx(request, boards_po_id):
 
 
 def regenerate_pnx_csv_files(boards_po):
-    """Regenerate both PNX and CSV files from current PNX items"""
-    import os
-    from django.conf import settings
+    """Regenerate both PNX and CSV files from current PNX items.
+    Uses Django's storage backend (ContentFile + .save()) so files are
+    uploaded to the configured storage (e.g. DigitalOcean Spaces).
+    """
+    from django.core.files.base import ContentFile
     
     # Get all PNX items for this boards PO
     pnx_items = boards_po.pnx_items.all().order_by('barcode')
@@ -1862,11 +1864,9 @@ def regenerate_pnx_csv_files(boards_po):
         ]
         pnx_output.write(';'.join(row) + '\n')
     
-    # Write directly to existing PNX file path (overwrite, don't create new)
-    if boards_po.file:
-        pnx_path = boards_po.file.path
-        with open(pnx_path, 'w', encoding='utf-8') as f:
-            f.write(pnx_output.getvalue())
+    # Save PNX file via Django storage backend
+    pnx_filename = f'Boards_Order_{boards_po.po_number}.pnx'
+    boards_po.file.save(pnx_filename, ContentFile(pnx_output.getvalue().encode('utf-8')), save=False)
     
     # Generate CSV content (comma-delimited) - exact header order as specified
     csv_output = io.StringIO()
@@ -1892,11 +1892,40 @@ def regenerate_pnx_csv_files(boards_po):
             item.prfid2,
         ])
     
-    # Write directly to existing CSV file path (overwrite, don't create new)
-    if boards_po.csv_file:
-        csv_path = boards_po.csv_file.path
-        with open(csv_path, 'w', encoding='utf-8', newline='') as f:
-            f.write(csv_output.getvalue())
+    # Save CSV file via Django storage backend
+    csv_filename = f'Boards_Order_{boards_po.po_number}.csv'
+    boards_po.csv_file.save(csv_filename, ContentFile(csv_output.getvalue().encode('utf-8')), save=False)
+    
+    boards_po.save()
+
+
+@login_required
+def regenerate_boards_po_files(request, order_id):
+    """Regenerate PNX and CSV files from database PNX items and upload to storage."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+    try:
+        order = get_object_or_404(Order, id=order_id)
+
+        if not order.boards_po:
+            return JsonResponse({'success': False, 'error': 'No Boards PO assigned to this order'})
+
+        boards_po = order.boards_po
+
+        if not boards_po.pnx_items.exists():
+            return JsonResponse({'success': False, 'error': 'No PNX items found in the database for this PO'})
+
+        regenerate_pnx_csv_files(boards_po)
+
+        return JsonResponse({
+            'success': True,
+            'message': 'PNX and CSV files regenerated successfully',
+            'pnx_url': boards_po.file.url if boards_po.file else None,
+            'csv_url': boards_po.csv_file.url if boards_po.csv_file else None,
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 
 
 @login_required
@@ -2247,7 +2276,7 @@ def update_both_files(request, boards_po_id):
             boards_po.csv_file.save(csv_path.split('/')[-1], ContentFile(csv_content.encode('utf-8')), save=False)
         else:
             # Create CSV file if it doesn't exist
-            csv_filename = f'PO_{boards_po.po_number}.csv'
+            csv_filename = f'Boards_Order_{boards_po.po_number}.csv'
             boards_po.csv_file.save(csv_filename, ContentFile(csv_content.encode('utf-8')), save=False)
         
         boards_po.save()
@@ -2357,7 +2386,7 @@ def generate_csv_file(request, boards_po_id):
         csv_content = '\n'.join(csv_lines)
         
         # Save CSV file
-        csv_filename = f'PO_{boards_po.po_number}.csv'
+        csv_filename = f'Boards_Order_{boards_po.po_number}.csv'
         boards_po.csv_file.save(csv_filename, ContentFile(csv_content.encode('utf-8')), save=True)
         
         return JsonResponse({'success': True, 'message': 'CSV file generated successfully'})
@@ -2923,6 +2952,11 @@ def order_details(request, order_id):
             Q(total_orders=0) | Q(total_orders__gt=models.F('finished_orders'))
         ).order_by('-po_number')
     
+    # Check if a local PurchaseOrder exists for this order's boards PO
+    boards_purchase_order = None
+    if order.boards_po:
+        boards_purchase_order = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -2956,6 +2990,7 @@ def order_details(request, order_id):
         'other_expense_cost': other_expense_cost,
         'manufacturing_by_worker': dict(manufacturing_by_worker),
         'designers': Designer.objects.all().order_by('name'),
+        'boards_purchase_order': boards_purchase_order,
     })
 
 def completed_stock_takes(request):

@@ -42,6 +42,16 @@
             </div>
         </div>
         <div class="po-detail-actions">
+            {% if purchase_order.status == 'Draft' %}
+            <button class="btn btn-sm btn-approve" id="approve-btn" onclick="updatePOStatus('Approved')">
+                <i class="bi bi-check-circle"></i> Approve
+            </button>
+            {% endif %}
+            {% if purchase_order.status == 'Approved' %}
+            <button class="btn btn-sm btn-revert" id="revert-btn" onclick="updatePOStatus('Draft')">
+                <i class="bi bi-arrow-counterclockwise"></i> Revert to Draft
+            </button>
+            {% endif %}
             {% if purchase_order.status != 'Received' %}
             <button class="btn btn-sm btn-receive" id="receive-btn" onclick="receivePO()">
                 <i class="bi bi-box-arrow-in-down"></i> Receive
@@ -65,6 +75,9 @@
             <a href="{% url 'purchase_orders_list' %}" class="btn btn-sm btn-secondary">
                 <i class="bi bi-arrow-left"></i> Back
             </a>
+            <button class="btn btn-sm btn-danger" onclick="deletePO()" title="Delete this purchase order">
+                <i class="bi bi-trash"></i> Delete
+            </button>
         </div>
     </div>
 
@@ -114,12 +127,12 @@
             <div class="po-overview-item">
                 <span class="po-overview-label">Issue Date</span>
                 <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="issue_date" type="text" value="{{ purchase_order.issue_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+                <input class="po-edit-input po-edit-val" data-field="issue_date" type="date" value="{{ purchase_order.issue_date|default:'' }}" style="display:none;">
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Expected Date</span>
                 <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="expected_date" type="text" value="{{ purchase_order.expected_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+                <input class="po-edit-input po-edit-val" data-field="expected_date" type="date" value="{{ purchase_order.expected_date|default:'' }}" style="display:none;">
             </div>
         </div>
         <div class="po-overview-row">
@@ -484,11 +497,81 @@
     </div>
     {% endif %}
 
+    <!-- Attachments Section -->
+    <div class="po-products-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3><i class="bi bi-paperclip"></i> Attachments</h3>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm btn-info" onclick="openMediaFilesModal()" title="Attach files from the app (PNX, CSV, etc.)">
+                    <i class="bi bi-folder2-open"></i> Attach from Media
+                </button>
+                <button class="btn btn-sm btn-primary" onclick="document.getElementById('attachment-file-input').click()">
+                    <i class="bi bi-upload"></i> Upload File
+                </button>
+                <form id="upload-attachment-form" style="display:none;">
+                    {% csrf_token %}
+                    <input type="file" id="attachment-file-input" onchange="uploadAttachment(this)">
+                </form>
+            </div>
+        </div>
+        <div id="attachments-list">
+            {% if attachments %}
+            <div class="po-table-container">
+                <table class="po-products-table">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Description</th>
+                            <th>Uploaded By</th>
+                            <th>Date</th>
+                            <th style="width: 80px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="attachments-tbody">
+                        {% for att in attachments %}
+                        <tr id="attachment-row-{{ att.id }}">
+                            <td>
+                                <a href="{{ att.file.url }}" download class="po-boards-file-link">
+                                    <i class="bi bi-file-earmark-arrow-down"></i> {{ att.filename }}
+                                </a>
+                            </td>
+                            <td>{{ att.description }}</td>
+                            <td>{{ att.uploaded_by }}</td>
+                            <td>{{ att.uploaded_at|date:"d-m-Y H:i" }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" onclick="deleteAttachment({{ att.id }})" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted" id="no-attachments-msg">No attachments yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
     {% endif %}
 </div>
 
 <!-- Product search dropdown (outside table container to avoid overflow clipping) -->
 <div class="product-search-results" id="product-search-results" style="display:none;"></div>
+
+<!-- Attach from Media Modal -->
+<div class="modal-overlay" id="media-files-modal" style="display:none;" onclick="closeMediaFilesModal(event)">
+    <div class="modal-dialog" style="max-width: 700px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-folder2-open"></i> Attach from Media</h3>
+            <button class="modal-close" onclick="closeMediaFilesModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="media-files-list">
+            <p class="text-muted">Loading...</p>
+        </div>
+    </div>
+</div>
 
 <!-- Send Email Modal -->
 <div class="modal-overlay" id="send-modal" style="display:none;" onclick="closeSendModal(event)">
@@ -897,6 +980,10 @@ function sendPOEmail() {
         if (result.success) {
             showNotification(result.message || 'Email sent successfully!', 'success');
             closeSendModal();
+            // Reload to reflect auto-approved status
+            if (result.new_status) {
+                setTimeout(() => location.reload(), 1000);
+            }
         } else {
             showNotification('Error: ' + (result.error || 'Failed to send'), 'error');
         }
@@ -916,5 +1003,190 @@ document.addEventListener('keydown', function(e) {
         document.getElementById('send-modal').style.display = 'none';
     }
 });
+
+function updatePOStatus(newStatus) {
+    const action = newStatus === 'Approved' ? 'approve' : 'revert to draft';
+    if (!confirm(`Are you sure you want to ${action} this purchase order?`)) return;
+
+    fetch('{% url "purchase_order_update_status" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ status: newStatus }),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification(`Purchase order ${result.status.toLowerCase()} successfully.`, 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification('Error: ' + (result.error || 'Failed'), 'error');
+        }
+    })
+    .catch(err => showNotification('Network error: ' + err.message, 'error'));
+}
+
+// ---- Attachments ----
+function uploadAttachment(input) {
+    if (!input.files.length) return;
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('description', '');
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/upload-attachment/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('File uploaded successfully', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification(data.error || 'Upload failed', 'error');
+        }
+    })
+    .catch(err => showNotification('Upload error: ' + err.message, 'error'));
+
+    input.value = '';
+}
+
+function deleteAttachment(attachmentId) {
+    if (!confirm('Delete this attachment?')) return;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-attachment/${attachmentId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById(`attachment-row-${attachmentId}`);
+            if (row) row.remove();
+            showNotification('Attachment deleted', 'success');
+        } else {
+            showNotification(data.error || 'Delete failed', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+function attachBoardsFiles() {
+    if (!confirm('Attach the PNX and CSV files from the linked boards PO?')) return;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/attach-boards-files/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification(data.message, 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification(data.error || 'Failed to attach files', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+function deletePO() {
+    if (!confirm('Are you sure you want to delete Purchase Order {{ purchase_order.display_number }}? This cannot be undone.')) return;
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/purchase-order/{{ purchase_order.workguru_id }}/delete/';
+    const csrf = document.createElement('input');
+    csrf.type = 'hidden';
+    csrf.name = 'csrfmiddlewaretoken';
+    csrf.value = '{{ csrf_token }}';
+    form.appendChild(csrf);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function openMediaFilesModal() {
+    const modal = document.getElementById('media-files-modal');
+    const list = document.getElementById('media-files-list');
+    list.innerHTML = '<p class="text-muted">Loading...</p>';
+    modal.style.display = 'flex';
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/media-files/`)
+    .then(r => r.json())
+    .then(data => {
+        if (!data.files || data.files.length === 0) {
+            list.innerHTML = '<p class="text-muted">No media files found for this PO.</p>';
+            return;
+        }
+        let html = '<table class="po-products-table"><thead><tr><th>File</th><th>Description</th><th style="width:120px;"></th></tr></thead><tbody>';
+        data.files.forEach(f => {
+            const disabled = f.already_attached ? 'disabled' : '';
+            const btnText = f.already_attached ? 'Attached' : 'Attach';
+            const btnClass = f.already_attached ? 'btn-secondary' : 'btn-primary';
+            html += `<tr>
+                <td><i class="bi bi-file-earmark"></i> ${f.filename}</td>
+                <td>${f.description}</td>
+                <td><button class="btn btn-sm ${btnClass}" ${disabled}
+                    onclick="attachMediaFile(this, '${f.source}', '${f.field}', ${f.order_id || 'null'})">
+                    <i class="bi bi-paperclip"></i> ${btnText}</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    })
+    .catch(err => {
+        list.innerHTML = `<p class="text-danger">Error loading files: ${err.message}</p>`;
+    });
+}
+
+function closeMediaFilesModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('media-files-modal').style.display = 'none';
+}
+
+function attachMediaFile(btn, source, field, orderId) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Attaching...';
+
+    const payload = { source: source, field: field };
+    if (orderId) payload.order_id = orderId;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/attach-media-file/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            btn.innerHTML = '<i class="bi bi-check"></i> Attached';
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-secondary');
+            showNotification(`${data.attachment.filename} attached`, 'success');
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach';
+            showNotification(data.error || 'Failed', 'error');
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach';
+        showNotification('Error: ' + err.message, 'error');
+    });
+}
 </script>
 {% endblock %}

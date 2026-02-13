@@ -758,6 +758,11 @@
                                     <i class="bi bi-x-circle-fill text-danger"></i>
                                 {% endif %}
                             </span>
+                            {% if order.boards_po.pnx_items.count %}
+                                <button type="button" class="btn btn-warning btn-sm" onclick="regenerateBoardsFiles()" title="Regenerate PNX and CSV files from database">
+                                    <i class="bi bi-arrow-clockwise"></i> Regenerate Files
+                                </button>
+                            {% endif %}
                         </div>
                     {% endif %}
                     {% if order.customer_number and order.boards_po %}
@@ -772,6 +777,17 @@
                             </button>
                         {% endif %}
                         {% if order_pnx_items and order.boards_po.po_number %}
+                            {% if boards_purchase_order %}
+                                <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn btn-sm btn-secondary" title="View Purchase Order">
+                                    <i class="bi bi-eye"></i> View PO
+                                </a>
+                            {% else %}
+                                <a href="{% url 'create_boards_purchase_order' order.id %}" class="btn btn-sm btn-success"
+                                   onclick="return confirm('Create a local Purchase Order for {{ order.boards_po.po_number }} and attach the board files?');"
+                                   title="Create a local PO and attach PNX/CSV files">
+                                    <i class="bi bi-file-earmark-plus"></i> Create PO
+                                </a>
+                            {% endif %}
                             <a href="{% url 'push_boards_to_workguru_po' order.id %}" class="btn btn-info btn-sm"
                                onclick="return confirm('Push {{ order_pnx_items|length }} board items and files to WorkGuru PO {{ order.boards_po.po_number }}?');">
                                 <i class="bi bi-cloud-upload"></i> Push Boards to PO
@@ -3351,6 +3367,35 @@ function addBoardItem() {
     })
     .catch(error => {
         showAlert('Error adding board', 'danger');
+    });
+}
+
+// Regenerate PNX and CSV files from database items
+function regenerateBoardsFiles() {
+    if (!confirm('This will regenerate the PNX and CSV files from the database records and upload them to storage. Continue?')) {
+        return;
+    }
+
+    const orderId = {{ order.id }};
+    fetch(`/order/${orderId}/regenerate-boards-files/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showAlert(data.error || 'Failed to regenerate files', 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error regenerating files', 'danger');
     });
 }
 

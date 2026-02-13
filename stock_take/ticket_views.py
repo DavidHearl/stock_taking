@@ -28,9 +28,9 @@ def tickets_list(request):
     
     tickets = Ticket.objects.all()
     
-    # Filter by status
-    status_filter = request.GET.get('status', '')
-    if status_filter:
+    # Filter by status – default to 'open' so the page loads with open tickets
+    status_filter = request.GET.get('status', 'open')
+    if status_filter and status_filter != 'all':
         tickets = tickets.filter(status=status_filter)
     
     context = {

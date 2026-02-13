@@ -717,6 +717,22 @@ class PurchaseOrderProduct(models.Model):
         return f"{self.purchase_order.display_number} - {self.sku} - {self.name}"
 
 
+class PurchaseOrderAttachment(models.Model):
+    """File attachments on a purchase order (PNX, CSV, PDF, etc.)"""
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='po_attachments/')
+    filename = models.CharField(max_length=255)
+    description = models.CharField(max_length=255, blank=True)
+    uploaded_by = models.CharField(max_length=200, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"{self.purchase_order.display_number} - {self.filename}"
+
+
 class Remedial(models.Model):
     """Remedial work orders linked to original orders"""
     original_order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='remedials')

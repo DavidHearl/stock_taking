@@ -26,19 +26,30 @@
         </div>
     </div>
 
-    <!-- Fits Per Week Chart -->
-    <div class="chart-container">
-        <h3><i class="bi bi-calendar-week"></i> Fits Per Week</h3>
-        <div class="chart-wrapper">
-            <canvas id="fitsPerWeekChart"></canvas>
+    <!-- Weekly Charts Row -->
+    <div class="charts-row">
+        <!-- Fits Per Week Chart -->
+        <div class="chart-container">
+            <h3><i class="bi bi-calendar-week"></i> Fits Per Week</h3>
+            <div class="chart-wrapper">
+                <canvas id="fitsPerWeekChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Job Profit Per Week Chart -->
+        <div class="chart-container">
+            <h3><i class="bi bi-currency-pound"></i> Job Profit Per Week</h3>
+            <div class="chart-wrapper">
+                <canvas id="profitPerWeekChart"></canvas>
+            </div>
         </div>
     </div>
 
-    <!-- Job Profit Per Week Chart -->
+    <!-- Monthly Board Costs Chart -->
     <div class="chart-container">
-        <h3><i class="bi bi-currency-pound"></i> Job Profit Per Week</h3>
+        <h3><i class="bi bi-box-seam"></i> Monthly Board Costs</h3>
         <div class="chart-wrapper">
-            <canvas id="profitPerWeekChart"></canvas>
+            <canvas id="boardCostsChart"></canvas>
         </div>
     </div>
 </div>
@@ -235,6 +246,92 @@ document.addEventListener('DOMContentLoaded', function() {
             interaction: {
                 intersect: false,
                 mode: 'index'
+            }
+        }
+    });
+
+    // Monthly Board Costs Chart
+    const boardCtx = document.getElementById('boardCostsChart').getContext('2d');
+    const boardChartData = {{ board_cost_chart_data|safe }};
+    
+    // Create gradient for board costs
+    const boardGradient = boardCtx.createLinearGradient(0, 0, 0, 400);
+    boardGradient.addColorStop(0, 'rgba(255, 159, 64, 0.4)');
+    boardGradient.addColorStop(1, 'rgba(255, 159, 64, 0.05)');
+    
+    new Chart(boardCtx, {
+        type: 'bar',
+        data: {
+            labels: boardChartData.labels,
+            datasets: [{
+                label: 'Board Costs',
+                data: boardChartData.values,
+                backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                borderColor: '#ff9f40',
+                borderWidth: 2,
+                borderRadius: 6,
+                hoverBackgroundColor: 'rgba(255, 159, 64, 0.8)',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#ff9f40',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            return 'Board Cost: £' + context.parsed.y.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 11
+                        },
+                        callback: function(value) {
+                            return '£' + value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(108, 117, 125, 0.1)',
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 10
+                        },
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: {
+                        display: false,
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                }
             }
         }
     });

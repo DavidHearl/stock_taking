@@ -5,14 +5,26 @@ from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
 from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-from .models import BoardsPO, Order, OSDoor, PurchaseOrder, PurchaseOrderProduct, StockItem, Supplier
+from .models import BoardsPO, Order, OSDoor, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, StockItem, Supplier
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
 import json
 import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _format_date(date_str):
+    """Convert ISO date string (e.g. 2026-02-11T00:00:00+00:00) to DD-MM-YYYY."""
+    if not date_str:
+        return date_str
+    try:
+        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        return dt.strftime('%d-%m-%Y')
+    except (ValueError, AttributeError):
+        return date_str
 
 
 def _build_po_defaults_from_list(po_data):
@@ -29,10 +41,10 @@ def _build_po_defaults_from_list(po_data):
         'supplier_id': po_data.get('supplierId'),
         'supplier_name': po_data.get('supplierName'),
         'supplier_invoice_number': po_data.get('supplierInvoiceNumber'),
-        'issue_date': po_data.get('issueDate'),
-        'expected_date': po_data.get('expectedDate'),
-        'received_date': po_data.get('receivedDate'),
-        'invoice_date': po_data.get('invoiceDate'),
+        'issue_date': _format_date(po_data.get('issueDate')),
+        'expected_date': _format_date(po_data.get('expectedDate')),
+        'received_date': _format_date(po_data.get('receivedDate')),
+        'invoice_date': _format_date(po_data.get('invoiceDate')),
         'status': po_data.get('status', 'Draft'),
         'total': po_data.get('total') or 0,
         'forecast_total': po_data.get('forecastTotal') or 0,
@@ -77,19 +89,19 @@ def _update_po_from_detail(po, detail_data):
     po.is_landed_costs_po = detail_data.get('isLandedCostsPo', False)
     po.stock_used_on_projects = detail_data.get('stockUsedOnProjects', False)
     
-    # Dates from detail (may be ISO format)
-    po.approved_date = detail_data.get('approvedDate')
-    po.invoice_due_date = detail_data.get('invoiceDueDate')
+    # Dates from detail (may be ISO format) - format to DD-MM-YYYY
+    po.approved_date = _format_date(detail_data.get('approvedDate'))
+    po.invoice_due_date = _format_date(detail_data.get('invoiceDueDate'))
     
     # Detail gives richer date info (ISO format) - update if present
     if detail_data.get('issueDate'):
-        po.issue_date = detail_data.get('issueDate')
+        po.issue_date = _format_date(detail_data.get('issueDate'))
     if detail_data.get('expectedDate'):
-        po.expected_date = detail_data.get('expectedDate')
+        po.expected_date = _format_date(detail_data.get('expectedDate'))
     if detail_data.get('receivedDate'):
-        po.received_date = detail_data.get('receivedDate')
+        po.received_date = _format_date(detail_data.get('receivedDate'))
     if detail_data.get('invoiceDate'):
-        po.invoice_date = detail_data.get('invoiceDate')
+        po.invoice_date = _format_date(detail_data.get('invoiceDate'))
     
     # Delivery detail
     po.suburb = detail_data.get('suburb') or po.suburb
@@ -259,10 +271,15 @@ def sync_purchase_orders_from_workguru():
         products_synced = 0
         suppliers_synced = 0
         
-        for po_data in po_list:
+        # Get all existing PO workguru_ids to skip them
+        existing_ids = set(PurchaseOrder.objects.values_list('workguru_id', flat=True))
+        new_pos = [po_data for po_data in po_list if po_data.get('id') not in existing_ids]
+        api.log(f"Skipping {len(po_list) - len(new_pos)} existing POs, syncing {len(new_pos)} new POs\n")
+        
+        for po_data in new_pos:
             wg_id = po_data.get('id')
             
-            # Create/update PO from list data
+            # Create PO from list data (only new ones)
             po, created = PurchaseOrder.objects.update_or_create(
                 workguru_id=wg_id,
                 defaults=_build_po_defaults_from_list(po_data),
@@ -327,14 +344,22 @@ def sync_purchase_orders_stream(request):
             
             yield f"data: {json.dumps({'status': 'started', 'total': total})}\n\n"
             
+            # Skip POs already in the system
+            existing_ids = set(PurchaseOrder.objects.values_list('workguru_id', flat=True))
+            new_pos = [po_data for po_data in po_list if po_data.get('id') not in existing_ids]
+            skipped = total - len(new_pos)
+            total = len(new_pos)
+            
+            yield f"data: {json.dumps({'status': 'progress', 'synced': 0, 'total': total, 'skipped': skipped, 'products': 0, 'suppliers': 0})}\n\n"
+            
             synced = 0
             products_total = 0
             suppliers_total = 0
             
-            for i, po_data in enumerate(po_list):
+            for i, po_data in enumerate(new_pos):
                 wg_id = po_data.get('id')
                 
-                # Save PO from list data using shared helper
+                # Create PO from list data (only new ones)
                 po, _ = PurchaseOrder.objects.update_or_create(
                     workguru_id=wg_id,
                     defaults=_build_po_defaults_from_list(po_data),
@@ -541,6 +566,7 @@ def purchase_order_detail(request, po_id):
         'related_pos': related_pos,
         'os_door_items': os_door_items,
         'supplier_email': supplier_email,
+        'attachments': purchase_order.attachments.all(),
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -1005,6 +1031,62 @@ def supplier_detail(request, supplier_id):
 
 
 @login_required
+def supplier_save(request, supplier_id):
+    """Save edited supplier details via AJAX POST"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    supplier = get_object_or_404(Supplier, workguru_id=supplier_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    editable_fields = [
+        'name', 'email', 'phone', 'fax', 'website', 'abn',
+        'address_1', 'address_2', 'city', 'state', 'postcode', 'country',
+        'currency', 'credit_limit', 'credit_days', 'credit_terms_type',
+        'price_tier', 'supplier_tax_rate', 'estimate_lead_time',
+    ]
+
+    update_fields = []
+    for field in editable_fields:
+        if field in data:
+            val = data[field]
+            if field == 'credit_limit':
+                try:
+                    val = float(val) if val else 0
+                except (ValueError, TypeError):
+                    val = 0
+            elif field == 'estimate_lead_time':
+                try:
+                    val = int(val) if val else None
+                except (ValueError, TypeError):
+                    val = None
+            elif field == 'email':
+                val = val if val and '@' in val else None
+            elif field == 'website':
+                if val and not val.startswith(('http://', 'https://')):
+                    val = f'https://{val}' if val and '.' in val else None
+                elif not val:
+                    val = None
+            else:
+                val = val or None
+            setattr(supplier, field, val)
+            update_fields.append(field)
+
+    if 'is_active' in data:
+        supplier.is_active = data['is_active']
+        update_fields.append('is_active')
+
+    if update_fields:
+        supplier.save(update_fields=update_fields)
+
+    return JsonResponse({'success': True})
+
+
+@login_required
 def purchase_order_download_pdf(request, po_id):
     """Download a Purchase Order as a PDF"""
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
@@ -1065,18 +1147,472 @@ def purchase_order_send_email(request, po_id):
         email = EmailMessage(
             subject=subject,
             body=body,
-            from_email=settings.DEFAULT_FROM_EMAIL,
+            from_email=settings.PO_FROM_EMAIL,
             to=[recipient],
             cc=cc_list if cc_list else None,
         )
         email.attach(pdf_filename, pdf_buffer.read(), 'application/pdf')
         email.send(fail_silently=False)
 
+        # Auto-approve the PO when email is sent
+        if po.status == 'Draft':
+            po.status = 'Approved'
+            po.approved_by_name = request.user.get_full_name() or request.user.username
+            po.approved_date = datetime.now().strftime('%d-%m-%Y')
+            po.save(update_fields=['status', 'approved_by_name', 'approved_date'])
+        
         logger.info(f'PO {po.display_number} emailed to {recipient} by {request.user}')
         return JsonResponse({
             'success': True,
             'message': f'Purchase order sent to {recipient}',
+            'new_status': po.status,
         })
     except Exception as e:
         logger.error(f'Failed to send PO {po.display_number} email: {e}')
         return JsonResponse({'error': f'Failed to send email: {str(e)}'}, status=500)
+
+
+@login_required
+def purchase_order_update_status(request, po_id):
+    """Update a PO's status (approve or revert to draft) via AJAX."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    new_status = data.get('status', '').strip()
+
+    if new_status == 'Approved':
+        po.status = 'Approved'
+        po.approved_by_name = request.user.get_full_name() or request.user.username
+        po.approved_date = datetime.now().strftime('%d-%m-%Y')
+        po.save(update_fields=['status', 'approved_by_name', 'approved_date'])
+    elif new_status == 'Draft':
+        po.status = 'Draft'
+        po.approved_by_name = None
+        po.approved_date = None
+        po.save(update_fields=['status', 'approved_by_name', 'approved_date'])
+    else:
+        return JsonResponse({'error': f'Invalid status: {new_status}'}, status=400)
+
+    return JsonResponse({'success': True, 'status': po.status})
+
+
+@login_required
+def purchase_order_delete(request, po_id):
+    """Delete a purchase order and all its products/attachments"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from django.contrib import messages
+    from django.shortcuts import redirect
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    display_number = po.display_number
+
+    # Delete attachment files from storage
+    for att in po.attachments.all():
+        try:
+            att.file.delete(save=False)
+        except Exception:
+            pass
+
+    po.delete()
+
+    messages.success(request, f'Purchase Order {display_number} deleted.')
+    return redirect('purchase_orders_list')
+
+
+@login_required
+def purchase_order_list_media_files(request, po_id):
+    """Return a JSON list of media files available to attach from the app.
+    Sources: linked BoardsPO (PNX, CSV) and linked Order (original_csv, processed_csv).
+    """
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    files = []
+    already_attached = set(po.attachments.values_list('filename', flat=True))
+
+    # 1. BoardsPO files
+    boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+    if boards_po:
+        if boards_po.file:
+            fname = boards_po.file.name.split('/')[-1]
+            files.append({
+                'source': 'boards_po',
+                'field': 'file',
+                'filename': fname,
+                'description': 'PNX board order file',
+                'already_attached': fname in already_attached,
+            })
+        if boards_po.csv_file:
+            fname = boards_po.csv_file.name.split('/')[-1]
+            files.append({
+                'source': 'boards_po',
+                'field': 'csv_file',
+                'filename': fname,
+                'description': 'CSV board order file',
+                'already_attached': fname in already_attached,
+            })
+
+    # 2. Linked Order files
+    linked_order = None
+    if po.project_id:
+        linked_order = Order.objects.filter(workguru_id=str(po.project_id)).first()
+
+    if linked_order:
+        if linked_order.original_csv:
+            fname = linked_order.original_csv.name.split('/')[-1]
+            files.append({
+                'source': 'order',
+                'field': 'original_csv',
+                'order_id': linked_order.id,
+                'filename': fname,
+                'description': 'Original accessories CSV',
+                'already_attached': fname in already_attached,
+            })
+        if linked_order.processed_csv:
+            fname = linked_order.processed_csv.name.split('/')[-1]
+            files.append({
+                'source': 'order',
+                'field': 'processed_csv',
+                'order_id': linked_order.id,
+                'filename': fname,
+                'description': 'Processed accessories CSV',
+                'already_attached': fname in already_attached,
+            })
+
+    # 3. Also check all orders linked to this boards_po for their CSVs
+    if boards_po:
+        for order in boards_po.orders.all():
+            if linked_order and order.id == linked_order.id:
+                continue  # Already handled above
+            if order.original_csv:
+                fname = order.original_csv.name.split('/')[-1]
+                files.append({
+                    'source': 'order',
+                    'field': 'original_csv',
+                    'order_id': order.id,
+                    'filename': fname,
+                    'description': f'Original CSV ({order.sale_number})',
+                    'already_attached': fname in already_attached,
+                })
+            if order.processed_csv:
+                fname = order.processed_csv.name.split('/')[-1]
+                files.append({
+                    'source': 'order',
+                    'field': 'processed_csv',
+                    'order_id': order.id,
+                    'filename': fname,
+                    'description': f'Processed CSV ({order.sale_number})',
+                    'already_attached': fname in already_attached,
+                })
+
+    # Sort: files matching this PO number first, then alphabetically
+    po_number = po.display_number or ''
+    files.sort(key=lambda f: (0 if po_number and po_number in f['filename'] else 1, f['filename']))
+
+    return JsonResponse({'files': files})
+
+
+@login_required
+def purchase_order_attach_media_file(request, po_id):
+    """Attach a specific media file from the app to this purchase order."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from django.core.files.base import ContentFile
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    source = data.get('source')
+    field = data.get('field')
+    order_id = data.get('order_id')
+
+    file_obj = None
+    description = ''
+
+    if source == 'boards_po':
+        boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+        if not boards_po:
+            return JsonResponse({'error': 'BoardsPO not found'}, status=404)
+        if field == 'file':
+            file_obj = boards_po.file
+            description = 'PNX board order file'
+        elif field == 'csv_file':
+            file_obj = boards_po.csv_file
+            description = 'CSV board order file'
+    elif source == 'order' and order_id:
+        order = get_object_or_404(Order, id=order_id)
+        if field == 'original_csv':
+            file_obj = order.original_csv
+            description = f'Original accessories CSV ({order.sale_number})'
+        elif field == 'processed_csv':
+            file_obj = order.processed_csv
+            description = f'Processed accessories CSV ({order.sale_number})'
+
+    if not file_obj:
+        return JsonResponse({'error': 'File not found'}, status=404)
+
+    try:
+        file_obj.open('rb')
+        content = file_obj.read()
+        file_obj.close()
+        fname = file_obj.name.split('/')[-1]
+
+        # Don't attach duplicates
+        if po.attachments.filter(filename=fname).exists():
+            return JsonResponse({'error': f'{fname} is already attached'}, status=400)
+
+        att = PurchaseOrderAttachment(
+            purchase_order=po,
+            filename=fname,
+            description=description,
+            uploaded_by=request.user.get_full_name() or request.user.username,
+        )
+        att.file.save(fname, ContentFile(content), save=False)
+        att.save()
+
+        return JsonResponse({
+            'success': True,
+            'attachment': {
+                'id': att.id,
+                'filename': att.filename,
+                'description': att.description,
+                'uploaded_by': att.uploaded_by,
+                'uploaded_at': att.uploaded_at.strftime('%d-%m-%Y %H:%M'),
+                'url': att.file.url,
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+def purchase_order_upload_attachment(request, po_id):
+    """Upload a file attachment to a purchase order"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    uploaded_file = request.FILES.get('file')
+    if not uploaded_file:
+        return JsonResponse({'error': 'No file provided'}, status=400)
+
+    description = request.POST.get('description', '').strip()
+
+    attachment = PurchaseOrderAttachment.objects.create(
+        purchase_order=po,
+        file=uploaded_file,
+        filename=uploaded_file.name,
+        description=description,
+        uploaded_by=request.user.get_full_name() or request.user.username,
+    )
+
+    return JsonResponse({
+        'success': True,
+        'attachment': {
+            'id': attachment.id,
+            'filename': attachment.filename,
+            'description': attachment.description,
+            'uploaded_by': attachment.uploaded_by,
+            'uploaded_at': attachment.uploaded_at.strftime('%d-%m-%Y %H:%M'),
+            'url': attachment.file.url,
+        }
+    })
+
+
+@login_required
+def purchase_order_delete_attachment(request, po_id, attachment_id):
+    """Delete a file attachment from a purchase order"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    attachment = get_object_or_404(PurchaseOrderAttachment, id=attachment_id, purchase_order=po)
+
+    try:
+        attachment.file.delete(save=False)
+    except Exception:
+        pass
+    attachment.delete()
+
+    return JsonResponse({'success': True})
+
+
+@login_required
+def purchase_order_attach_boards_files(request, po_id):
+    """Attach PNX and CSV files from the linked BoardsPO to this purchase order"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from django.core.files.base import ContentFile
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+
+    if not boards_po:
+        return JsonResponse({'error': f'No BoardsPO found matching {po.display_number}'}, status=404)
+
+    attached = []
+
+    if boards_po.file:
+        try:
+            boards_po.file.open('rb')
+            content = boards_po.file.read()
+            boards_po.file.close()
+            fname = boards_po.file.name.split('/')[-1]
+            att = PurchaseOrderAttachment(
+                purchase_order=po,
+                filename=fname,
+                description='PNX board order file',
+                uploaded_by=request.user.get_full_name() or request.user.username,
+            )
+            att.file.save(fname, ContentFile(content), save=False)
+            att.save()
+            attached.append(fname)
+        except Exception as e:
+            logger.error(f'Error attaching PNX file: {e}')
+
+    if boards_po.csv_file:
+        try:
+            boards_po.csv_file.open('rb')
+            content = boards_po.csv_file.read()
+            boards_po.csv_file.close()
+            fname = boards_po.csv_file.name.split('/')[-1]
+            att = PurchaseOrderAttachment(
+                purchase_order=po,
+                filename=fname,
+                description='CSV board order file',
+                uploaded_by=request.user.get_full_name() or request.user.username,
+            )
+            att.file.save(fname, ContentFile(content), save=False)
+            att.save()
+            attached.append(fname)
+        except Exception as e:
+            logger.error(f'Error attaching CSV file: {e}')
+
+    if not attached:
+        return JsonResponse({'error': 'No files available to attach'}, status=400)
+
+    return JsonResponse({
+        'success': True,
+        'message': f'Attached {len(attached)} file(s): {", ".join(attached)}',
+    })
+
+
+@login_required
+def create_boards_purchase_order(request, order_id):
+    """Create a local PurchaseOrder for boards and attach PNX/CSV files.
+    This does NOT push to WorkGuru — it creates the local PO record only.
+    """
+    import re
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from django.core.files.base import ContentFile
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.boards_po:
+        messages.error(request, 'This order does not have a BoardsPO assigned.')
+        return redirect('order_details', order_id=order_id)
+
+    # Check if a PurchaseOrder already exists for this BoardsPO number
+    existing = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
+    if existing:
+        # Attach files if not already attached
+        _attach_boards_files_to_po(existing, order.boards_po, request.user)
+        messages.info(request, f'Purchase Order {existing.display_number} already exists. Files attached.')
+        return redirect('order_details', order_id=order_id)
+
+    # Build customer name
+    if order.customer:
+        customer_name = f'{order.customer.first_name} {order.customer.last_name}'.strip()
+    else:
+        customer_name = f'{order.first_name} {order.last_name}'.strip()
+
+    # Generate a unique workguru_id for manual POs (800000+ range)
+    max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 800000)
+
+    # Use the boards_po po_number as the display number
+    po_number = order.boards_po.po_number
+
+    # Get Carnehill supplier if it exists
+    supplier = Supplier.objects.filter(name__icontains='Carnehill').first()
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_id,
+        number=po_number,
+        display_number=po_number,
+        description=f'Boards order for {customer_name} - Sale {order.sale_number}',
+        supplier_id=supplier.workguru_id if supplier else None,
+        supplier_name=supplier.name if supplier else 'Carnehill Joinery Ltd',
+        project_id=int(order.workguru_id) if order.workguru_id else None,
+        project_number=order.sale_number,
+        project_name=customer_name,
+        status='Draft',
+        currency='GBP',
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
+
+    # Attach PNX and CSV files
+    _attach_boards_files_to_po(po, order.boards_po, request.user)
+
+    messages.success(request, f'Purchase Order {po_number} created with board files attached.')
+    return redirect('order_details', order_id=order_id)
+
+
+def _attach_boards_files_to_po(po, boards_po, user):
+    """Helper to attach PNX/CSV from a BoardsPO to a PurchaseOrder."""
+    from django.core.files.base import ContentFile
+
+    user_name = user.get_full_name() or user.username
+
+    if boards_po.file:
+        try:
+            boards_po.file.open('rb')
+            content = boards_po.file.read()
+            boards_po.file.close()
+            fname = boards_po.file.name.split('/')[-1]
+            # Avoid duplicates
+            if not po.attachments.filter(filename=fname).exists():
+                att = PurchaseOrderAttachment(
+                    purchase_order=po,
+                    filename=fname,
+                    description='PNX board order file',
+                    uploaded_by=user_name,
+                )
+                att.file.save(fname, ContentFile(content), save=False)
+                att.save()
+        except Exception:
+            pass
+
+    if boards_po.csv_file:
+        try:
+            boards_po.csv_file.open('rb')
+            content = boards_po.csv_file.read()
+            boards_po.csv_file.close()
+            fname = boards_po.csv_file.name.split('/')[-1]
+            if not po.attachments.filter(filename=fname).exists():
+                att = PurchaseOrderAttachment(
+                    purchase_order=po,
+                    filename=fname,
+                    description='CSV board order file',
+                    uploaded_by=user_name,
+                )
+                att.file.save(fname, ContentFile(content), save=False)
+                att.save()
+        except Exception:
+            pass
