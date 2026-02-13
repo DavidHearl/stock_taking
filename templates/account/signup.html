@@ -1,24 +1,193 @@
 {% extends "base.html" %}
-{% load i18n %}
-{% block title %}{% trans "Sign Up" %} - {{ block.super }}{% endblock %}
+{% load i18n static %}
+{% block title %}{% trans "Create Account" %} - {{ block.super }}{% endblock %}
+
+{% block extra_css %}
+<style>
+	.content-wrapper {
+		display: flex;
+		justify-content: center;
+	}
+
+	.signup-card {
+		background: var(--card-bg);
+		border: 1px solid var(--border-color);
+		border-radius: 16px;
+		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+		max-width: 440px;
+		width: 100%;
+		overflow: hidden;
+	}
+
+	.signup-header {
+		display: flex;
+		justify-content: center;
+		background: var(--bg-secondary);
+		padding: 40px;
+		text-align: center;
+		border-bottom: 1px solid var(--border-color);
+	}
+
+	.signup-logo {
+		max-width: 200px;
+		height: auto;
+	}
+
+	.signup-logo.logo-dark-bg {
+		display: block;
+	}
+
+	.signup-logo.logo-light-bg {
+		display: none;
+	}
+
+	body.light-mode .signup-logo.logo-dark-bg {
+		display: none;
+	}
+
+	body.light-mode .signup-logo.logo-light-bg {
+		display: block;
+	}
+
+	.signup-body {
+		padding: 24px 40px;
+	}
+
+	.signup-body h3 {
+		font-size: 1.3rem;
+		font-weight: 600;
+		color: var(--text-primary);
+		margin: 0 0 24px 0;
+		text-align: center;
+	}
+
+	.signup-form .form-group {
+		margin-bottom: 20px;
+	}
+
+	.signup-form label {
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: var(--text-primary);
+		margin-bottom: 8px;
+		display: block;
+	}
+
+	.signup-form input {
+		width: 100%;
+		padding: 12px 16px;
+		background: var(--bg-primary);
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		color: var(--text-primary);
+		font-size: 0.95rem;
+		transition: all 0.2s;
+		box-sizing: border-box;
+	}
+
+	.signup-form input:focus {
+		outline: none;
+		border-color: var(--primary-color);
+		box-shadow: 0 0 0 3px rgba(90, 159, 212, 0.1);
+	}
+
+	.signup-form .btn-signup {
+		width: 100%;
+		padding: 14px;
+		background: var(--primary-color);
+		border: none;
+		border-radius: 8px;
+		color: white;
+		font-size: 1rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+		margin-top: 10px;
+	}
+
+	.signup-form .btn-signup:hover {
+		background: #4a8fc4;
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(90, 159, 212, 0.3);
+	}
+
+	.signup-form .btn-signup:active {
+		transform: translateY(0);
+	}
+
+	.signup-footer {
+		padding: 40px;
+		padding-top: 0;
+		text-align: center;
+	}
+
+	.signup-footer a {
+		color: var(--text-secondary);
+		text-decoration: none;
+		font-size: 0.85rem;
+		transition: color 0.2s;
+	}
+
+	.signup-footer a:hover {
+		color: var(--primary-color);
+	}
+
+	.alert-danger {
+		background: rgba(220, 53, 69, 0.1);
+		border: 1px solid rgba(220, 53, 69, 0.3);
+		border-radius: 8px;
+		padding: 12px;
+		color: #dc3545;
+		font-size: 0.85rem;
+		margin-bottom: 20px;
+	}
+
+	.field-error {
+		color: #dc3545;
+		font-size: 0.8rem;
+		margin-top: 4px;
+	}
+
+	/* Hide allauth help text */
+	.signup-form .helptext,
+	.signup-form ul {
+		display: none;
+	}
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container py-5">
-	<div class="row justify-content-center">
-		<div class="col-md-6 col-lg-5">
-			<div class="card shadow-sm">
-				<div class="card-body p-4">
-					<h3 class="mb-4 text-center">{% trans "Sign Up" %}</h3>
-					<form method="post" action="">
-						{% csrf_token %}
-						{{ form.as_p }}
-						<button type="submit" class="btn btn-primary w-100">{% trans "Sign Up" %}</button>
-					</form>
-					<div class="text-center">
-						<a href="{% url 'account_login' %}" class="text-decoration-none">{% trans "Already have an account? Sign In" %}</a>
+	<div class="signup-card">
+		<div class="signup-header">
+			<img src="{% static 'images/logo-full-dark.png' %}" alt="Atlas" class="signup-logo logo-dark-bg">
+			<img src="{% static 'images/logo-full-light.png' %}" alt="Atlas" class="signup-logo logo-light-bg">
+		</div>
+
+		<div class="signup-body">
+			<h3>{% trans "Create Account" %}</h3>
+			<form method="post" action="" class="signup-form">
+				{% csrf_token %}
+				{% if form.non_field_errors %}
+					<div class="alert-danger">{{ form.non_field_errors }}</div>
+				{% endif %}
+				{% for hidden in form.hidden_fields %}
+					{{ hidden }}
+				{% endfor %}
+				{% for field in form.visible_fields %}
+					<div class="form-group">
+						{{ field.label_tag }}
+						{{ field }}
+						{% if field.errors %}
+							<div class="field-error">{{ field.errors }}</div>
+						{% endif %}
 					</div>
-				</div>
-			</div>
+				{% endfor %}
+				<button type="submit" class="btn-signup">{% trans "Create Account" %}</button>
+			</form>
+		</div>
+
+		<div class="signup-footer">
+			<a href="{% url 'account_login' %}">{% trans "Already have an account? Sign In" %}</a>
 		</div>
 	</div>
-</div>
 {% endblock %}

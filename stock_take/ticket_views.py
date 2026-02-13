@@ -26,7 +26,13 @@ def tickets_list(request):
         else:
             messages.error(request, 'Title and description are required.')
     
-    tickets = Ticket.objects.all()
+    # Franchise users can only see their own tickets
+    profile = getattr(request.user, 'profile', None)
+    is_franchise = profile and profile.role and profile.role.name == 'franchise'
+    if is_franchise:
+        tickets = Ticket.objects.filter(submitted_by=request.user)
+    else:
+        tickets = Ticket.objects.all()
     
     # Filter by status – default to 'open' so the page loads with open tickets
     status_filter = request.GET.get('status', 'open')

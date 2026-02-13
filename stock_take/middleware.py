@@ -135,6 +135,10 @@ class RolePermissionMiddleware:
         if profile.role.name == 'admin':
             return self.get_response(request)
 
+        # Always let dashboard through — the view handles role-based redirects
+        if page_codename == 'dashboard':
+            return self.get_response(request)
+
         # Determine required action based on HTTP method
         method = request.method
         if method == 'GET':

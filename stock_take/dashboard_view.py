@@ -1,4 +1,4 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Sum
 from django.db.models.functions import TruncWeek, TruncMonth
@@ -11,6 +11,11 @@ from .models import Order, PurchaseOrder
 @login_required
 def dashboard(request):
     """Main dashboard page."""
+
+    # Franchise users go straight to claim service
+    profile = getattr(request.user, 'profile', None)
+    if profile and profile.role and profile.role.name == 'franchise':
+        return redirect('claim_service')
     
     # Get fits per week data (max 52 weeks, or less if not enough data)
     today = datetime.now().date()

@@ -120,8 +120,15 @@ URL_TO_PAGE = {
 
     # Tickets
     'tickets_list': 'tickets',
+    'ticket_detail': 'tickets',
     'ticket_update_status': 'tickets',
+    'ticket_edit': 'tickets',
     'ticket_delete': 'tickets',
+
+    # Claim Service
+    'claim_service': 'claim_service',
+    'claim_delete': 'claim_service',
+    'claim_download_zip': 'claim_service',
 }
 
 

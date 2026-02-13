@@ -28,7 +28,13 @@
             {% endif %}
         </div>
         <div class="claims-header-right">
-            <span class="claims-count">{{ group_count }} job{{ group_count|pluralize }}{% if ungrouped %} + {{ ungrouped|length }} file{{ ungrouped|length|pluralize }}{% endif %} &middot; {{ total_count }} total</span>
+            <span class="claims-count">
+                {% if search_query %}
+                    {{ showing_count }} result{{ showing_count|pluralize }} &middot; {{ total_count }} total
+                {% else %}
+                    Showing {{ showing_count }} of {{ group_count }} job{{ group_count|pluralize }} &middot; {{ total_count }} files
+                {% endif %}
+            </span>
         </div>
     </div>
 
@@ -121,6 +127,19 @@
         {% endif %}
     </div>
     {% endif %}
+
+    <!-- Pagination -->
+    {% if total_pages > 1 and not search_query %}
+    <div class="claims-pagination">
+        {% if page > 1 %}
+        <a href="?page={{ page|add:'-1' }}" class="pagination-btn"><i class="bi bi-chevron-left"></i> Previous</a>
+        {% endif %}
+        <span class="pagination-info">Page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}
+        <a href="?page={{ page|add:'1' }}" class="pagination-btn">Next <i class="bi bi-chevron-right"></i></a>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 
 <script>
@@ -130,25 +149,27 @@ function toggleGroup(header) {
     group.classList.toggle('expanded');
 }
 
-// Live search filtering — searches groups
+// Server-side search with debounce
 const searchInput = document.getElementById('claims-search');
+let searchTimeout = null;
 if (searchInput) {
     searchInput.addEventListener('input', function() {
-        const q = this.value.toLowerCase().trim();
-        const groups = document.querySelectorAll('.claim-group');
-
-        groups.forEach(group => {
-            const groupKey = group.dataset.group || '';
-            const customer = group.dataset.customer || '';
-            const jobNumber = group.dataset.jobnumber || '';
-            // Also search filenames within the group
-            const fileNames = Array.from(group.querySelectorAll('.claim-file-name, .claim-group-name'))
-                .map(el => el.textContent.toLowerCase()).join(' ');
-            const match = !q || groupKey.includes(q) || customer.includes(q) ||
-                          jobNumber.includes(q) || fileNames.includes(q);
-            group.style.display = match ? '' : 'none';
-        });
+        clearTimeout(searchTimeout);
+        const q = this.value.trim();
+        searchTimeout = setTimeout(() => {
+            if (q) {
+                window.location.href = '{% url "claim_service" %}?q=' + encodeURIComponent(q);
+            } else {
+                window.location.href = '{% url "claim_service" %}';
+            }
+        }, 400);
     });
+
+    // Focus and place cursor at end of search input if there's a query
+    {% if search_query %}
+    searchInput.focus();
+    searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+    {% endif %}
 }
 
 // Delete claim

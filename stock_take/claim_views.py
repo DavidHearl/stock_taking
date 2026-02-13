@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
-from django.db.models import Q
+from django.db.models import Q, Max
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from collections import OrderedDict
@@ -9,12 +9,16 @@ from .models import ClaimDocument
 import os
 import io
 import zipfile
+import math
+
+PAGE_SIZE = 100
 
 
 @login_required
 def claim_service(request):
     """Main claim service page with grouped PDFs."""
     query = request.GET.get('q', '').strip()
+    page = int(request.GET.get('page', 1))
 
     documents = ClaimDocument.objects.all()
     if query:
@@ -36,14 +40,14 @@ def claim_service(request):
             ungrouped.append(doc)
 
     # Build display-friendly group data
-    groups = []
+    all_groups = []
     for key, docs in grouped.items():
         parts = key.split('_')
         job_number = parts[0] if parts else key
         customer = parts[1] if len(parts) >= 2 else ''
         job_id = parts[2] if len(parts) >= 3 else ''
         display_name = f"{job_number} - {customer}" if customer else key
-        groups.append({
+        all_groups.append({
             'key': key,
             'display_name': display_name,
             'job_number': job_number,
@@ -54,12 +58,28 @@ def claim_service(request):
             'date': docs[0].uploaded_at,
         })
 
+    total_groups = len(all_groups)
+
+    # Paginate only when not searching
+    if query:
+        groups = all_groups
+        total_pages = 1
+        page = 1
+    else:
+        total_pages = max(1, math.ceil(total_groups / PAGE_SIZE))
+        page = min(page, total_pages)
+        start = (page - 1) * PAGE_SIZE
+        groups = all_groups[start:start + PAGE_SIZE]
+
     context = {
         'groups': groups,
-        'ungrouped': ungrouped,
+        'ungrouped': ungrouped if (query or page == total_pages) else [],
         'search_query': query,
         'total_count': ClaimDocument.objects.count(),
-        'group_count': len(groups),
+        'group_count': total_groups,
+        'page': page,
+        'total_pages': total_pages,
+        'showing_count': len(groups),
     }
     return render(request, 'stock_take/claim_service.html', context)
 

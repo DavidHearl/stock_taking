@@ -1367,6 +1367,7 @@ PAGE_SECTIONS = [
     ]),
     ('Other', [
         ('tickets', 'Tickets'),
+        ('claim_service', 'Claim Service'),
         ('admin_panel', 'Admin Panel'),
     ]),
 ]
@@ -1486,9 +1487,10 @@ class UserProfile(models.Model):
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
-    """Create a UserProfile when a new User is created"""
+    """Create a UserProfile when a new User is created, auto-assigning Franchise role."""
     if created:
-        UserProfile.objects.create(user=instance)
+        franchise_role = Role.objects.filter(name='franchise').first()
+        UserProfile.objects.create(user=instance, role=franchise_role)
 
 
 @receiver(post_save, sender=User)
