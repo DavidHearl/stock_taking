@@ -1534,6 +1534,8 @@ class ClaimDocument(models.Model):
     title = models.CharField(max_length=255, help_text='Display title for the claim')
     file = models.FileField(upload_to='claim_documents/')
     customer_name = models.CharField(max_length=255, blank=True, help_text='Customer name for search')
+    group_key = models.CharField(max_length=255, blank=True, db_index=True,
+                                 help_text='Groups related PDFs together, e.g. 1111_Radley_022115')
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -1547,3 +1549,29 @@ class ClaimDocument(models.Model):
     def filename(self):
         import os
         return os.path.basename(self.file.name) if self.file else ''
+
+    @property
+    def doc_type(self):
+        """Extract document type from filename (e.g. 'ProductionDrawings')."""
+        import os
+        name = os.path.splitext(os.path.basename(self.file.name))[0] if self.file else ''
+        parts = name.rsplit('_', 1)
+        return parts[-1] if len(parts) > 1 else name
+
+    @staticmethod
+    def extract_group_key(filename):
+        """Extract group key from a filename like '1111_Radley_022115_ProductionDrawings.PDF'."""
+        import os
+        name = os.path.splitext(filename)[0]
+        parts = name.rsplit('_', 1)
+        return parts[0] if len(parts) > 1 else ''
+
+    @staticmethod
+    def extract_customer_name(filename):
+        """Extract customer name from filename pattern '{number}_{name}_{id}_{type}.PDF'."""
+        import os
+        name = os.path.splitext(filename)[0]
+        parts = name.split('_')
+        if len(parts) >= 3:
+            return parts[1]
+        return ''

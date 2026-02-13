@@ -9,7 +9,7 @@ from .customer_views import customers_list, customer_detail, customer_save, cust
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
-from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload
+from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip
 from .profile_views import user_profile, user_profile_save, user_change_password
 
 urlpatterns = [
@@ -269,4 +269,5 @@ urlpatterns = [
     path('claims/upload/', claim_upload, name='claim_upload'),
     path('claims/api/upload/', claim_api_upload, name='claim_api_upload'),
     path('claims/<int:doc_id>/delete/', claim_delete, name='claim_delete'),
+    path('claims/download/<path:group_key>/', claim_download_zip, name='claim_download_zip'),
 ]

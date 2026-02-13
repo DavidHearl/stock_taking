@@ -1,4 +1,4 @@
-"""
+r"""
 Claim PDF Watcher
 =================
 Monitors C:\evolution\eCadPro\_PDF for new PDF files and automatically
@@ -35,7 +35,7 @@ WATCH_FOLDER = r"C:\evolution\eCadPro\_PDF"
 SERVER_URL = "https://atlas-gxbq5.ondigitalocean.app"
 
 # API key — must match the CLAIM_UPLOAD_API_KEY env var on the server
-API_KEY = "change-me-in-production"
+API_KEY = "diWM84zsbfEZuNHeVpAZJUAbx7877sKZ"
 
 # How often to check for new files (seconds)
 POLL_INTERVAL = 30
@@ -89,13 +89,24 @@ def upload_pdf(filepath: str) -> bool:
     filename = os.path.basename(filepath)
     url = f"{SERVER_URL}/claims/api/upload/"
 
+    # Extract group_key and customer_name from filename pattern: {number}_{name}_{id}_{type}.PDF
+    name_no_ext = os.path.splitext(filename)[0]
+    parts = name_no_ext.rsplit('_', 1)
+    group_key = parts[0] if len(parts) > 1 else ''
+    name_parts = name_no_ext.split('_')
+    customer_name = name_parts[1] if len(name_parts) >= 3 else ''
+
     try:
         with open(filepath, "rb") as f:
             response = requests.post(
                 url,
                 headers={"X-API-Key": API_KEY},
                 files={"file": (filename, f, "application/pdf")},
-                data={"title": os.path.splitext(filename)[0]},
+                data={
+                    "title": name_no_ext,
+                    "group_key": group_key,
+                    "customer_name": customer_name,
+                },
                 timeout=120,
             )
 

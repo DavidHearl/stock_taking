@@ -1,16 +1,19 @@
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from collections import OrderedDict
 from .models import ClaimDocument
 import os
+import io
+import zipfile
 
 
 @login_required
 def claim_service(request):
-    """Main claim service page with search and PDF listing."""
+    """Main claim service page with grouped PDFs."""
     query = request.GET.get('q', '').strip()
 
     documents = ClaimDocument.objects.all()
@@ -18,13 +21,45 @@ def claim_service(request):
         documents = documents.filter(
             Q(title__icontains=query) |
             Q(customer_name__icontains=query) |
+            Q(group_key__icontains=query) |
             Q(file__icontains=query)
         )
 
+    # Group documents by group_key
+    grouped = OrderedDict()
+    ungrouped = []
+
+    for doc in documents:
+        if doc.group_key:
+            grouped.setdefault(doc.group_key, []).append(doc)
+        else:
+            ungrouped.append(doc)
+
+    # Build display-friendly group data
+    groups = []
+    for key, docs in grouped.items():
+        parts = key.split('_')
+        job_number = parts[0] if parts else key
+        customer = parts[1] if len(parts) >= 2 else ''
+        job_id = parts[2] if len(parts) >= 3 else ''
+        display_name = f"{job_number} - {customer}" if customer else key
+        groups.append({
+            'key': key,
+            'display_name': display_name,
+            'job_number': job_number,
+            'customer': customer,
+            'job_id': job_id,
+            'documents': docs,
+            'count': len(docs),
+            'date': docs[0].uploaded_at,
+        })
+
     context = {
-        'documents': documents,
+        'groups': groups,
+        'ungrouped': ungrouped,
         'search_query': query,
         'total_count': ClaimDocument.objects.count(),
+        'group_count': len(groups),
     }
     return render(request, 'stock_take/claim_service.html', context)
 
@@ -43,13 +78,18 @@ def claim_upload(request):
         return JsonResponse({'error': 'No file provided'}, status=400)
 
     if not title:
-        # Default title from filename
         title = os.path.splitext(file.name)[0]
+
+    # Auto-extract group_key from filename
+    group_key = ClaimDocument.extract_group_key(file.name)
+    if not customer_name:
+        customer_name = ClaimDocument.extract_customer_name(file.name)
 
     doc = ClaimDocument.objects.create(
         title=title,
         file=file,
         customer_name=customer_name,
+        group_key=group_key,
         uploaded_by=request.user,
     )
 
@@ -79,10 +119,35 @@ def claim_delete(request, doc_id):
     return JsonResponse({'success': True})
 
 
+@login_required
+def claim_download_zip(request, group_key):
+    """Download all PDFs in a group as a zip file."""
+    documents = ClaimDocument.objects.filter(group_key=group_key)
+    if not documents.exists():
+        return JsonResponse({'error': 'No documents found for this group'}, status=404)
+
+    # Create zip in memory
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for doc in documents:
+            try:
+                doc.file.open('rb')
+                zf.writestr(doc.filename, doc.file.read())
+                doc.file.close()
+            except Exception:
+                continue
+
+    buffer.seek(0)
+    response = HttpResponse(buffer.read(), content_type='application/zip')
+    response['Content-Disposition'] = f'attachment; filename="{group_key}.zip"'
+    return response
+
+
 @csrf_exempt
 def claim_api_upload(request):
     """API endpoint for automated PDF uploads from remote PC.
     Authenticates via X-API-Key header instead of session login.
+    Auto-extracts group_key and customer_name from filename pattern.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
@@ -98,9 +163,16 @@ def claim_api_upload(request):
 
     title = request.POST.get('title', '').strip()
     customer_name = request.POST.get('customer_name', '').strip()
+    group_key = request.POST.get('group_key', '').strip()
 
     if not title:
         title = os.path.splitext(file.name)[0]
+
+    # Auto-extract group_key and customer_name from filename if not provided
+    if not group_key:
+        group_key = ClaimDocument.extract_group_key(file.name)
+    if not customer_name:
+        customer_name = ClaimDocument.extract_customer_name(file.name)
 
     # Skip if a document with this exact filename already exists
     if ClaimDocument.objects.filter(file__endswith=file.name).exists():
@@ -110,6 +182,7 @@ def claim_api_upload(request):
         title=title,
         file=file,
         customer_name=customer_name,
+        group_key=group_key,
     )
 
     return JsonResponse({
@@ -118,5 +191,6 @@ def claim_api_upload(request):
             'id': doc.id,
             'title': doc.title,
             'filename': doc.filename,
+            'group_key': doc.group_key,
         }
     })
