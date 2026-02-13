@@ -371,6 +371,66 @@ def customers_bulk_delete(request):
 
 
 @login_required
+def customer_merge(request):
+    """Merge two customers: transfer orders/data from remove_id into keep_id, then delete remove_id"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        keep_id = data.get('keep_id')
+        remove_id = data.get('remove_id')
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    if not keep_id or not remove_id:
+        return JsonResponse({'error': 'Both keep_id and remove_id are required'}, status=400)
+
+    try:
+        keep_customer = Customer.objects.get(pk=keep_id)
+        remove_customer = Customer.objects.get(pk=remove_id)
+    except Customer.DoesNotExist:
+        return JsonResponse({'error': 'Customer not found'}, status=404)
+
+    # Transfer orders from remove to keep
+    orders_moved = Order.objects.filter(customer=remove_customer).update(customer=keep_customer)
+
+    # Transfer purchase orders if the model has a customer FK
+    try:
+        pos_moved = PurchaseOrder.objects.filter(customer=remove_customer).update(customer=keep_customer)
+    except Exception:
+        pos_moved = 0
+
+    # Fill in any blank fields on keep_customer from remove_customer
+    fill_fields = [
+        'email', 'phone', 'fax', 'website', 'abn',
+        'address_1', 'address_2', 'city', 'state', 'suburb', 'postcode', 'country',
+        'code', 'currency', 'credit_days', 'credit_terms_type', 'price_tier',
+    ]
+    updated_fields = []
+    for field in fill_fields:
+        keep_val = getattr(keep_customer, field)
+        remove_val = getattr(remove_customer, field)
+        if not keep_val and remove_val:
+            setattr(keep_customer, field, remove_val)
+            updated_fields.append(field)
+
+    if updated_fields:
+        keep_customer.save(update_fields=updated_fields)
+
+    # Delete the merged-away customer
+    remove_name = str(remove_customer)
+    remove_customer.delete()
+
+    return JsonResponse({
+        'success': True,
+        'orders_moved': orders_moved,
+        'fields_filled': len(updated_fields),
+        'removed': remove_name,
+    })
+
+
+@login_required
 def customer_create(request):
     """Create a new customer manually"""
     if request.method != 'POST':

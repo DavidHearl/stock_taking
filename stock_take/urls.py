@@ -5,7 +5,7 @@ from .dark_mode_view import toggle_dark_mode
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search
-from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create
+from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
@@ -65,6 +65,7 @@ urlpatterns = [
     path('customer/<int:customer_id>/save/', customer_save, name='customer_save'),
     path('customer/<int:customer_id>/delete/', customer_delete, name='customer_delete'),
     path('customers/bulk-delete/', customers_bulk_delete, name='customers_bulk_delete'),
+    path('customers/merge/', customer_merge, name='customer_merge'),
     
     # Import management
     path('import-history/', views.import_history, name='import_history'),

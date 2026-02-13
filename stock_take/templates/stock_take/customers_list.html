@@ -6,62 +6,41 @@
 {% block nav_stock_active %}active{% endblock %}
 {% block nav_customers_active %}active{% endblock %}
 
+{% block page_title %}
+Customers
+<button class="btn btn-add-customer" onclick="document.getElementById('add-customer-modal').style.display='flex'" style="margin-left: 12px; padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--primary-color); background: transparent; color: var(--primary-color); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; transition: all 0.2s;">
+    <i class="bi bi-plus-lg"></i> Add Customer
+</button>
+{% endblock %}
+
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
 {% endblock %}
 
 {% block content %}
 <div class="content-card">
-    <div class="customers-header">
-        <h1><i class="bi bi-people"></i> Customers</h1>
-        <button class="btn btn-add-customer" onclick="document.getElementById('add-customer-modal').style.display='flex'">
-            <i class="bi bi-plus-lg"></i> Add Customer
-        </button>
-    </div>
-
-    <!-- Stats Bar -->
-    <div class="customers-stats">
-        <div class="customer-stat-item">
-            <span class="customer-stat-value">{{ total_count }}</span>
-            <span>Total</span>
-        </div>
-        <div class="customer-stat-item">
-            <span class="customer-stat-value active">{{ active_count }}</span>
-            <span>Active</span>
-        </div>
-        <div class="customer-stat-item">
-            <span class="customer-stat-value inactive">{{ inactive_count }}</span>
-            <span>Inactive</span>
-        </div>
-    </div>
-
     <!-- Search & Filters -->
     <div class="customers-controls">
         <div class="customers-search">
-            <form method="GET" action="" class="search-form">
-                <input type="hidden" name="status" value="{{ status_filter }}">
-                <div class="search-input-wrapper">
-                    <i class="bi bi-search"></i>
-                    <input type="text" name="q" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode...">
-                </div>
-                <button type="submit" class="search-submit">Search</button>
-                {% if search_query %}
-                <a href="?status={{ status_filter }}" class="search-clear">Clear</a>
-                {% endif %}
-            </form>
+            <div class="search-input-wrapper">
+                <i class="bi bi-search"></i>
+                <input type="text" id="customer-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
+            </div>
         </div>
         <div class="customers-filter-tabs">
-            <a href="?q={{ search_query }}&status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">All ({{ total_count }})</a>
-            <a href="?q={{ search_query }}&status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">Active ({{ active_count }})</a>
-            <a href="?q={{ search_query }}&status=inactive" class="filter-tab {% if status_filter == 'inactive' %}active{% endif %}">Inactive ({{ inactive_count }})</a>
+            <a href="?status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">All ({{ total_count }})</a>
+            <a href="?status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">Active ({{ active_count }})</a>
+            <a href="?status=inactive" class="filter-tab {% if status_filter == 'inactive' %}active{% endif %}">Inactive ({{ inactive_count }})</a>
         </div>
     </div>
 
     {% if customers %}
     <div class="customers-result-bar">
-        <p class="customers-result-count">Showing {{ filtered_count }} customer{{ filtered_count|pluralize }}</p>
-        <div class="bulk-delete-bar" id="bulk-delete-bar" style="display:none;">
+        <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
             <span id="selected-count">0 selected</span>
+            <button class="merge-btn" id="merge-btn" onclick="mergeCustomers()" style="display:none;" title="Merge selected customers">
+                <i class="bi bi-arrow-left-right"></i> Merge
+            </button>
             <button class="bulk-delete-btn" onclick="bulkDelete()">
                 <i class="bi bi-trash"></i> Delete Selected
             </button>
@@ -84,7 +63,7 @@
             </thead>
             <tbody>
                 {% for customer in customers %}
-                <tr data-id="{{ customer.pk }}">
+                <tr data-id="{{ customer.pk }}" data-has-details="{{ customer.workguru_id|yesno:'1,0' }}" data-search="{{ customer.name|lower }} {{ customer.email|lower }} {{ customer.phone|lower }} {{ customer.city|lower }} {{ customer.postcode|lower }}">
                     <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ customer.pk }}" onclick="updateSelection()"></td>
                     <td>
                         {% if customer.workguru_id %}
@@ -190,6 +169,88 @@
 </div>
 
 <script>
+// --- Client-side search ---
+const searchInput = document.getElementById('customer-search');
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        const query = this.value.toLowerCase().trim();
+        const rows = document.querySelectorAll('.customers-table tbody tr');
+        let visible = 0;
+        rows.forEach(row => {
+            const text = row.getAttribute('data-search') || '';
+            const show = !query || text.includes(query);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        document.getElementById('visible-count').textContent = visible;
+        document.getElementById('visible-plural').textContent = visible === 1 ? '' : 's';
+    });
+    searchInput.focus();
+}
+
+function clearSelectionAndReload() {
+    document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+    const sa = document.getElementById('select-all');
+    if (sa) { sa.checked = false; sa.indeterminate = false; }
+    location.reload();
+}
+
+// --- Merge logic ---
+function checkMergeEligibility() {
+    const mergeBtn = document.getElementById('merge-btn');
+    if (!mergeBtn) return;
+    const checked = document.querySelectorAll('.row-select:checked');
+    if (checked.length !== 2) {
+        mergeBtn.style.display = 'none';
+        return;
+    }
+    const rows = Array.from(checked).map(cb => cb.closest('tr'));
+    const hasDetails0 = rows[0].getAttribute('data-has-details') === '1';
+    const hasDetails1 = rows[1].getAttribute('data-has-details') === '1';
+    // Show merge if one has details and one doesn't
+    if (hasDetails0 !== hasDetails1) {
+        mergeBtn.style.display = 'inline-flex';
+    } else {
+        mergeBtn.style.display = 'none';
+    }
+}
+
+function mergeCustomers() {
+    const checked = document.querySelectorAll('.row-select:checked');
+    if (checked.length !== 2) return;
+    const rows = Array.from(checked).map(cb => cb.closest('tr'));
+    let keepRow, removeRow;
+    if (rows[0].getAttribute('data-has-details') === '1') {
+        keepRow = rows[0]; removeRow = rows[1];
+    } else {
+        keepRow = rows[1]; removeRow = rows[0];
+    }
+    const keepName = keepRow.querySelector('td:nth-child(2)').textContent.trim();
+    const removeName = removeRow.querySelector('td:nth-child(2)').textContent.trim();
+    if (!confirm('Merge "' + removeName + '" into "' + keepName + '"?\n\nOrders and data from "' + removeName + '" will be transferred to "' + keepName + '", then "' + removeName + '" will be deleted.')) return;
+
+    fetch('{% url "customer_merge" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            keep_id: parseInt(keepRow.getAttribute('data-id')),
+            remove_id: parseInt(removeRow.getAttribute('data-id'))
+        }),
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            clearSelectionAndReload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+
 function deleteCustomer(id, name) {
     if (!confirm('Delete customer "' + name + '"?')) return;
 
@@ -203,7 +264,7 @@ function deleteCustomer(id, name) {
     .then(res => res.json())
     .then(data => {
         if (data.success) {
-            location.reload();
+            clearSelectionAndReload();
         } else {
             alert('Error: ' + (data.error || 'Unknown error'));
         }
@@ -218,7 +279,7 @@ function toggleSelectAll(el) {
 
 function updateSelection() {
     const checked = document.querySelectorAll('.row-select:checked');
-    const bar = document.getElementById('bulk-delete-bar');
+    const bar = document.getElementById('bulk-actions-bar');
     const countEl = document.getElementById('selected-count');
     const selectAll = document.getElementById('select-all');
     const allBoxes = document.querySelectorAll('.row-select');
@@ -231,6 +292,7 @@ function updateSelection() {
     }
     selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
     selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
+    checkMergeEligibility();
 }
 
 function bulkDelete() {
@@ -249,7 +311,7 @@ function bulkDelete() {
     .then(res => res.json())
     .then(data => {
         if (data.success) {
-            location.reload();
+            clearSelectionAndReload();
         } else {
             alert('Error: ' + (data.error || 'Unknown error'));
         }
