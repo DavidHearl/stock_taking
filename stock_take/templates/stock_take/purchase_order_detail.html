@@ -221,6 +221,29 @@
             </button>
         </div>
 
+        {% if boards_po %}
+        <div class="po-boards-meta">
+            <span class="po-boards-badge {% if boards_po.boards_ordered %}ordered{% else %}not-ordered{% endif %}">
+                <i class="bi bi-{% if boards_po.boards_ordered %}check-circle{% else %}clock{% endif %}"></i>
+                {% if boards_po.boards_ordered %}Ordered{% else %}Not Ordered{% endif %}
+            </span>
+            <span class="po-boards-badge {% if boards_po.boards_received %}received{% else %}pending{% endif %}">
+                <i class="bi bi-{% if boards_po.boards_received %}box-seam{% else %}hourglass-split{% endif %}"></i>
+                {% if boards_po.boards_received %}All Received{% else %}Pending{% endif %}
+            </span>
+            {% if boards_po.file %}
+            <a href="{{ boards_po.file.url }}" class="po-boards-file-link" download>
+                <i class="bi bi-file-earmark-arrow-down"></i> PNX File
+            </a>
+            {% endif %}
+            {% if boards_po.csv_file %}
+            <a href="{{ boards_po.csv_file.url }}" class="po-boards-file-link" download>
+                <i class="bi bi-filetype-csv"></i> CSV File
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="po-table-container">
             <table class="po-products-table" id="products-table">
                 <thead>
@@ -232,7 +255,7 @@
                         <th class="text-right">Rec'd Qty</th>
                         <th class="text-right">Invoice Price</th>
                         <th class="text-right">Line Total</th>
-                        <th class="text-center po-col-actions" style="display:none;">Actions</th>
+                        <th class="text-center" style="width: 50px;"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -294,7 +317,7 @@
                             <span class="po-view-val">£{{ product.line_total|floatformat:2 }}</span>
                             <input class="po-edit-input po-edit-val po-edit-number" data-field="line_total" type="number" step="0.01" value="{{ product.line_total }}" style="display:none;">
                         </td>
-                        <td class="text-center po-col-actions" style="display:none;">
+                        <td class="text-center">
                             <button class="btn-inline-delete" onclick="deleteProduct({{ product.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
                         </td>
                     </tr>
@@ -324,13 +347,31 @@
                         </td>
                     </tr>
                     {% empty %}
+                    {% endfor %}
+                    {% for bp in board_product_rows %}
+                    <tr class="board-product-row">
+                        <td><code class="board-sku">{{ bp.sku }}</code></td>
+                        <td>
+                            <span>{{ bp.name }}</span>
+                        </td>
+                        <td class="text-right">£{{ bp.order_price|floatformat:2 }}</td>
+                        <td class="text-right">{{ bp.order_quantity|floatformat:0 }}</td>
+                        <td class="text-right">{{ bp.received_quantity|floatformat:0 }}</td>
+                        <td class="text-right">-</td>
+                        <td class="text-right">£{{ bp.line_total|floatformat:2 }}</td>
+                        <td class="text-center">
+                            <button class="btn-inline-delete" onclick="deleteBoardItems('{{ bp.item_ids }}', this)" title="Delete"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not products and not board_product_rows %}
                     <tr id="no-products-row">
-                        <td colspan="7" class="text-center" style="padding: 24px; color: var(--text-secondary);">
+                        <td colspan="8" class="text-center" style="padding: 24px; color: var(--text-secondary);">
                             <i class="bi bi-inbox" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
                             No products yet. Click <strong>Add Product</strong> above to get started.
                         </td>
                     </tr>
-                    {% endfor %}
+                    {% endif %}
                 </tbody>
             </table>
         </div>
@@ -373,79 +414,6 @@
             </div>
         </div>
     </div>
-
-    {% if pnx_items %}
-    <!-- Board Order Products (from PNX file) -->
-    <div class="po-products-section">
-        <h3><i class="bi bi-grid-3x3"></i> Board Order Items</h3>
-        {% if boards_po %}
-        <div class="po-boards-meta">
-            <span class="po-boards-badge {% if boards_po.boards_ordered %}ordered{% else %}not-ordered{% endif %}">
-                <i class="bi bi-{% if boards_po.boards_ordered %}check-circle{% else %}clock{% endif %}"></i>
-                {% if boards_po.boards_ordered %}Ordered{% else %}Not Ordered{% endif %}
-            </span>
-            <span class="po-boards-badge {% if boards_po.boards_received %}received{% else %}pending{% endif %}">
-                <i class="bi bi-{% if boards_po.boards_received %}box-seam{% else %}hourglass-split{% endif %}"></i>
-                {% if boards_po.boards_received %}All Received{% else %}Pending{% endif %}
-            </span>
-            {% if boards_po.file %}
-            <a href="{{ boards_po.file.url }}" class="po-boards-file-link" download>
-                <i class="bi bi-file-earmark-arrow-down"></i> PNX File
-            </a>
-            {% endif %}
-            {% if boards_po.csv_file %}
-            <a href="{{ boards_po.csv_file.url }}" class="po-boards-file-link" download>
-                <i class="bi bi-filetype-csv"></i> CSV File
-            </a>
-            {% endif %}
-        </div>
-        {% endif %}
-        <div class="po-table-container">
-            <table class="po-products-table po-pnx-table">
-                <thead>
-                    <tr>
-                        <th>Material</th>
-                        <th>Customer</th>
-                        <th class="text-right">Length (mm)</th>
-                        <th class="text-right">Width (mm)</th>
-                        <th class="text-right">Qty</th>
-                        <th class="text-right">Received</th>
-                        <th class="text-right">Cost</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in pnx_items %}
-                    <tr class="{% if item.is_fully_received %}pnx-received{% endif %}">
-                        <td>{{ item.matname }}</td>
-                        <td>{{ item.customer }}</td>
-                        <td class="text-right">{{ item.cleng|floatformat:0 }}</td>
-                        <td class="text-right">{{ item.cwidth|floatformat:0 }}</td>
-                        <td class="text-right">{{ item.cnt|floatformat:0 }}</td>
-                        <td class="text-right">{{ item.received_quantity|floatformat:0 }}</td>
-                        <td class="text-right">£{{ item.calculated_cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.is_fully_received %}
-                            <span class="pnx-status-badge received"><i class="bi bi-check-circle"></i> Received</span>
-                            {% else %}
-                            <span class="pnx-status-badge pending"><i class="bi bi-clock"></i> Pending</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        <div class="po-totals">
-            <div class="po-totals-table">
-                <div class="po-totals-row total">
-                    <div class="po-totals-label">Board Total</div>
-                    <div class="po-totals-value">£{{ pnx_total_cost|floatformat:2 }}</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
 
     {% if os_door_items %}
     <!-- OS Door Products -->
@@ -776,10 +744,8 @@ let addRowVisible = false;
 
 function toggleAddProductRow() {
     const row = document.getElementById('add-product-row');
-    const actionCols = document.querySelectorAll('.po-col-actions');
     addRowVisible = !addRowVisible;
     row.style.display = addRowVisible ? '' : 'none';
-    actionCols.forEach(col => col.style.display = addRowVisible ? '' : 'none');
 
     // Hide the empty-state row when adding
     const emptyRow = document.getElementById('no-products-row');
@@ -957,6 +923,39 @@ function deleteProduct(productId, btn) {
             const row = btn.closest('tr');
             if (row) row.remove();
             // Update total
+            if (result.po_total) {
+                const el = document.getElementById('po-total-display');
+                if (el) el.textContent = '{{ purchase_order.currency|default:"GBP" }} ' + parseFloat(result.po_total).toFixed(2);
+            }
+        } else {
+            showNotification('Error: ' + (result.error || 'Unknown'), 'error');
+            btn.disabled = false;
+        }
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+    });
+}
+
+function deleteBoardItems(itemIds, btn) {
+    if (!confirm('Delete this board product group?')) return;
+    btn.disabled = true;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-board-items/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ item_ids: itemIds }),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Board items removed.', 'success');
+            const row = btn.closest('tr');
+            if (row) row.remove();
             if (result.po_total) {
                 const el = document.getElementById('po-total-display');
                 if (el) el.textContent = '{{ purchase_order.currency|default:"GBP" }} ' + parseFloat(result.po_total).toFixed(2);

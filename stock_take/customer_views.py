@@ -265,9 +265,9 @@ def customers_list(request):
 
 
 @login_required
-def customer_detail(request, customer_id):
+def customer_detail(request, pk):
     """Display detailed view of a single customer"""
-    customer = get_object_or_404(Customer, workguru_id=customer_id)
+    customer = get_object_or_404(Customer, pk=pk)
 
     # Get linked orders
     orders = Order.objects.filter(customer=customer).order_by('-order_date')
@@ -288,12 +288,12 @@ def customer_detail(request, customer_id):
 
 
 @login_required
-def customer_save(request, customer_id):
+def customer_save(request, pk):
     """Save edited customer details via AJAX POST"""
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
-    customer = get_object_or_404(Customer, workguru_id=customer_id)
+    customer = get_object_or_404(Customer, pk=pk)
 
     try:
         data = json.loads(request.body)
@@ -341,12 +341,12 @@ def customer_save(request, customer_id):
 
 
 @login_required
-def customer_delete(request, customer_id):
+def customer_delete(request, pk):
     """Delete a customer"""
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
-    customer = get_object_or_404(Customer, pk=customer_id)
+    customer = get_object_or_404(Customer, pk=pk)
     customer.delete()
     return JsonResponse({'success': True})
 
@@ -406,6 +406,7 @@ def customer_merge(request):
         'email', 'phone', 'fax', 'website', 'abn',
         'address_1', 'address_2', 'city', 'state', 'suburb', 'postcode', 'country',
         'code', 'currency', 'credit_days', 'credit_terms_type', 'price_tier',
+        'workguru_id', 'anthill_customer_id',
     ]
     updated_fields = []
     for field in fill_fields:
@@ -468,4 +469,4 @@ def customer_create(request):
     )
     
     messages.success(request, f'Customer "{customer.name}" created successfully.')
-    return redirect('customer_detail', customer_id=customer.workguru_id)
+    return redirect('customer_detail', pk=customer.pk)

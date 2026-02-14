@@ -24,9 +24,11 @@ def product_detail(request, item_id):
     current_stock = product.quantity
     
     # Get all accessories linked to this stock item with fit dates
+    # Exclude already-allocated items (stock already deducted for those)
     accessories = Accessory.objects.filter(
         stock_item=product,
-        order__job_finished=False
+        order__job_finished=False,
+        is_allocated=False
     ).select_related('order').order_by('order__fit_date')
     
     # Build stock trajectory data

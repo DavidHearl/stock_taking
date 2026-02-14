@@ -11,11 +11,16 @@ def get_item(dictionary, key):
 
 @register.filter
 def calculate_remaining(accessory):
-    """Calculate remaining stock: Stock - QTY - Allocated"""
+    """Calculate remaining stock: Stock - QTY - Allocated
+    If this accessory is already allocated (stock deducted), don't subtract its qty again.
+    """
     if not accessory.stock_item:
         return 0
     stock = accessory.available_quantity
     allocated = accessory.allocated_quantity
+    if accessory.is_allocated:
+        # Stock already deducted for this item, don't double-count
+        return stock - allocated
     qty = accessory.quantity
     return stock - qty - allocated
 

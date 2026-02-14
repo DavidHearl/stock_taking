@@ -4,7 +4,7 @@ from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
@@ -42,7 +42,9 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/update-status/', purchase_order_update_status, name='purchase_order_update_status'),
     path('api/product-search/', product_search, name='product_search'),
     path('api/order-search/', order_search, name='order_search'),
+    path('api/purchase-order-search/', purchase_order_search, name='purchase_order_search'),
     path('purchase-order/<int:po_id>/delete-product/<int:product_id>/', purchase_order_delete_product, name='purchase_order_delete_product'),
+    path('purchase-order/<int:po_id>/delete-board-items/', purchase_order_delete_board_items, name='purchase_order_delete_board_items'),
     path('purchase-order/<int:po_id>/upload-attachment/', purchase_order_upload_attachment, name='purchase_order_upload_attachment'),
     path('purchase-order/<int:po_id>/delete-attachment/<int:attachment_id>/', purchase_order_delete_attachment, name='purchase_order_delete_attachment'),
     path('purchase-order/<int:po_id>/attach-boards-files/', purchase_order_attach_boards_files, name='purchase_order_attach_boards_files'),
@@ -61,9 +63,9 @@ urlpatterns = [
     # Customers
     path('customers/', customers_list, name='customers_list'),
     path('customers/create/', customer_create, name='customer_create'),
-    path('customer/<int:customer_id>/', customer_detail, name='customer_detail'),
-    path('customer/<int:customer_id>/save/', customer_save, name='customer_save'),
-    path('customer/<int:customer_id>/delete/', customer_delete, name='customer_delete'),
+    path('customer/<int:pk>/', customer_detail, name='customer_detail'),
+    path('customer/<int:pk>/save/', customer_save, name='customer_save'),
+    path('customer/<int:pk>/delete/', customer_delete, name='customer_delete'),
     path('customers/bulk-delete/', customers_bulk_delete, name='customers_bulk_delete'),
     path('customers/merge/', customer_merge, name='customer_merge'),
     
@@ -165,6 +167,7 @@ urlpatterns = [
     path('delete-pnx-items/', views.delete_pnx_items, name='delete_pnx_items'),
     path('order/<int:order_id>/generate-accessories-csv/', views.generate_and_upload_accessories_csv, name='generate_and_upload_accessories_csv'),
     path('accessory/delete/<int:accessory_id>/', views.delete_accessory, name='delete_accessory'),
+    path('order/<int:order_id>/allocate-accessories/', views.allocate_accessories, name='allocate_accessories'),
     path('order/<int:order_id>/update-os-doors-po/', views.update_os_doors_po, name='update_os_doors_po'),
     path('order/<int:order_id>/delete-all-accessories/', views.delete_all_accessories, name='delete_all_accessories'),
     path('order/<int:order_id>/remove-csv/<str:csv_type>/', views.remove_order_csv, name='remove_order_csv'),

@@ -246,23 +246,40 @@
                                     <!-- Boards PO (Editable Dropdown) -->
                                     <div>
                                         <label class="form-label-uppercase">Boards PO</label>
-                                        <div class="flex-row-gap">
-                                            <select class="form-select form-select-styled flex-1" id="boards-po-select" onchange="updateBoardsPO({{ order.id }}, this.value)">
-                                                <option value="">No PO Selected</option>
-                                                {% for po in available_pos %}
-                                                    <option value="{{ po.id }}" data-po-number="{{ po.po_number }}" {% if order.boards_po and order.boards_po.id == po.id %}selected{% endif %}>{{ po.po_number }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddBoardsPOInline()" title="Add new boards PO">
-                                                <i class="bi bi-plus-lg"></i>
-                                            </button>
-                                            {% if order.workguru_id and not order.boards_po %}
-                                            <a href="{% url 'create_workguru_po' order.id %}" 
-                                               class="btn btn-sm btn-primary btn-icon-add" 
-                                               title="Create PO in WorkGuru"
-                                               onclick="return confirm('Create a new Purchase Order in WorkGuru for this order?');">
-                                                <i class="bi bi-cloud-plus"></i>
-                                            </a>
+                                        <div class="boards-po-combo" style="position:relative;">
+                                            <div class="flex-row-gap">
+                                                <div style="flex:1;position:relative;">
+                                                    <input type="text" class="form-input" id="boards-po-search"
+                                                           placeholder="Search PO number..."
+                                                           value="{% if order.boards_po %}{{ order.boards_po.po_number }}{% endif %}"
+                                                           autocomplete="off"
+                                                           oninput="searchBoardsPO(this.value)"
+                                                           onfocus="this.select(); searchBoardsPO(this.value);">
+                                                    <div class="boards-po-results" id="boards-po-results" style="display:none;"></div>
+                                                </div>
+                                                {% if order.boards_po %}
+                                                <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="clearBoardsPOLink({{ order.id }})" title="Remove PO link">
+                                                    <i class="bi bi-x-lg"></i>
+                                                </button>
+                                                {% endif %}
+                                                <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddBoardsPOInline()" title="Create new PO">
+                                                    <i class="bi bi-plus-lg"></i>
+                                                </button>
+                                                {% if order.workguru_id and not order.boards_po %}
+                                                <a href="{% url 'create_workguru_po' order.id %}" 
+                                                   class="btn btn-sm btn-primary btn-icon-add" 
+                                                   title="Create PO in WorkGuru"
+                                                   onclick="return confirm('Create a new Purchase Order in WorkGuru for this order?');">
+                                                    <i class="bi bi-cloud-plus"></i>
+                                                </a>
+                                                {% endif %}
+                                            </div>
+                                            {% if order.boards_po and boards_purchase_order %}
+                                            <div style="margin-top:4px;">
+                                                <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn-link-sm" style="font-size:0.8rem;">
+                                                    <i class="bi bi-eye"></i> View Purchase Order
+                                                </a>
+                                            </div>
                                             {% endif %}
                                         </div>
                                         <div id="new-boards-po-inline" class="new-person-inline">
@@ -309,6 +326,18 @@
                                             <i class="bi bi-check2-circle"></i> Job Finished
                                         </label>
                                     </div>
+
+                                    <!-- Materials Allocated Checkbox -->
+                                    {% if order.accessories.exists %}
+                                    <div class="job-checkbox-container">
+                                        <input class="job-checkbox" type="checkbox" id="materialsAllocated" 
+                                               {% if all_allocated %}checked{% endif %}
+                                               onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
+                                        <label class="job-checkbox-label" for="materialsAllocated">
+                                            <i class="bi bi-box-arrow-in-down"></i> Materials Allocated
+                                        </label>
+                                    </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
@@ -1134,7 +1163,7 @@
             <div class="card-body">
                 {% if glass_items %}
                 <div class="table-container">
-                    <table class="table">
+                    <table class="table" id="glass-table">
                         <thead>
                             <tr>
                                 <th>SKU</th>
@@ -1148,7 +1177,7 @@
                         </thead>
                         <tbody>
                             {% for glass in glass_items %}
-                            <tr>
+                            <tr {% if glass.is_allocated %}class="allocated-row"{% endif %}>
                                 <td>{{ glass.sku }}</td>
                                 <td>{{ glass.name }}</td>
                                 <td>
@@ -1175,7 +1204,9 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if glass.missing %}
+                                    {% if glass.is_allocated %}
+                                        <span class="badge badge-allocated"><i class="bi bi-check-circle-fill"></i> Allocated</span>
+                                    {% elif glass.missing %}
                                         <span class="badge badge-warning">Missing</span>
                                     {% elif glass.stock_item %}
                                         {% with remaining=glass|calculate_remaining %}
@@ -1288,8 +1319,8 @@
                             </thead>
                             <tbody>
                                 {% for accessory in non_glass_accessories %}
-                                <tr data-accessory-id="{{ accessory.id }}">
-                                    <td><input type="checkbox" class="checkbox-input accessory-select" data-accessory-id="{{ accessory.id }}"></td>
+                                <tr data-accessory-id="{{ accessory.id }}" {% if accessory.is_allocated %}class="allocated-row"{% endif %}>
+                                    <td><input type="checkbox" class="checkbox-input accessory-select" data-accessory-id="{{ accessory.id }}" data-allocated="{{ accessory.is_allocated|yesno:'1,0' }}"></td>
                                     <td>{{ accessory.sku }}</td>
                                     <td>{{ accessory.name }}</td>
                                     <td>
@@ -1316,7 +1347,9 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        {% if accessory.missing %}
+                                        {% if accessory.is_allocated %}
+                                            <span class="badge badge-allocated"><i class="bi bi-check-circle-fill"></i> Allocated</span>
+                                        {% elif accessory.missing %}
                                             <span class="badge badge-warning">Missing</span>
                                         {% elif accessory.stock_item %}
                                             {% with remaining=accessory|calculate_remaining %}
@@ -2101,6 +2134,47 @@
     </div>
 </div>
 
+<!-- Modal for Stock Allocation Confirmation -->
+<div class="modal" id="allocationModal">
+    <div class="modal-overlay" onclick="closeModal('allocationModal')"></div>
+    <div class="modal-dialog modal-dialog-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-box-arrow-in-down"></i> Confirm Stock Allocation</h3>
+                <button type="button" class="modal-close" onclick="closeModal('allocationModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 12px; color: var(--text-secondary);">
+                    Review the items below. Adjust quantities if needed, then confirm to deduct from stock.
+                </p>
+                <div class="table-container">
+                    <table class="table" id="allocation-modal-table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th style="width:90px;">Qty</th>
+                                <th>In Stock</th>
+                                <th>After Allocation</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allocation-modal-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="allocation-warnings" style="margin-top:12px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('allocationModal')">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirm-allocation-btn" onclick="confirmAllocation()">
+                    <i class="bi bi-check-lg"></i> Confirm Allocation
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for PNX Generation Analysis -->
 <div class="modal" id="pnxAnalysisModal">
     <div class="modal-overlay" onclick="closePNXAnalysisModal()"></div>
@@ -2347,91 +2421,103 @@ function updateOrderType(selectElement, orderId) {
     });
 }
 
-// Update Boards PO
-function updateBoardsPO(orderId, poId) {
+// ─── Boards PO search-based combo ─────────────────────────────────────────
+let _boardsPOSearchTimer = null;
+
+function searchBoardsPO(query) {
+    clearTimeout(_boardsPOSearchTimer);
+    const resultsDiv = document.getElementById('boards-po-results');
+
+    if (query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    _boardsPOSearchTimer = setTimeout(() => {
+        fetch(`{% url 'purchase_order_search' %}?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                resultsDiv.innerHTML = '';
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No purchase orders found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                data.results.forEach(po => {
+                    const item = document.createElement('div');
+                    item.className = 'boards-po-result-item';
+                    item.innerHTML = `
+                        <span class="boards-po-result-number">${po.display_number}</span>
+                        <span class="boards-po-result-meta">${po.supplier_name}${po.project_number ? ' · ' + po.project_number : ''}</span>
+                        <span class="boards-po-result-status badge-${(po.status || 'draft').toLowerCase()}">${po.status}</span>
+                    `;
+                    item.addEventListener('click', () => selectBoardsPO({{ order.id }}, po));
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = 'block';
+            })
+            .catch(() => {
+                resultsDiv.style.display = 'none';
+            });
+    }, 250);
+}
+
+function selectBoardsPO(orderId, po) {
+    const input = document.getElementById('boards-po-search');
+    const resultsDiv = document.getElementById('boards-po-results');
+    input.value = po.display_number;
+    resultsDiv.style.display = 'none';
+
     fetch(`/order/${orderId}/update-boards-po/`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
-        body: JSON.stringify({boards_po_id: poId})
+        body: JSON.stringify({ purchase_order_id: po.id })
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(result => {
         if (result.success) {
-            showAlert('Boards PO updated successfully!', 'success');
+            showAlert(`Boards PO set to ${po.display_number}`, 'success');
+            location.reload();
         } else {
-            showAlert('Error updating Boards PO', 'danger');
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
         }
     })
-    .catch(error => {
-        showAlert('Error updating Boards PO', 'danger');
-    });
+    .catch(err => showAlert('Error updating Boards PO', 'danger'));
 }
 
-// Format PO search input to show PO prefix
-function formatPOSearch(input) {
-    let value = input.value.toUpperCase();
-    
-    // Remove any existing PO prefix
-    if (value.startsWith('PO')) {
-        value = value.substring(2);
-    }
-    
-    // Only keep digits
-    value = value.replace(/\D/g, '');
-    
-    // Update display value
-    if (value) {
-        input.value = 'PO' + value;
-    } else {
-        input.value = '';
-    }
-}
-
-// Format PO search input to show PO prefix
-function formatPOSearch(input) {
-    let value = input.value.toUpperCase();
-    
-    // Remove any existing PO prefix
-    if (value.startsWith('PO')) {
-        value = value.substring(2);
-    }
-    
-    // Only keep digits
-    value = value.replace(/\D/g, '');
-    
-    // Update display value
-    if (value) {
-        input.value = 'PO' + value;
-    } else {
-        input.value = '';
-    }
-}
-
-// Filter PO dropdown options
-function filterPOOptions() {
-    const searchInput = document.getElementById('po-search');
-    const select = document.getElementById('boards-po-select');
-    let filter = searchInput.value.toUpperCase();
-    
-    // If user typed just digits, prepend PO automatically
-    if (filter && !filter.startsWith('PO') && /^\d/.test(filter)) {
-        filter = 'PO' + filter;
-    }
-    
-    const options = select.getElementsByTagName('option');
-    
-    for (let i = 1; i < options.length; i++) { // Start at 1 to skip "No PO Selected"
-        const poNumber = options[i].getAttribute('data-po-number');
-        if (poNumber && poNumber.toUpperCase().indexOf(filter) > -1) {
-            options[i].style.display = '';
+function clearBoardsPOLink(orderId) {
+    if (!confirm('Remove the Boards PO link from this order?')) return;
+    fetch(`/order/${orderId}/update-boards-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Boards PO link removed', 'success');
+            location.reload();
         } else {
-            options[i].style.display = 'none';
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
         }
-    }
+    })
+    .catch(err => showAlert('Error updating Boards PO', 'danger'));
 }
+
+// Close results dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const combo = document.querySelector('.boards-po-combo');
+    const results = document.getElementById('boards-po-results');
+    if (combo && results && !combo.contains(e.target)) {
+        results.style.display = 'none';
+    }
+});
 
 // Update Job Checkbox
 function updateJobCheckbox(orderId, field, value) {
@@ -2711,7 +2797,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ─── Accessories select / bulk delete ─────────────────────────────────────
+    // ─── Accessories select / bulk delete / allocate ─────────────────────────
     const accessorySelectAll = document.getElementById('accessory-select-all');
     const deleteAccessoriesBtn = document.getElementById('delete-accessories-selected');
     const accessoryCountSpan = document.getElementById('accessory-selected-count');
@@ -2774,6 +2860,164 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.disabled = false;
                 this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected';
             });
+        });
+    }
+
+    // ─── Toggle materials allocation (Job Info checkbox) ────────────────────
+    function toggleMaterialsAllocated(orderId, allocate, checkbox) {
+        if (!allocate) {
+            // Unallocate – simple confirm
+            const msg = 'Unallocate all materials?\n\nThis will add quantities back to stock.';
+            if (!confirm(msg)) {
+                checkbox.checked = true;
+                return;
+            }
+            doAllocation(orderId, false, {}, checkbox);
+            return;
+        }
+
+        // Allocate – show modal with editable quantities
+        const tbody = document.getElementById('allocation-modal-body');
+        const warnings = document.getElementById('allocation-warnings');
+        tbody.innerHTML = '';
+        warnings.innerHTML = '';
+
+        // Gather unallocated accessories from the page
+        const rows = document.querySelectorAll('#accessories-table tbody tr[data-accessory-id], #glass-table tbody tr[data-accessory-id]');
+        let hasItems = false;
+
+        rows.forEach(row => {
+            const allocated = row.classList.contains('allocated-row');
+            if (allocated) return; // skip already-allocated rows
+
+            const accId = row.getAttribute('data-accessory-id');
+            const sku = row.querySelector('td:nth-child(2)').textContent.trim();
+            const name = row.querySelector('td:nth-child(3)').textContent.trim();
+            const qtyInput = row.querySelector('.accessory-quantity');
+            const qty = qtyInput ? parseInt(qtyInput.value) || 0 : 0;
+
+            // Parse stock info
+            const priceInfo = row.querySelector('.accessory-price-info');
+            let stockQty = '-';
+            let afterAlloc = '-';
+            let isLow = false;
+
+            if (priceInfo) {
+                const stockDiv = priceInfo.querySelector('div:first-child');
+                if (stockDiv) {
+                    const match = stockDiv.textContent.match(/Stock:\s*(-?\d+)/);
+                    if (match) {
+                        stockQty = parseInt(match[1]);
+                        afterAlloc = stockQty - qty;
+                        isLow = afterAlloc < 0;
+                    }
+                }
+            }
+
+            const tr = document.createElement('tr');
+            if (isLow) tr.style.background = 'rgba(220, 53, 69, 0.08)';
+            tr.innerHTML = `
+                <td><code>${sku}</code></td>
+                <td>${name}</td>
+                <td><input type="number" class="quantity-input alloc-modal-qty" data-acc-id="${accId}" value="${qty}" min="0" step="1" style="width:80px;" oninput="updateAllocPreview()"></td>
+                <td>${stockQty}</td>
+                <td class="alloc-after" data-stock="${typeof stockQty === 'number' ? stockQty : ''}"
+                    style="${isLow ? 'color:#dc3545;font-weight:bold;' : 'color:#28a745;'}">${afterAlloc}</td>
+            `;
+            tbody.appendChild(tr);
+            hasItems = true;
+        });
+
+        if (!hasItems) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="padding:16px;color:var(--text-secondary);">No unallocated accessories found.</td></tr>';
+            document.getElementById('confirm-allocation-btn').disabled = true;
+        } else {
+            document.getElementById('confirm-allocation-btn').disabled = false;
+        }
+
+        // Store the checkbox ref and order id for the confirm action
+        window._allocOrderId = orderId;
+        window._allocCheckbox = checkbox;
+        openModal('allocationModal');
+    }
+
+    function updateAllocPreview() {
+        document.querySelectorAll('#allocation-modal-body tr').forEach(row => {
+            const qtyInput = row.querySelector('.alloc-modal-qty');
+            const afterCell = row.querySelector('.alloc-after');
+            if (!qtyInput || !afterCell) return;
+            const stock = afterCell.getAttribute('data-stock');
+            if (stock === '') { afterCell.textContent = '-'; return; }
+            const newQty = parseInt(qtyInput.value) || 0;
+            const remaining = parseInt(stock) - newQty;
+            afterCell.textContent = remaining;
+            afterCell.style.color = remaining < 0 ? '#dc3545' : '#28a745';
+            afterCell.style.fontWeight = remaining < 0 ? 'bold' : 'normal';
+            row.style.background = remaining < 0 ? 'rgba(220, 53, 69, 0.08)' : '';
+        });
+
+        // Show warning if any items go negative
+        const negatives = document.querySelectorAll('#allocation-modal-body .alloc-after');
+        let hasNeg = false;
+        negatives.forEach(c => { if (parseInt(c.textContent) < 0) hasNeg = true; });
+        const warnings = document.getElementById('allocation-warnings');
+        if (hasNeg) {
+            warnings.innerHTML = '<div style="padding:8px 12px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:6px;color:#dc3545;font-size:0.9rem;"><i class="bi bi-exclamation-triangle"></i> Some items will go below zero stock. You can still proceed.</div>';
+        } else {
+            warnings.innerHTML = '';
+        }
+    }
+
+    function confirmAllocation() {
+        const orderId = window._allocOrderId;
+        const checkbox = window._allocCheckbox;
+
+        // Collect quantity overrides
+        const quantities = {};
+        document.querySelectorAll('.alloc-modal-qty').forEach(input => {
+            const accId = input.getAttribute('data-acc-id');
+            quantities[accId] = parseInt(input.value) || 0;
+        });
+
+        const btn = document.getElementById('confirm-allocation-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Allocating...';
+
+        doAllocation(orderId, true, quantities, checkbox);
+    }
+
+    function doAllocation(orderId, allocate, quantities, checkbox) {
+        fetch('{% url "allocate_accessories" order.id %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({ allocate: allocate, quantities: quantities })
+        })
+        .then(res => {
+            if (!res.ok) console.error('Allocate response not OK:', res.status);
+            return res.json();
+        })
+        .then(data => {
+            if (data.success) {
+                closeModal('allocationModal');
+                const verb = allocate ? 'allocated' : 'unallocated';
+                showAlert(`${data.count} item(s) ${verb}, ${data.stock_changes} stock change(s) made.`, 'success');
+                location.reload();
+            } else {
+                showAlert('Error: ' + (data.error || 'Unknown error'), 'danger');
+                checkbox.checked = !allocate;
+                const btn = document.getElementById('confirm-allocation-btn');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
+            }
+        })
+        .catch(err => {
+            console.error('Allocate fetch error:', err);
+            showAlert('Error: ' + err.message, 'danger');
+            checkbox.checked = !allocate;
+            const btn = document.getElementById('confirm-allocation-btn');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
         });
     }
 
@@ -4867,26 +5111,22 @@ function saveNewBoardsPO(orderId) {
         poNumber = 'PO' + poNumber;
     }
     
-    fetch('{% url "create_boards_po" %}', {
+    // Use the update-boards-po endpoint which will find/create the BoardsPO
+    fetch(`/order/${orderId}/update-boards-po/`, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/json',
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
-        body: new URLSearchParams({
-            'po_number': poNumber,
-            'boards_ordered': 'off',
-            'order_id': orderId
-        })
+        body: JSON.stringify({ po_number: poNumber })
     })
-    .then(response => {
-        if (response.redirected) {
-            // Success - reload page to show new PO
-            window.location.reload();
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`Boards PO ${poNumber} created and linked`, 'success');
+            location.reload();
         } else {
-            return response.text().then(text => {
-                throw new Error('Failed to create PO');
-            });
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
         }
     })
     .catch(error => {

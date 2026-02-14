@@ -5,7 +5,7 @@ from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
 from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-from .models import BoardsPO, Order, OSDoor, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, ProductCustomerAllocation, StockItem, Supplier
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, ProductCustomerAllocation, StockItem, Supplier
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -522,6 +522,7 @@ def purchase_order_detail(request, po_id):
     boards_po = BoardsPO.objects.filter(po_number=purchase_order.display_number).first()
     pnx_items = []
     pnx_total_cost = 0
+    board_product_rows = []  # grouped PNX items presented as product rows
     if boards_po:
         pnx_items = list(boards_po.pnx_items.all())
         for item in pnx_items:
@@ -531,6 +532,43 @@ def purchase_order_detail(request, po_id):
         if pnx_total_cost and purchase_order.total != pnx_total_cost:
             purchase_order.total = pnx_total_cost
             purchase_order.save(update_fields=['total'])
+
+        # Group PNX items by matname + dimensions into product-like rows
+        from collections import defaultdict
+        from decimal import Decimal
+        groups = defaultdict(lambda: {
+            'matname': '', 'cleng': 0, 'cwidth': 0,
+            'total_qty': Decimal('0'), 'received_qty': Decimal('0'),
+            'total_cost': Decimal('0'), 'items': [],
+        })
+        for item in pnx_items:
+            key = (item.matname, float(item.cleng), float(item.cwidth))
+            grp = groups[key]
+            grp['matname'] = item.matname
+            grp['cleng'] = float(item.cleng)
+            grp['cwidth'] = float(item.cwidth)
+            grp['total_qty'] += item.cnt
+            grp['received_qty'] += item.received_quantity
+            grp['total_cost'] += item.calculated_cost
+            grp['items'].append(item)
+
+        for key, grp in sorted(groups.items(), key=lambda x: x[0]):
+            sku = f"{grp['matname'].rstrip('_')}_{int(grp['cwidth'])}"
+            qty = grp['total_qty']
+            cost = grp['total_cost']
+            unit_price = (cost / qty) if qty else Decimal('0')
+            board_product_rows.append({
+                'sku': sku,
+                'name': f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm",
+                'order_price': unit_price,
+                'order_quantity': qty,
+                'received_quantity': grp['received_qty'],
+                'invoice_price': Decimal('0'),
+                'line_total': cost,
+                'is_board': True,
+                'items': grp['items'],
+                'item_ids': ','.join(str(i.id) for i in grp['items']),
+            })
     
     # Find related POs on the same project (sibling POs from other suppliers)
     related_pos = []
@@ -563,6 +601,7 @@ def purchase_order_detail(request, po_id):
         'boards_po': boards_po,
         'pnx_items': pnx_items,
         'pnx_total_cost': pnx_total_cost,
+        'board_product_rows': board_product_rows,
         'related_pos': related_pos,
         'os_door_items': os_door_items,
         'supplier_email': supplier_email,
@@ -862,6 +901,47 @@ def purchase_order_delete_product(request, po_id, product_id):
     po.save(update_fields=['total'])
 
     return JsonResponse({'success': True, 'po_total': str(new_total)})
+
+
+@login_required
+def purchase_order_delete_board_items(request, po_id):
+    """Delete a group of board (PNX) items from a purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+    if not boards_po:
+        return JsonResponse({'error': 'No board PO linked'}, status=404)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    item_ids_str = data.get('item_ids', '')
+    if not item_ids_str:
+        return JsonResponse({'error': 'No item IDs provided'}, status=400)
+
+    item_ids = [int(x) for x in item_ids_str.split(',') if x.strip().isdigit()]
+    deleted_count = PNXItem.objects.filter(id__in=item_ids, boards_po=boards_po).delete()[0]
+
+    # Recalculate board total from remaining PNX items
+    remaining_items = boards_po.pnx_items.all()
+    pnx_total = sum(item.get_cost() for item in remaining_items)
+
+    # Update the PO total
+    product_total = po.products.aggregate(total=Sum('line_total'))['total'] or 0
+    new_total = product_total + pnx_total
+    po.total = new_total
+    po.save(update_fields=['total'])
+
+    return JsonResponse({
+        'success': True,
+        'deleted_count': deleted_count,
+        'po_total': str(new_total),
+    })
+
     """Receive a purchase order - marks PO as received and updates linked items (AJAX)"""
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
@@ -1707,6 +1787,35 @@ def order_search(request):
             'id': o.id,
             'sale_number': o.sale_number,
             'customer_name': name or 'Unknown',
+        })
+
+    return JsonResponse({'results': results})
+
+
+@login_required
+def purchase_order_search(request):
+    """Search purchase orders by display_number, supplier or project. Returns JSON.
+    Used by the Boards PO combo selector in the order details page.
+    """
+    q = request.GET.get('q', '').strip()
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+
+    pos = PurchaseOrder.objects.filter(
+        Q(display_number__icontains=q) |
+        Q(supplier_name__icontains=q) |
+        Q(project_number__icontains=q) |
+        Q(project_name__icontains=q)
+    ).order_by('-display_number')[:20]
+
+    results = []
+    for po in pos:
+        results.append({
+            'id': po.workguru_id,
+            'display_number': po.display_number or po.number or f'#{po.workguru_id}',
+            'supplier_name': po.supplier_name or '',
+            'project_number': po.project_number or '',
+            'status': po.status or '',
         })
 
     return JsonResponse({'results': results})

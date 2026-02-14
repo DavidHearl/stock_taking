@@ -156,21 +156,21 @@ def push_boards_to_po(api: WorkGuruAPI, order) -> dict:
         # Try to resolve stock product
         product_id = None
         supplier_code = matname
-        sku = matname
+        # Build SKU from material name + width (e.g. SHT_MFC_EGG_U899ST9_18_1000)
+        sku = f"{matname.rstrip('_')}_{int(grp['cwidth'])}"
 
         result = api.lookup_product_by_sku(matname)
         if result:
             product_id = result['id']
             supplier_code = result.get('supplierCode') or matname
-            sku = result.get('sku') or matname
+            # Keep the material+width SKU even when we find a stock match
             stock_count += 1
             api.log(f"  Stock match: {matname} -> productId={product_id}\n")
 
         if product_id is None:
             product_id = GENERIC_BOARDS_PRODUCT_ID
-            sku = GENERIC_BOARDS_SKU
             adhoc_count += 1
-            api.log(f"  No stock match for {matname} – using BOARDS_CH\n")
+            api.log(f"  No stock match for {matname} – using generic product, SKU={sku}\n")
 
         description = f"{matname} - {grp['cleng']:.0f}x{grp['cwidth']:.0f}mm x{total_qty:.0f}"
 

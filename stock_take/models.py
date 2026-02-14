@@ -351,6 +351,7 @@ class Accessory(models.Model):
     required = models.BooleanField(default=False, help_text='Required for OS Doors')
     ordered = models.BooleanField(default=False, help_text='Ordered for OS Doors')
     missing = models.BooleanField(default=False, help_text='True if SKU not found in stock')
+    is_allocated = models.BooleanField(default=False, help_text='True if stock has been physically used/deducted')
 
     @property
     def available_quantity(self):
@@ -361,12 +362,14 @@ class Accessory(models.Model):
 
     @property
     def allocated_quantity(self):
-        """Get quantity allocated to other non-completed jobs"""
+        """Get quantity allocated to other non-completed jobs (excluding already-allocated items)"""
         from django.db.models import Sum
-        # Get all accessories with same SKU, excluding current order and completed jobs
+        # Get all accessories with same SKU, excluding current order, completed jobs,
+        # and items that have already been allocated (stock already deducted)
         allocated = Accessory.objects.filter(
             sku=self.sku,
-            order__job_finished=False
+            order__job_finished=False,
+            is_allocated=False
         ).exclude(
             order=self.order
         ).aggregate(total=Sum('quantity'))['total'] or 0

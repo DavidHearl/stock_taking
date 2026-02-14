@@ -4,6 +4,7 @@ from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Reme
 import csv
 import io
 import os
+import json
 import logging
 from decimal import Decimal, InvalidOperation
 from django.conf import settings
@@ -13,9 +14,10 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db.models import Sum, F, Count, Q, Prefetch
+from django.db.models.functions import Greatest
 from django.db import models
 from django.views.decorators.http import require_http_methods
-from .models import StockItem, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
+from .models import StockItem, StockHistory, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
 from django.template.loader import render_to_string
 import datetime
 from django.utils import timezone
@@ -2683,26 +2685,68 @@ def update_order_type(request, order_id):
 
 @login_required
 def update_boards_po(request, order_id):
-    """Update boards PO for an order"""
+    """Update boards PO for an order.
+
+    Accepts JSON body with ONE of:
+      - boards_po_id: legacy BoardsPO.id
+      - purchase_order_id: PurchaseOrder.workguru_id – we find/create the
+        matching BoardsPO via display_number and link it.
+      - po_number: a PO number string – we find/create the BoardsPO.
+      - (empty / null) – clears the link
+    """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Invalid request method'})
-    
+
     order = get_object_or_404(Order, id=order_id)
-    
+
     try:
-        import json
         data = json.loads(request.body)
-        
-        po_id = data.get('boards_po_id', '')
-        if po_id:
-            from .models import BoardsPO
-            boards_po = BoardsPO.objects.get(id=po_id)
+
+        boards_po_id = data.get('boards_po_id', '')
+        purchase_order_id = data.get('purchase_order_id', '')
+        po_number = data.get('po_number', '').strip()
+
+        if purchase_order_id:
+            # Link via PurchaseOrder – find/create matching BoardsPO
+            purchase_order = PurchaseOrder.objects.get(workguru_id=int(purchase_order_id))
+            display = purchase_order.display_number or purchase_order.number or f'PO{purchase_order.workguru_id}'
+            boards_po, _ = BoardsPO.objects.get_or_create(
+                po_number=display,
+                defaults={'boards_ordered': False},
+            )
+            order.boards_po = boards_po
+        elif po_number:
+            # Create or find BoardsPO by number
+            if not po_number.upper().startswith('PO'):
+                po_number = 'PO' + po_number
+            boards_po, _ = BoardsPO.objects.get_or_create(
+                po_number=po_number,
+                defaults={'boards_ordered': False},
+            )
+            order.boards_po = boards_po
+        elif boards_po_id:
+            boards_po = BoardsPO.objects.get(id=boards_po_id)
             order.boards_po = boards_po
         else:
             order.boards_po = None
-        
+
         order.save()
-        return JsonResponse({'success': True})
+
+        # Build response with board PO info
+        resp = {'success': True}
+        if order.boards_po:
+            resp['boards_po'] = {
+                'id': order.boards_po.id,
+                'po_number': order.boards_po.po_number,
+            }
+            # Check if a local PurchaseOrder exists
+            local_po = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
+            if local_po:
+                resp['purchase_order'] = {
+                    'workguru_id': local_po.workguru_id,
+                    'display_number': local_po.display_number,
+                }
+        return JsonResponse(resp)
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
@@ -2715,13 +2759,18 @@ def update_job_checkbox(request, order_id):
     order = get_object_or_404(Order, id=order_id)
     
     try:
-        import json
         data = json.loads(request.body)
         
         if 'all_items_ordered' in data:
             order.all_items_ordered = bool(data['all_items_ordered'])
         if 'job_finished' in data:
+            was_finished = order.job_finished
             order.job_finished = bool(data['job_finished'])
+            
+            # Auto-mark all accessories as allocated when job is finished
+            # Do NOT deduct stock — finished jobs are already excluded from allocation calc
+            if order.job_finished and not was_finished:
+                order.accessories.filter(is_allocated=False).update(is_allocated=True)
         
         order.save()
         return JsonResponse({'success': True})
@@ -2957,6 +3006,11 @@ def order_details(request, order_id):
     if order.boards_po:
         boards_purchase_order = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
     
+    # Check if all accessories are allocated
+    total_accessories = order.accessories.count()
+    all_allocated = total_accessories > 0 and not order.accessories.filter(is_allocated=False).exists()
+    unallocated_count = order.accessories.filter(is_allocated=False).count()
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -2973,6 +3027,8 @@ def order_details(request, order_id):
         'boards_cost': boards_cost,
         'accessories_cost': accessories_cost,
         'os_doors_cost': os_doors_cost,
+        'all_allocated': all_allocated,
+        'unallocated_count': unallocated_count,
         'workflow_progress': workflow_progress,
         'workflow_stages': workflow_stages,
         'task_completions': task_completions,
@@ -4556,6 +4612,117 @@ def delete_accessory(request, accessory_id):
         messages.success(request, f'Accessory "{accessory_name}" has been removed from order {order.sale_number} and CSV regenerated.')
         return redirect('order_details', order_id=order.id)
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def allocate_accessories(request, order_id):
+    """Toggle allocation for all accessories on an order.
+
+    POST JSON body:
+        allocate (bool): True = allocate, False = unallocate
+        quantities (dict, optional): {accessory_id: new_qty, ...}
+            When provided during allocation, the accessory quantity is updated
+            before deducting from stock so the user can adjust in the modal.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    order = get_object_or_404(Order, id=order_id)
+
+    try:
+        data = json.loads(request.body)
+        allocate = data.get('allocate', True)
+        qty_overrides = data.get('quantities', {})  # {str(accessory_id): int}
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    try:
+        user = request.user if request.user.is_authenticated else None
+        count = 0
+        stock_changes = 0
+
+        if allocate:
+            # Allocate: mark all unallocated as allocated and deduct stock
+            accessories = list(order.accessories.filter(is_allocated=False).select_related('stock_item'))
+            for acc in accessories:
+                # Apply quantity override if provided
+                override_key = str(acc.id)
+                if override_key in qty_overrides:
+                    new_qty = max(int(qty_overrides[override_key]), 0)
+                    if new_qty != int(acc.quantity):
+                        acc.quantity = new_qty
+                        acc.save(update_fields=['quantity', 'is_allocated'])
+                    else:
+                        acc.is_allocated = True
+                        acc.save(update_fields=['is_allocated'])
+                else:
+                    acc.is_allocated = True
+                    acc.save(update_fields=['is_allocated'])
+
+                # Ensure is_allocated is set
+                if not acc.is_allocated:
+                    acc.is_allocated = True
+                    acc.save(update_fields=['is_allocated'])
+
+                count += 1
+
+                if acc.stock_item_id and acc.quantity > 0:
+                    qty = int(acc.quantity)
+                    # Use F() expression to atomically update stock, avoiding stale reads
+                    # when multiple accessories share the same stock item
+                    StockItem.objects.filter(pk=acc.stock_item_id).update(
+                        quantity=Greatest(F('quantity') - qty, 0)
+                    )
+                    # Re-fetch to get updated quantity for history
+                    stock_item = StockItem.objects.get(pk=acc.stock_item_id)
+                    stock_changes += 1
+
+                    StockHistory.objects.create(
+                        stock_item=stock_item,
+                        quantity=stock_item.quantity,
+                        change_amount=-qty,
+                        change_type='sale',
+                        reference=order.sale_number,
+                        notes=f'Allocated for order {order.sale_number} ({acc.name})',
+                        created_by=user,
+                    )
+        else:
+            # Unallocate: mark all allocated as unallocated and add stock back
+            accessories = list(order.accessories.filter(is_allocated=True).select_related('stock_item'))
+            for acc in accessories:
+                acc.is_allocated = False
+                acc.save(update_fields=['is_allocated'])
+                count += 1
+
+                if acc.stock_item_id and acc.quantity > 0:
+                    qty = int(acc.quantity)
+                    StockItem.objects.filter(pk=acc.stock_item_id).update(
+                        quantity=F('quantity') + qty
+                    )
+                    stock_item = StockItem.objects.get(pk=acc.stock_item_id)
+                    stock_changes += 1
+
+                    StockHistory.objects.create(
+                        stock_item=stock_item,
+                        quantity=stock_item.quantity,
+                        change_amount=qty,
+                        change_type='adjustment',
+                        reference=order.sale_number,
+                        notes=f'Unallocated from order {order.sale_number} ({acc.name})',
+                        created_by=user,
+                    )
+
+        return JsonResponse({
+            'success': True,
+            'count': count,
+            'stock_changes': stock_changes,
+            'allocated': allocate,
+        })
+
+    except Exception as e:
+        import traceback
+        logging.error(f'allocate_accessories error for order {order_id}: {e}\n{traceback.format_exc()}')
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @login_required

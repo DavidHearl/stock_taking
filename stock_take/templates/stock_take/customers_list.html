@@ -66,13 +66,9 @@ Customers
                 <tr data-id="{{ customer.pk }}" data-has-details="{{ customer.workguru_id|yesno:'1,0' }}" data-search="{{ customer.name|lower }} {{ customer.email|lower }} {{ customer.phone|lower }} {{ customer.city|lower }} {{ customer.postcode|lower }}">
                     <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ customer.pk }}" onclick="updateSelection()"></td>
                     <td>
-                        {% if customer.workguru_id %}
-                        <a href="{% url 'customer_detail' customer.workguru_id %}" class="customer-name-link">
+                        <a href="{% url 'customer_detail' customer.pk %}" class="customer-name-link">
                             {{ customer.name|default:customer|default:"-" }}
                         </a>
-                        {% else %}
-                        <span>{{ customer.name|default:customer|default:"-" }}</span>
-                        {% endif %}
                     </td>
                     <td>
                         {% if customer.email %}
@@ -168,6 +164,39 @@ Customers
     </div>
 </div>
 
+<!-- Merge Customer Modal -->
+<div class="modal-overlay" id="merge-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-arrow-left-right"></i> Merge Customers</h2>
+            <button class="modal-close" onclick="document.getElementById('merge-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 16px;">Choose which customer to <strong>keep</strong>. The other customer's orders and data will be transferred into the kept customer, then the other will be deleted.</p>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <label style="display: flex; align-items: center; gap: 10px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+                    <input type="radio" name="merge-keep" id="merge-option-0" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div>
+                        <strong>Keep: <span id="merge-option-0-name"></span></strong>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 2px;">Delete &amp; merge in: <span id="merge-option-0-remove"></span></div>
+                    </div>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+                    <input type="radio" name="merge-keep" id="merge-option-1" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div>
+                        <strong>Keep: <span id="merge-option-1-name"></span></strong>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 2px;">Delete &amp; merge in: <span id="merge-option-1-remove"></span></div>
+                    </div>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('merge-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-save" onclick="executeMerge()">Merge</button>
+        </div>
+    </div>
+</div>
+
 <script>
 // --- Client-side search ---
 const searchInput = document.getElementById('customer-search');
@@ -200,34 +229,40 @@ function checkMergeEligibility() {
     const mergeBtn = document.getElementById('merge-btn');
     if (!mergeBtn) return;
     const checked = document.querySelectorAll('.row-select:checked');
-    if (checked.length !== 2) {
-        mergeBtn.style.display = 'none';
-        return;
-    }
-    const rows = Array.from(checked).map(cb => cb.closest('tr'));
-    const hasDetails0 = rows[0].getAttribute('data-has-details') === '1';
-    const hasDetails1 = rows[1].getAttribute('data-has-details') === '1';
-    // Show merge if one has details and one doesn't
-    if (hasDetails0 !== hasDetails1) {
-        mergeBtn.style.display = 'inline-flex';
-    } else {
-        mergeBtn.style.display = 'none';
-    }
+    // Show merge button whenever exactly 2 customers are selected
+    mergeBtn.style.display = checked.length === 2 ? 'inline-flex' : 'none';
 }
 
 function mergeCustomers() {
     const checked = document.querySelectorAll('.row-select:checked');
     if (checked.length !== 2) return;
     const rows = Array.from(checked).map(cb => cb.closest('tr'));
-    let keepRow, removeRow;
-    if (rows[0].getAttribute('data-has-details') === '1') {
-        keepRow = rows[0]; removeRow = rows[1];
-    } else {
-        keepRow = rows[1]; removeRow = rows[0];
-    }
-    const keepName = keepRow.querySelector('td:nth-child(2)').textContent.trim();
-    const removeName = removeRow.querySelector('td:nth-child(2)').textContent.trim();
-    if (!confirm('Merge "' + removeName + '" into "' + keepName + '"?\n\nOrders and data from "' + removeName + '" will be transferred to "' + keepName + '", then "' + removeName + '" will be deleted.')) return;
+    const name0 = rows[0].querySelector('td:nth-child(2)').textContent.trim();
+    const name1 = rows[1].querySelector('td:nth-child(2)').textContent.trim();
+    const id0 = parseInt(rows[0].getAttribute('data-id'));
+    const id1 = parseInt(rows[1].getAttribute('data-id'));
+
+    // Show merge modal to let user choose which to keep
+    const modal = document.getElementById('merge-modal');
+    document.getElementById('merge-option-0-name').textContent = name0;
+    document.getElementById('merge-option-1-name').textContent = name1;
+    document.getElementById('merge-option-0').value = id0;
+    document.getElementById('merge-option-1').value = id1;
+    document.getElementById('merge-option-0-remove').textContent = name1;
+    document.getElementById('merge-option-1-remove').textContent = name0;
+    document.getElementById('merge-option-0').checked = true;
+    modal.style.display = 'flex';
+}
+
+function executeMerge() {
+    const selected = document.querySelector('input[name="merge-keep"]:checked');
+    if (!selected) return;
+    const keepId = parseInt(selected.value);
+    const otherId = parseInt(selected.value) === parseInt(document.getElementById('merge-option-0').value)
+        ? parseInt(document.getElementById('merge-option-1').value)
+        : parseInt(document.getElementById('merge-option-0').value);
+
+    document.getElementById('merge-modal').style.display = 'none';
 
     fetch('{% url "customer_merge" %}', {
         method: 'POST',
@@ -235,10 +270,7 @@ function mergeCustomers() {
             'X-CSRFToken': '{{ csrf_token }}',
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            keep_id: parseInt(keepRow.getAttribute('data-id')),
-            remove_id: parseInt(removeRow.getAttribute('data-id'))
-        }),
+        body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
     })
     .then(res => res.json())
     .then(data => {
