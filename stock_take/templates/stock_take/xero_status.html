@@ -246,15 +246,16 @@
     <!-- Permissions Info -->
     <div class="admin-card">
         <div class="admin-card-header">
-            <h2>Permissions (Read-Only)</h2>
+            <h2>Permissions</h2>
         </div>
         <div class="admin-card-body">
             <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
-                This integration requests <strong>read-only</strong> access to Xero. No data will be created, modified, or deleted in your Xero account.
+                This integration requests <strong>read-only</strong> access to most Xero data, with <strong>write access</strong> for contacts (customers/suppliers).
             </p>
             <div class="scope-list">
                 <span class="scope-tag readonly">accounting.transactions.read</span>
                 <span class="scope-tag readonly">accounting.contacts.read</span>
+                <span class="scope-tag" style="background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.2); color: var(--warning-color, #f59e0b);">accounting.contacts (write)</span>
                 <span class="scope-tag readonly">accounting.settings.read</span>
                 <span class="scope-tag readonly">accounting.reports.read</span>
                 <span class="scope-tag">openid</span>
@@ -309,6 +310,63 @@
         </div>
     </div>
     {% endif %}
+
+    {% if connected %}
+    <!-- Create Customer in Xero -->
+    <div class="admin-card">
+        <div class="admin-card-header">
+            <h2>Export Customer to Xero</h2>
+        </div>
+        <div class="admin-card-body">
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+                Search for a customer in the database and export them to Xero as a new contact.
+            </p>
+
+            <!-- Customer Search -->
+            <div style="max-width: 600px; position: relative;">
+                <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">Search Customer</label>
+                <input type="text" id="xeroCustomerSearch" placeholder="Type a name or email to search..." autocomplete="off"
+                    style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); color: var(--text-primary); font-size: 0.9rem;">
+                <div id="xeroSearchResults" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 100;
+                    background: var(--card-bg); border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 8px 8px;
+                    max-height: 280px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
+            </div>
+
+            <!-- Selected Customer Preview -->
+            <div id="selectedCustomerCard" style="display: none; margin-top: 16px; max-width: 600px; padding: 16px;
+                background: rgba(90,159,212,0.06); border: 1px solid rgba(90,159,212,0.2); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                    <h3 style="margin: 0; font-size: 1rem; color: var(--text-primary);" id="selectedName"></h3>
+                    <button onclick="clearSelectedCustomer()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; padding: 0;" title="Clear selection">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="xero-info-grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Email</span>
+                        <span class="xero-info-value" id="selectedEmail">-</span>
+                    </div>
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Phone</span>
+                        <span class="xero-info-value" id="selectedPhone">-</span>
+                    </div>
+                    <div class="xero-info-item" style="grid-column: 1 / -1;">
+                        <span class="xero-info-label">Address</span>
+                        <span class="xero-info-value" id="selectedAddress">-</span>
+                    </div>
+                </div>
+                <input type="hidden" id="selectedCustomerId" value="">
+                <div style="margin-top: 14px;">
+                    <button class="btn-xero-connect" id="createCustomerBtn" onclick="createXeroCustomer()">
+                        <i class="bi bi-person-plus"></i> Export to Xero
+                    </button>
+                </div>
+            </div>
+
+            <div class="xero-test-result" id="createCustomerResult"></div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 
@@ -343,6 +401,151 @@ function testXeroConnection() {
         .finally(() => {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-lightning"></i> Test Connection';
+        });
+}
+
+// ─── Customer Search & Export ──────────────────────────
+let searchTimeout = null;
+const searchInput = document.getElementById('xeroCustomerSearch');
+const searchResults = document.getElementById('xeroSearchResults');
+
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        const q = this.value.trim();
+        if (q.length < 2) {
+            searchResults.style.display = 'none';
+            return;
+        }
+        searchTimeout = setTimeout(() => {
+            fetch('{% url "xero_customer_search" %}?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.results.length) {
+                        searchResults.innerHTML = '<div style="padding: 12px 14px; color: var(--text-muted); font-size: 0.85rem;">No customers found</div>';
+                        searchResults.style.display = 'block';
+                        return;
+                    }
+                    searchResults.innerHTML = data.results.map(c => {
+                        const linked = c.xero_id ? ' <span style="font-size:0.7rem; color:var(--success-color);"><i class="bi bi-check-circle-fill"></i> In Xero</span>' : '';
+                        return '<div class="xero-search-item" data-id="' + c.id + '" data-name="' + escapeHtml(c.name) + '" data-email="' + escapeHtml(c.email) + '" data-phone="' + escapeHtml(c.phone) + '" data-address="' + escapeHtml(c.address) + '" data-xero-id="' + c.xero_id + '"' +
+                            ' style="padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s;"' +
+                            ' onmouseenter="this.style.background=\'rgba(90,159,212,0.08)\'" onmouseleave="this.style.background=\'transparent\'">' +
+                            '<div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">' + escapeHtml(c.name) + linked + '</div>' +
+                            (c.email ? '<div style="font-size: 0.8rem; color: var(--text-muted);">' + escapeHtml(c.email) + '</div>' : '') +
+                            (c.address ? '<div style="font-size: 0.8rem; color: var(--text-muted);">' + escapeHtml(c.address) + '</div>' : '') +
+                            '</div>';
+                    }).join('');
+                    searchResults.style.display = 'block';
+
+                    // Bind click to each result
+                    searchResults.querySelectorAll('.xero-search-item').forEach(item => {
+                        item.addEventListener('click', () => selectCustomer(item));
+                    });
+                });
+        }, 300);
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+            searchResults.style.display = 'none';
+        }
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+}
+
+function selectCustomer(item) {
+    const id = item.dataset.id;
+    const name = item.dataset.name;
+    const email = item.dataset.email;
+    const phone = item.dataset.phone;
+    const address = item.dataset.address;
+    const xeroId = item.dataset.xeroId;
+
+    document.getElementById('selectedCustomerId').value = id;
+    document.getElementById('selectedName').textContent = name;
+    document.getElementById('selectedEmail').textContent = email || '-';
+    document.getElementById('selectedPhone').textContent = phone || '-';
+    document.getElementById('selectedAddress').textContent = address || '-';
+    document.getElementById('selectedCustomerCard').style.display = 'block';
+    searchResults.style.display = 'none';
+    searchInput.value = name;
+
+    // Disable button if already in Xero
+    const btn = document.getElementById('createCustomerBtn');
+    const resultDiv = document.getElementById('createCustomerResult');
+    if (xeroId) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-check-circle"></i> Already in Xero';
+        resultDiv.className = 'xero-test-result success';
+        resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> This customer is already linked to Xero (ID: <code>' + xeroId + '</code>)';
+        resultDiv.style.display = 'block';
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
+        resultDiv.style.display = 'none';
+    }
+}
+
+function clearSelectedCustomer() {
+    document.getElementById('selectedCustomerCard').style.display = 'none';
+    document.getElementById('selectedCustomerId').value = '';
+    document.getElementById('createCustomerResult').style.display = 'none';
+    document.getElementById('xeroCustomerSearch').value = '';
+}
+
+function createXeroCustomer() {
+    const btn = document.getElementById('createCustomerBtn');
+    const resultDiv = document.getElementById('createCustomerResult');
+    const customerId = document.getElementById('selectedCustomerId').value;
+
+    if (!customerId) {
+        resultDiv.className = 'xero-test-result error';
+        resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Please search and select a customer first.';
+        resultDiv.style.display = 'block';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Exporting...';
+    resultDiv.className = 'xero-test-result';
+    resultDiv.style.display = 'none';
+
+    fetch('{% url "xero_create_customer" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ customer_id: parseInt(customerId) })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                resultDiv.className = 'xero-test-result success';
+                resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> <strong>Customer exported to Xero!</strong> ' +
+                    data.contact.name + ' (Xero ID: <code>' + data.contact.id + '</code>)';
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> Already in Xero';
+            } else {
+                resultDiv.className = 'xero-test-result error';
+                resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> <strong>Failed:</strong> ' + (data.error || 'Unknown error');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
+            }
+            resultDiv.style.display = 'block';
+        })
+        .catch(err => {
+            resultDiv.className = 'xero-test-result error';
+            resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> <strong>Request failed:</strong> ' + err.message;
+            resultDiv.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
         });
 }
 </script>

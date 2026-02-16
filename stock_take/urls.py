@@ -11,7 +11,7 @@ from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip
 from .profile_views import user_profile, user_profile_save, user_change_password
-from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test
+from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
@@ -282,4 +282,6 @@ urlpatterns = [
     path('xero/disconnect/', xero_disconnect, name='xero_disconnect'),
     path('xero/status/', xero_status, name='xero_status'),
     path('xero/api/test/', xero_api_test, name='xero_api_test'),
+    path('xero/api/create-customer/', xero_create_customer, name='xero_create_customer'),
+    path('xero/api/customer-search/', xero_customer_search, name='xero_customer_search'),
 ]

@@ -138,3 +138,117 @@ def xero_api_test(request):
         })
     else:
         return JsonResponse({"connected": False, "error": "Could not fetch organisation"}, status=502)
+
+
+@login_required
+def xero_create_customer(request):
+    """
+    Create a new customer (contact) in Xero from a database Customer.
+    Accepts POST with JSON body: {customer_id} (database PK)
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "error": "POST required"}, status=405)
+
+    import json
+    from stock_take.models import Customer
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+
+    customer_id = data.get("customer_id")
+    if not customer_id:
+        return JsonResponse({"success": False, "error": "customer_id is required"}, status=400)
+
+    try:
+        customer = Customer.objects.get(pk=customer_id)
+    except Customer.DoesNotExist:
+        return JsonResponse({"success": False, "error": "Customer not found"}, status=404)
+
+    if customer.xero_id:
+        return JsonResponse({
+            "success": False,
+            "error": f"Customer already linked to Xero (ID: {customer.xero_id})"
+        }, status=400)
+
+    # Build the contact name
+    name = customer.name or f"{customer.first_name} {customer.last_name}".strip()
+    if not name:
+        return JsonResponse({"success": False, "error": "Customer has no name"}, status=400)
+
+    result = xero_api.create_contact(
+        name=name,
+        first_name=customer.first_name,
+        last_name=customer.last_name,
+        email=customer.email or "",
+        phone=customer.phone or "",
+        address_line1=customer.address_1 or "",
+        address_line2=customer.address_2 or "",
+        city=customer.city or "",
+        region=customer.state or "",
+        postal_code=customer.postcode or "",
+        country=customer.country or "",
+    )
+
+    if result and "Contacts" in result:
+        contact = result["Contacts"][0]
+        xero_contact_id = contact.get("ContactID", "")
+
+        # Save the Xero ID back to the customer record
+        if xero_contact_id:
+            customer.xero_id = xero_contact_id
+            customer.save(update_fields=["xero_id"])
+
+        return JsonResponse({
+            "success": True,
+            "contact": {
+                "id": xero_contact_id,
+                "name": contact.get("Name", ""),
+                "first_name": contact.get("FirstName", ""),
+                "last_name": contact.get("LastName", ""),
+                "email": contact.get("EmailAddress", ""),
+                "status": contact.get("ContactStatus", ""),
+            }
+        })
+    else:
+        return JsonResponse({
+            "success": False,
+            "error": "Failed to create contact in Xero. Check server logs for details."
+        }, status=500)
+
+
+@login_required
+def xero_customer_search(request):
+    """
+    Search customers in the local database for the Xero customer picker.
+    Returns JSON with matching customers.
+    """
+    from stock_take.models import Customer
+    from django.db.models import Q
+
+    q = request.GET.get("q", "").strip()
+    if len(q) < 2:
+        return JsonResponse({"results": []})
+
+    customers = Customer.objects.filter(
+        Q(name__icontains=q) |
+        Q(first_name__icontains=q) |
+        Q(last_name__icontains=q) |
+        Q(email__icontains=q)
+    ).filter(is_active=True)[:15]
+
+    results = []
+    for c in customers:
+        display_name = c.name or f"{c.first_name} {c.last_name}".strip()
+        address_parts = [p for p in [c.address_1, c.address_2, c.city, c.state, c.postcode] if p]
+        results.append({
+            "id": c.pk,
+            "name": display_name,
+            "email": c.email or "",
+            "phone": c.phone or "",
+            "address": ", ".join(address_parts),
+            "xero_id": c.xero_id or "",
+        })
+
+    return JsonResponse({"results": results})

@@ -18,11 +18,12 @@ XERO_TOKEN_URL = "https://login.xero.com/identity/connect/token"
 XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
 
-# Read-only scopes only — no write permissions
+# Scopes — includes write access for contacts
 XERO_SCOPES = (
     "openid profile email offline_access "
     "accounting.transactions.read "
     "accounting.contacts.read "
+    "accounting.contacts "
     "accounting.settings.read "
     "accounting.reports.read"
 )
@@ -197,6 +198,66 @@ def _api_get(endpoint, params=None):
         return None
 
 
+def _api_post(endpoint, data):
+    """
+    Make a POST request to the Xero API.
+    Handles token refresh automatically.
+    Returns the parsed JSON response or None on failure.
+    """
+    access_token, tenant_id = get_valid_access_token()
+    if not access_token:
+        logger.warning("No valid Xero token available")
+        return None
+
+    url = f"{XERO_API_BASE}/{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Xero-Tenant-Id": tenant_id,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Xero API POST error ({endpoint}): {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            logger.error(f"Response body: {e.response.text}")
+        return None
+
+
+def _api_put(endpoint, data):
+    """
+    Make a PUT request to the Xero API.
+    Handles token refresh automatically.
+    Returns the parsed JSON response or None on failure.
+    """
+    access_token, tenant_id = get_valid_access_token()
+    if not access_token:
+        logger.warning("No valid Xero token available")
+        return None
+
+    url = f"{XERO_API_BASE}/{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Xero-Tenant-Id": tenant_id,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.put(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Xero API PUT error ({endpoint}): {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            logger.error(f"Response body: {e.response.text}")
+        return None
+
+
 def get_organisation():
     """Fetch the connected organisation details."""
     return _api_get("Organisation")
@@ -246,3 +307,50 @@ def get_reports_profit_and_loss(from_date=None, to_date=None):
     if to_date:
         params["toDate"] = to_date
     return _api_get("Reports/ProfitAndLoss", params=params)
+
+
+# ─── Write API Helpers ──────────────────────────────────────────────
+
+def create_contact(name, first_name="", last_name="", email="", phone="",
+                   address_line1="", address_line2="", city="", region="",
+                   postal_code="", country=""):
+    """
+    Create a new contact (customer/supplier) in Xero.
+    Returns the parsed JSON response or None on failure.
+    """
+    contact_data = {
+        "Name": name,
+    }
+    if first_name:
+        contact_data["FirstName"] = first_name
+    if last_name:
+        contact_data["LastName"] = last_name
+    if email:
+        contact_data["EmailAddress"] = email
+    if phone:
+        contact_data["Phones"] = [
+            {
+                "PhoneType": "DEFAULT",
+                "PhoneNumber": phone,
+            }
+        ]
+
+    # Build address if any address field is provided
+    if any([address_line1, address_line2, city, region, postal_code, country]):
+        address = {"AddressType": "STREET"}
+        if address_line1:
+            address["AddressLine1"] = address_line1
+        if address_line2:
+            address["AddressLine2"] = address_line2
+        if city:
+            address["City"] = city
+        if region:
+            address["Region"] = region
+        if postal_code:
+            address["PostalCode"] = postal_code
+        if country:
+            address["Country"] = country
+        contact_data["Addresses"] = [address]
+
+    payload = {"Contacts": [contact_data]}
+    return _api_post("Contacts", payload)
