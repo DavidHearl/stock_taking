@@ -4,7 +4,7 @@ from .models import (
     Customer, BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
     Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
     OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense, UserProfile,
-    StockHistory, Role, PagePermission
+    StockHistory, Role, PagePermission, XeroToken
 )
 
 @admin.register(Customer)
@@ -270,3 +270,9 @@ class PagePermissionAdmin(admin.ModelAdmin):
     list_display = ['role', 'page_codename', 'can_view', 'can_create', 'can_edit', 'can_delete']
     list_filter = ['role', 'can_view', 'can_create', 'can_edit', 'can_delete']
     list_editable = ['can_view', 'can_create', 'can_edit', 'can_delete']
+
+
+@admin.register(XeroToken)
+class XeroTokenAdmin(admin.ModelAdmin):
+    list_display = ['tenant_name', 'tenant_id', 'connected_by', 'is_expired', 'updated_at']
+    readonly_fields = ['access_token', 'refresh_token', 'expires_at', 'created_at', 'updated_at']

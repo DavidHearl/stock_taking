@@ -1580,3 +1580,35 @@ class ClaimDocument(models.Model):
         if len(parts) >= 3:
             return parts[1]
         return ''
+
+
+class XeroToken(models.Model):
+    """
+    Stores Xero OAuth2 tokens. Only one active token set at a time.
+    Access tokens expire every 30 minutes; refresh tokens last 60 days.
+    """
+    access_token = models.TextField()
+    refresh_token = models.TextField()
+    token_type = models.CharField(max_length=50, default='Bearer')
+    expires_at = models.DateTimeField(help_text='When the access token expires')
+    scope = models.TextField(blank=True, default='')
+    tenant_id = models.CharField(max_length=100, blank=True, default='', help_text='Xero Tenant (Organisation) ID')
+    tenant_name = models.CharField(max_length=255, blank=True, default='', help_text='Xero Organisation name')
+    connected_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"Xero Token ({self.tenant_name or 'no tenant'}) - updated {self.updated_at}"
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    @classmethod
+    def get_active_token(cls):
+        """Return the most recently updated token, or None."""
+        return cls.objects.first()

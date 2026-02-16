@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Xero Integration{% endblock %}
+
+{% block nav_admin_settings_active %}{% endblock %}
+{% block nav_xero_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/admin_pages.css' %}" rel="stylesheet">
+<style>
+    .xero-status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .xero-status-badge.connected {
+        background: rgba(16, 185, 129, 0.15);
+        color: var(--success-color, #10b981);
+    }
+    .xero-status-badge.disconnected {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--danger-color, #ef4444);
+    }
+    .xero-info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 16px;
+    }
+    .xero-info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .xero-info-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .xero-info-value {
+        font-size: 0.95rem;
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+    .xero-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 8px;
+    }
+    .btn-xero-connect {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 24px;
+        background: #13B5EA;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background 0.2s ease;
+    }
+    .btn-xero-connect:hover {
+        background: #0e94c0;
+        color: #fff;
+    }
+    .btn-xero-disconnect {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 24px;
+        background: transparent;
+        color: var(--danger-color, #ef4444);
+        border: 1px solid var(--danger-color, #ef4444);
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.2s ease;
+    }
+    .btn-xero-disconnect:hover {
+        background: var(--danger-color, #ef4444);
+        color: #fff;
+    }
+    .btn-xero-test {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 24px;
+        background: transparent;
+        color: var(--primary-color);
+        border: 1px solid var(--primary-color);
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.2s ease;
+    }
+    .btn-xero-test:hover {
+        background: var(--primary-color);
+        color: #fff;
+    }
+    .xero-test-result {
+        margin-top: 12px;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        display: none;
+    }
+    .xero-test-result.success {
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        color: var(--success-color, #10b981);
+        display: block;
+    }
+    .xero-test-result.error {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        color: var(--danger-color, #ef4444);
+        display: block;
+    }
+    .scope-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 4px;
+    }
+    .scope-tag {
+        display: inline-block;
+        padding: 2px 10px;
+        background: rgba(90, 159, 212, 0.1);
+        border: 1px solid rgba(90, 159, 212, 0.2);
+        border-radius: 12px;
+        font-size: 0.75rem;
+        color: var(--primary-color);
+        font-weight: 500;
+    }
+    .scope-tag.readonly {
+        background: rgba(16, 185, 129, 0.1);
+        border-color: rgba(16, 185, 129, 0.2);
+        color: var(--success-color, #10b981);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="page-header">
+        <h1><i class="bi bi-plug"></i> Xero Integration</h1>
+        <p class="page-subtitle">Connect to Xero for read-only access to accounting data</p>
+    </div>
+
+    {% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }}" style="padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem;
+        {% if message.tags == 'success' %}background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: var(--success-color, #10b981);
+        {% elif message.tags == 'error' %}background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--danger-color, #ef4444);
+        {% else %}background: rgba(90,159,212,0.1); border: 1px solid rgba(90,159,212,0.3); color: var(--primary-color);{% endif %}">
+        {{ message }}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    <!-- Connection Status -->
+    <div class="admin-card">
+        <div class="admin-card-header">
+            <h2>Connection Status</h2>
+            {% if connected %}
+            <span class="xero-status-badge connected"><i class="bi bi-check-circle-fill"></i> Connected</span>
+            {% else %}
+            <span class="xero-status-badge disconnected"><i class="bi bi-x-circle-fill"></i> Disconnected</span>
+            {% endif %}
+        </div>
+        <div class="admin-card-body">
+            {% if connected %}
+                <div class="xero-info-grid">
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Organisation</span>
+                        <span class="xero-info-value">{{ token.tenant_name|default:"Unknown" }}</span>
+                    </div>
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Tenant ID</span>
+                        <span class="xero-info-value" style="font-family: monospace; font-size: 0.8rem;">{{ token.tenant_id|default:"-" }}</span>
+                    </div>
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Connected By</span>
+                        <span class="xero-info-value">{{ token.connected_by.get_full_name|default:token.connected_by.username|default:"Unknown" }}</span>
+                    </div>
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Token Status</span>
+                        <span class="xero-info-value">
+                            {% if token.is_expired %}
+                                <span style="color: var(--warning-color, #f59e0b);">Expired (will auto-refresh)</span>
+                            {% else %}
+                                <span style="color: var(--success-color, #10b981);">Valid</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Last Updated</span>
+                        <span class="xero-info-value">{{ token.updated_at|date:"d M Y H:i" }}</span>
+                    </div>
+                    <div class="xero-info-item">
+                        <span class="xero-info-label">Expires At</span>
+                        <span class="xero-info-value">{{ token.expires_at|date:"d M Y H:i" }}</span>
+                    </div>
+                </div>
+
+                <div class="xero-actions" style="margin-top: 20px;">
+                    <button class="btn-xero-test" id="testConnectionBtn" onclick="testXeroConnection()">
+                        <i class="bi bi-lightning"></i> Test Connection
+                    </button>
+                    <form method="post" action="{% url 'xero_disconnect' %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to disconnect from Xero?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn-xero-disconnect">
+                            <i class="bi bi-plug"></i> Disconnect
+                        </button>
+                    </form>
+                </div>
+
+                <div class="xero-test-result" id="testResult"></div>
+
+            {% else %}
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    No Xero account is currently connected. Click the button below to authorize read-only access to your Xero organisation.
+                </p>
+                <div class="xero-actions">
+                    <a href="{% url 'xero_connect' %}" class="btn-xero-connect">
+                        <i class="bi bi-box-arrow-up-right"></i> Connect to Xero
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Permissions Info -->
+    <div class="admin-card">
+        <div class="admin-card-header">
+            <h2>Permissions (Read-Only)</h2>
+        </div>
+        <div class="admin-card-body">
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+                This integration requests <strong>read-only</strong> access to Xero. No data will be created, modified, or deleted in your Xero account.
+            </p>
+            <div class="scope-list">
+                <span class="scope-tag readonly">accounting.transactions.read</span>
+                <span class="scope-tag readonly">accounting.contacts.read</span>
+                <span class="scope-tag readonly">accounting.settings.read</span>
+                <span class="scope-tag readonly">accounting.reports.read</span>
+                <span class="scope-tag">openid</span>
+                <span class="scope-tag">profile</span>
+                <span class="scope-tag">email</span>
+                <span class="scope-tag">offline_access</span>
+            </div>
+        </div>
+    </div>
+
+    {% if connected and organisation %}
+    <!-- Organisation Details -->
+    <div class="admin-card">
+        <div class="admin-card-header">
+            <h2>Organisation Details</h2>
+        </div>
+        <div class="admin-card-body">
+            <div class="xero-info-grid">
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Name</span>
+                    <span class="xero-info-value">{{ organisation.Name|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Legal Name</span>
+                    <span class="xero-info-value">{{ organisation.LegalName|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Short Code</span>
+                    <span class="xero-info-value" style="font-family: monospace;">{{ organisation.ShortCode|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Base Currency</span>
+                    <span class="xero-info-value">{{ organisation.BaseCurrency|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Country</span>
+                    <span class="xero-info-value">{{ organisation.CountryCode|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Organisation Type</span>
+                    <span class="xero-info-value">{{ organisation.OrganisationType|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Financial Year End</span>
+                    <span class="xero-info-value">{{ organisation.FinancialYearEndDay|default:"-" }} / {{ organisation.FinancialYearEndMonth|default:"-" }}</span>
+                </div>
+                <div class="xero-info-item">
+                    <span class="xero-info-label">Tax Number</span>
+                    <span class="xero-info-value" style="font-family: monospace;">{{ organisation.TaxNumber|default:"-" }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function testXeroConnection() {
+    const btn = document.getElementById('testConnectionBtn');
+    const resultDiv = document.getElementById('testResult');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Testing...';
+    resultDiv.className = 'xero-test-result';
+    resultDiv.style.display = 'none';
+
+    fetch('{% url "xero_api_test" %}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.connected) {
+                resultDiv.className = 'xero-test-result success';
+                resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> <strong>Connection successful!</strong> Organisation: ' + data.organisation.name + ' (' + data.organisation.base_currency + ')';
+            } else {
+                resultDiv.className = 'xero-test-result error';
+                resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> <strong>Connection failed:</strong> ' + (data.error || 'Unknown error');
+            }
+            resultDiv.style.display = 'block';
+        })
+        .catch(err => {
+            resultDiv.className = 'xero-test-result error';
+            resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> <strong>Request failed:</strong> ' + err.message;
+            resultDiv.style.display = 'block';
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-lightning"></i> Test Connection';
+        });
+}
+</script>
+{% endblock %}
