@@ -1,0 +1,355 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Leads{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_leads_active %}active{% endblock %}
+
+{% block page_title %}
+Leads
+<button class="btn btn-add-lead" onclick="document.getElementById('add-lead-modal').style.display='flex'" style="margin-left: 12px; padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--primary-color); background: transparent; color: var(--primary-color); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; transition: all 0.2s;">
+    <i class="bi bi-plus-lg"></i> Add Lead
+</button>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/leads.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <!-- Search & Filters -->
+    <div class="leads-controls">
+        <div class="leads-search">
+            <div class="search-input-wrapper">
+                <i class="bi bi-search"></i>
+                <input type="text" id="lead-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
+            </div>
+        </div>
+        <div class="leads-filter-tabs">
+            <a href="?status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">All ({{ total_count }})</a>
+            <a href="?status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">Active ({{ active_count }})</a>
+            <a href="?status=converted" class="filter-tab {% if status_filter == 'converted' %}active{% endif %}">Converted ({{ converted_count }})</a>
+            <a href="?status=lost" class="filter-tab {% if status_filter == 'lost' %}active{% endif %}">Lost ({{ lost_count }})</a>
+        </div>
+    </div>
+
+    {% if leads %}
+    <div class="leads-result-bar">
+        <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
+            <span id="selected-count">0 selected</span>
+            <button class="merge-btn" id="merge-btn" onclick="mergeLeads()" style="display:none;" title="Merge selected leads">
+                <i class="bi bi-arrow-left-right"></i> Merge
+            </button>
+            <button class="bulk-delete-btn" onclick="bulkDelete()">
+                <i class="bi bi-trash"></i> Delete Selected
+            </button>
+        </div>
+    </div>
+    <div class="leads-table-container">
+        <table class="leads-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-col"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for lead in leads %}
+                <tr data-id="{{ lead.pk }}" data-search="{{ lead.name|lower }} {{ lead.email|lower }} {{ lead.phone|lower }} {{ lead.city|lower }} {{ lead.postcode|lower }} {{ lead.source|lower }}">
+                    <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ lead.pk }}" onclick="updateSelection()"></td>
+                    <td>
+                        <a href="{% url 'lead_detail' lead.pk %}" class="lead-name-link">
+                            {{ lead.name|default:"-" }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if lead.email %}
+                        <a href="mailto:{{ lead.email }}" class="lead-email">{{ lead.email }}</a>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ lead.phone|default:"-" }}</td>
+                    <td>{{ lead.city|default:"-" }}</td>
+                    <td>
+                        {% if lead.source %}
+                        <span class="lead-source-badge {{ lead.source }}">{{ lead.get_source_display }}</span>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        <span class="lead-status-badge {{ lead.status }}">{{ lead.get_status_display }}</span>
+                    </td>
+                    <td class="text-right">
+                        <button class="lead-delete-btn" onclick="deleteLead({{ lead.pk }}, '{{ lead.name|escapejs }}')" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="leads-empty-state">
+        <i class="bi bi-funnel"></i>
+        <p>No leads found.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Add Lead Modal -->
+<div class="modal-overlay" id="add-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-person-plus"></i> Add New Lead</h2>
+            <button class="modal-close" onclick="document.getElementById('add-lead-modal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{% url 'lead_create' %}">
+            {% csrf_token %}
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="lead-name">Name <span class="required">*</span></label>
+                    <input type="text" id="lead-name" name="name" required placeholder="Lead name">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lead-email">Email</label>
+                        <input type="email" id="lead-email" name="email" placeholder="email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-phone">Phone</label>
+                        <input type="text" id="lead-phone" name="phone" placeholder="Phone number">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lead-source">Source</label>
+                        <select id="lead-source" name="source" style="padding: 9px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-size: 0.88rem;">
+                            <option value="">-- Select source --</option>
+                            {% for value, label in source_choices %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-website">Website</label>
+                        <input type="url" id="lead-website" name="website" placeholder="https://...">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="lead-address">Address</label>
+                    <input type="text" id="lead-address" name="address_1" placeholder="Street address">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lead-city">City</label>
+                        <input type="text" id="lead-city" name="city" placeholder="City">
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-postcode">Postcode</label>
+                        <input type="text" id="lead-postcode" name="postcode" placeholder="Postcode">
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-country">Country</label>
+                        <input type="text" id="lead-country" name="country" placeholder="Country">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('add-lead-modal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn-save">Create Lead</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Merge Lead Modal -->
+<div class="modal-overlay" id="merge-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-arrow-left-right"></i> Merge Leads</h2>
+            <button class="modal-close" onclick="document.getElementById('merge-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 16px;">Choose which lead to <strong>keep</strong>. The other lead's data will be transferred into the kept lead, then the other will be deleted.</p>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <label style="display: flex; align-items: center; gap: 10px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+                    <input type="radio" name="merge-keep" id="merge-option-0" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div>
+                        <strong>Keep: <span id="merge-option-0-name"></span></strong>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 2px;">Delete &amp; merge in: <span id="merge-option-0-remove"></span></div>
+                    </div>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+                    <input type="radio" name="merge-keep" id="merge-option-1" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div>
+                        <strong>Keep: <span id="merge-option-1-name"></span></strong>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 2px;">Delete &amp; merge in: <span id="merge-option-1-remove"></span></div>
+                    </div>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('merge-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-save" onclick="executeMerge()">Merge</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- Client-side search ---
+const searchInput = document.getElementById('lead-search');
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        const query = this.value.toLowerCase().trim();
+        const rows = document.querySelectorAll('.leads-table tbody tr');
+        let visible = 0;
+        rows.forEach(row => {
+            const text = row.getAttribute('data-search') || '';
+            const show = !query || text.includes(query);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+    });
+    searchInput.focus();
+}
+
+function clearSelectionAndReload() {
+    document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+    const sa = document.getElementById('select-all');
+    if (sa) { sa.checked = false; sa.indeterminate = false; }
+    location.reload();
+}
+
+// --- Merge logic ---
+function checkMergeEligibility() {
+    const mergeBtn = document.getElementById('merge-btn');
+    if (!mergeBtn) return;
+    const checked = document.querySelectorAll('.row-select:checked');
+    mergeBtn.style.display = checked.length === 2 ? 'inline-flex' : 'none';
+}
+
+function mergeLeads() {
+    const checked = document.querySelectorAll('.row-select:checked');
+    if (checked.length !== 2) return;
+    const rows = Array.from(checked).map(cb => cb.closest('tr'));
+    const name0 = rows[0].querySelector('td:nth-child(2)').textContent.trim();
+    const name1 = rows[1].querySelector('td:nth-child(2)').textContent.trim();
+    const id0 = parseInt(rows[0].getAttribute('data-id'));
+    const id1 = parseInt(rows[1].getAttribute('data-id'));
+
+    const modal = document.getElementById('merge-modal');
+    document.getElementById('merge-option-0-name').textContent = name0;
+    document.getElementById('merge-option-1-name').textContent = name1;
+    document.getElementById('merge-option-0').value = id0;
+    document.getElementById('merge-option-1').value = id1;
+    document.getElementById('merge-option-0-remove').textContent = name1;
+    document.getElementById('merge-option-1-remove').textContent = name0;
+    document.getElementById('merge-option-0').checked = true;
+    modal.style.display = 'flex';
+}
+
+function executeMerge() {
+    const selected = document.querySelector('input[name="merge-keep"]:checked');
+    if (!selected) return;
+    const keepId = parseInt(selected.value);
+    const otherId = parseInt(selected.value) === parseInt(document.getElementById('merge-option-0').value)
+        ? parseInt(document.getElementById('merge-option-1').value)
+        : parseInt(document.getElementById('merge-option-0').value);
+
+    document.getElementById('merge-modal').style.display = 'none';
+
+    fetch('{% url "lead_merge" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            clearSelectionAndReload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+
+function deleteLead(id, name) {
+    if (!confirm('Delete lead "' + name + '"?')) return;
+
+    fetch('/lead/' + id + '/delete/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            clearSelectionAndReload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+
+function toggleSelectAll(el) {
+    document.querySelectorAll('.row-select').forEach(cb => cb.checked = el.checked);
+    updateSelection();
+}
+
+function updateSelection() {
+    const checked = document.querySelectorAll('.row-select:checked');
+    const bar = document.getElementById('bulk-actions-bar');
+    const countEl = document.getElementById('selected-count');
+    const selectAll = document.getElementById('select-all');
+    const allBoxes = document.querySelectorAll('.row-select');
+
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        countEl.textContent = checked.length + ' selected';
+    } else {
+        bar.style.display = 'none';
+    }
+    selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
+    selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
+    checkMergeEligibility();
+}
+
+function bulkDelete() {
+    const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value));
+    if (ids.length === 0) return;
+    if (!confirm('Delete ' + ids.length + ' lead(s)? This cannot be undone.')) return;
+
+    fetch('{% url "leads_bulk_delete" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ids: ids}),
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            clearSelectionAndReload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+</script>
+{% endblock %}

@@ -51,7 +51,7 @@
                     </div>
                     <div class="claim-group-info">
                         <span class="claim-group-name">{{ group.display_name }}</span>
-                        <span class="claim-group-meta">{{ group.count }} file{{ group.count|pluralize }} &middot; {{ group.date|date:"d M Y" }}</span>
+                        <span class="claim-group-meta">{{ group.count }} file{{ group.count|pluralize }} &middot; {{ group.date|date:"d M Y H:i" }}</span>
                     </div>
                 </div>
                 <div class="claim-group-actions" onclick="event.stopPropagation()">
@@ -62,14 +62,19 @@
             </div>
             <div class="claim-group-content">
                 {% for doc in group.documents %}
-                <div class="claim-file-row">
-                    <a href="{{ doc.file.url }}" target="_blank" class="claim-file-link">
+                <div class="claim-file-row{% if doc.downloaded_at %} downloaded{% endif %}">
+                    <a href="{% url 'claim_file_download' doc.id %}" target="_blank" class="claim-file-link">
                         <i class="bi bi-file-earmark-pdf claim-file-icon"></i>
                         <span class="claim-file-type">{{ doc.doc_type }}</span>
                         <span class="claim-file-name">{{ doc.filename }}</span>
                     </a>
+                    {% if is_role_admin and doc.downloaded_at %}
+                    <span class="claim-downloaded-badge" title="Downloaded {{ doc.downloaded_at|date:'d M Y H:i' }}">
+                        <i class="bi bi-download"></i> {{ doc.downloaded_by.get_full_name|default:doc.downloaded_by.username }}
+                    </span>
+                    {% endif %}
                     <div class="claim-file-actions">
-                        <a href="{{ doc.file.url }}" target="_blank" class="claim-file-btn" title="View PDF">
+                        <a href="{% url 'claim_file_download' doc.id %}" target="_blank" class="claim-file-btn" title="View PDF">
                             <i class="bi bi-eye"></i>
                         </a>
                         <button class="claim-file-btn delete" onclick="deleteClaim({{ doc.id }}, this)" title="Delete">
@@ -100,7 +105,7 @@
                             <a href="{{ doc.file.url }}" target="_blank" class="claim-group-name file-link">{{ doc.title }}</a>
                             <span class="claim-group-meta">
                                 {% if doc.customer_name %}{{ doc.customer_name }} &middot; {% endif %}
-                                {{ doc.uploaded_at|date:"d M Y" }}
+                                {{ doc.uploaded_at|date:"d M Y H:i" }}
                             </span>
                         </div>
                     </div>

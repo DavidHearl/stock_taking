@@ -24,7 +24,7 @@ class OrderForm(forms.ModelForm):
             'customer', 'first_name', 'last_name', 'sale_number', 'customer_number',
             'order_date', 'fit_date', 'designer', 'boards_po',
             'job_finished', 'address', 'postcode', 'order_type', 'os_doors_required', 'all_items_ordered',
-            'anthill_id', 'workguru_id'
+            'anthill_id', 'total_value_inc_vat'
         ]
         widgets = {
             'customer': forms.HiddenInput(),
@@ -43,7 +43,7 @@ class OrderForm(forms.ModelForm):
             'os_doors_required': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
             'all_items_ordered': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
             'anthill_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 273121'}),
-            'workguru_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 41422'}),
+            'total_value_inc_vat': forms.NumberInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 5000.00', 'step': '0.01'}),
         }
         labels = {
             'customer_number': 'CAD Number',

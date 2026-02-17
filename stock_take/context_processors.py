@@ -3,7 +3,7 @@ Context processors for role-based access control.
 Adds user permissions and navigation visibility to every template context.
 """
 
-from .models import PAGE_SECTIONS, PAGE_CHOICES
+from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket
 from .permissions import get_user_permissions
 
 
@@ -59,6 +59,9 @@ def user_permissions(request):
         'user_role_display': role.get_name_display() if role else 'No Role',
         'is_role_admin': is_admin,
         'nav_sections': nav_sections,
+        # Ticket counts for nav badges
+        'open_ticket_count': Ticket.objects.filter(status__in=['open', 'in_progress']).count(),
+        'unread_ticket_count': Ticket.objects.filter(read_by_admin=False).exclude(status='closed').count() if is_admin else 0,
         # Impersonation context
         'is_impersonating': getattr(request, 'is_impersonating', False),
         'real_user': getattr(request, 'real_user', request.user),

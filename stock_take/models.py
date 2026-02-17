@@ -65,6 +65,67 @@ class Customer(models.Model):
     class Meta:
         ordering = ['name', 'last_name', 'first_name']
 
+
+class Lead(models.Model):
+    """Lead model to track potential customers / sales leads"""
+
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('contacted', 'Contacted'),
+        ('qualified', 'Qualified'),
+        ('proposal', 'Proposal'),
+        ('converted', 'Converted'),
+        ('lost', 'Lost'),
+    ]
+
+    SOURCE_CHOICES = [
+        ('website', 'Website'),
+        ('referral', 'Referral'),
+        ('social_media', 'Social Media'),
+        ('phone', 'Phone'),
+        ('email', 'Email'),
+        ('walk_in', 'Walk-In'),
+        ('advertisement', 'Advertisement'),
+        ('other', 'Other'),
+    ]
+
+    # Core details
+    name = models.CharField(max_length=255, help_text='Lead / contact name')
+    email = models.EmailField(max_length=254, blank=True, null=True)
+    phone = models.CharField(max_length=50, blank=True, null=True)
+    website = models.URLField(max_length=300, blank=True, null=True)
+
+    # Address fields
+    address_1 = models.CharField(max_length=255, blank=True, null=True)
+    address_2 = models.CharField(max_length=255, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    postcode = models.CharField(max_length=20, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+
+    # Lead-specific fields
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new')
+    source = models.CharField(max_length=30, choices=SOURCE_CHOICES, blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    value = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text='Estimated value')
+
+    # Conversion
+    converted_to_customer = models.ForeignKey(
+        Customer, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='source_leads', help_text='Customer created from this lead'
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name or f"Lead #{self.pk}"
+
+    class Meta:
+        ordering = ['-created_at']
+
+
 class Designer(models.Model):
     """Designer model to store designer information"""
     name = models.CharField(max_length=100, unique=True)
@@ -1524,6 +1585,7 @@ class Ticket(models.Model):
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='open')
     submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tickets')
+    read_by_admin = models.BooleanField(default=False, help_text='Has an admin read this ticket?')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -1541,8 +1603,14 @@ class ClaimDocument(models.Model):
     customer_name = models.CharField(max_length=255, blank=True, help_text='Customer name for search')
     group_key = models.CharField(max_length=255, blank=True, db_index=True,
                                  help_text='Groups related PDFs together, e.g. 1111_Radley_022115')
-    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='uploaded_claims')
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    # Download tracking
+    downloaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name='downloaded_claims')
+    downloaded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-uploaded_at']

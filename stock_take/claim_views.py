@@ -1,9 +1,10 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
 from django.db.models import Q, Max
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from django.utils import timezone
 from collections import OrderedDict
 from .models import ClaimDocument
 import os
@@ -146,6 +147,12 @@ def claim_download_zip(request, group_key):
     if not documents.exists():
         return JsonResponse({'error': 'No documents found for this group'}, status=404)
 
+    # Mark all docs in the group as downloaded
+    documents.update(
+        downloaded_by=request.user,
+        downloaded_at=timezone.now(),
+    )
+
     # Create zip in memory
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -161,6 +168,16 @@ def claim_download_zip(request, group_key):
     response = HttpResponse(buffer.read(), content_type='application/zip')
     response['Content-Disposition'] = f'attachment; filename="{group_key}.zip"'
     return response
+
+
+@login_required
+def claim_file_download(request, doc_id):
+    """Track and redirect to a claim file download."""
+    doc = get_object_or_404(ClaimDocument, id=doc_id)
+    doc.downloaded_by = request.user
+    doc.downloaded_at = timezone.now()
+    doc.save(update_fields=['downloaded_by', 'downloaded_at'])
+    return redirect(doc.file.url)
 
 
 @csrf_exempt

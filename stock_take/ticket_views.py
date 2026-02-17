@@ -50,6 +50,15 @@ def tickets_list(request):
 def ticket_detail(request, ticket_id):
     """View a single ticket's details."""
     ticket = get_object_or_404(Ticket, id=ticket_id)
+
+    # Mark as read by admin when an admin views it
+    if not ticket.read_by_admin:
+        profile = getattr(request.user, 'profile', None)
+        is_admin = request.user.is_superuser or (profile and profile.role and profile.role.name == 'admin')
+        if is_admin:
+            ticket.read_by_admin = True
+            ticket.save(update_fields=['read_by_admin'])
+
     context = {
         'ticket': ticket,
     }

@@ -49,8 +49,11 @@
                         
                         <!-- Tasks for Current Stage -->
                         {% if workflow_progress.current_stage.tasks.all %}
-                        <div class="stage-tasks">
-                            <h4>Tasks for This Stage:</h4>
+                        <div class="stage-tasks-toggle" onclick="toggleStageTasks()">
+                            <span><i class="bi bi-list-check"></i> Criteria ({{ workflow_progress.current_stage.tasks.all|length }})</span>
+                            <i class="bi bi-chevron-down toggle-arrow"></i>
+                        </div>
+                        <div class="stage-tasks collapsed" id="stage-tasks-content">
                             {% for task in workflow_progress.current_stage.tasks.all %}
                             {% with completion=task_completions|get_item:task.id %}
                             <div class="task-item task-type-{{ task.task_type }}">
@@ -127,7 +130,7 @@
                             {% endfor %}
                         </div>
                         {% endif %}
-                        
+
                         <!-- Stage Navigation Buttons -->
                         <div class="stage-navigation">
                             <button class="btn-stage-nav btn-previous" onclick="revertToPreviousStage({{ order.id }})">
@@ -261,10 +264,11 @@
                                                 <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="clearBoardsPOLink({{ order.id }})" title="Remove PO link">
                                                     <i class="bi bi-x-lg"></i>
                                                 </button>
-                                                {% endif %}
-                                                <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddBoardsPOInline()" title="Create new PO">
+                                                {% else %}
+                                                <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="createNextBoardsPO({{ order.id }})" title="Create new PO with next available number">
                                                     <i class="bi bi-plus-lg"></i>
                                                 </button>
+                                                {% endif %}
                                                 {% if order.workguru_id and not order.boards_po %}
                                                 <a href="{% url 'create_workguru_po' order.id %}" 
                                                    class="btn btn-sm btn-primary btn-icon-add" 
@@ -282,17 +286,7 @@
                                             </div>
                                             {% endif %}
                                         </div>
-                                        <div id="new-boards-po-inline" class="new-person-inline">
-                                            <input type="text" id="new-po-number" class="form-input new-person-input" placeholder="PO number (e.g., PO1234)">
-                                            <div class="flex-row-gap">
-                                                <button type="button" class="btn btn-sm btn-success" onclick="saveNewBoardsPO({{ order.id }})" title="Save PO">
-                                                    <i class="bi bi-check-lg"></i> Save
-                                                </button>
-                                                <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddBoardsPO()" title="Cancel">
-                                                    <i class="bi bi-x-lg"></i> Cancel
-                                                </button>
-                                            </div>
-                                        </div>
+
                                     </div>
                                     
                                     <!-- Boards Ordered Checkbox -->
@@ -760,7 +754,14 @@
     <div class="full-width-section">
         <div class="card">
             <div class="card-header">
-                <h3>{% if order.boards_po %}{{ order.boards_po.po_number }} : {% endif %}Board Details</h3>
+                <div class="boards-header-left">
+                    {% if boards_purchase_order %}
+                        <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
+                            <i class="bi bi-eye"></i> View PO
+                        </a>
+                    {% endif %}
+                    <h3>{% if order.boards_po %}{{ order.boards_po.po_number }} : {% endif %}Board Details</h3>
+                </div>
                 <div class="header-actions">
                     {% if order.boards_po %}
                         <!-- File status indicators -->
@@ -787,47 +788,35 @@
                                     <i class="bi bi-x-circle-fill text-danger"></i>
                                 {% endif %}
                             </span>
-                            {% if order.boards_po.pnx_items.count %}
-                                <button type="button" class="btn btn-warning btn-sm" onclick="regenerateBoardsFiles()" title="Regenerate PNX and CSV files from database">
-                                    <i class="bi bi-arrow-clockwise"></i> Regenerate Files
-                                </button>
-                            {% endif %}
                         </div>
                     {% endif %}
                     {% if order.customer_number and order.boards_po %}
-                        <button type="button" class="btn btn-info btn-sm btn-info-styled" onclick="analyzePNXGeneration(event)">
+                        <button type="button" class="btn btn-sm btn-generate-cad" onclick="analyzePNXGeneration(event)">
                             <i class="bi bi-file-earmark-plus"></i> Generate PNX - CAD
                         </button>
                     {% endif %}
                     <div class="section-actions">
                         {% if order.boards_po %}
-                            <button type="button" class="btn btn-primary btn-sm" onclick="openModal('addBoardModal')">
+                            <button type="button" class="btn btn-sm btn-add-board" onclick="openModal('addBoardModal')">
                                 <i class="bi bi-plus-circle"></i> Add Board
                             </button>
                         {% endif %}
                         {% if order_pnx_items and order.boards_po.po_number %}
                             {% if boards_purchase_order %}
-                                <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn btn-sm btn-secondary" title="View Purchase Order">
-                                    <i class="bi bi-eye"></i> View PO
-                                </a>
+                                <button type="button" class="btn btn-sm btn-update-files-po" onclick="updateBoardsPO()" title="Regenerate PNX/CSV files and update PO attachments">
+                                    <i class="bi bi-arrow-repeat"></i> Update Files &amp; PO
+                                </button>
                             {% else %}
-                                <a href="{% url 'create_boards_purchase_order' order.id %}" class="btn btn-sm btn-success"
+                                <a href="{% url 'create_boards_purchase_order' order.id %}" class="btn btn-sm btn-create-po"
                                    onclick="return confirm('Create a local Purchase Order for {{ order.boards_po.po_number }} and attach the board files?');"
                                    title="Create a local PO and attach PNX/CSV files">
                                     <i class="bi bi-file-earmark-plus"></i> Create PO
                                 </a>
                             {% endif %}
-                            <a href="{% url 'push_boards_to_workguru_po' order.id %}" class="btn btn-info btn-sm"
-                               onclick="return confirm('Push {{ order_pnx_items|length }} board items and files to WorkGuru PO {{ order.boards_po.po_number }}?');">
-                                <i class="bi bi-cloud-upload"></i> Push Boards to PO
-                            </a>
                         {% endif %}
                         {% if order_pnx_items %}
-                            <button type="button" class="btn btn-warning btn-save-changes" id="save-pnx-dimensions" style="display: none;">
+                            <button type="button" class="btn btn-save-dims btn-save-changes" id="save-pnx-dimensions" style="display: none;">
                                 <i class="bi bi-arrow-repeat"></i> Update Files
-                            </button>
-                            <button type="button" class="btn btn-success btn-save-changes" id="save-pnx-changes">
-                                <i class="bi bi-box-seam"></i> Save Received Items
                             </button>
                         {% endif %}
                     </div>
@@ -853,17 +842,16 @@
                                     <th><input type="checkbox" id="select-all-pnx"></th>
                                     <th>Barcode</th>
                                     <th>Material</th>
-                                    <th>Length</th>
-                                    <th>Width</th>
-                                    <th>Count</th>
+                                    <th class="col-dim">Length</th>
+                                    <th class="col-dim">Width</th>
+                                    <th class="col-cnt">Cnt</th>
                                     <th title="PRFID1">E1</th>
                                     <th title="PRFID3">E3</th>
                                     <th title="PRFID4">E4</th>
                                     <th title="PRFID2">E2</th>
-                                    <th>Received</th>
+                                    <th class="col-stock">Stock</th>
                                     <th>Status</th>
                                     <th>Cost</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -876,21 +864,21 @@
                                         <input type="number" 
                                                class="quantity-input pnx-dimension-input" 
                                                min="0" 
-                                               step="0.1"
-                                               value="{{ item.cleng|floatformat:1 }}"
+                                               step="1"
+                                               value="{{ item.cleng|floatformat:0 }}"
                                                data-pnx-id="{{ item.id }}"
                                                data-field="cleng"
-                                               data-original-value="{{ item.cleng|floatformat:1 }}">
+                                               data-original-value="{{ item.cleng|floatformat:0 }}">
                                     </td>
                                     <td>
                                         <input type="number" 
                                                class="quantity-input pnx-dimension-input" 
                                                min="0" 
-                                               step="0.1"
-                                               value="{{ item.cwidth|floatformat:1 }}"
+                                               step="1"
+                                               value="{{ item.cwidth|floatformat:0 }}"
                                                data-pnx-id="{{ item.id }}"
                                                data-field="cwidth"
-                                               data-original-value="{{ item.cwidth|floatformat:1 }}">
+                                               data-original-value="{{ item.cwidth|floatformat:0 }}">
                                     </td>
                                     <td>
                                         <input type="number" 
@@ -922,15 +910,8 @@
                                                data-pnx-id="{{ item.id }}" data-field="prfid2"
                                                {% if item.prfid2 %}checked{% endif %}>
                                     </td>
-                                    <td>
-                                        <input type="number" 
-                                               class="quantity-input pnx-received-quantity" 
-                                               min="0" 
-                                               max="{{ item.cnt|floatformat:0 }}"
-                                               step="1"
-                                               value="{{ item.received_quantity|floatformat:0 }}"
-                                               data-pnx-id="{{ item.id }}"
-                                               data-original-quantity="{{ item.received_quantity|floatformat:0 }}">
+                                    <td class="stock-qty-cell {% if item.is_standard_board %}{% if item.stock_quantity == 0 %}stock-zero{% elif item.stock_quantity < 5 %}stock-low{% endif %}{% endif %}">
+                                        {% if item.is_standard_board %}{{ item.stock_quantity }}{% else %}-{% endif %}
                                     </td>
                                     <td>
                                         {% if item.is_fully_received %}
@@ -942,19 +923,11 @@
                                         {% endif %}
                                     </td>
                                     <td>£{{ item.calculated_cost|floatformat:2 }}</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-primary mark-received-btn" 
-                                                data-pnx-id="{{ item.id }}"
-                                                data-max-quantity="{{ item.cnt|floatformat:0 }}"
-                                                {% if item.is_fully_received %}disabled{% endif %}>
-                                            RECEIVE
-                                        </button>
-                                    </td>
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
-                                    <td colspan="12"><strong>Total Cost:</strong></td>
-                                    <td colspan="2"><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
+                                    <td colspan="11"><strong>Total Cost:</strong></td>
+                                    <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -980,30 +953,23 @@
                     {% endif %}
                 </h3>
                 <div class="header-actions">
-                    {% if order.workguru_id and not order.os_doors_po %}
-                    <a href="{% url 'create_workguru_os_doors_po' order.id %}" 
-                       class="btn btn-sm btn-primary"
-                       title="Create OS Doors PO in WorkGuru"
-                       onclick="return confirm('Create a new OS Doors Purchase Order in WorkGuru for this order?');">
-                        <i class="bi bi-cloud-plus"></i> Create PO
+                    {% if os_doors_purchase_order %}
+                        <a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
+                            <i class="bi bi-eye"></i> View PO
+                        </a>
+                    {% endif %}
+                    {% if order.os_doors.exists and not order.os_doors_po %}
+                    <a href="{% url 'create_os_doors_purchase_order' order.id %}"
+                       class="btn btn-sm btn-create-po"
+                       title="Create a local PO for OS Doors"
+                       onclick="return confirm('Create a Purchase Order for OS Doors on this order?');">
+                        <i class="bi bi-file-earmark-plus"></i> Create PO
                     </a>
                     {% endif %}
-                    {% if order.os_doors.exists and order.os_doors_po %}
-                    <a href="{% url 'push_os_doors_to_workguru_po' order.id %}" 
-                       class="btn btn-sm btn-info"
-                       onclick="return confirm('Push {{ order.os_doors.count }} OS door item(s) to WorkGuru PO {{ order.os_doors_po }}?');">
-                        <i class="bi bi-cloud-upload"></i> Push to PO
-                    </a>
-                    {% endif %}
-                    {% if order.os_doors.exists or order.os_doors_required %}
-                    <button type="button" class="btn btn-sm btn-primary" onclick="openModal('updateOSDModal')">
-                        <i class="bi bi-pencil"></i> Update Order PO
-                    </button>
-                    {% endif %}
-                    <button class="btn btn-sm btn-success" type="button" onclick="openModal('pasteOSDoorModal')">
+                    <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('pasteOSDoorModal')">
                         <i class="bi bi-clipboard"></i> Paste OS Door
                     </button>
-                    <button class="btn btn-sm btn-primary" type="button" onclick="toggleCollapse('addOSDoorForm')">
+                    <button class="btn btn-sm btn-add-board" type="button" onclick="toggleCollapse('addOSDoorForm')">
                         <i class="bi bi-plus-lg"></i> Add OS Door
                     </button>
                 </div>
@@ -1254,39 +1220,20 @@
                 <div class="card-header">
                     <h3>Accessories</h3>
                     <div class="header-actions">
-                        {% if order.accessories.exists %}
-                            <span class="file-status" title="CSV File">
-                                CSV
-                                {% if order.boards_po.csv_file %}
-                                    <i class="bi bi-check-circle-fill text-success"></i>
-                                    <a href="{% url 'download_current_accessories_csv' order.id %}" download class="btn-icon" title="Download CSV">
-                                        <i class="bi bi-download"></i>
-                                    </a>
-                                {% else %}
-                                    <i class="bi bi-x-circle-fill text-danger"></i>
-                                {% endif %}
-                            </span>
-                            
-                        {% endif %}
-                        <button class="btn btn-sm btn-success" type="button" onclick="openModal('addItemModal')">
+                        <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('addItemModal')">
                             <i class="bi bi-plus-lg"></i> Add Item
                         </button>
-                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-sm btn-info">
+                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-sm btn-generate-cad"
+                           onclick="return confirm('Generate accessories CSV from CAD data?\n\nThis will create/update accessories from the CAD database.');">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
                         </a>
-                        {% if order.workguru_id %}
-                            <a href="{% url 'push_accessories_to_workguru' order.id %}" class="btn btn-sm btn-info" 
-                            onclick="return confirm('Push {{ order.accessories.count }} accessory/accessories to WorkGuru Project {{ order.workguru_id }}?');">
-                                <i class="bi bi-cloud-upload"></i> Push to WorkGuru
-                            </a>
-                        {% endif %}
                         {% if order.original_csv %}
-                        <button class="btn btn-sm btn-warning" type="button" onclick="regenerateCSV({{ order.id }})">
+                        <button class="btn btn-sm btn-update-files-po" type="button" onclick="regenerateCSV({{ order.id }})">
                             <i class="bi bi-arrow-repeat"></i> Regenerate CSV
                         </button>
                         {% endif %}
                         {% if order.accessories.exists %}
-                        <button type="button" class="btn btn-sm btn-primary" id="save-accessory-changes" style="display: none;">
+                        <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-accessory-changes" style="display: none;">
                             <i class="bi bi-save"></i> Save Changes
                         </button>
                         <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected">
@@ -2585,8 +2532,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }, 5000); // 5 seconds
 
-    // Track PNX changes instead of auto-saving
-    let pnxChanges = {};
+    // Track PNX dimension changes
     let pnxDimensionChanges = {};
 
     // Handle PNX dimension/count input changes - track changes
@@ -2677,52 +2623,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Handle PNX received quantity changes (just track changes, don't save)
-    document.querySelectorAll('.pnx-received-quantity').forEach(function(input) {
-        input.addEventListener('input', function() {
-            const pnxId = this.getAttribute('data-pnx-id');
-            const quantity = parseFloat(this.value) || 0;
-            const originalQuantity = parseFloat(this.getAttribute('data-original-quantity')) || 0;
-            
-            if (quantity !== originalQuantity) {
-                pnxChanges[pnxId] = quantity;
-                // Show save button
-                const saveBtn = document.getElementById('save-pnx-changes');
-                if (saveBtn) saveBtn.style.display = 'inline-block';
-            } else {
-                delete pnxChanges[pnxId];
-                // Hide save button if no changes
-                if (Object.keys(pnxChanges).length === 0) {
-                    const saveBtn = document.getElementById('save-pnx-changes');
-                    if (saveBtn) saveBtn.style.display = 'none';
-                }
-            }
-        });
-    });
-
-    // Handle "Mark Received" button clicks for PNX items
-    document.querySelectorAll('.mark-received-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            const pnxId = this.getAttribute('data-pnx-id');
-            const maxQuantity = parseFloat(this.getAttribute('data-max-quantity'));
-            const input = document.querySelector(`.pnx-received-quantity[data-pnx-id="${pnxId}"]`);
-            
-            if (input) {
-                input.value = maxQuantity;
-                pnxChanges[pnxId] = maxQuantity;
-                
-                // Trigger input event to update tracking
-                input.dispatchEvent(new Event('input'));
-                
-                // Show save button
-                const saveBtn = document.getElementById('save-pnx-changes');
-                if (saveBtn) saveBtn.style.display = 'inline-block';
-                
-                // Disable the button
-                this.disabled = true;
-            }
-        });
-    });
-
     // Track Accessory quantity changes
     let accessoryChanges = {};
     
@@ -3018,57 +2918,6 @@ document.addEventListener('DOMContentLoaded', function() {
             checkbox.checked = !allocate;
             const btn = document.getElementById('confirm-allocation-btn');
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
-        });
-    }
-
-    // Handle save button click
-    const savePnxBtn = document.getElementById('save-pnx-changes');
-    if (savePnxBtn) {
-        savePnxBtn.addEventListener('click', function() {
-            if (Object.keys(pnxChanges).length === 0) {
-                showAlert('No changes to save.', 'info');
-                return;
-            }
-
-            // Disable button during save
-            this.disabled = true;
-            this.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
-
-        // Send all changes in one request
-        fetch('/stock-take/update-pnx-batch/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            },
-            body: JSON.stringify({ changes: pnxChanges })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showAlert('PNX changes saved successfully!', 'success');
-                pnxChanges = {}; // Clear changes
-                // Update original quantities
-                Object.keys(pnxChanges).forEach(pnxId => {
-                    const input = document.querySelector(`[data-pnx-id="${pnxId}"]`);
-                    if (input) {
-                        input.setAttribute('data-original-quantity', pnxChanges[pnxId].toString());
-                    }
-                });
-                location.reload(); // Reload to show updated status
-            } else {
-                showAlert('Error saving PNX changes: ' + data.error, 'danger');
-                // Re-enable button
-                this.disabled = false;
-                this.innerHTML = '<i class="bi bi-save"></i> Save PNX Changes';
-            }
-        })
-        .catch(error => {
-            showAlert('Error saving PNX changes', 'danger');
-            // Re-enable button
-            this.disabled = false;
-            this.innerHTML = '<i class="bi bi-save"></i> Save PNX Changes';
-        });
         });
     }
 
@@ -3643,6 +3492,44 @@ function regenerateBoardsFiles() {
     });
 }
 
+// Update PO - regenerate PNX/CSV files and update PO attachments
+function updateBoardsPO() {
+    if (!confirm('This will regenerate PNX/CSV files and update the Purchase Order attachments. Continue?')) {
+        return;
+    }
+
+    const orderId = {{ order.id }};
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+
+    fetch(`/order/${orderId}/update-boards-po-files/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showAlert(data.error || 'Failed to update PO', 'danger');
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error updating PO', 'danger');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    });
+}
+
 // Reimport PNX items from file
 function reimportPNX(boardsPoId) {
     if (!confirm('This will delete all current PNX items and re-import them from the PNX file. Continue?')) {
@@ -4069,6 +3956,16 @@ function performCSVRegeneration(orderId) {
 }
 
 // Workflow functions
+function toggleStageTasks() {
+    const content = document.getElementById('stage-tasks-content');
+    const toggle = document.querySelector('.stage-tasks-toggle');
+    if (!content) return;
+    const isCollapsed = content.classList.contains('collapsed');
+    content.classList.toggle('collapsed', !isCollapsed);
+    content.classList.toggle('expanded', isCollapsed);
+    toggle.classList.toggle('expanded', isCollapsed);
+}
+
 function updateWorkflowStage(orderId, stageId) {
     fetch(`/order/${orderId}/update-workflow-stage/`, {
         method: 'POST',
@@ -5077,53 +4974,20 @@ function togglePetrolAmount() {
     amountInput.style.display = checkbox.checked ? 'block' : 'none';
 }
 
-// Inline Boards PO management
-function toggleAddBoardsPOInline() {
-    const form = document.getElementById('new-boards-po-inline');
-    if (form.style.display === 'none' || form.style.display === '') {
-        form.style.display = 'block';
-        document.getElementById('new-po-number').focus();
-    } else {
-        form.style.display = 'none';
-        clearBoardsPOForm();
-    }
-}
-
-function cancelAddBoardsPO() {
-    document.getElementById('new-boards-po-inline').style.display = 'none';
-    clearBoardsPOForm();
-}
-
-function clearBoardsPOForm() {
-    document.getElementById('new-po-number').value = '';
-}
-
-function saveNewBoardsPO(orderId) {
-    let poNumber = document.getElementById('new-po-number').value.trim();
-    
-    if (!poNumber) {
-        showAlert('Please enter a PO number', 'warning');
-        return;
-    }
-    
-    // Auto-prepend "PO" if not present
-    if (!poNumber.toUpperCase().startsWith('PO')) {
-        poNumber = 'PO' + poNumber;
-    }
-    
-    // Use the update-boards-po endpoint which will find/create the BoardsPO
+// Create Boards PO with next available number
+function createNextBoardsPO(orderId) {
     fetch(`/order/${orderId}/update-boards-po/`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
-        body: JSON.stringify({ po_number: poNumber })
+        body: JSON.stringify({ auto_next: true })
     })
     .then(r => r.json())
     .then(result => {
         if (result.success) {
-            showAlert(`Boards PO ${poNumber} created and linked`, 'success');
+            showAlert(`Boards PO ${result.boards_po.po_number} created and linked`, 'success');
             location.reload();
         } else {
             showAlert('Error: ' + (result.error || 'Unknown'), 'danger');

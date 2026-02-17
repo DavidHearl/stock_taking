@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment
 
 import csv
 import io
@@ -1900,6 +1900,47 @@ def regenerate_pnx_csv_files(boards_po):
     
     boards_po.save()
 
+    # Auto-sync attachments to the linked PurchaseOrder (if one exists)
+    _sync_boards_files_to_po(boards_po)
+
+
+def _sync_boards_files_to_po(boards_po):
+    """Push the current PNX/CSV files from a BoardsPO to its linked PurchaseOrder attachments."""
+    from django.core.files.base import ContentFile
+
+    po = PurchaseOrder.objects.filter(display_number=boards_po.po_number).first()
+    if not po:
+        return
+
+    for file_field, extension, description in [
+        (boards_po.file, '.pnx', 'PNX board order file'),
+        (boards_po.csv_file, '.csv', 'CSV board order file'),
+    ]:
+        if not file_field:
+            continue
+        try:
+            file_field.open('rb')
+            content = file_field.read()
+            file_field.close()
+            fname = file_field.name.split('/')[-1]
+
+            existing = po.attachments.filter(filename__endswith=extension).first()
+            if existing:
+                existing.file.save(fname, ContentFile(content), save=False)
+                existing.filename = fname
+                existing.save()
+            else:
+                att = PurchaseOrderAttachment(
+                    purchase_order=po,
+                    filename=fname,
+                    description=description,
+                    uploaded_by='System',
+                )
+                att.file.save(fname, ContentFile(content), save=False)
+                att.save()
+        except Exception:
+            pass
+
 
 @login_required
 def regenerate_boards_po_files(request, order_id):
@@ -1926,6 +1967,41 @@ def regenerate_boards_po_files(request, order_id):
             'pnx_url': boards_po.file.url if boards_po.file else None,
             'csv_url': boards_po.csv_file.url if boards_po.csv_file else None,
         })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def update_boards_po_files(request, order_id):
+    """Regenerate PNX/CSV files from DB items and update the PurchaseOrder attachments."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+    try:
+        order = get_object_or_404(Order, id=order_id)
+
+        if not order.boards_po:
+            return JsonResponse({'success': False, 'error': 'No Boards PO assigned to this order'})
+
+        boards_po = order.boards_po
+
+        if not boards_po.pnx_items.exists():
+            return JsonResponse({'success': False, 'error': 'No PNX items found for this PO'})
+
+        # Regenerate files and auto-sync to PurchaseOrder (handled inside regenerate_pnx_csv_files)
+        regenerate_pnx_csv_files(boards_po)
+
+        po = PurchaseOrder.objects.filter(display_number=boards_po.po_number).first()
+        if po:
+            return JsonResponse({
+                'success': True,
+                'message': f'PNX/CSV files regenerated and PO {po.display_number} attachments updated',
+            })
+        else:
+            return JsonResponse({
+                'success': True,
+                'message': 'PNX/CSV files regenerated (no linked PurchaseOrder found to update)',
+            })
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
@@ -2705,8 +2781,69 @@ def update_boards_po(request, order_id):
         boards_po_id = data.get('boards_po_id', '')
         purchase_order_id = data.get('purchase_order_id', '')
         po_number = data.get('po_number', '').strip()
+        auto_next = data.get('auto_next', False)
 
-        if purchase_order_id:
+        if auto_next:
+            # Auto-generate the next PO number
+            # Must check BOTH BoardsPO and PurchaseOrder tables to avoid collisions
+            import re
+            max_num = 0
+
+            # Check BoardsPO table
+            for pn in BoardsPO.objects.filter(po_number__regex=r'^PO\d+$').values_list('po_number', flat=True):
+                m = re.search(r'(\d+)', pn)
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+
+            # Check PurchaseOrder table (display_number and number fields)
+            for field in ['display_number', 'number']:
+                for pn in PurchaseOrder.objects.filter(**{f'{field}__regex': r'^PO\d+$'}).values_list(field, flat=True):
+                    m = re.search(r'(\d+)', pn)
+                    if m:
+                        max_num = max(max_num, int(m.group(1)))
+
+            next_num = max(max_num + 1, 1000)
+            po_number = f'PO{next_num}'
+            # Final safety: ensure it doesn't exist in either table
+            while (BoardsPO.objects.filter(po_number=po_number).exists() or
+                   PurchaseOrder.objects.filter(display_number=po_number).exists() or
+                   PurchaseOrder.objects.filter(number=po_number).exists()):
+                next_num += 1
+                po_number = f'PO{next_num}'
+            boards_po = BoardsPO.objects.create(po_number=po_number, boards_ordered=False)
+            order.boards_po = boards_po
+
+            # Also create a full PurchaseOrder record
+            from .models import Supplier
+            # Build customer name
+            if order.customer:
+                customer_name = f'{order.customer.first_name} {order.customer.last_name}'.strip() or order.customer.name
+            else:
+                customer_name = f'{order.first_name} {order.last_name}'.strip()
+
+            # Generate a unique workguru_id for manual POs (800000+ range)
+            max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+            manual_wg_id = max(max_wg_id + 1, 800000)
+
+            # Get Carnehill supplier if it exists
+            supplier = Supplier.objects.filter(name__icontains='Carnehill').first()
+
+            PurchaseOrder.objects.create(
+                workguru_id=manual_wg_id,
+                number=po_number,
+                display_number=po_number,
+                description=f'Boards order for {customer_name} - Sale {order.sale_number}',
+                supplier_id=supplier.workguru_id if supplier else None,
+                supplier_name=supplier.name if supplier else 'Carnehill Joinery Ltd',
+                project_id=int(order.workguru_id) if order.workguru_id else None,
+                project_number=order.sale_number,
+                project_name=customer_name,
+                delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+                status='Draft',
+                currency='GBP',
+                creator_name=request.user.get_full_name() or request.user.username,
+            )
+        elif purchase_order_id:
             # Link via PurchaseOrder – find/create matching BoardsPO
             purchase_order = PurchaseOrder.objects.get(workguru_id=int(purchase_order_id))
             display = purchase_order.display_number or purchase_order.number or f'PO{purchase_order.workguru_id}'
@@ -2859,11 +2996,33 @@ def order_details(request, order_id):
     order_pnx_items = []
     pnx_total_cost = 0
     if order.boards_po:
-        order_pnx_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
+        order_pnx_items = list(order.boards_po.pnx_items.filter(customer__icontains=order.sale_number))
         # Calculate cost for each item and total using dynamic price
         for item in order_pnx_items:
             item.calculated_cost = item.get_cost(price_per_sqm)
         pnx_total_cost = sum(item.calculated_cost for item in order_pnx_items)
+
+        # Standard stock board widths (all 2800mm length)
+        STANDARD_WIDTHS = {79, 250, 500, 680, 750, 1000}
+        WIDTH_ORDER = {w: i for i, w in enumerate(sorted(STANDARD_WIDTHS))}
+
+        # Annotate each item: is it a standard stock board?
+        for item in order_pnx_items:
+            w = int(item.cwidth)
+            if w in STANDARD_WIDTHS:
+                item.is_standard_board = True
+                # Look up stock for this exact board: matname + width
+                sku_prefix = f"{item.matname}{w}"
+                stock_item = StockItem.objects.filter(sku=sku_prefix).first()
+                item.stock_quantity = stock_item.quantity if stock_item else 0
+                item.sort_key = (0, WIDTH_ORDER.get(w, 999))
+            else:
+                item.is_standard_board = False
+                item.stock_quantity = None  # No stock for custom boards
+                item.sort_key = (1, w)
+
+        # Sort: standard sizes first (by width), then custom boards
+        order_pnx_items.sort(key=lambda x: x.sort_key)
     
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
@@ -3005,6 +3164,11 @@ def order_details(request, order_id):
     boards_purchase_order = None
     if order.boards_po:
         boards_purchase_order = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
+
+    # Check if a local PurchaseOrder exists for this order's OS doors PO
+    os_doors_purchase_order = None
+    if order.os_doors_po:
+        os_doors_purchase_order = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
     
     # Check if all accessories are allocated
     total_accessories = order.accessories.count()
@@ -3047,6 +3211,7 @@ def order_details(request, order_id):
         'manufacturing_by_worker': dict(manufacturing_by_worker),
         'designers': Designer.objects.all().order_by('name'),
         'boards_purchase_order': boards_purchase_order,
+        'os_doors_purchase_order': os_doors_purchase_order,
     })
 
 def completed_stock_takes(request):

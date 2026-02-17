@@ -570,6 +570,10 @@ def purchase_order_detail(request, po_id):
                 'item_ids': ','.join(str(i.id) for i in grp['items']),
             })
     
+    # Compute total board counts for template display
+    total_board_items = len(pnx_items)  # individual PNX rows (before grouping)
+    total_board_qty = sum(item.cnt for item in pnx_items)  # sum of all cnt values
+
     # Find related POs on the same project (sibling POs from other suppliers)
     related_pos = []
     if purchase_order.project_id:
@@ -602,6 +606,8 @@ def purchase_order_detail(request, po_id):
         'pnx_items': pnx_items,
         'pnx_total_cost': pnx_total_cost,
         'board_product_rows': board_product_rows,
+        'total_board_items': total_board_items,
+        'total_board_qty': total_board_qty,
         'related_pos': related_pos,
         'os_door_items': os_door_items,
         'supplier_email': supplier_email,
@@ -811,7 +817,7 @@ def purchase_order_create(request):
         supplier_id=supplier.workguru_id,
         supplier_name=supplier.name,
         expected_date=expected_date or None,
-        delivery_address_1=delivery_address or None,
+        delivery_address_1=delivery_address or '61 Boucher Crescent, BT126HU, Belfast',
         delivery_instructions=delivery_instructions or None,
         status='Draft',
         currency='GBP',
@@ -1197,6 +1203,7 @@ def purchase_order_send_email(request, po_id):
     cc_list = [e.strip() for e in data.get('cc', '').split(',') if e.strip()]
     subject = data.get('subject', '').strip()
     body = data.get('body', '').strip()
+    attachment_ids = data.get('attachment_ids', [])
 
     if not recipient:
         # Fall back to supplier email
@@ -1232,6 +1239,20 @@ def purchase_order_send_email(request, po_id):
             cc=cc_list if cc_list else None,
         )
         email.attach(pdf_filename, pdf_buffer.read(), 'application/pdf')
+
+        # Attach any selected PO attachments
+        if attachment_ids:
+            extra_attachments = PurchaseOrderAttachment.objects.filter(
+                id__in=attachment_ids, purchase_order=po
+            )
+            for att in extra_attachments:
+                try:
+                    att.file.open('rb')
+                    email.attach(att.filename, att.file.read())
+                    att.file.close()
+                except Exception as file_err:
+                    logger.warning(f'Could not attach file {att.filename}: {file_err}')
+
         email.send(fail_silently=False)
 
         # Auto-approve the PO when email is sent
@@ -1642,6 +1663,7 @@ def create_boards_purchase_order(request, order_id):
         project_id=int(order.workguru_id) if order.workguru_id else None,
         project_number=order.sale_number,
         project_name=customer_name,
+        delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
         status='Draft',
         currency='GBP',
         creator_name=request.user.get_full_name() or request.user.username,
@@ -1696,6 +1718,113 @@ def _attach_boards_files_to_po(po, boards_po, user):
                 att.save()
         except Exception:
             pass
+
+
+@login_required
+def create_os_doors_purchase_order(request, order_id):
+    """Create a local PurchaseOrder for OS Doors and add door items as products.
+    Auto-generates the next PO number and links it to the order.
+    """
+    import re
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from decimal import Decimal
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.os_doors.exists():
+        messages.error(request, 'This order has no OS door items. Add doors first.')
+        return redirect('order_details', order_id=order_id)
+
+    # If a PO already exists for this order's os_doors_po, just redirect
+    if order.os_doors_po:
+        existing = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+        if existing:
+            messages.info(request, f'OS Doors Purchase Order {existing.display_number} already exists.')
+            return redirect('order_details', order_id=order_id)
+
+    # Auto-generate the next PO number (check both tables to avoid collisions)
+    max_num = 0
+    for pn in BoardsPO.objects.filter(po_number__regex=r'^PO\d+$').values_list('po_number', flat=True):
+        m = re.search(r'(\d+)', pn)
+        if m:
+            max_num = max(max_num, int(m.group(1)))
+    for field in ['display_number', 'number']:
+        for pn in PurchaseOrder.objects.filter(**{f'{field}__regex': r'^PO\d+$'}).values_list(field, flat=True):
+            m = re.search(r'(\d+)', pn)
+            if m:
+                max_num = max(max_num, int(m.group(1)))
+
+    next_num = max(max_num + 1, 1000)
+    po_number = f'PO{next_num}'
+    while (BoardsPO.objects.filter(po_number=po_number).exists() or
+           PurchaseOrder.objects.filter(display_number=po_number).exists() or
+           PurchaseOrder.objects.filter(number=po_number).exists()):
+        next_num += 1
+        po_number = f'PO{next_num}'
+
+    # Build customer name
+    if order.customer:
+        customer_name = f'{order.customer.first_name} {order.customer.last_name}'.strip() or getattr(order.customer, 'name', '')
+    else:
+        customer_name = f'{order.first_name} {order.last_name}'.strip()
+
+    # Generate a unique workguru_id for manual POs (800000+ range)
+    max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_wg_id = max(max_wg_id + 1, 800000)
+
+    # Get O & S Doors supplier
+    supplier = Supplier.objects.filter(name__icontains='O & S Doors').first()
+    if not supplier:
+        supplier = Supplier.objects.filter(name__icontains='O S Door').first()
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_wg_id,
+        number=po_number,
+        display_number=po_number,
+        description=f'OS Doors for {customer_name} - Sale {order.sale_number}',
+        supplier_id=supplier.workguru_id if supplier else None,
+        supplier_name=supplier.name if supplier else 'O & S Doors Ltd',
+        project_id=int(order.workguru_id) if order.workguru_id else None,
+        project_number=order.sale_number,
+        project_name=customer_name,
+        delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        status='Draft',
+        currency='GBP',
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
+
+    # Add each OS door as a product line
+    total = Decimal('0')
+    for idx, door in enumerate(order.os_doors.all()):
+        unit_price = door.cost_price or Decimal('0')
+        qty = Decimal(str(door.quantity))
+        line_total = unit_price * qty
+        total += line_total
+
+        PurchaseOrderProduct.objects.create(
+            purchase_order=po,
+            sku=door.door_style,
+            name=f'{door.door_style} - {door.style_colour} ({door.height:.0f}x{door.width:.0f}mm) {door.colour}',
+            description=door.item_description or '',
+            order_price=unit_price,
+            order_quantity=qty,
+            quantity=qty,
+            line_total=line_total,
+            sort_order=idx,
+        )
+
+    # Update PO total
+    po.total = total
+    po.save(update_fields=['total'])
+
+    # Link the PO number to the order and mark doors as ordered
+    order.os_doors_po = po_number
+    order.save(update_fields=['os_doors_po'])
+    order.os_doors.update(ordered=True, po_number=po_number)
+
+    messages.success(request, f'OS Doors Purchase Order {po_number} created with {order.os_doors.count()} door item(s).')
+    return redirect('order_details', order_id=order_id)
 
 
 @login_required

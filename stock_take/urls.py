@@ -4,14 +4,15 @@ from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
-from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip
+from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
 from .profile_views import user_profile, user_profile_save, user_change_password
 from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search
+from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
@@ -69,6 +70,16 @@ urlpatterns = [
     path('customer/<int:pk>/delete/', customer_delete, name='customer_delete'),
     path('customers/bulk-delete/', customers_bulk_delete, name='customers_bulk_delete'),
     path('customers/merge/', customer_merge, name='customer_merge'),
+    
+    # Leads
+    path('leads/', leads_list, name='leads_list'),
+    path('leads/create/', lead_create, name='lead_create'),
+    path('lead/<int:pk>/', lead_detail, name='lead_detail'),
+    path('lead/<int:pk>/save/', lead_save, name='lead_save'),
+    path('lead/<int:pk>/delete/', lead_delete, name='lead_delete'),
+    path('lead/<int:pk>/convert/', lead_convert, name='lead_convert'),
+    path('leads/bulk-delete/', leads_bulk_delete, name='leads_bulk_delete'),
+    path('leads/merge/', lead_merge, name='lead_merge'),
     
     # Import management
     path('import-history/', views.import_history, name='import_history'),
@@ -163,7 +174,9 @@ urlpatterns = [
     path('order/<int:order_id>/push-os-doors-to-workguru-po/', views.push_os_doors_to_workguru_po, name='push_os_doors_to_workguru_po'),
     path('order/<int:order_id>/generate-pnx/', views.generate_and_attach_pnx, name='generate_and_attach_pnx'),
     path('order/<int:order_id>/regenerate-boards-files/', views.regenerate_boards_po_files, name='regenerate_boards_po_files'),
+    path('order/<int:order_id>/update-boards-po-files/', views.update_boards_po_files, name='update_boards_po_files'),
     path('order/<int:order_id>/create-boards-purchase-order/', create_boards_purchase_order, name='create_boards_purchase_order'),
+    path('order/<int:order_id>/create-os-doors-purchase-order/', create_os_doors_purchase_order, name='create_os_doors_purchase_order'),
     path('order/<int:order_id>/confirm-pnx/', views.confirm_pnx_generation, name='confirm_pnx_generation'),
     path('delete-pnx-items/', views.delete_pnx_items, name='delete_pnx_items'),
     path('order/<int:order_id>/generate-accessories-csv/', views.generate_and_upload_accessories_csv, name='generate_and_upload_accessories_csv'),
@@ -274,6 +287,7 @@ urlpatterns = [
     path('claims/upload/', claim_upload, name='claim_upload'),
     path('claims/api/upload/', claim_api_upload, name='claim_api_upload'),
     path('claims/<int:doc_id>/delete/', claim_delete, name='claim_delete'),
+    path('claims/<int:doc_id>/download/', claim_file_download, name='claim_file_download'),
     path('claims/download/<path:group_key>/', claim_download_zip, name='claim_download_zip'),
 
     # Xero Integration

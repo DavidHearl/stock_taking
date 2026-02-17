@@ -71,6 +71,9 @@
                     {% if role_perms.customers.can_view or is_role_admin %}
                     <a href="{% url 'customers_list' %}" class="nav-link {% block nav_customers_active %}{% endblock %}" title="Customers"><span class="nav-text">Customers</span></a>
                     {% endif %}
+                    {% if role_perms.customers.can_view or is_role_admin %}
+                    <a href="{% url 'leads_list' %}" class="nav-link {% block nav_leads_active %}{% endblock %}" title="Leads"><span class="nav-text">Leads</span></a>
+                    {% endif %}
                     {% if role_perms.remedials.can_view or is_role_admin %}
                     <a href="{% url 'remedials' %}" class="nav-link {% block nav_remedials_active %}{% endblock %}" title="Remedials"><span class="nav-text">Remedials</span></a>
                     {% endif %}
@@ -87,7 +90,7 @@
                 </div>
                 <div class="nav-section-content" id="accounting-section">
                     {% if role_perms.invoices.can_view or is_role_admin %}
-                    <a href="{% url 'invoices_list' %}" class="nav-link {% block nav_invoices_active %}{% endblock %}" title="Invoices"><span class="nav-text">Invoices</span></a>
+                    <a href="{% url 'invoices_list' %}" class="nav-link {% block nav_invoices_active %}{% endblock %}" title="Invoices"><span class="nav-text">Sales Invoices</span></a>
                     {% endif %}
                 </div>
             </div>
@@ -237,7 +240,8 @@
             <!-- Tickets -->
             {% if role_perms.tickets.can_view or is_role_admin %}
             <a href="{% url 'tickets_list' %}" class="nav-link single {% block nav_tickets_active %}{% endblock %}" title="Tickets">
-                <i class="bi bi-ticket-detailed"></i><span class="nav-text">Tickets</span>
+                <i class="bi bi-ticket-detailed"></i><span class="nav-text">Tickets{% if is_role_admin and open_ticket_count %} ({{ open_ticket_count }}){% endif %}</span>
+                {% if is_role_admin and unread_ticket_count %}<span class="nav-badge unread">{{ unread_ticket_count }}</span>{% endif %}
             </a>
             {% endif %}
 
@@ -263,6 +267,9 @@
                     <input type="search" name="q" placeholder="Search everything..." value="{{ request.GET.q }}">
                 </form>
             </div>
+            <select class="top-location-select" id="topLocationSelect" title="Location">
+                <option value="belfast" selected>Belfast</option>
+            </select>
             <button class="theme-toggle" id="themeToggle" onclick="toggleDarkMode()" title="Toggle theme">
                 <i class="bi bi-sun-fill" id="themeIcon"></i>
             </button>
@@ -370,6 +377,15 @@
             section.classList.toggle('open');
             header.classList.toggle('open');
         }
+
+        // Auto-open nav sections that contain the active link
+        document.querySelectorAll('.nav-section-content').forEach(function(section) {
+            if (section.querySelector('.nav-link.active')) {
+                section.classList.add('open');
+                var header = section.previousElementSibling;
+                if (header) header.classList.add('open');
+            }
+        });
 
         // Modal functionality
         function openModal(modalId) {

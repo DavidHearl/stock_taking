@@ -215,7 +215,13 @@
     <!-- Products Section -->
     <div class="po-products-section">
         <div class="po-products-header-row">
-            <h3><i class="bi bi-box-seam"></i> Products</h3>
+            <h3><i class="bi bi-box-seam"></i> Products
+                {% if total_board_qty %}
+                <span class="po-board-count-badge">{{ total_board_items }} items &middot; {{ total_board_qty|floatformat:0 }} boards</span>
+                {% elif products.count %}
+                <span class="po-board-count-badge">{{ products.count }} items</span>
+                {% endif %}
+            </h3>
             <button class="btn btn-sm btn-add-product" onclick="toggleAddProductRow()">
                 <i class="bi bi-plus-lg"></i> Add Product
             </button>
@@ -364,6 +370,13 @@
                         </td>
                     </tr>
                     {% endfor %}
+                    {% if board_product_rows %}
+                    <tr class="board-product-totals-row">
+                        <td colspan="3" class="text-right"><strong>Total</strong></td>
+                        <td class="text-right"><strong>{{ total_board_qty|floatformat:0 }}</strong></td>
+                        <td colspan="4"></td>
+                    </tr>
+                    {% endif %}
                     {% if not products and not board_product_rows %}
                     <tr id="no-products-row">
                         <td colspan="8" class="text-center" style="padding: 24px; color: var(--text-secondary);">
@@ -603,8 +616,23 @@ If you have any questions, please do not hesitate to contact us.
 Kind regards,
 Sliderobes</textarea>
             </div>
-            <div class="modal-info">
-                <i class="bi bi-paperclip"></i> Purchase_Order_{{ purchase_order.display_number }}.pdf will be attached automatically
+            <div class="modal-form-group">
+                <label>Attachments</label>
+                <div class="email-attachments-list">
+                    <label class="email-attachment-item">
+                        <input type="checkbox" checked disabled>
+                        <i class="bi bi-file-earmark-pdf"></i>
+                        <span>Purchase_Order_{{ purchase_order.display_number }}.pdf</span>
+                        <span class="attachment-auto-tag">auto</span>
+                    </label>
+                    {% for att in attachments %}
+                    <label class="email-attachment-item">
+                        <input type="checkbox" class="email-att-checkbox" value="{{ att.id }}">
+                        <i class="bi bi-file-earmark-arrow-down"></i>
+                        <span>{{ att.filename }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
             </div>
         </div>
         <div class="modal-footer">
@@ -988,6 +1016,12 @@ function sendPOEmail() {
     const subject = document.getElementById('send-subject').value.trim();
     const body = document.getElementById('send-body').value.trim();
 
+    // Gather selected attachment IDs
+    const attachmentIds = [];
+    document.querySelectorAll('.email-att-checkbox:checked').forEach(cb => {
+        attachmentIds.push(parseInt(cb.value));
+    });
+
     if (!to) {
         showNotification('Please enter a recipient email address.', 'error');
         document.getElementById('send-to').focus();
@@ -1003,7 +1037,7 @@ function sendPOEmail() {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}',
         },
-        body: JSON.stringify({ to, cc, subject, body }),
+        body: JSON.stringify({ to, cc, subject, body, attachment_ids: attachmentIds }),
     })
     .then(res => res.json())
     .then(result => {
