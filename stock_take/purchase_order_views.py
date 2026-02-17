@@ -1255,12 +1255,20 @@ def purchase_order_send_email(request, po_id):
 
         email.send(fail_silently=False)
 
+        # Mark PO as email sent
+        po.email_sent = True
+        po.email_sent_at = datetime.now()
+        po.email_sent_to = recipient
+        update_fields = ['email_sent', 'email_sent_at', 'email_sent_to']
+
         # Auto-approve the PO when email is sent
         if po.status == 'Draft':
             po.status = 'Approved'
             po.approved_by_name = request.user.get_full_name() or request.user.username
             po.approved_date = datetime.now().strftime('%d-%m-%Y')
-            po.save(update_fields=['status', 'approved_by_name', 'approved_date'])
+            update_fields += ['status', 'approved_by_name', 'approved_date']
+
+        po.save(update_fields=update_fields)
         
         logger.info(f'PO {po.display_number} emailed to {recipient} by {request.user}')
         return JsonResponse({
