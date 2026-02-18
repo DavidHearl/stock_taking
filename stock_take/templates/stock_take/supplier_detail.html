@@ -155,6 +155,107 @@
         </div>
     </div>
 
+    <!-- Contacts Section -->
+    <div class="supplier-po-section">
+        <div class="contacts-section-header">
+            <h2><i class="bi bi-person-lines-fill"></i> Contacts ({{ contacts|length }})</h2>
+            <button class="btn-contact-action success" onclick="openAddContactModal()"><i class="bi bi-plus-lg"></i> Add Contact</button>
+        </div>
+
+        <div id="contacts-notification" class="customer-save-notification" style="display:none;"></div>
+
+        {% if contacts %}
+        <div class="po-table-container">
+            <table class="po-table" id="contacts-table">
+                <thead>
+                    <tr>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Position</th>
+                        <th>Default</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for contact in contacts %}
+                    <tr data-contact-id="{{ contact.id }}">
+                        <td class="contact-first-name">{{ contact.first_name }}</td>
+                        <td class="contact-last-name">{{ contact.last_name }}</td>
+                        <td><a href="mailto:{{ contact.email }}">{{ contact.email }}</a></td>
+                        <td>{{ contact.phone|default:"-" }}</td>
+                        <td>{{ contact.position|default:"-" }}</td>
+                        <td style="text-align:center;">
+                            {% if contact.is_default %}
+                            <span class="supplier-active-badge active">Default</span>
+                            {% else %}
+                            <button class="btn-contact-action primary" onclick="setDefault({{ contact.id }})"><i class="bi bi-star"></i> Set Default</button>
+                            {% endif %}
+                        </td>
+                        <td style="white-space:nowrap;">
+                            <button class="btn-contact-action secondary" onclick="openEditContactModal({{ contact.id }}, '{{ contact.first_name|escapejs }}', '{{ contact.last_name|escapejs }}', '{{ contact.email|escapejs }}', '{{ contact.phone|escapejs }}', '{{ contact.position|escapejs }}', {{ contact.is_default|yesno:'true,false' }})"><i class="bi bi-pencil"></i> Edit</button>
+                            <button class="btn-contact-action danger" onclick="deleteContact({{ contact.id }})"><i class="bi bi-trash"></i> Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="po-empty-state" id="contacts-empty">
+            <p>No contacts added yet. Click <strong>Add Contact</strong> to add one.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Add/Edit Contact Modal -->
+    <div id="contact-modal" class="contact-modal-overlay">
+        <div class="contact-modal-box">
+            <div class="contact-modal-header">
+                <h3><i class="bi bi-person-vcard"></i> <span id="contact-modal-title">Add Contact</span></h3>
+                <button class="contact-modal-close" onclick="closeContactModal()">&times;</button>
+            </div>
+            <input type="hidden" id="contact-modal-id" value="">
+            <div class="contact-modal-body">
+                <div class="contact-field-row">
+                    <div class="contact-field">
+                        <label>First Name</label>
+                        <input type="text" id="contact-first-name" placeholder="First name">
+                    </div>
+                    <div class="contact-field">
+                        <label>Last Name</label>
+                        <input type="text" id="contact-last-name" placeholder="Last name">
+                    </div>
+                </div>
+                <div class="contact-field-row">
+                    <div class="contact-field full">
+                        <label>Email</label>
+                        <input type="email" id="contact-email" placeholder="email@example.com">
+                    </div>
+                </div>
+                <div class="contact-field-row">
+                    <div class="contact-field">
+                        <label>Phone</label>
+                        <input type="text" id="contact-phone" placeholder="Phone number">
+                    </div>
+                    <div class="contact-field">
+                        <label>Position</label>
+                        <input type="text" id="contact-position" placeholder="e.g. Head of Sales">
+                    </div>
+                </div>
+                <label class="contact-default-check">
+                    <input type="checkbox" id="contact-is-default">
+                    <span>Set as default PO recipient</span>
+                </label>
+            </div>
+            <div class="contact-modal-footer">
+                <button class="btn-contact-action secondary" onclick="closeContactModal()">Cancel</button>
+                <button class="btn-contact-action success" onclick="saveContact()"><i class="bi bi-check-lg"></i> Save Contact</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Purchase Orders for this supplier -->
     <div class="supplier-po-section">
         <h2><i class="bi bi-clipboard-check"></i> Purchase Orders ({{ po_count }})</h2>
@@ -291,5 +392,130 @@ function showNotification(message, type) {
 function hideNotification() {
     document.getElementById('save-notification').style.display = 'none';
 }
+
+// ── Contacts ──────────────────────────────────────────────────────────────────
+
+const SUPPLIER_ID = {{ supplier.workguru_id }};
+const URL_CONTACT_ADD    = "{% url 'supplier_contact_add' supplier.workguru_id %}";
+const URL_CONTACT_EDIT   = (id) => `/stock/supplier/${SUPPLIER_ID}/contacts/${id}/edit/`;
+const URL_CONTACT_DELETE = (id) => `/stock/supplier/${SUPPLIER_ID}/contacts/${id}/delete/`;
+const URL_CONTACT_DEFAULT = (id) => `/stock/supplier/${SUPPLIER_ID}/contacts/${id}/set-default/`;
+
+function openAddContactModal() {
+    document.getElementById('contact-modal-title').textContent = 'Add Contact';
+    document.getElementById('contact-modal-id').value = '';
+    document.getElementById('contact-first-name').value = '';
+    document.getElementById('contact-last-name').value = '';
+    document.getElementById('contact-email').value = '';
+    document.getElementById('contact-phone').value = '';
+    document.getElementById('contact-position').value = '';
+    document.getElementById('contact-is-default').checked = false;
+    document.getElementById('contact-modal').classList.add('open');
+}
+
+function openEditContactModal(id, firstName, lastName, email, phone, position, isDefault) {
+    document.getElementById('contact-modal-title').textContent = 'Edit Contact';
+    document.getElementById('contact-modal-id').value = id;
+    document.getElementById('contact-first-name').value = firstName;
+    document.getElementById('contact-last-name').value = lastName;
+    document.getElementById('contact-email').value = email;
+    document.getElementById('contact-phone').value = phone;
+    document.getElementById('contact-position').value = position;
+    document.getElementById('contact-is-default').checked = isDefault;
+    document.getElementById('contact-modal').classList.add('open');
+}
+
+function closeContactModal() {
+    document.getElementById('contact-modal').classList.remove('open');
+}
+
+function showContactNotification(message, type) {
+    const n = document.getElementById('contacts-notification');
+    n.textContent = message;
+    n.className = 'customer-save-notification ' + type;
+    n.style.display = 'block';
+    if (type === 'success') setTimeout(() => { n.style.display = 'none'; }, 3000);
+}
+
+function saveContact() {
+    const id = document.getElementById('contact-modal-id').value;
+    const body = {
+        first_name: document.getElementById('contact-first-name').value.trim(),
+        last_name:  document.getElementById('contact-last-name').value.trim(),
+        email:      document.getElementById('contact-email').value.trim(),
+        phone:      document.getElementById('contact-phone').value.trim(),
+        position:   document.getElementById('contact-position').value.trim(),
+        is_default: document.getElementById('contact-is-default').checked,
+    };
+    const url = id ? URL_CONTACT_EDIT(id) : URL_CONTACT_ADD;
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+        body: JSON.stringify(body),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeContactModal();
+            showContactNotification(id ? 'Contact updated.' : 'Contact added.', 'success');
+            setTimeout(() => location.reload(), 700);
+        } else {
+            showContactNotification(data.error || 'Failed to save contact.', 'error');
+        }
+    })
+    .catch(() => showContactNotification('Error saving contact.', 'error'));
+}
+
+function deleteContact(id) {
+    if (!confirm('Delete this contact?')) return;
+    fetch(URL_CONTACT_DELETE(id), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+        body: '{}',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.querySelector(`#contacts-table tr[data-contact-id="${id}"]`)?.remove();
+            showContactNotification('Contact deleted.', 'success');
+        } else {
+            showContactNotification(data.error || 'Failed to delete.', 'error');
+        }
+    })
+    .catch(() => showContactNotification('Error deleting contact.', 'error'));
+}
+
+function setDefault(id) {
+    fetch(URL_CONTACT_DEFAULT(id), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+        body: '{}',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showContactNotification('Default contact updated.', 'success');
+            setTimeout(() => location.reload(), 700);
+        } else {
+            showContactNotification(data.error || 'Failed to set default.', 'error');
+        }
+    })
+    .catch(() => showContactNotification('Error setting default.', 'error'));
+}
+
+function getCookie(name) {
+    const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+    return v ? v[2] : null;
+}
+
+// Close modal on backdrop click
+document.getElementById('contact-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeContactModal();
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeContactModal();
+});
 </script>
 {% endblock %}

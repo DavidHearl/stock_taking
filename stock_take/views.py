@@ -270,13 +270,15 @@ def load_order_details_ajax(request, sale_number):
         # Separate glass items from accessories
         all_accessories = order.accessories.all()
         glass_items = [acc for acc in all_accessories if acc.sku.upper().startswith('GLS')]
-        non_glass_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS')]
+        raumplus_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS') and '_RAU_' in acc.sku.upper()]
+        non_glass_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS') and '_RAU_' not in acc.sku.upper()]
         
         # Render the detail row HTML
         html = render_to_string('stock_take/partials/order_detail_row.html', {
             'order': order,
             'price_per_sqm': price_per_sqm,
             'glass_items': glass_items,
+            'raumplus_accessories': raumplus_accessories,
             'non_glass_accessories': non_glass_accessories,
         })
         
@@ -893,7 +895,7 @@ def raumplus_storage(request):
     today = timezone.now().date()
     MIN_ORDER_VALUE = Decimal('5000.00')  # £5000 minimum order for free shipping (inc VAT)
     MIN_LINE_COST = Decimal('100.00')  # £100 minimum per line item
-    VAT_RATE = Decimal('1.20')  # 20% VAT
+    VAT_RATE = Decimal('1.19')  # 19% VAT (Raumplus is a German supplier)
     
     # Get upcoming orders with prefetched accessories and stock items (OPTIMIZATION)
     upcoming_orders = Order.objects.filter(
@@ -3140,14 +3142,19 @@ def order_details(request, order_id):
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
     
-    # Separate glass items (SKU starts with GLS) from other accessories
+    # Separate glass items (SKU starts with GLS), Raumplus (_RAU_), and other accessories
     glass_items_qs = order.accessories.filter(sku__istartswith='GLS')
-    non_glass_accessories_qs = order.accessories.exclude(sku__istartswith='GLS')
+    raumplus_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').filter(sku__icontains='_RAU_')
+    non_glass_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').exclude(sku__icontains='_RAU_')
     
     # Convert to lists and sort by out-of-stock status
     # Out of stock = remaining (available - allocated) < 0
     glass_items = sorted(
         list(glass_items_qs),
+        key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
+    )
+    raumplus_accessories = sorted(
+        list(raumplus_accessories_qs),
         key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
     )
     non_glass_accessories = sorted(
@@ -3303,6 +3310,7 @@ def order_details(request, order_id):
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
         'glass_items': glass_items,
+        'raumplus_accessories': raumplus_accessories,
         'non_glass_accessories': non_glass_accessories,
         'price_per_sqm': price_per_sqm,
         'materials_cost': materials_cost,
@@ -6160,6 +6168,8 @@ def update_stock_items_batch(request):
                         item.supplier_id = int(value) if value else None
                     if 'description' in item_data:
                         item.description = item_data['description']
+                    if 'supplier_code' in item_data:
+                        item.supplier_code = item_data['supplier_code']
                     # Product dimensions
                     for dim_field in ('length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'):
                         if dim_field in item_data:

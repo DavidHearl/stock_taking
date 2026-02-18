@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load custom_filters %}
 
 {% block title %}{{ purchase_order.display_number }} - Purchase Order{% endblock %}
 
@@ -99,13 +100,17 @@
         <div class="po-overview-row">
             <div class="po-overview-item">
                 <span class="po-overview-label">Supplier</span>
+                {% if supplier_obj %}
+                <a class="po-overview-value highlight po-view-val" data-field="supplier_name" href="{% url 'supplier_detail' supplier_obj.workguru_id %}">{{ purchase_order.supplier_name|default:"-" }}</a>
+                {% else %}
                 <span class="po-overview-value highlight po-view-val" data-field="supplier_name">{{ purchase_order.supplier_name|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="supplier_name" value="{{ purchase_order.supplier_name|default:'' }}" style="display:none;" list="supplier-options">
-                <datalist id="supplier-options">
+                {% endif %}
+                <select class="po-edit-input po-edit-val" data-field="supplier_name" style="display:none;">
+                    <option value="">-- Select supplier --</option>
                     {% for s in all_suppliers %}
-                    <option value="{{ s }}">
+                    <option value="{{ s.name }}" {% if s.name == purchase_order.supplier_name %}selected{% endif %}>{{ s.name }}</option>
                     {% endfor %}
-                </datalist>
+                </select>
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Supplier Invoice #</span>
@@ -151,25 +156,25 @@
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Issue Date</span>
-                <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|date:'d/m/Y'|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="issue_date" type="date" value="{{ purchase_order.issue_date|default:'' }}" style="display:none;">
+                <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|format_date_str|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="issue_date" type="date" id="po-issue-date" value="{{ purchase_order.issue_date|default:'' }}" style="display:none;" oninput="autoCalcExpectedDate()">
             </div>
             <div class="po-overview-item">
-                <span class="po-overview-label">Expected Date</span>
-                <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|date:'d/m/Y'|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="expected_date" type="date" value="{{ purchase_order.expected_date|default:'' }}" style="display:none;">
+                <span class="po-overview-label">Expected Date{% if supplier_obj and supplier_obj.estimate_lead_time %} <small class="po-lead-time-hint">(lead time: {{ supplier_obj.estimate_lead_time }} days)</small>{% endif %}</span>
+                <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|format_date_str|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="expected_date" type="date" id="po-expected-date" value="{{ purchase_order.expected_date|default:'' }}" style="display:none;">
             </div>
         </div>
         <div class="po-overview-row">
             <div class="po-overview-item">
                 <span class="po-overview-label">Received Date</span>
-                <span class="po-overview-value po-view-val" data-field="received_date">{{ purchase_order.received_date|date:'d/m/Y'|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="received_date" type="text" value="{{ purchase_order.received_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+                <span class="po-overview-value po-view-val" data-field="received_date">{{ purchase_order.received_date|format_date_str|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="received_date" type="date" value="{{ purchase_order.received_date|default:'' }}" style="display:none;">
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Invoice Date</span>
-                <span class="po-overview-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|date:'d/m/Y'|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="invoice_date" type="text" value="{{ purchase_order.invoice_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
+                <span class="po-overview-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|format_date_str|default:"-" }}</span>
+                <input class="po-edit-input po-edit-val" data-field="invoice_date" type="date" value="{{ purchase_order.invoice_date|default:'' }}" style="display:none;">
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Received By</span>
@@ -207,7 +212,17 @@
         <div class="po-overview-row">
             <div class="po-overview-item">
                 <span class="po-overview-label">Currency</span>
-                <span class="po-overview-value">{{ purchase_order.currency }}</span>
+                <span class="po-overview-value po-view-val" data-field="currency">
+                    {{ purchase_order.currency|default:"GBP" }}
+                    {% if supplier_obj and supplier_obj.currency and supplier_obj.currency|upper != purchase_order.currency|upper %}
+                    <button class="po-currency-sync-btn" title="Supplier uses {{ supplier_obj.currency }} — click to sync" onclick="syncCurrencyFromSupplier('{{ supplier_obj.currency|upper }}')">⚠ Supplier uses {{ supplier_obj.currency|upper }} — Sync</button>
+                    {% endif %}
+                </span>
+                <select class="po-edit-input po-edit-val" data-field="currency" style="display:none;">
+                    <option value="GBP" {% if purchase_order.currency == 'GBP' or not purchase_order.currency %}selected{% endif %}>GBP (£)</option>
+                    <option value="EUR" {% if purchase_order.currency == 'EUR' %}selected{% endif %}>EUR (€)</option>
+                    <option value="USD" {% if purchase_order.currency == 'USD' %}selected{% endif %}>USD ($)</option>
+                </select>
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Exchange Rate</span>
@@ -216,6 +231,23 @@
             <div class="po-overview-item">
                 <span class="po-overview-label">Base Currency Total (GBP)</span>
                 <span class="po-overview-value">£{{ purchase_order.base_currency_total|floatformat:2 }}</span>
+            </div>
+        </div>
+        {% else %}
+        <div class="po-overview-row">
+            <div class="po-overview-item">
+                <span class="po-overview-label">Currency</span>
+                <span class="po-overview-value po-view-val" data-field="currency">
+                    {{ purchase_order.currency|default:"GBP" }}
+                    {% if supplier_obj and supplier_obj.currency and supplier_obj.currency|upper != purchase_order.currency|upper %}
+                    <button class="po-currency-sync-btn" title="Supplier uses {{ supplier_obj.currency }} — click to sync" onclick="syncCurrencyFromSupplier('{{ supplier_obj.currency|upper }}')">⚠ Supplier uses {{ supplier_obj.currency|upper }} — Sync</button>
+                    {% endif %}
+                </span>
+                <select class="po-edit-input po-edit-val" data-field="currency" style="display:none;">
+                    <option value="GBP" {% if purchase_order.currency == 'GBP' or not purchase_order.currency %}selected{% endif %}>GBP (£)</option>
+                    <option value="EUR" {% if purchase_order.currency == 'EUR' %}selected{% endif %}>EUR (€)</option>
+                    <option value="USD" {% if purchase_order.currency == 'USD' %}selected{% endif %}>USD ($)</option>
+                </select>
             </div>
         </div>
         {% endif %}
@@ -619,8 +651,24 @@
         </div>
         <div class="modal-body">
             <div class="modal-form-group">
-                <label for="send-to">To <span class="required">*</span></label>
-                <input type="email" id="send-to" class="modal-input" placeholder="supplier@example.com" value="{{ supplier_email|default:'' }}">
+                <label>To <span class="required">*</span></label>
+                {% if supplier_contacts %}
+                <div class="email-recipients-list">
+                    {% for c in supplier_contacts %}
+                    <label class="email-recipient-item">
+                        <input type="checkbox" class="contact-recipient-cb"
+                               value="{{ c.email }}"
+                               {% if c.is_default %}checked{% endif %}>
+                        {% if c.first_name or c.last_name %}<span class="email-recipient-name">{{ c.first_name }} {{ c.last_name }}</span> &mdash; {% endif %}
+                        <span class="email-recipient-email">{{ c.email }}</span>
+                        {% if c.position %}<span class="email-recipient-position">({{ c.position }})</span>{% endif %}
+                        {% if c.is_default %}<span class="attachment-auto-tag" style="margin-left:auto;">default</span>{% endif %}
+                    </label>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <input type="email" id="send-to" class="modal-input" placeholder="{% if supplier_contacts %}Additional email address…{% else %}supplier@example.com{% endif %}" value="{% if not supplier_contacts %}{{ supplier_email|default:'' }}{% endif %}">
+                {% if supplier_contacts %}<div class="email-recipients-hint">Tick contacts above to include them as recipients, or enter an additional address below.</div>{% endif %}
             </div>
             <div class="modal-form-group">
                 <label for="send-cc">CC</label>
@@ -1085,7 +1133,16 @@ function closeSendModal(event) {
 
 function sendPOEmail() {
     const btn = document.getElementById('send-email-btn');
-    const to = document.getElementById('send-to').value.trim();
+
+    // Collect recipients: checked contact checkboxes + manual field
+    const recipientSet = new Set();
+    document.querySelectorAll('.contact-recipient-cb:checked').forEach(cb => {
+        if (cb.value.trim()) recipientSet.add(cb.value.trim());
+    });
+    const manualTo = document.getElementById('send-to').value.trim();
+    if (manualTo) manualTo.split(',').forEach(e => { if (e.trim()) recipientSet.add(e.trim()); });
+    const to = Array.from(recipientSet).join(', ');
+
     const cc = document.getElementById('send-cc').value.trim();
     const subject = document.getElementById('send-subject').value.trim();
     const body = document.getElementById('send-body').value.trim();
@@ -1479,6 +1536,48 @@ function removeAllocation(poId, productId, allocId, btn) {
             showNotification('Allocation removed');
         } else {
             showNotification(data.error || 'Failed to remove', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+function autoCalcExpectedDate() {
+    const leadTimeDays = {{ supplier_obj.estimate_lead_time|default:0 }};
+    if (!leadTimeDays) return;
+    const issueDateInput = document.getElementById('po-issue-date');
+    const expectedDateInput = document.getElementById('po-expected-date');
+    if (!issueDateInput || !expectedDateInput || !issueDateInput.value) return;
+    const issueDate = new Date(issueDateInput.value);
+    if (isNaN(issueDate)) return;
+    issueDate.setDate(issueDate.getDate() + leadTimeDays);
+    const yyyy = issueDate.getFullYear();
+    const mm = String(issueDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(issueDate.getDate()).padStart(2, '0');
+    expectedDateInput.value = `${yyyy}-${mm}-${dd}`;
+}
+
+function syncCurrencyFromSupplier(supplierCurrency) {
+    if (!supplierCurrency) return;
+    if (!confirm('Set PO currency to ' + supplierCurrency + ' (synced from supplier)?')) return;
+
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+        || '{{ csrf_token }}';
+
+    fetch('{% url "purchase_order_save" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify({ currency: supplierCurrency })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Currency updated to ' + supplierCurrency);
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification(data.error || 'Failed to update currency', 'error');
         }
     })
     .catch(err => showNotification('Error: ' + err.message, 'error'));

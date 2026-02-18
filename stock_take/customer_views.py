@@ -510,23 +510,35 @@ def customer_create(request):
     from django.contrib import messages
     from django.shortcuts import redirect
     
-    name = request.POST.get('name', '').strip()
-    if not name:
-        messages.error(request, 'Customer name is required.')
+    first_name = request.POST.get('first_name', '').strip()
+    last_name = request.POST.get('last_name', '').strip()
+    title = request.POST.get('title', '').strip()
+
+    if not first_name and not last_name:
+        messages.error(request, 'First name or last name is required.')
         return redirect('customers_list')
-    
-    # Check for duplicate name
-    if Customer.objects.filter(name__iexact=name).exists():
+
+    # Build a combined name for legacy compatibility
+    name = f'{first_name} {last_name}'.strip()
+
+    # Check for duplicate — match against both first/last fields and legacy name field
+    if Customer.objects.filter(
+        Q(first_name__iexact=first_name, last_name__iexact=last_name) |
+        Q(name__iexact=name)
+    ).exists():
         messages.error(request, f'A customer named "{name}" already exists.')
         return redirect('customers_list')
-    
+
     # Generate a unique positive workguru_id for manually created customers
     # Use 700000+ range to avoid collisions with real WorkGuru IDs
     max_id = Customer.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
     manual_id = max(max_id + 1, 700000)
-    
+
     customer = Customer.objects.create(
         workguru_id=manual_id,
+        title=title or None,
+        first_name=first_name,
+        last_name=last_name,
         name=name,
         email=request.POST.get('email', '').strip() or None,
         phone=request.POST.get('phone', '').strip() or None,
@@ -537,6 +549,6 @@ def customer_create(request):
         country=request.POST.get('country', '').strip() or None,
         is_active=True,
     )
-    
+
     messages.success(request, f'Customer "{customer.name}" created successfully.')
     return redirect('customer_detail', pk=customer.pk)

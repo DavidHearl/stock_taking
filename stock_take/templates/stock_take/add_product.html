@@ -27,6 +27,12 @@
         </div>
     </div>
 
+    <!-- Copy banner (shown when pre-populating from an existing product) -->
+    <div id="copy-banner" style="display:none; align-items:center; gap:10px; padding:10px 16px; margin-bottom:12px; background:var(--info-bg, #e7f3ff); border:1px solid var(--info-border, #b6d4fe); border-radius:6px; font-size:0.875rem; color:var(--info-text, #084298);">
+        <i class="bi bi-files"></i>
+        <span>Copied from an existing product. Enter a new unique SKU then save to create the copy.</span>
+    </div>
+
     <!-- Tab Navigation -->
     <div class="tab-navigation">
         <button class="tab-btn active" data-tab="overview">Overview</button>
@@ -229,6 +235,7 @@ const categoriesData = {{ categories|safe }};
 const stockTakeGroupsData = {{ stock_take_groups|safe }};
 const trackingChoices = {{ tracking_choices|safe }};
 const suppliersData = {{ suppliers|safe }};
+const prefillData = {{ prefill|safe }};
 
 document.addEventListener('DOMContentLoaded', function() {
     // Populate categories
@@ -268,8 +275,34 @@ document.addEventListener('DOMContentLoaded', function() {
         supplierSelect.appendChild(option);
     });
 
-    // Focus SKU field
-    document.getElementById('field-sku').focus();
+    // Pre-populate fields from copy source
+    if (prefillData && Object.keys(prefillData).length > 0) {
+        const textFields = ['name', 'description', 'location', 'serial_or_batch',
+                            'supplier_code', 'length', 'width', 'height', 'weight',
+                            'box_length', 'box_width', 'box_height'];
+        textFields.forEach(f => {
+            const el = document.getElementById('field-' + f);
+            if (el && prefillData[f] !== undefined) el.value = prefillData[f];
+        });
+        const numFields = ['cost', 'par_level', 'min_order_qty', 'box_quantity'];
+        numFields.forEach(f => {
+            const el = document.getElementById('field-' + f);
+            if (el && prefillData[f]) el.value = prefillData[f];
+        });
+        // Selects
+        ['category_id', 'stock_take_group_id', 'supplier_id', 'tracking_type'].forEach(f => {
+            const el = document.getElementById('field-' + f);
+            if (el && prefillData[f]) el.value = prefillData[f];
+        });
+        // Focus SKU since it must be unique
+        document.getElementById('field-sku').focus();
+        // Show banner
+        const banner = document.getElementById('copy-banner');
+        if (banner) banner.style.display = 'flex';
+    } else {
+        // Focus SKU field normally
+        document.getElementById('field-sku').focus();
+    }
 });
 
 async function saveNewProduct() {

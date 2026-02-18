@@ -11,6 +11,7 @@ class Customer(models.Model):
     workguru_id = models.IntegerField(unique=True, null=True, blank=True, help_text='WorkGuru Client ID')
     
     # Legacy fields
+    title = models.CharField(max_length=20, blank=True, null=True, help_text='Title e.g. Mr, Mrs, Dr')
     first_name = models.CharField(max_length=100, blank=True)
     last_name = models.CharField(max_length=100, blank=True)
     anthill_customer_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
@@ -540,6 +541,7 @@ class StockItem(models.Model):
     stock_take_group = models.ForeignKey(StockTakeGroup, on_delete=models.SET_NULL, 
                                        null=True, blank=True, related_name='stock_items')
     supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_items')
+    supplier_code = models.CharField(max_length=100, blank=True, default='', help_text="Supplier's own product/part code")
     category_name = models.CharField(max_length=100, blank=True)  # For CSV compatibility
     location = models.CharField(max_length=100)
     quantity = models.IntegerField(db_index=True)
@@ -657,6 +659,30 @@ class Supplier(models.Model):
     
     def __str__(self):
         return self.name
+
+
+class SupplierContact(models.Model):
+    """Individual contacts for a supplier (e.g. sales reps, account managers)"""
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name='contacts')
+    first_name = models.CharField(max_length=100, blank=True, default='')
+    last_name = models.CharField(max_length=100, blank=True, default='')
+    email = models.EmailField(max_length=255, blank=True, default='')
+    phone = models.CharField(max_length=100, blank=True, default='')
+    position = models.CharField(max_length=150, blank=True, default='')
+    is_default = models.BooleanField(default=False, help_text='Use this contact as the default email recipient for POs')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-is_default', 'last_name', 'first_name']
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} <{self.email}>"
+
+    def save(self, *args, **kwargs):
+        # Ensure only one default per supplier
+        if self.is_default:
+            SupplierContact.objects.filter(supplier=self.supplier, is_default=True).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
 
 
 class PurchaseOrder(models.Model):

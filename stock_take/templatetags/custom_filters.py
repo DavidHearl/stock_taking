@@ -1,6 +1,21 @@
 from django import template
+from datetime import datetime
 
 register = template.Library()
+
+@register.filter
+def format_date_str(value):
+    """Format a date string stored in various formats to DD/MM/YYYY for display."""
+    if not value:
+        return ''
+    if hasattr(value, 'strftime'):
+        return value.strftime('%d/%m/%Y')
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
+        try:
+            return datetime.strptime(str(value)[:19], fmt).strftime('%d/%m/%Y')
+        except (ValueError, TypeError):
+            continue
+    return str(value)
 
 @register.filter
 def get_item(dictionary, key):

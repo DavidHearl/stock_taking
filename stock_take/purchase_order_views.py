@@ -5,7 +5,7 @@ from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
 from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, ProductCustomerAllocation, StockItem, Supplier
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, ProductCustomerAllocation, StockItem, Supplier, SupplierContact
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -564,7 +564,7 @@ def purchase_order_detail(request, po_id):
     
     # All suppliers for the dropdown
     all_suppliers = list(
-        Supplier.objects.values_list('name', flat=True).order_by('name')
+        Supplier.objects.order_by('name')
     )
     
     # Try to find a linked local Order via multiple strategies
@@ -660,10 +660,19 @@ def purchase_order_detail(request, po_id):
     
     # Get supplier email for the send modal
     supplier_email = ''
+    supplier_obj = None
+    supplier_contacts = []
     if purchase_order.supplier_id:
         supplier_obj = Supplier.objects.filter(workguru_id=purchase_order.supplier_id).first()
         if supplier_obj and supplier_obj.email:
             supplier_email = supplier_obj.email
+        if supplier_obj:
+            supplier_contacts = list(supplier_obj.contacts.all())
+    # Fall back to name match if no supplier_id set
+    if not supplier_obj and purchase_order.supplier_name:
+        supplier_obj = Supplier.objects.filter(name__iexact=purchase_order.supplier_name).first()
+        if supplier_obj:
+            supplier_contacts = list(supplier_obj.contacts.all())
 
     # Determine original customer info (for stock/customer toggle)
     # If project is currently "Stock", try to find the original customer from the PO description
@@ -690,6 +699,7 @@ def purchase_order_detail(request, po_id):
         'purchase_order': purchase_order,
         'products': products,
         'all_suppliers': all_suppliers,
+        'supplier_obj': supplier_obj,
         'linked_order': linked_order,
         'boards_po': boards_po,
         'pnx_items': pnx_items,
@@ -700,6 +710,7 @@ def purchase_order_detail(request, po_id):
         'related_pos': related_pos,
         'os_door_items': os_door_items,
         'supplier_email': supplier_email,
+        'supplier_contacts': supplier_contacts,
         'attachments': purchase_order.attachments.all(),
         'original_customer_name': original_customer_name,
         'original_customer_number': original_customer_number,
@@ -779,6 +790,7 @@ def purchase_order_save(request, po_id):
         'delivery_address_2': 'delivery_address_2',
         'status': 'status',
         'total': 'total',
+        'currency': 'currency',
     }
     
     for json_key, model_field in field_map.items():
@@ -789,6 +801,23 @@ def purchase_order_save(request, po_id):
                     val = float(val) if val else 0
                 except (ValueError, TypeError):
                     val = 0
+            # Normalise date fields: convert DD/MM/YYYY -> YYYY-MM-DD for consistent storage
+            if json_key in ('issue_date', 'expected_date', 'received_date', 'invoice_date') and val:
+                for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%Y-%m-%dT%H:%M:%S'):
+                    try:
+                        from datetime import datetime as _dt
+                        val = _dt.strptime(str(val)[:19], fmt).strftime('%Y-%m-%d')
+                        break
+                    except (ValueError, TypeError):
+                        continue
+            if json_key == 'supplier_name' and val:
+                # Also update supplier_id to match the selected supplier
+                matched_supplier = Supplier.objects.filter(name__iexact=val).first()
+                if matched_supplier:
+                    po.supplier_id = matched_supplier.workguru_id
+                    # Auto-sync supplier's currency to the PO if supplier has one set
+                    if matched_supplier.currency and 'currency' not in data:
+                        po.currency = matched_supplier.currency.strip().upper()
             setattr(po, model_field, val)
     
     if 'billable' in data:
@@ -1243,6 +1272,7 @@ def supplier_detail(request, supplier_id):
         'draft_count': status_counts.get('Draft', 0),
         'approved_count': status_counts.get('Approved', 0),
         'received_count': status_counts.get('Received', 0),
+        'contacts': supplier.contacts.all(),
     }
     
     return render(request, 'stock_take/supplier_detail.html', context)
@@ -1308,7 +1338,7 @@ def supplier_save(request, supplier_id):
 def purchase_order_download_pdf(request, po_id):
     """Download a Purchase Order as a PDF"""
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
-    products = po.products.all()
+    products = po.products.select_related('stock_item').all()
 
     pdf_buffer = generate_purchase_order_pdf(po, products)
 
@@ -1316,6 +1346,91 @@ def purchase_order_download_pdf(request, po_id):
     filename = f'Purchase_Order_{po.display_number}.pdf'
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
+@login_required
+def supplier_contact_add(request, supplier_id):
+    """Add a new contact to a supplier (AJAX POST)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    supplier = get_object_or_404(Supplier, workguru_id=supplier_id)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    contact = SupplierContact.objects.create(
+        supplier=supplier,
+        first_name=data.get('first_name', '').strip(),
+        last_name=data.get('last_name', '').strip(),
+        email=data.get('email', '').strip(),
+        phone=data.get('phone', '').strip(),
+        position=data.get('position', '').strip(),
+        is_default=bool(data.get('is_default', False)),
+    )
+    return JsonResponse({
+        'success': True,
+        'contact': {
+            'id': contact.id,
+            'first_name': contact.first_name,
+            'last_name': contact.last_name,
+            'email': contact.email,
+            'phone': contact.phone,
+            'position': contact.position,
+            'is_default': contact.is_default,
+        }
+    })
+
+
+@login_required
+def supplier_contact_edit(request, supplier_id, contact_id):
+    """Edit an existing supplier contact (AJAX POST)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    supplier = get_object_or_404(Supplier, workguru_id=supplier_id)
+    contact = get_object_or_404(SupplierContact, id=contact_id, supplier=supplier)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    contact.first_name = data.get('first_name', contact.first_name).strip()
+    contact.last_name = data.get('last_name', contact.last_name).strip()
+    contact.email = data.get('email', contact.email).strip()
+    contact.phone = data.get('phone', contact.phone).strip()
+    contact.position = data.get('position', contact.position).strip()
+    contact.is_default = bool(data.get('is_default', contact.is_default))
+    contact.save()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def supplier_contact_delete(request, supplier_id, contact_id):
+    """Delete a supplier contact (AJAX POST)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    supplier = get_object_or_404(Supplier, workguru_id=supplier_id)
+    contact = get_object_or_404(SupplierContact, id=contact_id, supplier=supplier)
+    contact.delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def supplier_contact_set_default(request, supplier_id, contact_id):
+    """Set one contact as the default for PO emails (AJAX POST)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    supplier = get_object_or_404(Supplier, workguru_id=supplier_id)
+    contact = get_object_or_404(SupplierContact, id=contact_id, supplier=supplier)
+    # Clear existing defaults then set this one
+    SupplierContact.objects.filter(supplier=supplier, is_default=True).update(is_default=False)
+    contact.is_default = True
+    contact.save(update_fields=['is_default'])
+    # Also sync supplier.email to the default contact's email
+    if contact.email:
+        supplier.email = contact.email
+        supplier.save(update_fields=['email'])
+    return JsonResponse({'success': True, 'email': contact.email})
 
 
 @login_required
@@ -1358,7 +1473,7 @@ def purchase_order_send_email(request, po_id):
         )
 
     # Generate the PDF
-    products = po.products.all()
+    products = po.products.select_related('stock_item').all()
     pdf_buffer = generate_purchase_order_pdf(po, products)
     pdf_filename = f'Purchase_Order_{po.display_number}.pdf'
 
@@ -1391,7 +1506,10 @@ def purchase_order_send_email(request, po_id):
         po.email_sent = True
         po.email_sent_at = datetime.now()
         po.email_sent_to = recipient
-        update_fields = ['email_sent', 'email_sent_at', 'email_sent_to']
+        # Lock the issue date to today if not already set
+        if not po.issue_date:
+            po.issue_date = datetime.now().strftime('%d/%m/%Y')
+        update_fields = ['email_sent', 'email_sent_at', 'email_sent_to', 'issue_date']
 
         # Auto-approve the PO when email is sent
         if po.status == 'Draft':

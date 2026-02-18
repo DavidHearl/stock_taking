@@ -1200,6 +1200,103 @@
             </div>
         </div>
 
+        <!-- Raumplus Section -->
+        <div class="card">
+            <div class="card-header">
+                <h3>
+                    Raumplus
+                    {% if raumplus_accessories %}
+                        <span class="badge badge-info badge-ml">{{ raumplus_accessories|length }} item{{ raumplus_accessories|length|pluralize }}</span>
+                    {% endif %}
+                </h3>
+                <div class="header-actions">
+                    {% if raumplus_accessories %}
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-raumplus-selected" title="Delete selected">
+                        <i class="bi bi-trash"></i> <span id="raumplus-selected-count">0</span>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-add-to-po hidden" id="raumplus-add-to-po" onclick="openAddToPOModal('raumplus')">
+                        <i class="bi bi-cart-plus"></i> Add to PO
+                    </button>
+                    <button type="button" class="btn btn-sm btn-create-po hidden" id="raumplus-create-po" onclick="createPOFromSelected('raumplus')">
+                        <i class="bi bi-file-earmark-plus"></i> Create PO
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                {% if raumplus_accessories %}
+                <div class="table-container">
+                    <table class="table" id="raumplus-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="raumplus-select-all" title="Select all"></th>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Qty</th>
+                                <th>Cost</th>
+                                <th>Stock</th>
+                                <th style="text-align: center;">Replace</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rau in raumplus_accessories %}
+                            <tr data-accessory-id="{{ rau.id }}" {% if rau.is_allocated %}class="allocated-row"{% endif %}>
+                                <td><input type="checkbox" class="checkbox-input raumplus-select" data-accessory-id="{{ rau.id }}" data-allocated="{{ rau.is_allocated|yesno:'1,0' }}"></td>
+                                <td class="accessory-sku-cell">
+                                    <div class="accessory-sku-cell-inner">
+                                        {% if rau.stock_item %}
+                                            <a href="{% url 'product_detail' rau.stock_item.id %}" class="sku-link" target="_blank">{{ rau.sku }}</a>
+                                        {% else %}
+                                            {{ rau.sku }}
+                                        {% endif %}
+                                        <button type="button" class="btn-copy-sku" title="Copy SKU" onclick="copyToClipboard('{{ rau.sku|escapejs }}', this)"><i class="bi bi-clipboard"></i></button>
+                                    </div>
+                                </td>
+                                <td>{{ rau.name }}</td>
+                                <td>
+                                    <input type="number" class="quantity-input accessory-quantity" 
+                                           value="{{ rau.quantity|floatformat:0 }}" 
+                                           data-accessory-id="{{ rau.id }}"
+                                           data-original-quantity="{{ rau.quantity|floatformat:0 }}"
+                                           min="0" step="1">
+                                </td>
+                                <td>£{{ rau.cost_price|floatformat:2 }}</td>
+                                <td>
+                                    {% if rau.stock_item %}
+                                        {% with remaining=rau|calculate_remaining %}
+                                            <div class="accessory-price-info">
+                                                <div><span>Stock</span><span>{{ rau.available_quantity|floatformat:0 }}</span></div>
+                                                <div><span>Allocated</span><span>{{ rau.allocated_quantity|floatformat:0 }}</span></div>
+                                                <div class="{% if rau.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ rau.incoming_quantity|floatformat:0 }}</span></div>
+                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
+                                            </div>
+                                        {% endwith %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td style="text-align: center;">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" title="Replace Item" 
+                                        onclick="openSwapModal({{ rau.id }}, '{{ rau.sku }}', '{{ rau.name|escapejs }}')">
+                                        <i class="bi bi-arrow-repeat"></i> Replace
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="table-total-row">
+                                <td colspan="4" class="text-right">Total:</td>
+                                <td>£{{ raumplus_accessories|sum_accessory_costs }}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No Raumplus items added yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
             <!-- Accessories Section -->
             <div class="card">
                 <div class="card-header">
@@ -1260,7 +1357,16 @@
                                 {% for accessory in non_glass_accessories %}
                                 <tr data-accessory-id="{{ accessory.id }}" {% if accessory.is_allocated %}class="allocated-row"{% endif %}>
                                     <td><input type="checkbox" class="checkbox-input accessory-select" data-accessory-id="{{ accessory.id }}" data-allocated="{{ accessory.is_allocated|yesno:'1,0' }}"></td>
-                                    <td>{{ accessory.sku }}</td>
+                                    <td class="accessory-sku-cell">
+                                        <div class="accessory-sku-cell-inner">
+                                            {% if accessory.stock_item %}
+                                                <a href="{% url 'product_detail' accessory.stock_item.id %}" class="sku-link" target="_blank">{{ accessory.sku }}</a>
+                                            {% else %}
+                                                {{ accessory.sku }}
+                                            {% endif %}
+                                            <button type="button" class="btn-copy-sku" title="Copy SKU" onclick="copyToClipboard('{{ accessory.sku|escapejs }}', this)"><i class="bi bi-clipboard"></i></button>
+                                        </div>
+                                    </td>
                                     <td>{{ accessory.name }}</td>
                                     <td>
                                         <input type="number" class="quantity-input accessory-quantity" 
@@ -2836,13 +2942,83 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // ─── Raumplus select / bulk delete ─────────────────────────────────────
+    const rauplusSelectAll = document.getElementById('raumplus-select-all');
+    const deleteRauplusBtn = document.getElementById('delete-raumplus-selected');
+    const rauplusCountSpan = document.getElementById('raumplus-selected-count');
+    const rauplusAddToPOBtn = document.getElementById('raumplus-add-to-po');
+    const rauplusCreatePOBtn = document.getElementById('raumplus-create-po');
+
+    function updateRauplusActionButtons() {
+        const checked = document.querySelectorAll('.raumplus-select:checked');
+        const count = checked.length;
+        if (rauplusCountSpan) rauplusCountSpan.textContent = count;
+        [deleteRauplusBtn, rauplusAddToPOBtn, rauplusCreatePOBtn].forEach(btn => {
+            if (btn) {
+                if (count > 0) btn.classList.remove('hidden');
+                else btn.classList.add('hidden');
+            }
+        });
+    }
+
+    if (rauplusSelectAll) {
+        rauplusSelectAll.addEventListener('change', function() {
+            document.querySelectorAll('.raumplus-select').forEach(cb => cb.checked = this.checked);
+            updateRauplusActionButtons();
+        });
+    }
+
+    document.querySelectorAll('.raumplus-select').forEach(function(cb) {
+        cb.addEventListener('change', updateRauplusActionButtons);
+    });
+
+    if (deleteRauplusBtn) {
+        deleteRauplusBtn.addEventListener('click', function() {
+            const checked = document.querySelectorAll('.raumplus-select:checked');
+            const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
+            if (ids.length === 0) return;
+            if (!confirm(`Delete ${ids.length} Raumplus item(s)? This cannot be undone.`)) return;
+
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+
+            fetch('/stock-take/delete-accessories-batch/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ ids: ids })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`${data.deleted} Raumplus item(s) deleted.`, 'success');
+                    location.reload();
+                } else {
+                    showAlert('Error deleting items: ' + data.error, 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-trash"></i> <span id="raumplus-selected-count">' + ids.length + '</span>';
+                }
+            })
+            .catch(error => {
+                showAlert('Error deleting items.', 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-trash"></i> <span id="raumplus-selected-count">0</span>';
+            });
+        });
+    }
+
     // ─── PO actions (Add to PO / Create PO) ─────────────────────────────────
     // Exposed on window so inline onclick handlers can access them
     let poModalType = null;
 
     window.openAddToPOModal = function(type) {
         poModalType = type;
-        const selector = type === 'glass' ? '.glass-select:checked' : '.accessory-select:checked';
+        let selector;
+        if (type === 'glass') selector = '.glass-select:checked';
+        else if (type === 'raumplus') selector = '.raumplus-select:checked';
+        else selector = '.accessory-select:checked';
         const count = document.querySelectorAll(selector).length;
         const label = document.getElementById('po-modal-item-count');
         if (label) label.textContent = `${count} ${type} item(s) selected`;
@@ -2864,7 +3040,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function sendItemsToPO(type, poId) {
-        const selector = type === 'glass' ? '.glass-select:checked' : '.accessory-select:checked';
+        let selector;
+        if (type === 'glass') selector = '.glass-select:checked';
+        else if (type === 'raumplus') selector = '.raumplus-select:checked';
+        else selector = '.accessory-select:checked';
         const checked = document.querySelectorAll(selector);
         const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
         if (ids.length === 0) return;
@@ -5524,6 +5703,33 @@ document.addEventListener('DOMContentLoaded', function() {
         deleteBtn.addEventListener('click', deletePNXItems);
     }
 });
+
+function copyToClipboard(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+        const icon = btn.querySelector('i');
+        icon.className = 'bi bi-clipboard-check';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            icon.className = 'bi bi-clipboard';
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(() => {
+        // Fallback for older browsers
+        const el = document.createElement('textarea');
+        el.value = text;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        const icon = btn.querySelector('i');
+        icon.className = 'bi bi-clipboard-check';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            icon.className = 'bi bi-clipboard';
+            btn.classList.remove('copied');
+        }, 1500);
+    });
+}
 </script>
 
 {% endblock %}

@@ -252,6 +252,7 @@ def generate_summary_pdf(order, price_per_sqm=12):
     accessories = list(
         order.accessories
         .exclude(sku__istartswith='GLS')
+        .exclude(sku__icontains='_RAU_')
         .exclude(is_os_door=True)
         .order_by('name')
     )
@@ -276,7 +277,34 @@ def generate_summary_pdf(order, price_per_sqm=12):
         elements.append(_build_table(acc_data, acc_widths, has_total_row=True))
         elements.append(Spacer(1, 4 * mm))
 
-    # ─── 3. GLASS ITEMS ──────────────────────────────────────
+    # ─── 3. RAUMPLUS ─────────────────────────────────────────
+    raumplus_items = list(
+        order.accessories
+        .filter(sku__icontains='_RAU_')
+        .order_by('name')
+    )
+
+    if raumplus_items:
+        elements.append(_section_header('Raumplus', styles))
+
+        rau_data = [['SKU', 'Name', 'Qty']]
+        for rau in raumplus_items:
+            rau_data.append([
+                str(rau.sku),
+                str(rau.name),
+                f'{rau.quantity:,.0f}',
+            ])
+
+        total_rau_qty = sum(rau.quantity for rau in raumplus_items)
+        rau_data.append(['', f'{len(raumplus_items)} items', f'{total_rau_qty:,.0f}'])
+
+        rau_widths = [
+            page_width * 0.25, page_width * 0.60, page_width * 0.15,
+        ]
+        elements.append(_build_table(rau_data, rau_widths, has_total_row=True))
+        elements.append(Spacer(1, 4 * mm))
+
+    # ─── 4. GLASS ITEMS ──────────────────────────────────────
     glass_items = list(
         order.accessories
         .filter(sku__istartswith='GLS')
@@ -345,6 +373,12 @@ def generate_summary_pdf(order, price_per_sqm=12):
             'Accessories',
             str(len(accessories)),
             f'{sum(a.quantity for a in accessories):,.0f}',
+        ])
+    if raumplus_items:
+        summary_data.append([
+            'Raumplus',
+            str(len(raumplus_items)),
+            f'{sum(r.quantity for r in raumplus_items):,.0f}',
         ])
     if glass_items:
         summary_data.append([

@@ -5,7 +5,7 @@ from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
@@ -63,6 +63,10 @@ urlpatterns = [
     path('suppliers/create/', supplier_create, name='supplier_create'),
     path('supplier/<int:supplier_id>/', supplier_detail, name='supplier_detail'),
     path('supplier/<int:supplier_id>/save/', supplier_save, name='supplier_save'),
+    path('supplier/<int:supplier_id>/contacts/add/', supplier_contact_add, name='supplier_contact_add'),
+    path('supplier/<int:supplier_id>/contacts/<int:contact_id>/edit/', supplier_contact_edit, name='supplier_contact_edit'),
+    path('supplier/<int:supplier_id>/contacts/<int:contact_id>/delete/', supplier_contact_delete, name='supplier_contact_delete'),
+    path('supplier/<int:supplier_id>/contacts/<int:contact_id>/set-default/', supplier_contact_set_default, name='supplier_contact_set_default'),
     
     # Customers
     path('customers/', customers_list, name='customers_list'),

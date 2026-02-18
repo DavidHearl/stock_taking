@@ -190,12 +190,44 @@ def add_product(request):
     categories = list(Category.objects.values('id', 'name').order_by('name'))
     stock_take_groups = list(StockTakeGroup.objects.values('id', 'name').order_by('name'))
     suppliers = list(Supplier.objects.values('id', 'name').order_by('name'))
-    
+
+    # Support copying from an existing product
+    prefill = {}
+    copy_from_id = request.GET.get('copy_from')
+    if copy_from_id:
+        try:
+            source = StockItem.objects.get(id=copy_from_id)
+            prefill = {
+                'name': f'Copy of {source.name}',
+                'description': source.description or '',
+                'cost': str(source.cost or '0'),
+                'location': source.location or '',
+                'tracking_type': source.tracking_type or '',
+                'par_level': str(source.par_level or '0'),
+                'min_order_qty': str(source.min_order_qty) if source.min_order_qty is not None else '',
+                'serial_or_batch': source.serial_or_batch or '',
+                'category_id': str(source.category_id) if source.category_id else '',
+                'stock_take_group_id': str(source.stock_take_group_id) if source.stock_take_group_id else '',
+                'supplier_id': str(source.supplier_id) if source.supplier_id else '',
+                'length': str(source.length) if source.length else '',
+                'width': str(source.width) if source.width else '',
+                'height': str(source.height) if source.height else '',
+                'weight': str(source.weight) if source.weight else '',
+                'box_length': str(source.box_length) if source.box_length else '',
+                'box_width': str(source.box_width) if source.box_width else '',
+                'box_height': str(source.box_height) if source.box_height else '',
+                'box_quantity': str(source.box_quantity) if source.box_quantity else '',
+                'supplier_code': source.supplier_code or '',
+            }
+        except StockItem.DoesNotExist:
+            pass
+
     return render(request, 'stock_take/add_product.html', {
         'categories': json.dumps(categories),
         'stock_take_groups': json.dumps(stock_take_groups),
         'suppliers': json.dumps(suppliers),
         'tracking_choices': json.dumps(list(StockItem.TRACKING_CHOICES)),
+        'prefill': json.dumps(prefill),
     })
 
 

@@ -171,6 +171,63 @@
     </div>
     {% endif %}
     
+    {% if raumplus_accessories %}
+    {% load custom_filters %}
+    <div class="detail-section">
+        <h4>Raumplus ({{ raumplus_accessories|length }} items)</h4>
+        <table class="table detail-table">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Name</th>
+                    <th>Qty</th>
+                    <th>Stock</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rau in raumplus_accessories %}
+                <tr>
+                    <td>{{ rau.sku }}</td>
+                    <td>{{ rau.name|truncatechars:30 }}</td>
+                    <td>{{ rau.quantity|floatformat:0 }}</td>
+                    <td>
+                        {% if rau.stock_item %}
+                            {% with remaining=rau|calculate_remaining %}
+                                <div style="font-size: 0.85em;">
+                                    <div>Stock: {{ rau.available_quantity|floatformat:0 }}</div>
+                                    <div>Allocated: {{ rau.allocated_quantity|floatformat:0 }}</div>
+                                    <div style="font-weight: bold; {% if remaining < 0 %}color: #dc3545;{% else %}color: #28a745;{% endif %}">
+                                        Remaining: {{ remaining|floatformat:0 }}
+                                    </div>
+                                </div>
+                            {% endwith %}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if rau.missing %}
+                            <span class="badge badge-warning">Missing</span>
+                        {% elif rau.stock_item %}
+                            {% with remaining=rau|calculate_remaining %}
+                                {% if remaining >= 0 %}
+                                    <span class="badge badge-success">In Stock</span>
+                                {% else %}
+                                    <span class="badge badge-danger">Out of Stock</span>
+                                {% endif %}
+                            {% endwith %}
+                        {% else %}
+                            <span class="badge badge-info">No Stock Link</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
     {% if non_glass_accessories %}
     {% load custom_filters %}
     <div class="detail-section">

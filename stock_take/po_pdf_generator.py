@@ -193,18 +193,31 @@ def generate_purchase_order_pdf(purchase_order, products):
         elements.append(Spacer(1, 6 * mm))
 
     # ─── HEADER: Title + Date/PO info side by side ─────────────
-    currency_sym = _currency_symbol(purchase_order.currency or 'EUR')
+
+    # Resolve supplier early so we can use currency / address below
+    supplier = None
+    if purchase_order.supplier_id:
+        from .models import Supplier
+        supplier = Supplier.objects.filter(workguru_id=purchase_order.supplier_id).first()
+
+    # Currency: use PO field directly; fall back to supplier's currency; then GBP
+    _po_currency = (purchase_order.currency or '').strip().upper()
+    _sup_currency = (supplier.currency or '').strip().upper() if supplier else ''
+    currency_code = _po_currency or _sup_currency or 'GBP'
+    currency_sym = _currency_symbol(currency_code)
+
+    # Issue date: if email already sent use the locked issue_date,
+    # otherwise show today so it always reads as the current date until sent.
+    if purchase_order.email_sent_at and purchase_order.issue_date:
+        issue_date_str = _format_date(purchase_order.issue_date)
+    else:
+        issue_date_str = datetime.now().strftime('%d/%m/%Y')
 
     # Left side: Purchase Order title + supplier info
     left_parts = []
     left_parts.append(Paragraph('<b>Purchase Order</b>', styles['POTitle']))
 
     # Supplier details
-    supplier = None
-    if purchase_order.supplier_id:
-        from .models import Supplier
-        supplier = Supplier.objects.filter(workguru_id=purchase_order.supplier_id).first()
-
     supplier_name = purchase_order.supplier_name or ''
     if supplier_name:
         left_parts.append(Paragraph(f'<b>{supplier_name}</b>', styles['SupplierName']))
@@ -236,12 +249,10 @@ def generate_purchase_order_pdf(purchase_order, products):
 
     # Right side: Date, PO Number, ABN
     right_data = []
-    date_str = _format_date(purchase_order.issue_date)
-    if date_str:
-        right_data.append([
-            Paragraph('<b>Date:</b>', styles['LabelText']),
-            Paragraph(date_str, styles['ValueText']),
-        ])
+    right_data.append([
+        Paragraph('<b>Date:</b>', styles['LabelText']),
+        Paragraph(issue_date_str, styles['ValueText']),
+    ])
     right_data.append([
         Paragraph('<b>PO Number:</b>', styles['LabelText']),
         Paragraph(purchase_order.display_number or '', styles['ValueText']),
@@ -339,8 +350,18 @@ def generate_purchase_order_pdf(purchase_order, products):
         line_total = product.line_total or (qty * rate)
         subtotal += Decimal(str(line_total))
 
+        # Use supplier_code from the linked StockItem if available, then fall back
+        # to the code stored directly on the PO line
+        code = ''
+        if product.stock_item and product.stock_item.supplier_code:
+            code = product.stock_item.supplier_code
+        elif product.supplier_code:
+            code = product.supplier_code
+        else:
+            code = product.sku or ''
+
         table_data.append([
-            Paragraph(str(product.sku or product.supplier_code or ''), styles['CellText']),
+            Paragraph(str(code), styles['CellText']),
             Paragraph(str(product.name or product.description or ''), styles['CellText']),
             Paragraph(f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}', styles['CellTextRight']),
             Paragraph(f'{rate:,.2f}', styles['CellTextRight']),
