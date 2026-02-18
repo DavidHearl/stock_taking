@@ -32,7 +32,7 @@
                         <i class="bi bi-diagram-3"></i> View Full Workflow
                     </button>
                 </div>
-                <div class="card-body">
+                <div class="card-body padded">
                     <div class="workflow-current-stage">
                         {% if workflow_progress.current_stage %}
                         <div class="stage-info {{ workflow_progress.current_stage.role }}">
@@ -137,7 +137,7 @@
                                 <i class="bi bi-arrow-left-circle"></i> Revert to Previous Stage
                             </button>
                             <button class="btn-stage-nav btn-next" onclick="progressToNextStage({{ order.id }})">
-                                <i class="bi bi-arrow-right-circle"></i> Progress to Next Stage
+                                Progress to Next Stage <i class="bi bi-arrow-right-circle"></i>
                             </button>
                         </div>
                         {% endif %}
@@ -175,7 +175,7 @@
                 {% endif %}
                 
                 <!-- Edit Order Information -->
-                <div class="card-body">
+                <div class="card-body padded">
                     <div class="form-grid-2col">
                         <!-- Left Column: Customer Info + Job Info -->
                         <div>
@@ -679,7 +679,7 @@
                 <div class="card-header">
                     <h3>Order Summary</h3>
                 </div>
-                <div class="card-body">
+                <div class="card-body padded">
                     <dl class="summary-list">
                         <div class="summary-row">
                             <dt>Time Allowance:</dt>
@@ -966,6 +966,12 @@
                         <i class="bi bi-file-earmark-plus"></i> Create PO
                     </a>
                     {% endif %}
+                    <button type="button" class="btn btn-sm btn-save-dims" id="save-os-doors-changes" style="display: none;">
+                        <i class="bi bi-save"></i> Save Changes
+                    </button>
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-os-doors-selected">
+                        <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
+                    </button>
                     <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('pasteOSDoorModal')">
                         <i class="bi bi-clipboard"></i> Paste OS Door
                     </button>
@@ -1034,14 +1040,6 @@
                             {% endfor %}
                         </tbody>
                     </table>
-                </div>
-                <div class="form-actions" style="display: flex; gap: 0.5rem;">
-                    <button type="button" class="btn btn-primary" id="save-os-doors-changes">
-                        💾 Save OS Doors Changes
-                    </button>
-                    <button type="button" class="btn btn-danger hidden" id="delete-os-doors-selected">
-                        <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
-                    </button>
                 </div>
                 {% else %}
                 <p class="text-muted">No OS doors added yet.</p>
@@ -1149,8 +1147,7 @@
                                 <th>Qty</th>
                                 <th>Cost</th>
                                 <th>Stock</th>
-                                <th>Status</th>
-                                <th>Actions</th>
+                                <th style="text-align: center;">Replace</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1171,39 +1168,20 @@
                                     {% if glass.stock_item %}
                                         {% with remaining=glass|calculate_remaining %}
                                             <div class="accessory-price-info">
-                                                <div>Stock: {{ glass.available_quantity|floatformat:0 }}</div>
-                                                <div>Allocated: {{ glass.allocated_quantity|floatformat:0 }}</div>
-                                                <div class="incoming-highlight">Incoming: {{ glass.incoming_quantity|floatformat:0 }}</div>
-                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% else %}accessory-remaining-positive{% endif %}">
-                                                    Remaining: {{ remaining|floatformat:0 }}
-                                                </div>
+                                                <div><span>Stock</span><span>{{ glass.available_quantity|floatformat:0 }}</span></div>
+                                                <div><span>Allocated</span><span>{{ glass.allocated_quantity|floatformat:0 }}</span></div>
+                                                <div class="{% if glass.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ glass.incoming_quantity|floatformat:0 }}</span></div>
+                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
                                             </div>
                                         {% endwith %}
                                     {% else %}
                                         <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
-                                <td>
-                                    {% if glass.is_allocated %}
-                                        <span class="badge badge-allocated"><i class="bi bi-check-circle-fill"></i> Allocated</span>
-                                    {% elif glass.missing %}
-                                        <span class="badge badge-warning">Missing</span>
-                                    {% elif glass.stock_item %}
-                                        {% with remaining=glass|calculate_remaining %}
-                                            {% if remaining >= 0 %}
-                                                <span class="badge badge-success">In Stock</span>
-                                            {% else %}
-                                                <span class="badge badge-danger">Out of Stock</span>
-                                            {% endif %}
-                                        {% endwith %}
-                                    {% else %}
-                                        <span class="badge badge-info">No Stock Link</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <button type="button" class="btn btn-primary btn-sm" title="Swap Item" 
+                                <td style="text-align: center;">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" title="Replace Item" 
                                         onclick="openSwapModal('{{ glass.id }}', '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
-                                        <i class="bi bi-arrow-repeat"></i>
+                                        <i class="bi bi-arrow-repeat"></i> Replace
                                     </button>
                                 </td>
                             </tr>
@@ -1211,7 +1189,7 @@
                             <tr class="table-total-row">
                                 <td colspan="4" class="text-right">Total:</td>
                                 <td>£{{ glass_items|sum_accessory_costs }}</td>
-                                <td colspan="2"></td>
+                                <td colspan="1"></td>
                             </tr>
                         </tbody>
                     </table>
@@ -1271,12 +1249,11 @@
                                     <th>Qty</th>
                                     <th>Cost</th>
                                     <th>Stock</th>
-                                    <th>Status</th>
                                     {% if has_os_door_accessories %}
                                     <th>Required</th>
                                     <th>Ordered</th>
                                     {% endif %}
-                                    <th>Actions</th>
+                                    <th style="text-align: center;">Replace</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1297,33 +1274,14 @@
                                         {% if accessory.stock_item %}
                                             {% with remaining=accessory|calculate_remaining %}
                                                 <div class="accessory-price-info">
-                                                    <div>Stock: {{ accessory.available_quantity|floatformat:0 }}</div>
-                                                    <div>Allocated: {{ accessory.allocated_quantity|floatformat:0 }}</div>
-                                                    <div class="incoming-highlight">Incoming: {{ accessory.incoming_quantity|floatformat:0 }}</div>
-                                                    <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% else %}accessory-remaining-positive{% endif %}">
-                                                        Remaining: {{ remaining|floatformat:0 }}
-                                                    </div>
+                                                    <div><span>Stock</span><span>{{ accessory.available_quantity|floatformat:0 }}</span></div>
+                                                    <div><span>Allocated</span><span>{{ accessory.allocated_quantity|floatformat:0 }}</span></div>
+                                                    <div class="{% if accessory.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ accessory.incoming_quantity|floatformat:0 }}</span></div>
+                                                    <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
                                                 </div>
                                             {% endwith %}
                                         {% else %}
                                             <span class="text-muted">-</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if accessory.is_allocated %}
-                                            <span class="badge badge-allocated"><i class="bi bi-check-circle-fill"></i> Allocated</span>
-                                        {% elif accessory.missing %}
-                                            <span class="badge badge-warning">Missing</span>
-                                        {% elif accessory.stock_item %}
-                                            {% with remaining=accessory|calculate_remaining %}
-                                                {% if remaining >= 0 %}
-                                                    <span class="badge badge-success">In Stock</span>
-                                                {% else %}
-                                                    <span class="badge badge-danger">Out of Stock</span>
-                                                {% endif %}
-                                            {% endwith %}
-                                        {% else %}
-                                            <span class="badge badge-info">No Stock Link</span>
                                         {% endif %}
                                     </td>
                                     {% if has_os_door_accessories %}
@@ -1342,10 +1300,10 @@
                                         {% endif %}
                                     </td>
                                     {% endif %}
-                                    <td>
-                                        <button type="button" class="btn btn-sm btn-primary" title="Swap Item" 
+                                    <td style="text-align: center;">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" title="Replace Item" 
                                             onclick="openSwapModal({{ accessory.id }}, '{{ accessory.sku }}', '{{ accessory.name|escapejs }}')">
-                                            <i class="bi bi-arrow-repeat"></i>
+                                            <i class="bi bi-arrow-repeat"></i> Replace
                                         </button>
                                     </td>
                                 </tr>
@@ -1353,7 +1311,7 @@
                                 <tr class="table-total-row">
                                     <td colspan="4" class="text-right">Total:</td>
                                     <td>£{{ non_glass_accessories|sum_accessory_costs }}</td>
-                                    <td colspan="{% if has_os_door_accessories %}4{% else %}2{% endif %}"></td>
+                                    <td colspan="{% if has_os_door_accessories %}3{% else %}1{% endif %}"></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -3138,6 +3096,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
             osDoorsChanges[osDoorId].cost_price = costPrice;
             recalcOsDoorTotal(this.closest('tr'));
+            const saveBtn = document.getElementById('save-os-doors-changes');
+            if (saveBtn) saveBtn.style.display = '';
         });
     });
 
@@ -3149,6 +3109,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
             osDoorsChanges[osDoorId].quantity = quantity;
             recalcOsDoorTotal(this.closest('tr'));
+            const saveBtn = document.getElementById('save-os-doors-changes');
+            if (saveBtn) saveBtn.style.display = '';
         });
     });
 
@@ -3161,6 +3123,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const quantity = parseInt(qtyInput.value) || 0;
             if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
             osDoorsChanges[osDoorId].received_quantity = this.checked ? quantity : 0;
+            const saveBtn = document.getElementById('save-os-doors-changes');
+            if (saveBtn) saveBtn.style.display = '';
         });
     });
 

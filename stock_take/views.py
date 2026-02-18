@@ -5278,36 +5278,12 @@ def regenerate_csv(request, order_id):
     if request.method == 'POST':
         try:
             order = get_object_or_404(Order, id=order_id)
-            
-            if not order.original_csv:
-                return JsonResponse({'success': False, 'error': 'No original CSV found'})
-            
-            # Read original CSV
-            order.original_csv.seek(0)
-            file_content = order.original_csv.read().decode('utf-8')
-            io_string = io.StringIO(file_content)
-            
-            # Detect delimiter
-            sample = file_content[:1024]
-            sniffer = csv.Sniffer()
-            try:
-                delimiter = sniffer.sniff(sample, delimiters=',\t;').delimiter
-            except csv.Error:
-                delimiter = ','
-            
-            io_string.seek(0)
-            reader = csv.DictReader(io_string, delimiter=delimiter)
-            
-            # Create processed CSV with current accessory data
-            output = io.StringIO()
-            fieldnames = reader.fieldnames
-            writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=delimiter)
-            writer.writeheader()
-            
+
+            # Standard fieldnames used across all accessory CSVs
+            standard_fieldnames = ['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable']
+
             # Build a map of SKU to current accessory data
             sku_data = {}
-            processed_skus = set()  # Track which SKUs we've written
-            
             for acc in order.accessories.all():
                 sku_data[acc.sku] = {
                     'sku': acc.sku,
@@ -5318,45 +5294,100 @@ def regenerate_csv(request, order_id):
                     'sell': str(acc.sell_price),
                     'billable': 'True' if acc.billable else 'False'
                 }
-            
-            # Update existing rows
-            for row in reader:
-                sku = row.get('Sku', '').strip()
-                if sku in sku_data:
-                    # Update with current data
-                    row['Name'] = sku_data[sku]['name']
-                    row['Description'] = sku_data[sku]['description']
-                    row['Quantity'] = sku_data[sku]['quantity']
-                    row['CostPrice'] = sku_data[sku]['cost']
-                    row['SellPrice'] = sku_data[sku]['sell']
-                    row['Billable'] = sku_data[sku]['billable']
-                    processed_skus.add(sku)
-                writer.writerow(row)
-            
-            # Add new items that weren't in the original CSV
-            for sku, data in sku_data.items():
-                if sku not in processed_skus:
-                    new_row = {
+
+            # Try to read and update from the original CSV; fall back to generating fresh if file is missing
+            original_available = False
+            if order.original_csv:
+                try:
+                    order.original_csv.seek(0)
+                    file_content = order.original_csv.read().decode('utf-8')
+                    original_available = True
+                except (FileNotFoundError, OSError):
+                    # File record exists in DB but file is missing from disk — clear the stale reference
+                    order.original_csv = None
+                    order.save(update_fields=['original_csv'])
+
+            if original_available:
+                io_string = io.StringIO(file_content)
+
+                # Detect delimiter
+                sample = file_content[:1024]
+                sniffer = csv.Sniffer()
+                try:
+                    delimiter = sniffer.sniff(sample, delimiters=',\t;').delimiter
+                except csv.Error:
+                    delimiter = ','
+
+                io_string.seek(0)
+                reader = csv.DictReader(io_string, delimiter=delimiter)
+
+                output = io.StringIO()
+                fieldnames = reader.fieldnames or standard_fieldnames
+                writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=delimiter)
+                writer.writeheader()
+
+                processed_skus = set()
+
+                # Update existing rows
+                for row in reader:
+                    sku = row.get('Sku', '').strip()
+                    if sku in sku_data:
+                        row['Name'] = sku_data[sku]['name']
+                        row['Description'] = sku_data[sku]['description']
+                        row['Quantity'] = sku_data[sku]['quantity']
+                        row['CostPrice'] = sku_data[sku]['cost']
+                        row['SellPrice'] = sku_data[sku]['sell']
+                        row['Billable'] = sku_data[sku]['billable']
+                        processed_skus.add(sku)
+                    writer.writerow(row)
+
+                # Append items not present in the original
+                for sku, data in sku_data.items():
+                    if sku not in processed_skus:
+                        writer.writerow({
+                            'Sku': data['sku'],
+                            'Name': data['name'],
+                            'Description': data['description'],
+                            'CostPrice': data['cost'],
+                            'SellPrice': data['sell'],
+                            'Quantity': data['quantity'],
+                            'Billable': data['billable'],
+                        })
+
+                csv_content = output.getvalue()
+                filename = f"{order.customer_number}_processed_{order.original_csv.name.split('/')[-1]}"
+                message = 'Processed CSV regenerated successfully'
+            else:
+                # No original CSV (or file was missing) — build a fresh CSV from current accessories
+                if not sku_data:
+                    return JsonResponse({'success': False, 'error': 'No accessories found on this order to generate a CSV from'})
+
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=standard_fieldnames)
+                writer.writeheader()
+                for data in sku_data.values():
+                    writer.writerow({
                         'Sku': data['sku'],
                         'Name': data['name'],
                         'Description': data['description'],
                         'CostPrice': data['cost'],
                         'SellPrice': data['sell'],
                         'Quantity': data['quantity'],
-                        'Billable': data['billable']
-                    }
-                    writer.writerow(new_row)
-            
+                        'Billable': data['billable'],
+                    })
+
+                csv_content = output.getvalue()
+                filename = f"{order.customer_number}_generated_accessories.csv"
+                message = 'CSV generated from current accessories (original file was missing)'
+
             # Save processed CSV
-            csv_content = output.getvalue()
-            filename = f"{order.customer_number}_processed_{order.original_csv.name.split('/')[-1]}"
             order.processed_csv.save(filename, ContentFile(csv_content.encode('utf-8')))
             order.processed_csv_created_at = timezone.now()
             order.save()
-            
+
             return JsonResponse({
                 'success': True,
-                'message': 'Processed CSV regenerated successfully'
+                'message': message
             })
             
         except Exception as e:
