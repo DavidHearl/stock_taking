@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct
 
 import csv
 import io
@@ -2145,6 +2145,119 @@ def delete_accessories_batch(request):
 
 
 @login_required
+def add_accessories_to_po(request):
+    """Add selected accessories as product lines to an existing or new PO (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    
+    import json
+    from django.db.models import Sum
+    
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+    
+    accessory_ids = data.get('accessory_ids', [])
+    po_id = data.get('po_id')  # None means create new PO
+    
+    if not accessory_ids:
+        return JsonResponse({'success': False, 'error': 'No items selected'})
+    
+    try:
+        accessories = Accessory.objects.filter(id__in=[int(i) for i in accessory_ids]).select_related('order', 'stock_item', 'stock_item__supplier')
+        if not accessories.exists():
+            return JsonResponse({'success': False, 'error': 'No valid accessories found'})
+        
+        # ── Validate single supplier ──────────────────────────────────
+        suppliers = set()
+        for acc in accessories:
+            if acc.stock_item and acc.stock_item.supplier:
+                suppliers.add(acc.stock_item.supplier_id)
+        if len(suppliers) > 1:
+            return JsonResponse({
+                'success': False,
+                'error': 'Selected items have different suppliers. A Purchase Order can only have one supplier. Please select items from the same supplier.'
+            })
+        
+        # Determine the supplier for this PO
+        first_acc = accessories.first()
+        acc_supplier = first_acc.stock_item.supplier if first_acc and first_acc.stock_item else None
+        
+        if po_id:
+            # Add to existing PO – check supplier matches
+            po = get_object_or_404(PurchaseOrder, workguru_id=int(po_id))
+            if acc_supplier and po.supplier_name and po.supplier_name != acc_supplier.name:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Supplier mismatch. These items use "{acc_supplier.name}" but PO {po.display_number} is for "{po.supplier_name}". A PO can only have one supplier.'
+                })
+        else:
+            # Create a new PO
+            import re
+            max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+            manual_id = max(max_id + 1, 800000)
+            last_num = 0
+            for po_obj in PurchaseOrder.objects.filter(display_number__startswith='PO').order_by('-display_number'):
+                match = re.match(r'^PO(\d+)$', po_obj.display_number or '')
+                if match:
+                    last_num = max(last_num, int(match.group(1)))
+            display_number = f'PO{last_num + 1}'
+            
+            # Try to link to the order's project
+            order = first_acc.order if first_acc else None
+            
+            po = PurchaseOrder.objects.create(
+                workguru_id=manual_id,
+                number=display_number,
+                display_number=display_number,
+                description=f'Accessories for {order.sale_number}' if order else 'Accessories PO',
+                project_name=f'{order.first_name} {order.last_name}'.strip() if order else None,
+                project_number=order.sale_number if order else None,
+                supplier_id=acc_supplier.workguru_id if acc_supplier else None,
+                supplier_name=acc_supplier.name if acc_supplier else None,
+                status='Draft',
+                currency='GBP',
+                creator_name=request.user.get_full_name() or request.user.username,
+            )
+        
+        # Add accessories as product lines
+        max_sort = po.products.order_by('-sort_order').values_list('sort_order', flat=True).first() or 0
+        added = 0
+        for acc in accessories:
+            max_sort += 1
+            PurchaseOrderProduct.objects.create(
+                purchase_order=po,
+                sku=acc.sku or '',
+                name=acc.name or '',
+                description=f'For order {acc.order.sale_number}' if acc.order else '',
+                order_price=acc.cost_price or 0,
+                order_quantity=acc.quantity or 0,
+                line_total=round(float(acc.cost_price or 0) * float(acc.quantity or 0), 2),
+                sort_order=max_sort,
+                stock_item=acc.stock_item,
+            )
+            added += 1
+        
+        # Recalculate PO total
+        new_total = po.products.aggregate(total=Sum('line_total'))['total'] or 0
+        po.total = new_total
+        po.save(update_fields=['total'])
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'{added} item(s) added to {po.display_number}',
+            'added': added,
+            'po_id': po.workguru_id,
+            'po_number': po.display_number,
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
 def replace_pnx_file(request, boards_po_id):
     """Replace the PNX file for a Boards PO and re-parse items"""
     if request.method == 'POST':
@@ -3175,6 +3288,11 @@ def order_details(request, order_id):
     all_allocated = total_accessories > 0 and not order.accessories.filter(is_allocated=False).exists()
     unallocated_count = order.accessories.filter(is_allocated=False).count()
     
+    # Get available POs for "Add to Existing PO" (Draft/Approved, not yet received)
+    available_purchase_orders = PurchaseOrder.objects.filter(
+        status__in=['Draft', 'Approved']
+    ).order_by('-workguru_id')[:50]
+    
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -3212,6 +3330,7 @@ def order_details(request, order_id):
         'designers': Designer.objects.all().order_by('name'),
         'boards_purchase_order': boards_purchase_order,
         'os_doors_purchase_order': os_doors_purchase_order,
+        'available_purchase_orders': available_purchase_orders,
     })
 
 def completed_stock_takes(request):

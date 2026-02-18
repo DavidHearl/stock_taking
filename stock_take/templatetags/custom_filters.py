@@ -11,18 +11,20 @@ def get_item(dictionary, key):
 
 @register.filter
 def calculate_remaining(accessory):
-    """Calculate remaining stock: Stock - QTY - Allocated
+    """Calculate remaining stock: Stock - QTY - Allocated + Incoming
     If this accessory is already allocated (stock deducted), don't subtract its qty again.
+    Incoming = quantities on Approved POs not yet received.
     """
     if not accessory.stock_item:
         return 0
     stock = accessory.available_quantity
     allocated = accessory.allocated_quantity
+    incoming = accessory.incoming_quantity
     if accessory.is_allocated:
         # Stock already deducted for this item, don't double-count
-        return stock - allocated
+        return stock - allocated + incoming
     qty = accessory.quantity
-    return stock - qty - allocated
+    return stock - qty - allocated + incoming
 
 @register.filter
 def split_options(value, delimiter=','):

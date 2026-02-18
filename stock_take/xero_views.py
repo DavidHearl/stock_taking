@@ -222,6 +222,8 @@ def xero_create_customer(request):
 def xero_customer_search(request):
     """
     Search customers in the local database for the Xero customer picker.
+    Also does a live Xero API name search to check if the customer already
+    exists in Xero (by xero_id stored locally, or by exact name match in Xero).
     Returns JSON with matching customers.
     """
     from stock_take.models import Customer
@@ -236,19 +238,76 @@ def xero_customer_search(request):
         Q(first_name__icontains=q) |
         Q(last_name__icontains=q) |
         Q(email__icontains=q)
-    ).filter(is_active=True)[:15]
+    )[:15]
+
+    # Live Xero name search — get all candidates for the query string
+    xero_contacts_by_name = {}
+    try:
+        xero_hits = xero_api.search_contacts_by_name(q)
+        for xc in xero_hits:
+            xero_contacts_by_name[xc.get("Name", "").strip().lower()] = xc.get("ContactID", "")
+    except Exception:
+        pass  # best-effort
 
     results = []
     for c in customers:
         display_name = c.name or f"{c.first_name} {c.last_name}".strip()
         address_parts = [p for p in [c.address_1, c.address_2, c.city, c.state, c.postcode] if p]
+
+        # Determine Xero ID: prefer stored value, fallback to live name match
+        xero_id = c.xero_id or ""
+        if not xero_id:
+            xero_name_match = xero_contacts_by_name.get(display_name.strip().lower(), "")
+            if xero_name_match:
+                xero_id = xero_name_match
+                # Persist the discovered xero_id so future checks are instant
+                Customer.objects.filter(pk=c.pk).update(xero_id=xero_name_match)
+
         results.append({
             "id": c.pk,
             "name": display_name,
             "email": c.email or "",
             "phone": c.phone or "",
             "address": ", ".join(address_parts),
-            "xero_id": c.xero_id or "",
+            "xero_id": xero_id,
         })
 
     return JsonResponse({"results": results})
+
+
+@login_required
+def xero_check_contact(request):
+    """
+    Live check: given a local customer_id, look up their exact name in Xero.
+    Returns {found: bool, xero_id: str, name: str}.
+    Updates the local Customer.xero_id if a match is found.
+    """
+    from stock_take.models import Customer
+
+    customer_id = request.GET.get("customer_id", "").strip()
+    if not customer_id:
+        return JsonResponse({"error": "customer_id required"}, status=400)
+
+    try:
+        customer = Customer.objects.get(pk=int(customer_id))
+    except (Customer.DoesNotExist, ValueError):
+        return JsonResponse({"error": "Customer not found"}, status=404)
+
+    display_name = customer.name or f"{customer.first_name} {customer.last_name}".strip()
+
+    # If already stored, return immediately
+    if customer.xero_id:
+        return JsonResponse({"found": True, "xero_id": customer.xero_id, "name": display_name})
+
+    # Live lookup by exact name
+    try:
+        xero_id = xero_api.find_contact_by_name(display_name)
+    except Exception as e:
+        logger.error(f"xero_check_contact error: {e}")
+        return JsonResponse({"error": "Xero API unavailable"}, status=503)
+
+    if xero_id:
+        Customer.objects.filter(pk=customer.pk).update(xero_id=xero_id)
+        return JsonResponse({"found": True, "xero_id": xero_id, "name": display_name})
+
+    return JsonResponse({"found": False, "xero_id": "", "name": display_name})

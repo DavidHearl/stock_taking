@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render, redirect
@@ -45,14 +46,21 @@ def leads_list(request):
     active_count = Lead.objects.exclude(status__in=['converted', 'lost']).count()
     converted_count = Lead.objects.filter(status='converted').count()
     lost_count = Lead.objects.filter(status='lost').count()
+    filtered_count = leads.count()
+
+    # Pagination
+    paginator = Paginator(leads, 100)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
 
     context = {
-        'leads': leads,
+        'leads': page_obj,
+        'page_obj': page_obj,
         'total_count': total_count,
         'active_count': active_count,
         'converted_count': converted_count,
         'lost_count': lost_count,
-        'filtered_count': leads.count(),
+        'filtered_count': filtered_count,
         'search_query': search_query,
         'status_filter': status_filter,
         'status_choices': Lead.STATUS_CHOICES,

@@ -131,10 +131,18 @@
                         </a>
                     </td>
                     <td>{{ po.supplier_name|default:"-" }}</td>
-                    <td>{{ po.project_name|default:"-" }}</td>
+                    <td>
+                        {% if po.linked_order_info %}
+                        <a href="{% url 'order_details' po.linked_order_info.id %}" class="po-project-link" title="View order {{ po.linked_order_info.sale_number }}">
+                            <i class="bi bi-box-arrow-up-right"></i> {{ po.project_name|default:"-" }}
+                        </a>
+                        {% else %}
+                        {{ po.project_name|default:"-" }}
+                        {% endif %}
+                    </td>
                     <td class="po-desc-cell">{{ po.description|default:"-"|truncatewords:10 }}</td>
-                    <td>{{ po.issue_date|default:"-" }}</td>
-                    <td>{{ po.expected_date|default:"-" }}</td>
+                    <td>{{ po.issue_date|date:'d/m/Y'|default:"-" }}</td>
+                    <td>{{ po.expected_date|date:'d/m/Y'|default:"-" }}</td>
                     <td class="text-right">£{{ po.total|floatformat:2 }}</td>
                     <td>
                         <span class="po-status {% if po.status == 'Draft' %}draft{% elif po.status == 'Sent' %}sent{% elif po.status == 'Received' %}received{% elif po.status == 'Approved' %}approved{% elif po.status == 'Cancelled' %}cancelled{% endif %}">
@@ -145,10 +153,6 @@
                         {% if po.email_sent %}
                         <span class="po-email-badge sent" title="Sent {{ po.email_sent_at|date:'d/m/Y H:i' }} to {{ po.email_sent_to }}">
                             <i class="bi bi-envelope-check"></i>
-                        </span>
-                        {% else %}
-                        <span class="po-email-badge not-sent" title="Not yet emailed">
-                            <i class="bi bi-envelope"></i>
                         </span>
                         {% endif %}
                     </td>

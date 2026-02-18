@@ -1117,13 +1117,24 @@
                 <h3>
                     Glass
                     {% if glass_items %}
-                        <span class="badge badge-info badge-ml">{{ glass_items.count }} item{{ glass_items.count|pluralize }}</span>
+                        <span class="badge badge-info badge-ml">{{ glass_items|length }} item{{ glass_items|length|pluralize }}</span>
                     {% endif %}
                 </h3>
                 <div class="header-actions">
                     <button class="btn btn-sm btn-primary" type="button" onclick="openModal('addGlassModal')">
                         <i class="bi bi-plus-lg"></i> Add Glass
                     </button>
+                    {% if glass_items %}
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-glass-selected" title="Delete selected">
+                        <i class="bi bi-trash"></i> <span id="glass-selected-count">0</span>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-add-to-po hidden" id="glass-add-to-po" onclick="openAddToPOModal('glass')">
+                        <i class="bi bi-cart-plus"></i> Add to PO
+                    </button>
+                    <button type="button" class="btn btn-sm btn-create-po hidden" id="glass-create-po" onclick="createPOFromSelected('glass')">
+                        <i class="bi bi-file-earmark-plus"></i> Create PO
+                    </button>
+                    {% endif %}
                 </div>
             </div>
             <div class="card-body">
@@ -1132,18 +1143,20 @@
                     <table class="table" id="glass-table">
                         <thead>
                             <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="glass-select-all" title="Select all"></th>
                                 <th>SKU</th>
                                 <th>Name</th>
                                 <th>Qty</th>
                                 <th>Cost</th>
-                                <th>Stock/Allocated/Remaining</th>
+                                <th>Stock</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for glass in glass_items %}
-                            <tr {% if glass.is_allocated %}class="allocated-row"{% endif %}>
+                            <tr data-accessory-id="{{ glass.id }}" {% if glass.is_allocated %}class="allocated-row"{% endif %}>
+                                <td><input type="checkbox" class="checkbox-input glass-select" data-accessory-id="{{ glass.id }}" data-allocated="{{ glass.is_allocated|yesno:'1,0' }}"></td>
                                 <td>{{ glass.sku }}</td>
                                 <td>{{ glass.name }}</td>
                                 <td>
@@ -1160,6 +1173,7 @@
                                             <div class="accessory-price-info">
                                                 <div>Stock: {{ glass.available_quantity|floatformat:0 }}</div>
                                                 <div>Allocated: {{ glass.allocated_quantity|floatformat:0 }}</div>
+                                                <div class="incoming-highlight">Incoming: {{ glass.incoming_quantity|floatformat:0 }}</div>
                                                 <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% else %}accessory-remaining-positive{% endif %}">
                                                     Remaining: {{ remaining|floatformat:0 }}
                                                 </div>
@@ -1191,18 +1205,11 @@
                                         onclick="openSwapModal('{{ glass.id }}', '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
                                         <i class="bi bi-arrow-repeat"></i>
                                     </button>
-                                    <form method="POST" action="{% url 'delete_accessory' glass.id %}" class="inline-delete-form" 
-                                        onsubmit="return confirm('Are you sure you want to remove this glass item?');">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-danger btn-sm" title="Remove Glass">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </form>
                                 </td>
                             </tr>
                             {% endfor %}
                             <tr class="table-total-row">
-                                <td colspan="3" class="text-right">Total:</td>
+                                <td colspan="4" class="text-right">Total:</td>
                                 <td>£{{ glass_items|sum_accessory_costs }}</td>
                                 <td colspan="2"></td>
                             </tr>
@@ -1218,15 +1225,17 @@
             <!-- Accessories Section -->
             <div class="card">
                 <div class="card-header">
-                    <h3>Accessories</h3>
-                    <div class="header-actions">
-                        <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('addItemModal')">
-                            <i class="bi bi-plus-lg"></i> Add Item
-                        </button>
+                    <h3>
+                        Accessories
                         <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-sm btn-generate-cad"
                            onclick="return confirm('Generate accessories CSV from CAD data?\n\nThis will create/update accessories from the CAD database.');">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
                         </a>
+                    </h3>
+                    <div class="header-actions">
+                        <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('addItemModal')">
+                            <i class="bi bi-plus-lg"></i> Add Item
+                        </button>
                         {% if order.original_csv %}
                         <button class="btn btn-sm btn-update-files-po" type="button" onclick="regenerateCSV({{ order.id }})">
                             <i class="bi bi-arrow-repeat"></i> Regenerate CSV
@@ -1236,8 +1245,14 @@
                         <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-accessory-changes" style="display: none;">
                             <i class="bi bi-save"></i> Save Changes
                         </button>
-                        <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected">
-                            <i class="bi bi-trash"></i> Delete Selected (<span id="accessory-selected-count">0</span>)
+                        <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected" title="Delete selected">
+                            <i class="bi bi-trash"></i> <span id="accessory-selected-count">0</span>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-add-to-po hidden" id="acc-add-to-po" onclick="openAddToPOModal('accessory')">
+                            <i class="bi bi-cart-plus"></i> Add to PO
+                        </button>
+                        <button type="button" class="btn btn-sm btn-create-po hidden" id="acc-create-po" onclick="createPOFromSelected('accessory')">
+                            <i class="bi bi-file-earmark-plus"></i> Create PO
                         </button>
                         {% endif %}
                     </div>
@@ -1255,7 +1270,7 @@
                                     <th>Name</th>
                                     <th>Qty</th>
                                     <th>Cost</th>
-                                    <th>Stock/Allocated/Remaining</th>
+                                    <th>Stock</th>
                                     <th>Status</th>
                                     {% if has_os_door_accessories %}
                                     <th>Required</th>
@@ -1284,6 +1299,7 @@
                                                 <div class="accessory-price-info">
                                                     <div>Stock: {{ accessory.available_quantity|floatformat:0 }}</div>
                                                     <div>Allocated: {{ accessory.allocated_quantity|floatformat:0 }}</div>
+                                                    <div class="incoming-highlight">Incoming: {{ accessory.incoming_quantity|floatformat:0 }}</div>
                                                     <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% else %}accessory-remaining-positive{% endif %}">
                                                         Remaining: {{ remaining|floatformat:0 }}
                                                     </div>
@@ -1966,6 +1982,37 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('addGlassModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add to Existing PO Modal -->
+<div class="modal" id="addToPOModal">
+    <div class="modal-overlay" onclick="closeModal('addToPOModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Items to Purchase Order</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addToPOModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="po-modal-item-count" class="text-muted mb-2"></p>
+                <div class="form-group">
+                    <label for="po-select">Select Purchase Order</label>
+                    <select class="form-input" id="po-select">
+                        <option value="">-- Select a PO --</option>
+                        {% for po in available_purchase_orders %}
+                        <option value="{{ po.workguru_id }}">{{ po.display_number }} - {{ po.supplier_name }} ({{ po.status }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addToPOModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirm-add-to-po" onclick="submitAddToPO()">
+                    <i class="bi bi-cart-plus"></i> Add to PO
+                </button>
             </div>
         </div>
     </div>
@@ -2701,29 +2748,30 @@ document.addEventListener('DOMContentLoaded', function() {
     const accessorySelectAll = document.getElementById('accessory-select-all');
     const deleteAccessoriesBtn = document.getElementById('delete-accessories-selected');
     const accessoryCountSpan = document.getElementById('accessory-selected-count');
+    const accAddToPOBtn = document.getElementById('acc-add-to-po');
+    const accCreatePOBtn = document.getElementById('acc-create-po');
 
-    function updateAccessoryDeleteButton() {
+    function updateAccessoryActionButtons() {
         const checked = document.querySelectorAll('.accessory-select:checked');
         const count = checked.length;
         if (accessoryCountSpan) accessoryCountSpan.textContent = count;
-        if (deleteAccessoriesBtn) {
-            if (count > 0) {
-                deleteAccessoriesBtn.classList.remove('hidden');
-            } else {
-                deleteAccessoriesBtn.classList.add('hidden');
+        [deleteAccessoriesBtn, accAddToPOBtn, accCreatePOBtn].forEach(btn => {
+            if (btn) {
+                if (count > 0) btn.classList.remove('hidden');
+                else btn.classList.add('hidden');
             }
-        }
+        });
     }
 
     if (accessorySelectAll) {
         accessorySelectAll.addEventListener('change', function() {
             document.querySelectorAll('.accessory-select').forEach(cb => cb.checked = this.checked);
-            updateAccessoryDeleteButton();
+            updateAccessoryActionButtons();
         });
     }
 
     document.querySelectorAll('.accessory-select').forEach(function(cb) {
-        cb.addEventListener('change', updateAccessoryDeleteButton);
+        cb.addEventListener('change', updateAccessoryActionButtons);
     });
 
     if (deleteAccessoriesBtn) {
@@ -2752,14 +2800,163 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     showAlert('Error deleting items: ' + data.error, 'danger');
                     this.disabled = false;
-                    this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected (<span id="accessory-selected-count">' + ids.length + '</span>)';
+                    this.innerHTML = '<i class="bi bi-trash"></i> <span id="accessory-selected-count">' + ids.length + '</span>';
                 }
             })
             .catch(error => {
                 showAlert('Error deleting items.', 'danger');
                 this.disabled = false;
-                this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected';
+                this.innerHTML = '<i class="bi bi-trash"></i> <span id="accessory-selected-count">0</span>';
             });
+        });
+    }
+
+    // ─── Glass select / bulk delete ──────────────────────────────────────────
+    const glassSelectAll = document.getElementById('glass-select-all');
+    const deleteGlassBtn = document.getElementById('delete-glass-selected');
+    const glassCountSpan = document.getElementById('glass-selected-count');
+    const glassAddToPOBtn = document.getElementById('glass-add-to-po');
+    const glassCreatePOBtn = document.getElementById('glass-create-po');
+
+    function updateGlassActionButtons() {
+        const checked = document.querySelectorAll('.glass-select:checked');
+        const count = checked.length;
+        if (glassCountSpan) glassCountSpan.textContent = count;
+        [deleteGlassBtn, glassAddToPOBtn, glassCreatePOBtn].forEach(btn => {
+            if (btn) {
+                if (count > 0) btn.classList.remove('hidden');
+                else btn.classList.add('hidden');
+            }
+        });
+    }
+
+    if (glassSelectAll) {
+        glassSelectAll.addEventListener('change', function() {
+            document.querySelectorAll('.glass-select').forEach(cb => cb.checked = this.checked);
+            updateGlassActionButtons();
+        });
+    }
+
+    document.querySelectorAll('.glass-select').forEach(function(cb) {
+        cb.addEventListener('change', updateGlassActionButtons);
+    });
+
+    if (deleteGlassBtn) {
+        deleteGlassBtn.addEventListener('click', function() {
+            const checked = document.querySelectorAll('.glass-select:checked');
+            const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
+            if (ids.length === 0) return;
+            if (!confirm(`Delete ${ids.length} glass item(s)? This cannot be undone.`)) return;
+
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+
+            fetch('/stock-take/delete-accessories-batch/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ ids: ids })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`${data.deleted} glass item(s) deleted.`, 'success');
+                    location.reload();
+                } else {
+                    showAlert('Error deleting items: ' + data.error, 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-trash"></i> <span id="glass-selected-count">' + ids.length + '</span>';
+                }
+            })
+            .catch(error => {
+                showAlert('Error deleting items.', 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-trash"></i> <span id="glass-selected-count">0</span>';
+            });
+        });
+    }
+
+    // ─── PO actions (Add to PO / Create PO) ─────────────────────────────────
+    // Exposed on window so inline onclick handlers can access them
+    let poModalType = null;
+
+    window.openAddToPOModal = function(type) {
+        poModalType = type;
+        const selector = type === 'glass' ? '.glass-select:checked' : '.accessory-select:checked';
+        const count = document.querySelectorAll(selector).length;
+        const label = document.getElementById('po-modal-item-count');
+        if (label) label.textContent = `${count} ${type} item(s) selected`;
+        openModal('addToPOModal');
+    }
+
+    window.submitAddToPO = function() {
+        const poId = document.getElementById('po-select').value;
+        if (!poId) {
+            showAlert('Please select a Purchase Order.', 'warning');
+            return;
+        }
+        sendItemsToPO(poModalType, poId);
+    }
+
+    window.createPOFromSelected = function(type) {
+        if (!confirm(`Create a new Purchase Order from the selected ${type} items?`)) return;
+        sendItemsToPO(type, null);
+    }
+
+    function sendItemsToPO(type, poId) {
+        const selector = type === 'glass' ? '.glass-select:checked' : '.accessory-select:checked';
+        const checked = document.querySelectorAll(selector);
+        const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
+        if (ids.length === 0) return;
+
+        const payload = { accessory_ids: ids };
+        if (poId) payload.po_id = poId;
+
+        const btn = poId ? document.getElementById('confirm-add-to-po') : null;
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Adding...';
+        }
+
+        fetch('/stock-take/add-accessories-to-po/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => {
+            if (!response.ok) throw new Error(`Server error ${response.status}`);
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                closeModal('addToPOModal');
+                showAlert(`${data.added} item(s) added to PO ${data.po_number}.`, 'success');
+                // Optionally redirect to PO
+                if (data.po_id) {
+                    setTimeout(() => {
+                        window.location.href = `/purchase-order/${data.po_id}/`;
+                    }, 1500);
+                }
+            } else {
+                showAlert('Error: ' + (data.error || 'Unknown error'), 'danger');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-cart-plus"></i> Add to PO';
+                }
+            }
+        })
+        .catch(error => {
+            showAlert('Error adding items to PO: ' + error.message, 'danger');
+            console.error('PO error:', error);
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-cart-plus"></i> Add to PO';
+            }
         });
     }
 
@@ -2796,7 +2993,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const qtyInput = row.querySelector('.accessory-quantity');
             const qty = qtyInput ? parseInt(qtyInput.value) || 0 : 0;
 
-            // Parse stock info
+            // Parse stock info from stacked .accessory-price-info div
             const priceInfo = row.querySelector('.accessory-price-info');
             let stockQty = '-';
             let afterAlloc = '-';

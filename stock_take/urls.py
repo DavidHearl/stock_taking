@@ -2,16 +2,17 @@ from django.urls import path
 from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
+from .location_view import set_location
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
 from .profile_views import user_profile, user_profile_save, user_change_password
-from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search
+from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact
 from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
 
 urlpatterns = [
@@ -37,6 +38,7 @@ urlpatterns = [
     path('purchase-orders/sync/', sync_purchase_orders_stream, name='sync_purchase_orders'),
     path('purchase-order/<int:po_id>/', purchase_order_detail, name='purchase_order_detail'),
     path('purchase-order/<int:po_id>/save/', purchase_order_save, name='purchase_order_save'),
+    path('purchase-order/<int:po_id>/toggle-project/', purchase_order_toggle_project, name='purchase_order_toggle_project'),
     path('purchase-order/<int:po_id>/receive/', purchase_order_receive, name='purchase_order_receive'),
     path('purchase-order/<int:po_id>/add-product/', purchase_order_add_product, name='purchase_order_add_product'),
     path('purchase-order/<int:po_id>/download-pdf/', purchase_order_download_pdf, name='purchase_order_download_pdf'),
@@ -152,6 +154,7 @@ urlpatterns = [
     path('stock-take/update-os-doors-batch/', views.update_os_doors_batch, name='update_os_doors_batch'),
     path('stock-take/delete-os-doors-batch/', views.delete_os_doors_batch, name='delete_os_doors_batch'),
     path('stock-take/delete-accessories-batch/', views.delete_accessories_batch, name='delete_accessories_batch'),
+    path('stock-take/add-accessories-to-po/', views.add_accessories_to_po, name='add_accessories_to_po'),
     path('stock-take/boards-po/<int:boards_po_id>/replace-pnx/', views.replace_pnx_file, name='replace_pnx_file'),
     path('ordering/upload-accessories-csv/', views.upload_accessories_csv, name='upload_accessories_csv'),
     path('order/<int:order_id>/', views.order_details, name='order_details'),
@@ -251,8 +254,9 @@ urlpatterns = [
     # Timesheets
     path('timesheets/', views.timesheets, name='timesheets'),
 
-    # Dark mode toggle
+    # Dark mode / location toggles
     path('toggle-dark-mode/', toggle_dark_mode, name='toggle_dark_mode'),
+    path('set-location/', set_location, name='set_location'),
 
     # Product detail
     path('product/add/', add_product, name='add_product'),
@@ -298,4 +302,5 @@ urlpatterns = [
     path('xero/api/test/', xero_api_test, name='xero_api_test'),
     path('xero/api/create-customer/', xero_create_customer, name='xero_create_customer'),
     path('xero/api/customer-search/', xero_customer_search, name='xero_customer_search'),
+    path('xero/api/check-contact/', xero_check_contact, name='xero_check_contact'),
 ]

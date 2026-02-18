@@ -268,6 +268,31 @@ def get_contacts(page=1):
     return _api_get("Contacts", params={"page": page})
 
 
+def search_contacts_by_name(name):
+    """
+    Search Xero contacts by name using the searchTerm parameter.
+    Returns a list of matching contact dicts, or empty list on failure.
+    """
+    result = _api_get("Contacts", params={"searchTerm": name})
+    if result and "Contacts" in result:
+        return result["Contacts"]
+    return []
+
+
+def find_contact_by_name(name):
+    """
+    Find a Xero contact whose Name exactly matches the given name (case-insensitive).
+    Uses searchTerm to get candidates then filters for an exact name match.
+    Returns the ContactID string if found, or '' if not.
+    """
+    candidates = search_contacts_by_name(name)
+    name_lower = name.strip().lower()
+    for c in candidates:
+        if c.get("Name", "").strip().lower() == name_lower:
+            return c.get("ContactID", "")
+    return ""
+
+
 def get_invoices(page=1, statuses=None):
     """Fetch invoices from Xero."""
     params = {"page": page}

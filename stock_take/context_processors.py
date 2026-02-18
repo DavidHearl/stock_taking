@@ -10,15 +10,7 @@ from .permissions import get_user_permissions
 def user_permissions(request):
     """
     Makes user permissions available in all templates.
-
-    Template usage:
-        {% if perms.orders.can_view %}...{% endif %}
-        {% if perms.orders.can_edit %}...{% endif %}
-
-    Also provides:
-        - user_role: the role name string (or None)
-        - is_role_admin: True if user has admin role
-        - nav_sections: navigation sections filtered by permissions
+    Also provides current location and available locations for the top navbar.
     """
     if not request.user.is_authenticated:
         return {
@@ -26,6 +18,8 @@ def user_permissions(request):
             'user_role': None,
             'is_role_admin': False,
             'nav_sections': [],
+            'current_location': '',
+            'available_locations': [],
         }
 
     perms = get_user_permissions(request.user)
@@ -53,12 +47,25 @@ def user_permissions(request):
                 'pages': visible_pages,
             })
 
+    # Location: current selection from profile, available from DB
+    current_location = profile.selected_location if profile else ''
+    try:
+        from .models import Customer
+        available_locations = list(
+            Customer.objects.exclude(location__isnull=True).exclude(location='')
+            .values_list('location', flat=True).distinct().order_by('location')
+        )
+    except Exception:
+        available_locations = []
+
     return {
         'role_perms': perms,
         'user_role': role.name if role else None,
         'user_role_display': role.get_name_display() if role else 'No Role',
         'is_role_admin': is_admin,
         'nav_sections': nav_sections,
+        'current_location': current_location,
+        'available_locations': available_locations,
         # Ticket counts for nav badges
         'open_ticket_count': Ticket.objects.filter(status__in=['open', 'in_progress']).count(),
         'unread_ticket_count': Ticket.objects.filter(read_by_admin=False).exclude(status='closed').count() if is_admin else 0,

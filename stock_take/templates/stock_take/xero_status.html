@@ -313,11 +313,11 @@
 
     {% if connected %}
     <!-- Create Customer in Xero -->
-    <div class="admin-card">
+    <div class="admin-card" style="overflow: visible;">
         <div class="admin-card-header">
             <h2>Export Customer to Xero</h2>
         </div>
-        <div class="admin-card-body">
+        <div class="admin-card-body" style="overflow: visible;">
             <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
                 Search for a customer in the database and export them to Xero as a new contact.
             </p>
@@ -327,7 +327,7 @@
                 <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">Search Customer</label>
                 <input type="text" id="xeroCustomerSearch" placeholder="Type a name or email to search..." autocomplete="off"
                     style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); color: var(--text-primary); font-size: 0.9rem;">
-                <div id="xeroSearchResults" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 100;
+                <div id="xeroSearchResults" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 1000;
                     background: var(--card-bg); border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 8px 8px;
                     max-height: 280px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
             </div>
@@ -477,20 +477,47 @@ function selectCustomer(item) {
     searchResults.style.display = 'none';
     searchInput.value = name;
 
-    // Disable button if already in Xero
     const btn = document.getElementById('createCustomerBtn');
     const resultDiv = document.getElementById('createCustomerResult');
+
+    // If we already know the xero_id from the search result, block immediately
     if (xeroId) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-check-circle"></i> Already in Xero';
-        resultDiv.className = 'xero-test-result success';
-        resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> This customer is already linked to Xero (ID: <code>' + xeroId + '</code>)';
-        resultDiv.style.display = 'block';
-    } else {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
-        resultDiv.style.display = 'none';
+        markAlreadyInXero(btn, resultDiv, xeroId);
+        return;
     }
+
+    // Do a live check against Xero API
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Checking Xero...';
+    resultDiv.style.display = 'none';
+
+    fetch('{% url "xero_check_contact" %}?customer_id=' + encodeURIComponent(id))
+        .then(r => r.json())
+        .then(data => {
+            if (data.found) {
+                markAlreadyInXero(btn, resultDiv, data.xero_id);
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
+                resultDiv.style.display = 'none';
+            }
+        })
+        .catch(() => {
+            // If Xero is unreachable, allow export but warn
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
+            resultDiv.className = 'xero-test-result';
+            resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Could not verify Xero status — proceed with caution.';
+            resultDiv.style.display = 'block';
+        });
+}
+
+function markAlreadyInXero(btn, resultDiv, xeroId) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-check-circle"></i> Already in Xero';
+    resultDiv.className = 'xero-test-result success';
+    resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> This customer already exists in Xero (ID: <code>' + xeroId + '</code>)';
+    resultDiv.style.display = 'block';
 }
 
 function clearSelectedCustomer() {

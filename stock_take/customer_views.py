@@ -224,21 +224,41 @@ def sync_customers_stream(request):
 
 @login_required
 def customers_list(request):
-    """Display list of all customers"""
+    """Display list of all customers with date-bracket filters and cascading search.
+    Location is taken from the user's profile (site-wide selector in the top navbar).
+    """
+    from django.utils import timezone
+    from django.core.paginator import Paginator
+    from datetime import timedelta
+
     search_query = request.GET.get('q', '').strip()
-    status_filter = request.GET.get('status', 'all')
+    age_filter = request.GET.get('age', '9m')  # default to <9 months
 
-    customers = Customer.objects.prefetch_related('orders').all().order_by('name', 'last_name', 'first_name')
+    # Location comes from the user's profile (site-wide setting)
+    profile = getattr(request.user, 'profile', None)
+    location_filter = profile.selected_location if profile else ''
 
-    # Apply status filter
-    if status_filter == 'active':
-        customers = customers.filter(is_active=True)
-    elif status_filter == 'inactive':
-        customers = customers.filter(is_active=False)
+    now = timezone.now()
 
-    # Apply search
+    # Define date bracket cutoffs
+    cutoff_9m = now - timedelta(days=274)    # ~9 months
+    cutoff_2y = now - timedelta(days=730)    # ~2 years
+    cutoff_10y = now - timedelta(days=3650)  # ~10 years
+
+    # Use Coalesce to pick the best available date for each customer
+    from django.db.models.functions import Coalesce
+    customers_base = Customer.objects.prefetch_related('orders').annotate(
+        effective_date=Coalesce('creation_time', 'anthill_created_date')
+    ).order_by('name', 'last_name', 'first_name')
+
+    # Apply location filter from profile
+    if location_filter:
+        customers_base = customers_base.filter(location__iexact=location_filter)
+
+    # Build search Q filter
+    search_q = None
     if search_query:
-        customers = customers.filter(
+        search_q = (
             Q(name__icontains=search_query) |
             Q(email__icontains=search_query) |
             Q(phone__icontains=search_query) |
@@ -247,18 +267,68 @@ def customers_list(request):
             Q(postcode__icontains=search_query)
         )
 
-    total_count = Customer.objects.count()
-    active_count = Customer.objects.filter(is_active=True).count()
-    inactive_count = Customer.objects.filter(is_active=False).count()
+    # Date bracket filters
+    def bracket_filter(qs, bracket):
+        if bracket == '9m':
+            return qs.filter(effective_date__gte=cutoff_9m)
+        elif bracket == '2y':
+            return qs.filter(effective_date__gte=cutoff_2y, effective_date__lt=cutoff_9m)
+        elif bracket == '10y':
+            return qs.filter(effective_date__gte=cutoff_10y, effective_date__lt=cutoff_2y)
+        elif bracket == 'over10':
+            return qs.filter(Q(effective_date__lt=cutoff_10y) | Q(effective_date__isnull=True))
+        return qs
+
+    # Compute counts for each bracket (before search, after location filter)
+    count_9m = bracket_filter(customers_base, '9m').count()
+    count_2y = bracket_filter(customers_base, '2y').count()
+    count_10y = bracket_filter(customers_base, '10y').count()
+    count_over10 = bracket_filter(customers_base, 'over10').count()
+
+    # Apply date filter to get the current bracket's queryset
+    customers = bracket_filter(customers_base, age_filter)
+
+    # Cascading search: search current bracket first, expand if no results
+    search_expanded_from = None
+    if search_q:
+        filtered = customers.filter(search_q)
+        if filtered.exists():
+            customers = filtered
+        else:
+            bracket_order = ['9m', '2y', '10y', 'over10']
+            try:
+                start_idx = bracket_order.index(age_filter) + 1
+            except ValueError:
+                start_idx = 0
+            remaining_brackets = bracket_order[start_idx:] + bracket_order[:bracket_order.index(age_filter)]
+            found = False
+            for bracket in remaining_brackets:
+                expanded_qs = bracket_filter(customers_base, bracket).filter(search_q)
+                if expanded_qs.exists():
+                    customers = expanded_qs
+                    search_expanded_from = bracket
+                    found = True
+                    break
+            if not found:
+                customers = filtered
+
+    # Pagination
+    page_number = request.GET.get('page', 1)
+    paginator = Paginator(customers, 100)
+    page_obj = paginator.get_page(page_number)
 
     context = {
-        'customers': customers,
-        'total_count': total_count,
-        'active_count': active_count,
-        'inactive_count': inactive_count,
-        'filtered_count': customers.count(),
+        'customers': page_obj,
+        'page_obj': page_obj,
+        'filtered_count': paginator.count,
         'search_query': search_query,
-        'status_filter': status_filter,
+        'age_filter': age_filter,
+        'location_filter': location_filter,
+        'count_9m': count_9m,
+        'count_2y': count_2y,
+        'count_10y': count_10y,
+        'count_over10': count_over10,
+        'search_expanded_from': search_expanded_from,
     }
 
     return render(request, 'stock_take/customers_list.html', context)

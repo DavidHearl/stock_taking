@@ -33,10 +33,6 @@
                 <span class="po-email-badge sent" title="Sent {{ purchase_order.email_sent_at|date:'d/m/Y H:i' }} to {{ purchase_order.email_sent_to }}">
                     <i class="bi bi-envelope-check"></i> Emailed
                 </span>
-                {% else %}
-                <span class="po-email-badge not-sent" title="Not yet emailed">
-                    <i class="bi bi-envelope"></i> Not Emailed
-                </span>
                 {% endif %}
                 {% if purchase_order.creator_name %}
                 <span class="po-meta-sep">|</span>
@@ -81,6 +77,11 @@
             <button class="btn btn-sm btn-secondary" id="cancel-btn" onclick="cancelEdit()" style="display:none;">
                 <i class="bi bi-x-lg"></i> Cancel
             </button>
+            {% if linked_order %}
+            <a href="{% url 'order_details' linked_order.id %}" class="btn btn-sm btn-order-link" title="View order {{ linked_order.sale_number }}">
+                <i class="bi bi-box-arrow-up-right"></i> Order {{ linked_order.sale_number }}
+            </a>
+            {% endif %}
             <a href="{% url 'purchase_orders_list' %}" class="btn btn-sm btn-secondary">
                 <i class="bi bi-arrow-left"></i> Back
             </a>
@@ -119,9 +120,24 @@
         </div>
         <div class="po-overview-row">
             <div class="po-overview-item">
-                <span class="po-overview-label">Project</span>
-                <span class="po-overview-value po-view-val" data-field="project_name">
-                    {% if linked_order %}
+                <span class="po-overview-label">Project
+                    <button class="btn-project-toggle" id="project-toggle-btn"
+                        data-customer-name="{{ original_customer_name }}"
+                        data-customer-number="{{ original_customer_number }}"
+                        data-po-id="{{ purchase_order.workguru_id }}"
+                        onclick="toggleProjectStock()"
+                        title="{% if purchase_order.project_name == 'Stock' %}Switch to Customer{% else %}Switch to Stock{% endif %}">
+                        {% if purchase_order.project_name == 'Stock' %}
+                            <i class="bi bi-person"></i>
+                        {% else %}
+                            <i class="bi bi-box-seam"></i>
+                        {% endif %}
+                    </button>
+                </span>
+                <span class="po-overview-value po-view-val" data-field="project_name" id="project-display">
+                    {% if purchase_order.project_name == 'Stock' %}
+                        <span class="po-stock-badge">Stock</span>
+                    {% elif linked_order %}
                         <a href="{% url 'order_details' linked_order.id %}" class="po-project-link" title="View order {{ linked_order.sale_number }}">
                             <i class="bi bi-box-arrow-up-right"></i> {{ purchase_order.project_number }} - {{ purchase_order.project_name }}
                         </a>
@@ -135,24 +151,24 @@
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Issue Date</span>
-                <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|default:"-" }}</span>
+                <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|date:'d/m/Y'|default:"-" }}</span>
                 <input class="po-edit-input po-edit-val" data-field="issue_date" type="date" value="{{ purchase_order.issue_date|default:'' }}" style="display:none;">
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Expected Date</span>
-                <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|default:"-" }}</span>
+                <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|date:'d/m/Y'|default:"-" }}</span>
                 <input class="po-edit-input po-edit-val" data-field="expected_date" type="date" value="{{ purchase_order.expected_date|default:'' }}" style="display:none;">
             </div>
         </div>
         <div class="po-overview-row">
             <div class="po-overview-item">
                 <span class="po-overview-label">Received Date</span>
-                <span class="po-overview-value po-view-val" data-field="received_date">{{ purchase_order.received_date|default:"-" }}</span>
+                <span class="po-overview-value po-view-val" data-field="received_date">{{ purchase_order.received_date|date:'d/m/Y'|default:"-" }}</span>
                 <input class="po-edit-input po-edit-val" data-field="received_date" type="text" value="{{ purchase_order.received_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Invoice Date</span>
-                <span class="po-overview-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|default:"-" }}</span>
+                <span class="po-overview-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|date:'d/m/Y'|default:"-" }}</span>
                 <input class="po-edit-input po-edit-val" data-field="invoice_date" type="text" value="{{ purchase_order.invoice_date|default:'' }}" style="display:none;" placeholder="YYYY-MM-DD">
             </div>
             <div class="po-overview-item">
@@ -655,6 +671,55 @@ Sliderobes</textarea>
 
 <script>
 let editMode = false;
+
+function toggleProjectStock() {
+    const btn = document.getElementById('project-toggle-btn');
+    const display = document.getElementById('project-display');
+    const poId = btn.dataset.poId;
+    const customerName = btn.dataset.customerName;
+    const customerNumber = btn.dataset.customerNumber;
+    const isCurrentlyStock = display.querySelector('.po-stock-badge') !== null;
+
+    const mode = isCurrentlyStock ? 'customer' : 'stock';
+    const payload = { mode: mode };
+    if (mode === 'customer') {
+        payload.customer_name = customerName;
+        payload.customer_number = customerNumber;
+    }
+
+    btn.disabled = true;
+    fetch(`/purchase-order/${poId}/toggle-project/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify(payload),
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            if (result.project_name === 'Stock') {
+                display.innerHTML = '<span class="po-stock-badge">Stock</span>';
+                btn.innerHTML = '<i class="bi bi-person"></i>';
+                btn.title = 'Switch to Customer';
+            } else {
+                const text = (result.project_number ? result.project_number + ' - ' : '') + result.project_name;
+                display.textContent = text;
+                btn.innerHTML = '<i class="bi bi-box-seam"></i>';
+                btn.title = 'Switch to Stock';
+            }
+            showNotification('Project updated to ' + result.project_name, 'success');
+        } else {
+            showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
+        }
+        btn.disabled = false;
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+    });
+}
 
 function toggleEditMode() {
     editMode = true;

@@ -185,9 +185,9 @@ def generate_purchase_order_pdf(purchase_order, products):
     page_width = A4[0] - 40 * mm  # usable width
 
     # ─── LOGO ──────────────────────────────────────────────────
-    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-icon-dark.png')
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'sliderobes_logo.png')
     if os.path.exists(logo_path):
-        logo = Image(logo_path, width=18 * mm, height=18 * mm)
+        logo = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
         logo.hAlign = 'CENTER'
         elements.append(logo)
         elements.append(Spacer(1, 6 * mm))

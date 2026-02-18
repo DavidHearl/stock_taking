@@ -52,6 +52,10 @@ class Customer(models.Model):
     is_active = models.BooleanField(default=True)
     xero_id = models.CharField(max_length=100, blank=True, null=True, help_text='Xero integration ID')
     
+    # Anthill CRM
+    anthill_created_date = models.DateTimeField(null=True, blank=True, help_text='When this customer was created in Anthill CRM')
+    location = models.CharField(max_length=100, blank=True, null=True, help_text='Anthill location / branch')
+    
     # Metadata
     creation_time = models.DateTimeField(null=True, blank=True)
     last_modification_time = models.DateTimeField(null=True, blank=True)
@@ -93,6 +97,7 @@ class Lead(models.Model):
     name = models.CharField(max_length=255, help_text='Lead / contact name')
     email = models.EmailField(max_length=254, blank=True, null=True)
     phone = models.CharField(max_length=50, blank=True, null=True)
+    mobile = models.CharField(max_length=50, blank=True, null=True)
     website = models.URLField(max_length=300, blank=True, null=True)
 
     # Address fields
@@ -115,6 +120,11 @@ class Lead(models.Model):
         related_name='source_leads', help_text='Customer created from this lead'
     )
 
+    # Anthill CRM
+    anthill_customer_id = models.CharField(max_length=20, blank=True, null=True, unique=True, help_text='Anthill CRM Customer ID')
+    anthill_created_date = models.DateTimeField(null=True, blank=True, help_text='When this lead was created in Anthill CRM')
+    location = models.CharField(max_length=100, blank=True, null=True, help_text='Anthill location / branch')
+    
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -435,6 +445,18 @@ class Accessory(models.Model):
             order=self.order
         ).aggregate(total=Sum('quantity'))['total'] or 0
         return allocated
+
+    @property
+    def incoming_quantity(self):
+        """Get quantity on order (Approved POs not yet received) for this SKU"""
+        from django.db.models import Sum
+        incoming = PurchaseOrderProduct.objects.filter(
+            sku=self.sku,
+            purchase_order__status='Approved'
+        ).aggregate(
+            total=Sum('order_quantity')
+        )['total'] or 0
+        return incoming
 
     def __str__(self):
         return f"{self.sku} - {self.name} ({self.order.sale_number})"
@@ -1517,6 +1539,7 @@ class UserProfile(models.Model):
     """User profile to store user preferences and role assignment"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     dark_mode = models.BooleanField(default=True, help_text='Enable dark mode theme')
+    selected_location = models.CharField(max_length=100, blank=True, default='', help_text='Currently selected site location')
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
 
     def __str__(self):

@@ -92,6 +92,7 @@
                     {% if role_perms.invoices.can_view or is_role_admin %}
                     <a href="{% url 'invoices_list' %}" class="nav-link {% block nav_invoices_active %}{% endblock %}" title="Invoices"><span class="nav-text">Sales Invoices</span></a>
                     {% endif %}
+                    <a href="{% url 'xero_status' %}" class="nav-link {% block nav_xero_active %}{% endblock %}" title="Xero"><span class="nav-text">Xero</span></a>
                 </div>
             </div>
             {% endif %}
@@ -231,7 +232,6 @@
                     <a href="{% url 'admin_templates' %}" class="nav-link {% block nav_admin_templates_active %}{% endblock %}" title="Templates"><span class="nav-text">Templates</span></a>
                     <a href="{% url 'admin_roles' %}" class="nav-link {% block nav_admin_roles_active %}{% endblock %}" title="Roles"><span class="nav-text">Roles</span></a>
                     <a href="{% url 'admin_settings' %}" class="nav-link {% block nav_admin_settings_active %}{% endblock %}" title="Settings"><span class="nav-text">Settings</span></a>
-                    <a href="{% url 'xero_status' %}" class="nav-link {% block nav_xero_active %}{% endblock %}" title="Xero"><span class="nav-text">Xero</span></a>
                     <a href="/admin/" class="nav-link" title="Admin Panel" target="_blank"><span class="nav-text">Admin Panel</span></a>
                 </div>
             </div>
@@ -267,8 +267,11 @@
                     <input type="search" name="q" placeholder="Search everything..." value="{{ request.GET.q }}">
                 </form>
             </div>
-            <select class="top-location-select" id="topLocationSelect" title="Location">
-                <option value="belfast" selected>Belfast</option>
+            <select class="top-location-select" id="topLocationSelect" title="Location" onchange="setLocation(this.value)">
+                <option value=""{% if not current_location %} selected{% endif %}>All Locations</option>
+                {% for loc in available_locations %}
+                <option value="{{ loc }}"{% if current_location == loc %} selected{% endif %}>{{ loc }}</option>
+                {% endfor %}
             </select>
             <button class="theme-toggle" id="themeToggle" onclick="toggleDarkMode()" title="Toggle theme">
                 <i class="bi bi-sun-fill" id="themeIcon"></i>
@@ -418,6 +421,26 @@
                 }
             })
             .catch(error => console.error('Error toggling dark mode:', error));
+        }
+
+        // Location selector
+        function setLocation(location) {
+            fetch("{% url 'set_location' %}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ location: location }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Reload so all pages reflect the new location filter
+                    window.location.reload();
+                }
+            })
+            .catch(error => console.error('Error setting location:', error));
         }
 
         // Set initial theme on page load

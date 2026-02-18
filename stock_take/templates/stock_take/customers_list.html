@@ -28,11 +28,39 @@ Customers
             </div>
         </div>
         <div class="customers-filter-tabs">
-            <a href="?status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">All ({{ total_count }})</a>
-            <a href="?status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">Active ({{ active_count }})</a>
-            <a href="?status=inactive" class="filter-tab {% if status_filter == 'inactive' %}active{% endif %}">Inactive ({{ inactive_count }})</a>
+            <a href="?age=9m{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '9m' %}active{% endif %}">
+                &lt; 9 Months ({{ count_9m }})
+            </a>
+            <a href="?age=2y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '2y' %}active{% endif %}">
+                &lt; 2 Years ({{ count_2y }})
+            </a>
+            <a href="?age=10y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '10y' %}active{% endif %}">
+                &lt; 10 Years ({{ count_10y }})
+            </a>
+            <a href="?age=over10{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == 'over10' %}active{% endif %}">
+                Over 10 Years ({{ count_over10 }})
+            </a>
         </div>
+        {% if location_filter %}
+        <div class="customers-location-badge">
+            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
+        </div>
+        {% endif %}
     </div>
+
+    {% if search_expanded_from %}
+    <div class="search-expanded-notice">
+        <i class="bi bi-info-circle"></i>
+        No results in current bracket — showing results found in 
+        <strong>
+            {% if search_expanded_from == '9m' %}&lt; 9 Months
+            {% elif search_expanded_from == '2y' %}&lt; 2 Years
+            {% elif search_expanded_from == '10y' %}&lt; 10 Years
+            {% elif search_expanded_from == 'over10' %}Over 10 Years
+            {% endif %}
+        </strong>
+    </div>
+    {% endif %}
 
     {% if customers %}
     <div class="customers-result-bar">
@@ -58,6 +86,7 @@ Customers
                     <th>Postcode</th>
                     <th>Orders</th>
                     <th>Active</th>
+                    <th class="text-center">Xero</th>
                     <th class="text-right">Actions</th>
                 </tr>
             </thead>
@@ -91,6 +120,13 @@ Customers
                         <span class="customer-active-badge inactive">Inactive</span>
                         {% endif %}
                     </td>
+                    <td class="text-center xero-status-cell">
+                        {% if customer.xero_id %}
+                        <i class="bi bi-check-circle-fill xero-linked" title="Linked to Xero"></i>
+                        {% else %}
+                        <i class="bi bi-x-circle xero-unlinked" title="Not in Xero"></i>
+                        {% endif %}
+                    </td>
                     <td class="text-right">
                         <button class="customer-delete-btn" onclick="deleteCustomer({{ customer.pk }}, '{{ customer.name|escapejs }}')" title="Delete">
                             <i class="bi bi-trash"></i>
@@ -105,6 +141,38 @@ Customers
     <div class="customers-empty-state">
         <i class="bi bi-people"></i>
         <p>No customers found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="customers-pagination">
+        <div class="pagination-info">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} customers
+        </div>
+        <div class="pagination-controls">
+            {% if page_obj.has_previous %}
+            <a href="?page=1&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                    <a href="?page={{ num }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                    <a href="?page={{ num }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                    <span class="page-ellipsis">&hellip;</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            {% endif %}
+        </div>
     </div>
     {% endif %}
 </div>
@@ -198,21 +266,42 @@ Customers
 </div>
 
 <script>
-// --- Client-side search ---
+// --- Server-side search with debounce ---
 const searchInput = document.getElementById('customer-search');
+let searchTimeout;
 if (searchInput) {
     searchInput.addEventListener('input', function() {
-        const query = this.value.toLowerCase().trim();
-        const rows = document.querySelectorAll('.customers-table tbody tr');
-        let visible = 0;
-        rows.forEach(row => {
-            const text = row.getAttribute('data-search') || '';
-            const show = !query || text.includes(query);
-            row.style.display = show ? '' : 'none';
-            if (show) visible++;
-        });
-        document.getElementById('visible-count').textContent = visible;
-        document.getElementById('visible-plural').textContent = visible === 1 ? '' : 's';
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) {
+                params.set('q', query);
+            } else {
+                params.delete('q');
+            }
+            params.delete('page'); // reset to page 1 on search
+            // preserve age and loc filters
+            if (!params.has('age')) params.set('age', '{{ age_filter }}');
+            if (!params.has('loc') && '{{ location_filter }}') params.set('loc', '{{ location_filter }}');
+            window.location.href = '?' + params.toString();
+        }, 500);
+    });
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) {
+                params.set('q', query);
+            } else {
+                params.delete('q');
+            }
+            params.delete('page');
+            if (!params.has('age')) params.set('age', '{{ age_filter }}');
+            if (!params.has('loc') && '{{ location_filter }}') params.set('loc', '{{ location_filter }}');
+            window.location.href = '?' + params.toString();
+        }
     });
     searchInput.focus();
 }

@@ -480,9 +480,63 @@ def purchase_orders_list(request):
     
     # Supplier objects for the create PO modal
     supplier_objects = Supplier.objects.filter(is_active=True).order_by('name')
-    
+
+    # Batch-lookup linked orders (project_id -> Order.workguru_id)
+    # Batch-lookup linked orders using multiple strategies
+    linked_orders_map = {}  # keyed by PO pk
+
+    # Strategy 1: project_id -> Order.workguru_id
+    project_ids = list(
+        queryset.exclude(project_id__isnull=True)
+        .values_list('project_id', flat=True)
+        .distinct()
+    )
+    wg_id_to_order = {}
+    if project_ids:
+        for o in Order.objects.filter(
+            workguru_id__in=[str(pid) for pid in project_ids]
+        ).values('id', 'workguru_id', 'sale_number'):
+            wg_id_to_order[int(o['workguru_id'])] = o
+
+    # Strategy 2: project_name -> Order.last_name (for unmatched POs)
+    name_to_order = {}
+    project_names = list(
+        queryset.exclude(project_name__isnull=True)
+        .exclude(project_name='')
+        .values_list('project_name', flat=True)
+        .distinct()
+    )
+    if project_names:
+        for o in Order.objects.filter(
+            last_name__in=project_names
+        ).values('id', 'last_name', 'sale_number'):
+            name_to_order[o['last_name']] = o
+
+    # Strategy 3: product allocations
+    alloc_map = {}
+    alloc_qs = ProductCustomerAllocation.objects.filter(
+        product__purchase_order__in=queryset
+    ).select_related('order', 'product__purchase_order').values(
+        'product__purchase_order_id', 'order__id', 'order__sale_number'
+    ).distinct()
+    for a in alloc_qs:
+        alloc_map[a['product__purchase_order_id']] = {
+            'id': a['order__id'],
+            'sale_number': a['order__sale_number'],
+        }
+
+    # Annotate POs with linked order info (try each strategy in order)
+    po_list = list(queryset)
+    for po in po_list:
+        info = wg_id_to_order.get(po.project_id)
+        if not info and po.project_name:
+            info = name_to_order.get(po.project_name)
+        if not info:
+            info = alloc_map.get(po.pk)
+        po.linked_order_info = info
+
     context = {
-        'purchase_orders': queryset,
+        'purchase_orders': po_list,
         'total_count': total_count,
         'total_filtered': total_filtered,
         'filtered_count': queryset.count(),
@@ -513,10 +567,24 @@ def purchase_order_detail(request, po_id):
         Supplier.objects.values_list('name', flat=True).order_by('name')
     )
     
-    # Try to find a linked local Order via project_id -> Order.workguru_id
+    # Try to find a linked local Order via multiple strategies
     linked_order = None
     if purchase_order.project_id:
+        # 1. Match project_id -> Order.workguru_id
         linked_order = Order.objects.filter(workguru_id=str(purchase_order.project_id)).first()
+    if not linked_order and purchase_order.project_number:
+        # 2. Match project_number -> Order.sale_number
+        linked_order = Order.objects.filter(sale_number=purchase_order.project_number).first()
+    if not linked_order and purchase_order.project_name:
+        # 3. Match project_name -> Order customer name (last_name)
+        linked_order = Order.objects.filter(last_name__iexact=purchase_order.project_name).first()
+    if not linked_order:
+        # 4. Match via product allocations on this PO
+        allocation = ProductCustomerAllocation.objects.filter(
+            product__purchase_order=purchase_order
+        ).select_related('order').first()
+        if allocation:
+            linked_order = allocation.order
     
     # Find the BoardsPO that matches this PO's display_number (Carnehill board POs)
     boards_po = BoardsPO.objects.filter(po_number=purchase_order.display_number).first()
@@ -597,6 +665,27 @@ def purchase_order_detail(request, po_id):
         if supplier_obj and supplier_obj.email:
             supplier_email = supplier_obj.email
 
+    # Determine original customer info (for stock/customer toggle)
+    # If project is currently "Stock", try to find the original customer from the PO description
+    original_customer_name = ''
+    original_customer_number = ''
+    if linked_order:
+        original_customer_name = f'{linked_order.first_name} {linked_order.last_name}'.strip()
+        original_customer_number = linked_order.sale_number
+    elif purchase_order.project_name and purchase_order.project_name != 'Stock':
+        original_customer_name = purchase_order.project_name
+        original_customer_number = purchase_order.project_number or ''
+    elif purchase_order.description:
+        # Try to extract sale number from description like "Accessories for S12345"
+        import re as re_mod
+        desc_match = re_mod.search(r'for\s+(S\d+)', purchase_order.description or '')
+        if desc_match:
+            sale_num = desc_match.group(1)
+            desc_order = Order.objects.filter(sale_number=sale_num).first()
+            if desc_order:
+                original_customer_name = f'{desc_order.first_name} {desc_order.last_name}'.strip()
+                original_customer_number = desc_order.sale_number
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -612,9 +701,52 @@ def purchase_order_detail(request, po_id):
         'os_door_items': os_door_items,
         'supplier_email': supplier_email,
         'attachments': purchase_order.attachments.all(),
+        'original_customer_name': original_customer_name,
+        'original_customer_number': original_customer_number,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
+
+
+@login_required
+def purchase_order_toggle_project(request, po_id):
+    """Toggle PO project between customer link and Stock (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    
+    mode = data.get('mode')  # 'stock' or 'customer'
+    
+    if mode == 'stock':
+        # Save original customer info in description metadata, then set to Stock
+        po.project_name = 'Stock'
+        po.project_number = ''
+        po.project_id = None
+        po.save(update_fields=['project_name', 'project_number', 'project_id'])
+        return JsonResponse({
+            'success': True,
+            'project_name': 'Stock',
+            'project_number': '',
+        })
+    elif mode == 'customer':
+        customer_name = data.get('customer_name', '')
+        customer_number = data.get('customer_number', '')
+        po.project_name = customer_name
+        po.project_number = customer_number
+        po.save(update_fields=['project_name', 'project_number'])
+        return JsonResponse({
+            'success': True,
+            'project_name': customer_name,
+            'project_number': customer_number,
+        })
+    else:
+        return JsonResponse({'error': 'Invalid mode. Use "stock" or "customer".'}, status=400)
 
 
 @login_required
