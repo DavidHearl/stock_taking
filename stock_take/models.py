@@ -137,6 +137,48 @@ class Lead(models.Model):
         ordering = ['-created_at']
 
 
+class AnthillSale(models.Model):
+    """Sale activity from Anthill CRM, linked to a Customer."""
+
+    # Anthill identifiers
+    anthill_activity_id = models.CharField(max_length=30, unique=True, help_text='Anthill activity ID')
+    anthill_customer_id = models.CharField(max_length=20, blank=True, db_index=True, help_text='Anthill customer ID this sale belongs to')
+
+    # Link to local customer (nullable until we can match)
+    customer = models.ForeignKey(
+        Customer, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='anthill_sales', help_text='Linked local customer record'
+    )
+
+    # Link to local order if one exists
+    order = models.ForeignKey(
+        'Order', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='anthill_sale', help_text='Linked local order if one exists'
+    )
+
+    # Sale info from Anthill
+    activity_type = models.CharField(max_length=100, blank=True, help_text='Activity type e.g. "Sale"')
+    status = models.CharField(max_length=50, blank=True, help_text='Activity status e.g. "Complete"')
+    category = models.CharField(max_length=100, blank=True)
+    customer_name = models.CharField(max_length=255, blank=True, help_text='Customer name from Anthill')
+    location = models.CharField(max_length=100, blank=True, null=True)
+
+    # Dates
+    activity_date = models.DateTimeField(null=True, blank=True, help_text='When this activity was created in Anthill')
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Sale {self.anthill_activity_id} - {self.customer_name or 'Unknown'}"
+
+    class Meta:
+        ordering = ['-activity_date']
+        verbose_name = 'Anthill Sale'
+        verbose_name_plural = 'Anthill Sales'
+
+
 class Designer(models.Model):
     """Designer model to store designer information"""
     name = models.CharField(max_length=100, unique=True)
@@ -182,6 +224,7 @@ class Order(models.Model):
     order_date = models.DateField()
     fit_date = models.DateField()
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
+    additional_boards_pos = models.ManyToManyField(BoardsPO, blank=True, related_name='additional_orders', help_text='Additional boards POs for this order')
     job_finished = models.BooleanField(default=False)
     
     ORDER_TYPE_CHOICES = [
@@ -220,14 +263,22 @@ class Order(models.Model):
     def time_allowance(self):
         return (self.fit_date - self.order_date).days
 
+    @property
+    def all_boards_pos(self):
+        """Return a list of all boards POs (primary + additional)."""
+        pos = []
+        if self.boards_po:
+            pos.append(self.boards_po)
+        pos.extend(self.additional_boards_pos.all())
+        return pos
+
     def calculate_materials_cost(self, price_per_sqm=12):
         """Calculate total materials cost from boards, accessories, and OS doors"""
         total_cost = Decimal('0.00')
         
-        # Add boards cost from PNX items (only for this order's sale number)
-        if self.boards_po:
-            # Filter PNX items by this order's sale_number in the customer field
-            order_pnx_items = self.boards_po.pnx_items.filter(customer__icontains=self.sale_number)
+        # Add boards cost from PNX items across ALL boards POs
+        for bpo in self.all_boards_pos:
+            order_pnx_items = bpo.pnx_items.filter(customer__icontains=self.sale_number)
             for pnx_item in order_pnx_items:
                 total_cost += pnx_item.get_cost(price_per_sqm)
         
@@ -248,9 +299,13 @@ class Order(models.Model):
         if self.all_items_ordered:
             return True
             
-        # Check boards are ordered
-        if not (self.boards_po and self.boards_po.boards_ordered):
+        # Check ALL boards POs are ordered
+        all_pos = self.all_boards_pos
+        if not all_pos:
             return False
+        for bpo in all_pos:
+            if not bpo.boards_ordered:
+                return False
         
         # Check OS doors are ordered (if required)
         if self.os_doors_required and not self.os_doors_po:
@@ -268,17 +323,20 @@ class Order(models.Model):
     @property
     def order_boards_received(self):
         """Check if all boards for this specific order have been received"""
-        if not self.boards_po:
+        all_pos = self.all_boards_pos
+        if not all_pos:
             return False
         
-        # Get PNX items for this order (same logic as in the view)
-        order_pnx_items = self.boards_po.pnx_items.filter(customer__icontains=self.sale_number)
+        # Check PNX items across ALL boards POs
+        has_items = False
+        for bpo in all_pos:
+            order_pnx_items = bpo.pnx_items.filter(customer__icontains=self.sale_number)
+            if order_pnx_items.exists():
+                has_items = True
+                if not all(item.is_fully_received for item in order_pnx_items):
+                    return False
         
-        if not order_pnx_items.exists():
-            return False
-        
-        # Check if all PNX items for this order are fully received
-        return all(item.is_fully_received for item in order_pnx_items)
+        return has_items
 
     @property
     def os_doors_ordered(self):

@@ -62,7 +62,90 @@ Customers
     </div>
     {% endif %}
 
-    {% if customers %}
+    {% if search_by_bracket %}
+    <!-- Grouped search results across all brackets -->
+    <div class="customers-result-bar">
+        <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
+            <span id="selected-count">0 selected</span>
+            <button class="merge-btn" id="merge-btn" onclick="mergeCustomers()" style="display:none;" title="Merge selected customers">
+                <i class="bi bi-arrow-left-right"></i> Merge
+            </button>
+            <button class="bulk-delete-btn" onclick="bulkDelete()">
+                <i class="bi bi-trash"></i> Delete Selected
+            </button>
+        </div>
+    </div>
+    {% for bracket in search_by_bracket %}
+    <div class="bracket-separator">
+        <span class="bracket-label">{{ bracket.label }}</span>
+        <span class="bracket-count">{{ bracket.count }} result{{ bracket.count|pluralize }}</span>
+    </div>
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-col"><input type="checkbox" class="select-all-bracket" data-bracket="{{ bracket.key }}" onclick="toggleSelectAllBracket(this, '{{ bracket.key }}')"></th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Postcode</th>
+                    <th>Orders</th>
+                    <th>Active</th>
+                    <th class="text-center">Xero</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for customer in bracket.customers %}
+                <tr data-id="{{ customer.pk }}" data-bracket="{{ bracket.key }}">
+                    <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ customer.pk }}" onclick="updateSelection()"></td>
+                    <td>
+                        <a href="{% url 'customer_detail' customer.pk %}" class="customer-name-link">
+                            {{ customer.name|default:customer|default:"-" }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if customer.email %}
+                        <a href="mailto:{{ customer.email }}" class="customer-email">{{ customer.email }}</a>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ customer.phone|default:"-" }}</td>
+                    <td>{{ customer.city|default:"-" }}</td>
+                    <td>{{ customer.postcode|default:"-" }}</td>
+                    <td class="customer-orders-cell">
+                        {% for order in customer.orders.all %}
+                        <a href="{% url 'order_details' order.id %}" class="customer-order-badge" title="{{ order.get_order_type_display }}">{{ order.sale_number }}</a>
+                        {% empty %}-
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if customer.is_active %}
+                        <span class="customer-active-badge active">Active</span>
+                        {% else %}
+                        <span class="customer-active-badge inactive">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center xero-status-cell">
+                        {% if customer.xero_id %}
+                        <i class="bi bi-check-circle-fill xero-linked" title="Linked to Xero"></i>
+                        {% else %}
+                        <i class="bi bi-x-circle xero-unlinked" title="Not in Xero"></i>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        <button class="customer-delete-btn" onclick="deleteCustomer({{ customer.pk }}, '{{ customer.name|escapejs }}')" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+
+    {% elif customers %}
     <div class="customers-result-bar">
         <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
             <span id="selected-count">0 selected</span>
@@ -145,7 +228,7 @@ Customers
     {% endif %}
 
     <!-- Pagination -->
-    {% if page_obj.paginator.num_pages > 1 %}
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
     <div class="customers-pagination">
         <div class="pagination-info">
             Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} customers
@@ -413,6 +496,12 @@ function deleteCustomer(id, name) {
 
 function toggleSelectAll(el) {
     document.querySelectorAll('.row-select').forEach(cb => cb.checked = el.checked);
+    updateSelection();
+}
+
+function toggleSelectAllBracket(el, bracketKey) {
+    const rows = document.querySelectorAll(`tr[data-bracket="${bracketKey}"] .row-select`);
+    rows.forEach(cb => cb.checked = el.checked);
     updateSelection();
 }
 

@@ -1883,15 +1883,22 @@ def create_boards_purchase_order(request, order_id):
 
     order = get_object_or_404(Order, id=order_id)
 
-    if not order.boards_po:
+    # Support specific boards_po_id via query param (for additional POs)
+    boards_po_id = request.GET.get('boards_po_id') or request.POST.get('boards_po_id')
+    if boards_po_id:
+        boards_po = get_object_or_404(BoardsPO, id=int(boards_po_id))
+    else:
+        boards_po = order.boards_po
+
+    if not boards_po:
         messages.error(request, 'This order does not have a BoardsPO assigned.')
         return redirect('order_details', order_id=order_id)
 
     # Check if a PurchaseOrder already exists for this BoardsPO number
-    existing = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
+    existing = PurchaseOrder.objects.filter(display_number=boards_po.po_number).first()
     if existing:
         # Attach files if not already attached
-        _attach_boards_files_to_po(existing, order.boards_po, request.user)
+        _attach_boards_files_to_po(existing, boards_po, request.user)
         messages.info(request, f'Purchase Order {existing.display_number} already exists. Files attached.')
         return redirect('order_details', order_id=order_id)
 
@@ -1906,7 +1913,7 @@ def create_boards_purchase_order(request, order_id):
     manual_id = max(max_id + 1, 800000)
 
     # Use the boards_po po_number as the display number
-    po_number = order.boards_po.po_number
+    po_number = boards_po.po_number
 
     # Get Carnehill supplier if it exists
     supplier = Supplier.objects.filter(name__icontains='Carnehill').first()
@@ -1928,7 +1935,7 @@ def create_boards_purchase_order(request, order_id):
     )
 
     # Attach PNX and CSV files
-    _attach_boards_files_to_po(po, order.boards_po, request.user)
+    _attach_boards_files_to_po(po, boards_po, request.user)
 
     messages.success(request, f'Purchase Order {po_number} created with board files attached.')
     return redirect('order_details', order_id=order_id)

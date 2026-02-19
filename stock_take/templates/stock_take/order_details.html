@@ -690,6 +690,9 @@
                             <dd>
                                 {% if order.boards_po %}
                                     <strong>{{ order.boards_po.po_number }}</strong>
+                                    {% for extra_po in order.additional_boards_pos.all %}
+                                        <span class="badge badge-info" style="margin-left: 4px;">{{ extra_po.po_number }}</span>
+                                    {% endfor %}
                                 {% else %}
                                     <span class="text-muted">Not assigned</span>
                                 {% endif %}
@@ -708,7 +711,7 @@
                         <div class="summary-row">
                             <dt>Boards Ordered:</dt>
                             <dd>
-                                {% if order.boards_po and order.boards_po.boards_ordered %}
+                                {% if order.all_materials_ordered %}
                                     <span class="costing-badge success"><i class="bi bi-check"></i></span>
                                 {% else %}
                                     <span class="costing-badge danger"><i class="bi bi-x"></i></span>
@@ -752,85 +755,87 @@
     </div>
 
     <div class="full-width-section">
-        <div class="card">
+        {% for bpo_data in boards_po_list %}
+        <div class="card {% if not forloop.first %}mt-3{% endif %}">
             <div class="card-header">
                 <div class="boards-header-left">
-                    {% if boards_purchase_order %}
-                        <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
+                    {% if bpo_data.purchase_order %}
+                        <a href="{% url 'purchase_order_detail' bpo_data.purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{% if order.boards_po %}{{ order.boards_po.po_number }} : {% endif %}Board Details</h3>
+                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} <span class="badge badge-info badge-ml">Additional</span>{% endif %}</h3>
                 </div>
                 <div class="header-actions">
-                    {% if order.boards_po %}
-                        <!-- File status indicators -->
-                        <div class="file-status-group">
-                            <span class="file-status" title="PNX File">
-                                PNX
-                                {% if order.boards_po.file %}
-                                    <i class="bi bi-check-circle-fill text-success"></i>
-                                    <a href="{{ order.boards_po.file.url }}" download class="btn-icon" title="Download PNX">
-                                        <i class="bi bi-download"></i>
-                                    </a>
-                                {% else %}
-                                    <i class="bi bi-x-circle-fill text-danger"></i>
-                                {% endif %}
-                            </span>
-                            <span class="file-status" title="CSV File">
-                                CSV
-                                {% if order.boards_po.csv_file %}
-                                    <i class="bi bi-check-circle-fill text-success"></i>
-                                    <a href="{{ order.boards_po.csv_file.url }}" download class="btn-icon" title="Download CSV">
-                                        <i class="bi bi-download"></i>
-                                    </a>
-                                {% else %}
-                                    <i class="bi bi-x-circle-fill text-danger"></i>
-                                {% endif %}
-                            </span>
-                        </div>
-                    {% endif %}
-                    {% if order.customer_number and order.boards_po %}
-                        <button type="button" class="btn btn-sm btn-generate-cad" onclick="analyzePNXGeneration(event)">
+                    <!-- File status indicators -->
+                    <div class="file-status-group">
+                        <span class="file-status" title="PNX File">
+                            PNX
+                            {% if bpo_data.po.file %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                                <a href="{{ bpo_data.po.file.url }}" download class="btn-icon" title="Download PNX">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                            {% endif %}
+                        </span>
+                        <span class="file-status" title="CSV File">
+                            CSV
+                            {% if bpo_data.po.csv_file %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                                <a href="{{ bpo_data.po.csv_file.url }}" download class="btn-icon" title="Download CSV">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% if order.customer_number %}
+                        <button type="button" class="btn btn-sm btn-generate-cad" onclick="analyzePNXGeneration(event, {{ bpo_data.po.id }})">
                             <i class="bi bi-file-earmark-plus"></i> Generate PNX - CAD
                         </button>
                     {% endif %}
                     <div class="section-actions">
-                        {% if order.boards_po %}
-                            <button type="button" class="btn btn-sm btn-add-board" onclick="openModal('addBoardModal')">
-                                <i class="bi bi-plus-circle"></i> Add Board
-                            </button>
-                        {% endif %}
-                        {% if order_pnx_items and order.boards_po.po_number %}
-                            {% if boards_purchase_order %}
-                                <button type="button" class="btn btn-sm btn-update-files-po" onclick="updateBoardsPO()" title="Regenerate PNX/CSV files and update PO attachments">
+                        <button type="button" class="btn btn-sm btn-add-board" onclick="openModal('addBoardModal', {{ bpo_data.po.id }})">
+                            <i class="bi bi-plus-circle"></i> Add Board
+                        </button>
+                        {% if bpo_data.pnx_items and bpo_data.po.po_number %}
+                            {% if bpo_data.purchase_order %}
+                                <button type="button" class="btn btn-sm btn-update-files-po" onclick="updateBoardsPO({{ bpo_data.po.id }})" title="Regenerate PNX/CSV files and update PO attachments">
                                     <i class="bi bi-arrow-repeat"></i> Update Files &amp; PO
                                 </button>
                             {% else %}
-                                <a href="{% url 'create_boards_purchase_order' order.id %}" class="btn btn-sm btn-create-po"
-                                   onclick="return confirm('Create a local Purchase Order for {{ order.boards_po.po_number }} and attach the board files?');"
+                                <a href="{% url 'create_boards_purchase_order' order.id %}?boards_po_id={{ bpo_data.po.id }}" class="btn btn-sm btn-create-po"
+                                   onclick="return confirm('Create a local Purchase Order for {{ bpo_data.po.po_number }} and attach the board files?');"
                                    title="Create a local PO and attach PNX/CSV files">
                                     <i class="bi bi-file-earmark-plus"></i> Create PO
                                 </a>
                             {% endif %}
                         {% endif %}
-                        {% if order_pnx_items %}
-                            <button type="button" class="btn btn-save-dims btn-save-changes" id="save-pnx-dimensions" style="display: none;">
-                                <i class="bi bi-arrow-repeat"></i> Update Files
+                        {% if not bpo_data.is_primary %}
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeAdditionalBoardsPO({{ order.id }}, {{ bpo_data.po.id }})" title="Remove this additional PO from the order">
+                                <i class="bi bi-x-lg"></i> Remove
+                            </button>
+                        {% endif %}
+                        {% if bpo_data.pnx_items %}
+                            <button type="button" class="btn btn-save-dims btn-save-changes save-pnx-btn" data-boards-po-id="{{ bpo_data.po.id }}" style="display: none;">
+                                <i class="bi bi-check-lg"></i> Save Changes
                             </button>
                         {% endif %}
                     </div>
                 </div>
             </div>
             <div class="card-body">
-                {% if order_pnx_items %}
+                {% if bpo_data.pnx_items %}
                     <div class="pnx-items-header">
-                        <p><strong>PNX Items for this Order ({{ order_pnx_items|length }} items):</strong></p>
+                        <p><strong>PNX Items for this Order ({{ bpo_data.pnx_items|length }} items):</strong></p>
                         <div style="display: flex; gap: 10px;">
-                            <button type="button" class="btn btn-warning btn-sm" onclick="reimportPNX({{ order.boards_po.id }})">
+                            <button type="button" class="btn btn-warning btn-sm" onclick="reimportPNX({{ bpo_data.po.id }})">
                                 <i class="bi bi-arrow-clockwise"></i> Reimport from PNX
                             </button>
-                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected" id="delete-selected-pnx">
+                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected" data-boards-po-id="{{ bpo_data.po.id }}">
                                 <i class="bi bi-trash"></i> Delete Selected
                             </button>
                         </div>
@@ -839,12 +844,12 @@
                         <table class="table">
                             <thead>
                                 <tr>
-                                    <th><input type="checkbox" id="select-all-pnx"></th>
+                                    <th><input type="checkbox" class="select-all-pnx" data-boards-po-id="{{ bpo_data.po.id }}"></th>
                                     <th>Barcode</th>
                                     <th>Material</th>
                                     <th class="col-dim">Length</th>
                                     <th class="col-dim">Width</th>
-                                    <th class="col-cnt">Cnt</th>
+                                    <th class="col-cnt">QTY</th>
                                     <th title="PRFID1">E1</th>
                                     <th title="PRFID3">E3</th>
                                     <th title="PRFID4">E4</th>
@@ -855,11 +860,27 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for item in order_pnx_items %}
+                                {% for item in bpo_data.pnx_items %}
                                 <tr>
-                                    <td><input type="checkbox" class="pnx-item-checkbox" data-item-id="{{ item.id }}"></td>
-                                    <td>{{ item.barcode }}</td>
-                                    <td>{{ item.matname }}</td>
+                                    <td><input type="checkbox" class="pnx-item-checkbox" data-item-id="{{ item.id }}" data-boards-po-id="{{ bpo_data.po.id }}"></td>
+                                    <td>
+                                        <input type="text" 
+                                               class="quantity-input pnx-text-input" 
+                                               value="{{ item.barcode }}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="barcode"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-original-value="{{ item.barcode }}">
+                                    </td>
+                                    <td>
+                                        <input type="text" 
+                                               class="quantity-input pnx-text-input" 
+                                               value="{{ item.matname }}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="matname"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-original-value="{{ item.matname }}">
+                                    </td>
                                     <td>
                                         <input type="number" 
                                                class="quantity-input pnx-dimension-input" 
@@ -868,6 +889,7 @@
                                                value="{{ item.cleng|floatformat:0 }}"
                                                data-pnx-id="{{ item.id }}"
                                                data-field="cleng"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.cleng|floatformat:0 }}">
                                     </td>
                                     <td>
@@ -878,6 +900,7 @@
                                                value="{{ item.cwidth|floatformat:0 }}"
                                                data-pnx-id="{{ item.id }}"
                                                data-field="cwidth"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.cwidth|floatformat:0 }}">
                                     </td>
                                     <td>
@@ -888,26 +911,31 @@
                                                value="{{ item.cnt|floatformat:0 }}"
                                                data-pnx-id="{{ item.id }}"
                                                data-field="cnt"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.cnt|floatformat:0 }}">
                                     </td>
                                     <td class="edging-cell">
                                         <input type="checkbox" class="pnx-edging-checkbox" 
                                                data-pnx-id="{{ item.id }}" data-field="prfid1"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                {% if item.prfid1 %}checked{% endif %}>
                                     </td>
                                     <td class="edging-cell">
                                         <input type="checkbox" class="pnx-edging-checkbox" 
                                                data-pnx-id="{{ item.id }}" data-field="prfid3"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                {% if item.prfid3 %}checked{% endif %}>
                                     </td>
                                     <td class="edging-cell">
                                         <input type="checkbox" class="pnx-edging-checkbox" 
                                                data-pnx-id="{{ item.id }}" data-field="prfid4"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                {% if item.prfid4 %}checked{% endif %}>
                                     </td>
                                     <td class="edging-cell">
                                         <input type="checkbox" class="pnx-edging-checkbox" 
                                                data-pnx-id="{{ item.id }}" data-field="prfid2"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
                                                {% if item.prfid2 %}checked{% endif %}>
                                     </td>
                                     <td class="stock-qty-cell {% if item.is_standard_board %}{% if item.stock_quantity == 0 %}stock-zero{% elif item.stock_quantity < 5 %}stock-low{% endif %}{% endif %}">
@@ -927,14 +955,38 @@
                                 {% endfor %}
                                 <tr class="total-row">
                                     <td colspan="11"><strong>Total Cost:</strong></td>
-                                    <td><strong>£{{ pnx_total_cost|floatformat:2 }}</strong></td>
+                                    <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
+                {% else %}
+                    <p class="text-muted" style="padding: 12px;">No board items yet. Use "Add Board" or "Generate PNX - CAD" to add items.</p>
                 {% endif %}
             </div>
         </div>
+        {% endfor %}
+
+        {% if not boards_po_list %}
+        <!-- No boards PO assigned yet -->
+        <div class="card">
+            <div class="card-header">
+                <h3>Board Details</h3>
+            </div>
+            <div class="card-body">
+                <p class="text-muted" style="padding: 12px;">No Boards PO assigned. Assign one in the Job Info section above.</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Add Additional Boards PO button -->
+        {% if order.boards_po %}
+        <div style="margin-top: 10px; text-align: right;">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAdditionalBoardsPO({{ order.id }})" title="Create an additional boards PO for this order">
+                <i class="bi bi-plus-circle"></i> Add Additional Boards PO
+            </button>
+        </div>
+        {% endif %}
 
         <!-- OS Doors Section -->
         <div class="card">
@@ -2643,47 +2695,80 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }, 5000); // 5 seconds
 
-    // Track PNX dimension changes
-    let pnxDimensionChanges = {};
+    // Track PNX dimension changes per boards PO
+    // Key: boardsPoId, Value: { changeKey: { pnxId, field, value } }
+    let pnxDimensionChangesByPO = {};
+
+    function showSaveBtn(boardsPoId) {
+        const btn = document.querySelector(`.save-pnx-btn[data-boards-po-id="${boardsPoId}"]`);
+        if (btn) btn.style.display = 'inline-block';
+    }
+
+    function hideSaveBtnIfEmpty(boardsPoId) {
+        const changes = pnxDimensionChangesByPO[boardsPoId] || {};
+        if (Object.keys(changes).length === 0) {
+            const btn = document.querySelector(`.save-pnx-btn[data-boards-po-id="${boardsPoId}"]`);
+            if (btn) btn.style.display = 'none';
+        }
+    }
 
     // Handle PNX dimension/count input changes - track changes
     document.querySelectorAll('.pnx-dimension-input').forEach(function(input) {
         input.addEventListener('input', function() {
             const pnxId = this.getAttribute('data-pnx-id');
             const field = this.getAttribute('data-field');
+            const boardsPoId = this.getAttribute('data-boards-po-id');
             const value = parseFloat(this.value) || 0;
             const originalValue = parseFloat(this.getAttribute('data-original-value')) || 0;
-            
-            // Create key for this field
             const key = `${pnxId}_${field}`;
             
+            if (!pnxDimensionChangesByPO[boardsPoId]) pnxDimensionChangesByPO[boardsPoId] = {};
+            
             if (value !== originalValue) {
-                pnxDimensionChanges[key] = { pnxId: pnxId, field: field, value: value };
-                // Show update files button
-                const updateBtn = document.getElementById('save-pnx-dimensions');
-                if (updateBtn) updateBtn.style.display = 'inline-block';
+                pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: field, value: value };
+                showSaveBtn(boardsPoId);
             } else {
-                delete pnxDimensionChanges[key];
-                // Hide update files button if no changes
-                if (Object.keys(pnxDimensionChanges).length === 0) {
-                    const updateBtn = document.getElementById('save-pnx-dimensions');
-                    if (updateBtn) updateBtn.style.display = 'none';
-                }
+                delete pnxDimensionChangesByPO[boardsPoId][key];
+                hideSaveBtnIfEmpty(boardsPoId);
             }
         });
     });
 
-    // Handle "Update Files" button click - save all dimension changes and regenerate files
-    const updateFilesBtn = document.getElementById('save-pnx-dimensions');
-    if (updateFilesBtn) {
-        updateFilesBtn.addEventListener('click', function() {
-            if (Object.keys(pnxDimensionChanges).length === 0) {
+    // Handle PNX text input changes (barcode, material name)
+    document.querySelectorAll('.pnx-text-input').forEach(function(input) {
+        input.addEventListener('input', function() {
+            const pnxId = this.getAttribute('data-pnx-id');
+            const field = this.getAttribute('data-field');
+            const boardsPoId = this.getAttribute('data-boards-po-id');
+            const value = this.value.trim();
+            const originalValue = this.getAttribute('data-original-value');
+            const key = `${pnxId}_${field}`;
+            
+            if (!pnxDimensionChangesByPO[boardsPoId]) pnxDimensionChangesByPO[boardsPoId] = {};
+            
+            if (value !== originalValue) {
+                pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: field, value: value };
+                showSaveBtn(boardsPoId);
+            } else {
+                delete pnxDimensionChangesByPO[boardsPoId][key];
+                hideSaveBtnIfEmpty(boardsPoId);
+            }
+        });
+    });
+
+    // Handle "Save Changes" button click per PO
+    document.querySelectorAll('.save-pnx-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const boardsPoId = this.getAttribute('data-boards-po-id');
+            const changes = pnxDimensionChangesByPO[boardsPoId] || {};
+            
+            if (Object.keys(changes).length === 0) {
                 showAlert('No changes to save', 'warning');
                 return;
             }
             
-            // Convert to array of changes
-            const changes = Object.values(pnxDimensionChanges);
+            const changesArray = Object.values(changes);
+            const saveBtn = this;
             
             fetch('/stock-take/update-pnx-dimensions/', {
                 method: 'POST',
@@ -2692,20 +2777,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
                 },
                 body: JSON.stringify({ 
-                    changes: changes,
-                    boards_po_id: {{ order.boards_po.id|default:"null" }}
+                    changes: changesArray,
+                    boards_po_id: parseInt(boardsPoId)
                 })
             })
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
                     showAlert('PNX items updated and files regenerated!', 'success');
-                    // Update original values and clear changes
-                    document.querySelectorAll('.pnx-dimension-input').forEach(function(input) {
+                    // Update original values for inputs in this PO section only
+                    document.querySelectorAll(`.pnx-dimension-input[data-boards-po-id="${boardsPoId}"], .pnx-text-input[data-boards-po-id="${boardsPoId}"]`).forEach(function(input) {
                         input.setAttribute('data-original-value', input.value);
                     });
-                    pnxDimensionChanges = {};
-                    updateFilesBtn.style.display = 'none';
+                    pnxDimensionChangesByPO[boardsPoId] = {};
+                    saveBtn.style.display = 'none';
                 } else {
                     showAlert('Error updating PNX items: ' + result.error, 'danger');
                 }
@@ -2714,22 +2799,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 showAlert('Error updating PNX items', 'danger');
             });
         });
-    }
+    });
 
     // Handle PNX edging checkbox changes - track and show update button
     document.querySelectorAll('.pnx-edging-checkbox').forEach(function(checkbox) {
         checkbox.addEventListener('change', function() {
             const pnxId = this.getAttribute('data-pnx-id');
             const field = this.getAttribute('data-field');
+            const boardsPoId = this.getAttribute('data-boards-po-id');
             const value = this.checked ? 'Sliderobe_Edge_08' : '';
-            
-            // Track as a dimension change
             const key = `${pnxId}_${field}`;
-            pnxDimensionChanges[key] = { pnxId: pnxId, field: field, value: value };
             
-            // Show update files button
-            const updateBtn = document.getElementById('save-pnx-dimensions');
-            if (updateBtn) updateBtn.style.display = 'inline-block';
+            if (!pnxDimensionChangesByPO[boardsPoId]) pnxDimensionChangesByPO[boardsPoId] = {};
+            pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: field, value: value };
+            showSaveBtn(boardsPoId);
         });
     });
 
@@ -3702,8 +3785,14 @@ function submitParsedOSDoor() {
     });
 }
 
+// Track which boards PO is currently being acted on
+let activeBoardsPoId = null;
+
 // Modal functions (defined outside DOMContentLoaded so onclick handlers can access them)
-function openModal(modalId) {
+function openModal(modalId, boardsPoId) {
+    if (boardsPoId) {
+        activeBoardsPoId = boardsPoId;
+    }
     const modal = document.getElementById(modalId);
     if (modal) {
         modal.classList.add('active');
@@ -3761,7 +3850,7 @@ function addBoardItem() {
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
         body: JSON.stringify({
-            boards_po_id: {{ order.boards_po.id|default:"null" }},
+            boards_po_id: activeBoardsPoId,
             barcode: barcode,
             matname: matname,
             cleng: cleng,
@@ -3833,7 +3922,7 @@ function regenerateBoardsFiles() {
 }
 
 // Update PO - regenerate PNX/CSV files and update PO attachments
-function updateBoardsPO() {
+function updateBoardsPO(boardsPoId) {
     if (!confirm('This will regenerate PNX/CSV files and update the Purchase Order attachments. Continue?')) {
         return;
     }
@@ -3849,7 +3938,8 @@ function updateBoardsPO() {
         headers: {
             'X-CSRFToken': '{{ csrf_token }}',
             'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({ boards_po_id: boardsPoId })
     })
     .then(response => response.json())
     .then(data => {
@@ -4691,15 +4781,17 @@ function selectWorkflowStage(orderId, stageId) {
 }
 
 // PNX Generation Analysis Functions
-window.analyzePNXGeneration = function(event) {
+window.analyzePNXGeneration = function(event, boardsPoId) {
     if (event) {
         event.preventDefault();
         event.stopPropagation();
     }
     
+    activeBoardsPoId = boardsPoId || null;
     const orderId = {{ order.id }};
+    const queryParam = boardsPoId ? `?boards_po_id=${boardsPoId}` : '';
     
-    fetch(`/order/${orderId}/generate-pnx/`)
+    fetch(`/order/${orderId}/generate-pnx/${queryParam}`)
     .then(response => response.json())
     .then(data => {
         if (data.success) {
@@ -4955,11 +5047,20 @@ function confirmPNXGeneration() {
 }
 
 // PNX Item Selection and Delete Functions
-function updateDeleteButtonVisibility() {
-    const checkboxes = document.querySelectorAll('.pnx-item-checkbox:checked');
-    const deleteBtn = document.getElementById('delete-selected-pnx');
-    if (deleteBtn) {
-        deleteBtn.style.display = checkboxes.length > 0 ? 'block' : 'none';
+function updateDeleteButtonVisibility(boardsPoId) {
+    if (boardsPoId) {
+        const checkboxes = document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]:checked`);
+        const deleteBtn = document.querySelector(`.btn-delete-selected[data-boards-po-id="${boardsPoId}"]`);
+        if (deleteBtn) {
+            deleteBtn.style.display = checkboxes.length > 0 ? 'block' : 'none';
+        }
+    } else {
+        // Update all delete buttons
+        document.querySelectorAll('.btn-delete-selected').forEach(function(deleteBtn) {
+            const poId = deleteBtn.getAttribute('data-boards-po-id');
+            const checkboxes = document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${poId}"]:checked`);
+            deleteBtn.style.display = checkboxes.length > 0 ? 'block' : 'none';
+        });
     }
 }
 
@@ -5339,6 +5440,63 @@ function createNextBoardsPO(orderId) {
     });
 }
 
+// Add Additional Boards PO to an order
+function addAdditionalBoardsPO(orderId) {
+    const poNumber = prompt('Enter PO number for the additional boards PO (or leave blank to auto-generate):');
+    if (poNumber === null) return; // User cancelled
+    
+    fetch(`/order/${orderId}/add-additional-boards-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ po_number: poNumber.trim() })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`Additional Boards PO ${result.po_number} added`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error adding additional PO: ' + error.message, 'danger');
+    });
+}
+
+// Remove Additional Boards PO from order
+function removeAdditionalBoardsPO(orderId, boardsPoId) {
+    if (!confirm('Remove this additional boards PO from the order? The PO itself will not be deleted.')) {
+        return;
+    }
+    
+    fetch(`/order/${orderId}/remove-additional-boards-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ boards_po_id: boardsPoId })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Additional boards PO removed', 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error removing PO: ' + error.message, 'danger');
+    });
+}
+
 // Inline fitter management
 function toggleAddFitterInline() {
     const form = document.getElementById('new-fitter-inline');
@@ -5681,27 +5839,28 @@ function deletePNXItems() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Select All checkbox for PNX items
-    const selectAllCheckbox = document.getElementById('select-all-pnx');
-    if (selectAllCheckbox) {
+    // Select All checkboxes for PNX items (one per boards PO)
+    document.querySelectorAll('.select-all-pnx').forEach(function(selectAllCheckbox) {
         selectAllCheckbox.addEventListener('change', function() {
-            const checkboxes = document.querySelectorAll('.pnx-item-checkbox');
+            const boardsPoId = this.getAttribute('data-boards-po-id');
+            const checkboxes = document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`);
             checkboxes.forEach(cb => cb.checked = this.checked);
-            updateDeleteButtonVisibility();
+            updateDeleteButtonVisibility(boardsPoId);
         });
-    }
-    
-    // Individual checkboxes for PNX items
-    const checkboxes = document.querySelectorAll('.pnx-item-checkbox');
-    checkboxes.forEach(cb => {
-        cb.addEventListener('change', updateDeleteButtonVisibility);
     });
     
-    // Delete button for PNX items
-    const deleteBtn = document.getElementById('delete-selected-pnx');
-    if (deleteBtn) {
+    // Individual checkboxes for PNX items
+    document.querySelectorAll('.pnx-item-checkbox').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            const boardsPoId = this.getAttribute('data-boards-po-id');
+            updateDeleteButtonVisibility(boardsPoId);
+        });
+    });
+    
+    // Delete buttons for PNX items (one per boards PO)
+    document.querySelectorAll('.btn-delete-selected').forEach(function(deleteBtn) {
         deleteBtn.addEventListener('click', deletePNXItems);
-    }
+    });
 });
 
 function copyToClipboard(text, btn) {

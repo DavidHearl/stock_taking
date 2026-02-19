@@ -169,7 +169,11 @@
     <!-- Tabs Section (WorkGuru style) -->
     <div class="customer-tabs-section">
         <div class="customer-tabs">
-            <button class="customer-tab active" data-tab="contacts" onclick="switchTab('contacts')">
+            <button class="customer-tab active" data-tab="sales" onclick="switchTab('sales')">
+                <i class="bi bi-bag-check"></i> Sales
+                {% if anthill_sales_count %}<span class="tab-count">{{ anthill_sales_count }}</span>{% endif %}
+            </button>
+            <button class="customer-tab" data-tab="contacts" onclick="switchTab('contacts')">
                 <i class="bi bi-person-badge"></i> Contacts
                 {% if contacts %}<span class="tab-count">{{ contacts|length }}</span>{% endif %}
             </button>
@@ -188,8 +192,61 @@
             </button>
         </div>
 
+        <!-- Sales Tab -->
+        <div class="customer-tab-content active" id="tab-sales">
+            {% if anthill_sales %}
+            <div class="customer-table-container">
+                <table class="customer-orders-table">
+                    <thead>
+                        <tr>
+                            <th>Activity ID</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                            <th>Location</th>
+                            <th>Linked Order</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sale in anthill_sales %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'sale_detail' sale.pk %}" class="customer-order-link">
+                                    {{ sale.anthill_activity_id }}
+                                </a>
+                            </td>
+                            <td>{{ sale.activity_type|default:"-" }}</td>
+                            <td>
+                                <span class="order-status-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}finished{% else %}active{% endif %}">
+                                    {{ sale.status|default:"-" }}
+                                </span>
+                            </td>
+                            <td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                            <td>{{ sale.location|default:"-" }}</td>
+                            <td>
+                                {% if sale.order %}
+                                <a href="{% url 'order_details' sale.order.id %}" class="customer-order-link">
+                                    {{ sale.order.sale_number }}
+                                </a>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="customer-tab-empty">
+                <i class="bi bi-bag"></i>
+                <p>No sales found for this customer.</p>
+            </div>
+            {% endif %}
+        </div>
+
         <!-- Contacts Tab -->
-        <div class="customer-tab-content active" id="tab-contacts">
+        <div class="customer-tab-content" id="tab-contacts">
             {% if contacts %}
             <div class="customer-contacts-grid">
                 {% for contact in contacts %}

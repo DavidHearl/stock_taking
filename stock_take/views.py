@@ -1701,6 +1701,12 @@ def update_pnx_dimensions(request):
                     if pnx_item:
                         setattr(pnx_item, field, Decimal(str(value)))
                         pnx_item.save()
+                # Handle text fields (barcode, material name)
+                elif field in ['barcode', 'matname']:
+                    pnx_item = PNXItem.objects.filter(id=pnx_id).first()
+                    if pnx_item:
+                        setattr(pnx_item, field, str(value).strip())
+                        pnx_item.save()
                 # Handle edging fields (string)
                 elif field in ['prfid1', 'prfid2', 'prfid3', 'prfid4']:
                     pnx_item = PNXItem.objects.filter(id=pnx_id).first()
@@ -1982,10 +1988,18 @@ def update_boards_po_files(request, order_id):
     try:
         order = get_object_or_404(Order, id=order_id)
 
-        if not order.boards_po:
-            return JsonResponse({'success': False, 'error': 'No Boards PO assigned to this order'})
+        # Support specific boards_po_id via JSON body
+        boards_po = None
+        if request.body:
+            data = json.loads(request.body)
+            bpo_id = data.get('boards_po_id')
+            if bpo_id:
+                boards_po = BoardsPO.objects.get(id=int(bpo_id))
 
-        boards_po = order.boards_po
+        if not boards_po:
+            if not order.boards_po:
+                return JsonResponse({'success': False, 'error': 'No Boards PO assigned to this order'})
+            boards_po = order.boards_po
 
         if not boards_po.pnx_items.exists():
             return JsonResponse({'success': False, 'error': 'No PNX items found for this PO'})
@@ -3002,6 +3016,78 @@ def update_boards_po(request, order_id):
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
+
+@login_required
+def add_additional_boards_po(request, order_id):
+    """Create a new BoardsPO and add it to the order's additional_boards_pos M2M."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+    order = get_object_or_404(Order, id=order_id)
+    try:
+        data = json.loads(request.body)
+        po_number = data.get('po_number', '').strip()
+
+        if not po_number:
+            # Auto-generate next number
+            import re
+            max_num = 0
+            for pn in BoardsPO.objects.filter(po_number__regex=r'^PO\d+$').values_list('po_number', flat=True):
+                m = re.search(r'(\d+)', pn)
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+            for field in ['display_number', 'number']:
+                for pn in PurchaseOrder.objects.filter(**{f'{field}__regex': r'^PO\\d+$'}).values_list(field, flat=True):
+                    m = re.search(r'(\d+)', pn)
+                    if m:
+                        max_num = max(max_num, int(m.group(1)))
+            next_num = max(max_num + 1, 1000)
+            po_number = f'PO{next_num}'
+            while (BoardsPO.objects.filter(po_number=po_number).exists() or
+                   PurchaseOrder.objects.filter(display_number=po_number).exists()):
+                next_num += 1
+                po_number = f'PO{next_num}'
+        else:
+            if not po_number.upper().startswith('PO'):
+                po_number = 'PO' + po_number
+
+        boards_po, created = BoardsPO.objects.get_or_create(
+            po_number=po_number,
+            defaults={'boards_ordered': False},
+        )
+        order.additional_boards_pos.add(boards_po)
+
+        return JsonResponse({
+            'success': True,
+            'po_number': boards_po.po_number,
+            'boards_po_id': boards_po.id,
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def remove_additional_boards_po(request, order_id):
+    """Remove a BoardsPO from the order's additional_boards_pos M2M."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+    order = get_object_or_404(Order, id=order_id)
+    try:
+        data = json.loads(request.body)
+        boards_po_id = data.get('boards_po_id')
+        if not boards_po_id:
+            return JsonResponse({'success': False, 'error': 'boards_po_id required'})
+
+        boards_po = BoardsPO.objects.get(id=boards_po_id)
+        order.additional_boards_pos.remove(boards_po)
+        return JsonResponse({'success': True})
+    except BoardsPO.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Boards PO not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
 @login_required
 def update_job_checkbox(request, order_id):
     """Update job checkbox fields (all_items_ordered, job_finished)"""
@@ -3107,37 +3193,54 @@ def order_details(request, order_id):
     if order.boards_po:
         other_orders = Order.objects.filter(boards_po=order.boards_po).exclude(id=order.id)
     
-    # Get PNX items associated with this order (based on sale_number in customer field)
-    order_pnx_items = []
-    pnx_total_cost = 0
+    # Build list of ALL boards POs (primary + additional)
+    all_boards_pos_list = []
     if order.boards_po:
-        order_pnx_items = list(order.boards_po.pnx_items.filter(customer__icontains=order.sale_number))
-        # Calculate cost for each item and total using dynamic price
-        for item in order_pnx_items:
-            item.calculated_cost = item.get_cost(price_per_sqm)
-        pnx_total_cost = sum(item.calculated_cost for item in order_pnx_items)
-
-        # Standard stock board widths (all 2800mm length)
-        STANDARD_WIDTHS = {79, 250, 500, 680, 750, 1000}
-        WIDTH_ORDER = {w: i for i, w in enumerate(sorted(STANDARD_WIDTHS))}
-
-        # Annotate each item: is it a standard stock board?
-        for item in order_pnx_items:
+        all_boards_pos_list.append(order.boards_po)
+    all_boards_pos_list.extend(list(order.additional_boards_pos.all()))
+    
+    # Standard stock board widths (all 2800mm length)
+    STANDARD_WIDTHS = {79, 250, 500, 680, 750, 1000}
+    WIDTH_ORDER = {w: i for i, w in enumerate(sorted(STANDARD_WIDTHS))}
+    
+    def process_pnx_items(bpo, sale_number, price):
+        """Process PNX items for a single BoardsPO, returning annotated sorted list and total cost."""
+        items = list(bpo.pnx_items.filter(customer__icontains=sale_number))
+        for item in items:
+            item.calculated_cost = item.get_cost(price)
+        total = sum(item.calculated_cost for item in items)
+        for item in items:
             w = int(item.cwidth)
             if w in STANDARD_WIDTHS:
                 item.is_standard_board = True
-                # Look up stock for this exact board: matname + width
                 sku_prefix = f"{item.matname}{w}"
                 stock_item = StockItem.objects.filter(sku=sku_prefix).first()
                 item.stock_quantity = stock_item.quantity if stock_item else 0
                 item.sort_key = (0, WIDTH_ORDER.get(w, 999))
             else:
                 item.is_standard_board = False
-                item.stock_quantity = None  # No stock for custom boards
+                item.stock_quantity = None
                 item.sort_key = (1, w)
-
-        # Sort: standard sizes first (by width), then custom boards
-        order_pnx_items.sort(key=lambda x: x.sort_key)
+        items.sort(key=lambda x: x.sort_key)
+        return items, total
+    
+    # Build per-PO data for template
+    boards_po_list = []
+    order_pnx_items = []
+    pnx_total_cost = 0
+    
+    for idx, bpo in enumerate(all_boards_pos_list):
+        items, cost = process_pnx_items(bpo, order.sale_number, price_per_sqm)
+        local_po = PurchaseOrder.objects.filter(display_number=bpo.po_number).first()
+        boards_po_list.append({
+            'po': bpo,
+            'is_primary': (idx == 0 and order.boards_po_id == bpo.id),
+            'pnx_items': items,
+            'total_cost': cost,
+            'purchase_order': local_po,
+        })
+        order_pnx_items.extend(items)
+        pnx_total_cost += cost
     
     # Check if order has OS door accessories
     has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
@@ -3220,10 +3323,9 @@ def order_details(request, order_id):
     
     # Calculate materials cost breakdown
     boards_cost = Decimal('0.00')
-    if order.boards_po:
-        # Only include PNX items for this specific order (filtered by sale_number)
-        order_pnx_items_for_cost = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number)
-        for pnx_item in order_pnx_items_for_cost:
+    for bpo in all_boards_pos_list:
+        bpo_items = bpo.pnx_items.filter(customer__icontains=order.sale_number)
+        for pnx_item in bpo_items:
             boards_cost += pnx_item.get_cost(price_per_sqm)
     
     accessories_cost = Decimal('0.00')
@@ -3306,6 +3408,7 @@ def order_details(request, order_id):
         'os_door_form': os_door_form,
         'other_orders': other_orders,
         'available_pos': available_pos,
+        'boards_po_list': boards_po_list,
         'order_pnx_items': order_pnx_items,
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
@@ -6992,7 +7095,13 @@ def generate_and_attach_pnx(request, order_id):
     if not order.customer_number:
         return JsonResponse({'success': False, 'error': 'Order must have a CAD Number to generate PNX.'})
     
-    if not order.boards_po:
+    # Support specific boards_po_id via query param (for additional POs)
+    boards_po_id = request.GET.get('boards_po_id')
+    if boards_po_id:
+        boards_po = get_object_or_404(BoardsPO, id=int(boards_po_id))
+    elif order.boards_po:
+        boards_po = order.boards_po
+    else:
         return JsonResponse({'success': False, 'error': 'Order must have a Boards PO assigned to attach PNX file.'})
     
     try:
@@ -7015,7 +7124,7 @@ def generate_and_attach_pnx(request, order_id):
         # Get existing items
         existing_items = {
             (item.barcode, item.matname, float(item.cleng), float(item.cwidth)): item
-            for item in order.boards_po.pnx_items.all()
+            for item in boards_po.pnx_items.all()
         }
         
         # Collect ALL items from the PNX for review
@@ -7065,6 +7174,7 @@ def generate_and_attach_pnx(request, order_id):
         
         # Store the PNX content in session for later use
         request.session[f'pending_pnx_{order_id}'] = pnx_content
+        request.session[f'pending_pnx_bpo_id_{order_id}'] = boards_po.id
         request.session.modified = True  # Ensure session is saved
         
         return JsonResponse({
@@ -7095,6 +7205,9 @@ def confirm_pnx_generation(request, order_id):
     if not pnx_content:
         return JsonResponse({'success': False, 'error': 'No pending PNX data found. Please generate PNX again.'})
     
+    # Get boards_po_id from session (stored during analysis step)
+    boards_po_id = request.session.get(f'pending_pnx_bpo_id_{order_id}')
+    
     # Get force import barcodes from request body
     import json
     force_import_barcodes = []
@@ -7104,20 +7217,29 @@ def confirm_pnx_generation(request, order_id):
     except (json.JSONDecodeError, ValueError):
         pass
     
-    return confirm_pnx_generation_internal(request, order_id, pnx_content, force_import_barcodes)
+    return confirm_pnx_generation_internal(request, order_id, pnx_content, force_import_barcodes, boards_po_id=boards_po_id)
 
 
-def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import_barcodes=None):
+def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import_barcodes=None, boards_po_id=None):
     """Internal function to save PNX items - can be called directly or via confirm endpoint"""
     order = get_object_or_404(Order, id=order_id)
     
     if force_import_barcodes is None:
         force_import_barcodes = []
     
+    # Resolve which boards PO to use
+    if boards_po_id:
+        boards_po = BoardsPO.objects.get(id=int(boards_po_id))
+    else:
+        boards_po = order.boards_po
+    
+    if not boards_po:
+        return JsonResponse({'success': False, 'error': 'No Boards PO found'})
+    
     try:
         # Save PNX file to boards PO
-        filename = f"Boards_Order_{order.boards_po.po_number}.pnx"
-        order.boards_po.file.save(filename, io.BytesIO(pnx_content.encode('utf-8')))
+        filename = f"Boards_Order_{boards_po.po_number}.pnx"
+        boards_po.file.save(filename, io.BytesIO(pnx_content.encode('utf-8')))
         
         # Parse PNX and create/update PNX items
         io_string = io.StringIO(pnx_content)
@@ -7126,7 +7248,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
         # Get existing items for update detection
         existing_items = {
             (item.barcode, item.matname, float(item.cleng), float(item.cwidth)): item
-            for item in order.boards_po.pnx_items.all()
+            for item in boards_po.pnx_items.all()
         }
         
         items_created = 0
@@ -7194,7 +7316,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 else:
                     # Create new item
                     PNXItem.objects.create(
-                        boards_po=order.boards_po,
+                        boards_po=boards_po,
                         barcode=barcode,
                         matname=matname,
                         cleng=cleng,
@@ -7216,7 +7338,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 # Skip rows with invalid data
                 continue
         
-        order.boards_po.save()
+        boards_po.save()
         
         # Generate and save CSV file alongside PNX
         try:
@@ -7256,8 +7378,8 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                     row.get('PRFID2', '').strip(),
                 ])
             
-            csv_filename = f"Boards_Order_{order.boards_po.po_number}.csv"
-            order.boards_po.csv_file.save(csv_filename, io.BytesIO(csv_output.getvalue().encode('utf-8')))
+            csv_filename = f"Boards_Order_{boards_po.po_number}.csv"
+            boards_po.csv_file.save(csv_filename, io.BytesIO(csv_output.getvalue().encode('utf-8')))
             logger.info(f"CSV file generated and saved: {csv_filename}")
         except Exception as csv_error:
             logger.warning(f"Failed to generate CSV file: {csv_error}")
@@ -7265,16 +7387,18 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
         # Clear the session data if it exists
         if f'pending_pnx_{order_id}' in request.session:
             del request.session[f'pending_pnx_{order_id}']
+        if f'pending_pnx_bpo_id_{order_id}' in request.session:
+            del request.session[f'pending_pnx_bpo_id_{order_id}']
         
         logger.info(f"PNX generation complete for order {order_id} - Created: {items_created}, Updated: {items_updated}")
         logger.info(f"Order sale_number: '{order.sale_number}'")
         
         # Check if items can be found with the filter
-        matching_items = order.boards_po.pnx_items.filter(customer__icontains=order.sale_number).count()
+        matching_items = boards_po.pnx_items.filter(customer__icontains=order.sale_number).count()
         logger.info(f"Items matching filter (customer__icontains='{order.sale_number}'): {matching_items}")
         
         # Show sample of what customer values actually are
-        sample_items = order.boards_po.pnx_items.all()[:3]
+        sample_items = boards_po.pnx_items.all()[:3]
         for item in sample_items:
             logger.info(f"Sample PNX item - barcode: {item.barcode}, customer: '{item.customer}'")
         
@@ -7282,7 +7406,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
             'success': True,
             'items_created': items_created,
             'items_updated': items_updated,
-            'po_number': order.boards_po.po_number,
+            'po_number': boards_po.po_number,
             'auto_generated': True  # Flag to indicate this was auto-generated
         })
         

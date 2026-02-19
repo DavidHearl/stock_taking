@@ -5,27 +5,33 @@ sync_anthill_customers.py
 Standalone script to import customers from Anthill CRM into the
 stock_taking Django database.
 
+Two-phase sync:
+  Phase 1 — Sales: Scan all pages and fetch sale activities for
+            customers already in the local database.
+  Phase 2 — New Customers: Scan all pages again and import any
+            customers/leads not yet in the database.
+
+Classification:
   • Customers with a WorkGuruClientID or a completed "Sale" activity
     are saved as Customer (sale).
   • All others are saved as Lead.
-  • Existing records are skipped (matched by Anthill Customer ID).
 
 Usage
 ─────
-  # Import all customers from the last 10 years
+  # Full sync (both phases)
   python sync_anthill_customers.py
+
+  # Only sync sales for existing customers
+  python sync_anthill_customers.py --sales-only
+
+  # Only import new customers (skip sales phase)
+  python sync_anthill_customers.py --skip-sales
 
   # Import last 365 days only
   python sync_anthill_customers.py --days 365
 
-  # Only between specific dates
-  python sync_anthill_customers.py --from-date 2024-01-01 --to-date 2024-12-31
-
   # Dry-run (count only, don't write to DB)
   python sync_anthill_customers.py --dry-run
-
-  # Larger page size / resume from a page
-  python sync_anthill_customers.py --page-size 200 --start-page 5
 """
 
 import os
@@ -47,7 +53,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'stock_taking.settings')
 import django
 django.setup()
 
-from stock_take.models import Customer, Lead  # noqa: E402
+from stock_take.models import Customer, Lead, AnthillSale  # noqa: E402
 
 # ── Anthill config ──────────────────────────────────────────────────────
 load_dotenv(os.path.join(BASE_DIR, '.env'))
@@ -355,6 +361,48 @@ def save_as_lead(detail: dict, summary: dict) -> str:
     return 'created'
 
 
+def save_sales_from_activities(detail: dict, summary: dict, customer_obj=None) -> int:
+    """
+    Save sale activities from a customer's detail record as AnthillSale objects.
+    Returns the number of sales created.
+    """
+    created_count = 0
+    anthill_customer_id = str(detail.get('customer_id') or summary.get('id', ''))
+    customer_name = detail.get('name', '') or summary.get('name', '')
+    location = summary.get('location', '')
+
+    for act in detail.get('activities', []):
+        act_id = act.get('id', '')
+        if not act_id:
+            continue
+
+        # Only save if it doesn't already exist
+        if AnthillSale.objects.filter(anthill_activity_id=act_id).exists():
+            continue
+
+        activity_date = parse_datetime(act.get('created', ''))
+
+        # Try to find a local customer if not provided
+        local_customer = customer_obj
+        if not local_customer and anthill_customer_id:
+            local_customer = Customer.objects.filter(anthill_customer_id=anthill_customer_id).first()
+
+        AnthillSale.objects.create(
+            anthill_activity_id=act_id,
+            anthill_customer_id=anthill_customer_id,
+            customer=local_customer,
+            activity_type=act.get('type', ''),
+            status=act.get('status', ''),
+            category=act.get('category', ''),
+            customer_name=customer_name,
+            location=location,
+            activity_date=activity_date,
+        )
+        created_count += 1
+
+    return created_count
+
+
 # ════════════════════════════════════════════════════════════════════════
 # Main
 # ════════════════════════════════════════════════════════════════════════
@@ -388,6 +436,10 @@ Examples:
                         help='Count records without saving to DB')
     parser.add_argument('--skip-detail', action='store_true',
                         help='Only save summary data (faster, but less info)')
+    parser.add_argument('--skip-sales', action='store_true',
+                        help='Skip Phase 1 (sales sync) and go straight to new customers')
+    parser.add_argument('--sales-only', action='store_true',
+                        help='Only run Phase 1 (sales sync), skip new customer import')
     args = parser.parse_args()
 
     # ── Validate credentials ──
@@ -452,6 +504,7 @@ Examples:
         'customers_updated': 0,
         'leads_created': 0,
         'leads_updated': 0,
+        'sales_created': 0,
         'errors': 0,
     }
 
@@ -459,106 +512,202 @@ Examples:
     if args.max_pages > 0:
         end_page = min(args.start_page + args.max_pages - 1, total_pages)
 
+    page_range_label = f'{args.start_page} → {end_page}'
     start_time = time.time()
 
-    print(f'\nProcessing pages {args.start_page} → {end_page} …\n')
+    # ════════════════════════════════════════════════════════════════════
+    # PHASE 1 — Sync sales for existing customers
+    # ════════════════════════════════════════════════════════════════════
+    if not args.skip_sales:
+        print(f'\n╔═══════════════════════════════════════════════════════════════╗')
+        print(f'║  PHASE 1 — Syncing sales for {len(existing_customer_ids):,} known customers')
+        print(f'╚═══════════════════════════════════════════════════════════════╝')
+        print(f'  Pages {page_range_label}\n')
 
-    for page_num in range(args.start_page, end_page + 1):
-        # Use first_page data if we're on page 1 and started there
-        if page_num == 1 and args.start_page == 1:
-            summaries = first_page
-        else:
-            _, _, summaries = find_customers(page_num, args.page_size, days)
+        phase1_scanned = 0
+        phase1_processed = 0
 
-        if not summaries:
-            break
+        for page_num in range(args.start_page, end_page + 1):
+            if page_num == 1 and args.start_page == 1:
+                summaries = first_page
+            else:
+                _, _, summaries = find_customers(page_num, args.page_size, days)
 
-        page_new = 0
-        page_skip = 0
+            if not summaries:
+                break
 
-        for summary in summaries:
-            stats['scanned'] += 1
-            anthill_id = str(summary['id'])
+            page_sales = 0
 
-            # ── Date filter (if --from-date / --to-date) ──
-            if from_dt or to_dt:
-                created = parse_datetime(summary.get('created', ''))
-                if created:
-                    if from_dt and created < from_dt:
-                        stats['skipped_date'] += 1
-                        continue
-                    if to_dt and created > to_dt:
-                        stats['skipped_date'] += 1
-                        continue
+            for summary in summaries:
+                phase1_scanned += 1
+                anthill_id = str(summary['id'])
 
-            # ── Quick duplicate check (in-memory) ──
-            if anthill_id in existing_all:
-                stats['skipped_existing'] += 1
-                page_skip += 1
-                continue
+                # ── Date filter ──
+                if from_dt or to_dt:
+                    created = parse_datetime(summary.get('created', ''))
+                    if created:
+                        if from_dt and created < from_dt:
+                            continue
+                        if to_dt and created > to_dt:
+                            continue
 
-            if args.dry_run:
-                page_new += 1
-                continue
+                # Only process existing customers in Phase 1
+                if anthill_id not in existing_customer_ids:
+                    continue
 
-            # ── Fetch detail ──
-            try:
-                if args.skip_detail:
-                    # Minimal save using summary only
-                    detail = {
-                        'customer_id': anthill_id,
-                        'name': summary.get('name', ''),
-                        'custom_fields': {},
-                        'address': {},
-                        'activities': [],
-                    }
-                else:
+                if args.dry_run or args.skip_detail:
+                    phase1_processed += 1
+                    continue
+
+                try:
                     detail = get_customer_detail(int(anthill_id))
-                    if not detail:
-                        stats['errors'] += 1
-                        continue
+                    if detail and detail.get('activities'):
+                        customer_obj = Customer.objects.filter(
+                            anthill_customer_id=anthill_id
+                        ).first()
+                        created_count = save_sales_from_activities(
+                            detail, summary, customer_obj
+                        )
+                        stats['sales_created'] += created_count
+                        page_sales += created_count
+                    phase1_processed += 1
+                except Exception as e:
+                    stats['errors'] += 1
+                    print(f'  ✗ Error fetching sales for {anthill_id}: {e}')
 
-                # ── Classify and save ──
-                if is_sale(detail):
-                    result = save_as_customer(detail, summary)
-                    if result == 'created':
-                        stats['customers_created'] += 1
-                    elif result == 'updated':
-                        stats['customers_updated'] += 1
-                else:
-                    result = save_as_lead(detail, summary)
-                    if result == 'created':
-                        stats['leads_created'] += 1
-                    elif result == 'updated':
-                        stats['leads_updated'] += 1
+            # ── Page progress ──
+            elapsed = time.time() - start_time
+            rate = phase1_scanned / elapsed if elapsed > 0 else 0
+            remaining = (total_records - phase1_scanned) / rate if rate > 0 else 0
 
-                # Add to in-memory set so we don't reprocess
-                existing_all.add(anthill_id)
-                page_new += 1
+            print(
+                f'  Page {page_num:>5}/{end_page} | '
+                f'Scanned: {phase1_scanned:>7,} | '
+                f'Customers: {phase1_processed:>5,} | '
+                f'Sales: {page_sales:>3} | '
+                f'Rate: {rate:.0f}/s | '
+                f'ETA: {_format_time(remaining)}'
+            )
 
-            except Exception as e:
-                stats['errors'] += 1
-                print(f'  ✗ Error on customer {anthill_id}: {e}')
+        phase1_elapsed = time.time() - start_time
+        print(f'\n  Phase 1 complete in {_format_time(phase1_elapsed)}')
+        print(f'  Sales created: {stats["sales_created"]:,}')
 
-        # ── Page progress ──
-        elapsed = time.time() - start_time
-        rate = stats['scanned'] / elapsed if elapsed > 0 else 0
-        remaining = (total_records - stats['scanned']) / rate if rate > 0 else 0
+    # ════════════════════════════════════════════════════════════════════
+    # PHASE 2 — Import new customers / leads
+    # ════════════════════════════════════════════════════════════════════
+    if not args.sales_only:
+        phase2_start = time.time()
+        print(f'\n╔═══════════════════════════════════════════════════════════════╗')
+        print(f'║  PHASE 2 — Importing new customers & leads')
+        print(f'╚═══════════════════════════════════════════════════════════════╝')
+        print(f'  Pages {page_range_label}\n')
 
-        print(
-            f'  Page {page_num:>5}/{end_page} | '
-            f'Scanned: {stats["scanned"]:>7,} | '
-            f'New: {page_new:>3} | Skip: {page_skip:>3} | '
-            f'Rate: {rate:.0f}/s | '
-            f'ETA: {_format_time(remaining)}'
-        )
+        phase2_scanned = 0
+
+        for page_num in range(args.start_page, end_page + 1):
+            if page_num == 1 and args.start_page == 1:
+                summaries = first_page
+            else:
+                _, _, summaries = find_customers(page_num, args.page_size, days)
+
+            if not summaries:
+                break
+
+            page_new = 0
+            page_skip = 0
+
+            for summary in summaries:
+                phase2_scanned += 1
+                stats['scanned'] += 1
+                anthill_id = str(summary['id'])
+
+                # ── Date filter ──
+                if from_dt or to_dt:
+                    created = parse_datetime(summary.get('created', ''))
+                    if created:
+                        if from_dt and created < from_dt:
+                            stats['skipped_date'] += 1
+                            continue
+                        if to_dt and created > to_dt:
+                            stats['skipped_date'] += 1
+                            continue
+
+                # Skip already-known records
+                if anthill_id in existing_all:
+                    stats['skipped_existing'] += 1
+                    page_skip += 1
+                    continue
+
+                if args.dry_run:
+                    page_new += 1
+                    continue
+
+                # ── Fetch detail ──
+                try:
+                    if args.skip_detail:
+                        detail = {
+                            'customer_id': anthill_id,
+                            'name': summary.get('name', ''),
+                            'custom_fields': {},
+                            'address': {},
+                            'activities': [],
+                        }
+                    else:
+                        detail = get_customer_detail(int(anthill_id))
+                        if not detail:
+                            stats['errors'] += 1
+                            continue
+
+                    # ── Classify and save ──
+                    if is_sale(detail):
+                        result = save_as_customer(detail, summary)
+                        if result == 'created':
+                            stats['customers_created'] += 1
+                        elif result == 'updated':
+                            stats['customers_updated'] += 1
+                        customer_obj = Customer.objects.filter(
+                            anthill_customer_id=anthill_id
+                        ).first()
+                    else:
+                        result = save_as_lead(detail, summary)
+                        if result == 'created':
+                            stats['leads_created'] += 1
+                        elif result == 'updated':
+                            stats['leads_updated'] += 1
+                        customer_obj = None
+
+                    # ── Save sale activities ──
+                    if detail.get('activities'):
+                        created_count = save_sales_from_activities(detail, summary, customer_obj)
+                        stats['sales_created'] += created_count
+
+                    existing_all.add(anthill_id)
+                    page_new += 1
+
+                except Exception as e:
+                    stats['errors'] += 1
+                    print(f'  ✗ Error on customer {anthill_id}: {e}')
+
+            # ── Page progress ──
+            elapsed = time.time() - phase2_start
+            rate = phase2_scanned / elapsed if elapsed > 0 else 0
+            remaining = (total_records - phase2_scanned) / rate if rate > 0 else 0
+
+            print(
+                f'  Page {page_num:>5}/{end_page} | '
+                f'Scanned: {phase2_scanned:>7,} | '
+                f'New: {page_new:>3} | Skip: {page_skip:>3} | '
+                f'Rate: {rate:.0f}/s | '
+                f'ETA: {_format_time(remaining)}'
+            )
 
     # ── Summary ──
-    elapsed = time.time() - start_time
+    total_elapsed = time.time() - start_time
     print('\n' + '═' * 65)
     print('  SYNC COMPLETE')
     print('═' * 65)
-    print(f'  Time elapsed       : {_format_time(elapsed)}')
+    print(f'  Time elapsed       : {_format_time(total_elapsed)}')
     print(f'  Records scanned    : {stats["scanned"]:,}')
     print(f'  Skipped (existing) : {stats["skipped_existing"]:,}')
     if stats['skipped_date']:
@@ -567,6 +716,7 @@ Examples:
     print(f'  Customers updated  : {stats["customers_updated"]:,}')
     print(f'  Leads created      : {stats["leads_created"]:,}')
     print(f'  Leads updated      : {stats["leads_updated"]:,}')
+    print(f'  Sales created      : {stats["sales_created"]:,}')
     if stats['errors']:
         print(f'  Errors             : {stats["errors"]:,}')
     print('═' * 65)

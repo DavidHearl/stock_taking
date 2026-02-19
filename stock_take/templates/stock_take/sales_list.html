@@ -1,0 +1,187 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Sales{% endblock %}
+
+{% block nav_stock_active %}active{% endblock %}
+{% block nav_sales_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
+{% endblock %}
+
+{% block page_title %}Sales{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <!-- Search & Filters -->
+    <div class="customers-controls">
+        <div class="customers-search">
+            <div class="search-input-wrapper">
+                <i class="bi bi-search"></i>
+                <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type or status..." autocomplete="off">
+            </div>
+        </div>
+        <div class="customers-filter-tabs">
+            <a href="?age=9m{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '9m' %}active{% endif %}">
+                &lt; 9 Months ({{ count_9m }})
+            </a>
+            <a href="?age=2y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '2y' %}active{% endif %}">
+                &lt; 2 Years ({{ count_2y }})
+            </a>
+            <a href="?age=10y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '10y' %}active{% endif %}">
+                &lt; 10 Years ({{ count_10y }})
+            </a>
+            <a href="?age=over10{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == 'over10' %}active{% endif %}">
+                Over 10 Years ({{ count_over10 }})
+            </a>
+        </div>
+        {% if location_filter %}
+        <div class="customers-location-badge">
+            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if search_expanded_from %}
+    <div class="search-expanded-notice">
+        <i class="bi bi-info-circle"></i>
+        No results in current bracket — showing results found in 
+        <strong>
+            {% if search_expanded_from == '9m' %}&lt; 9 Months
+            {% elif search_expanded_from == '2y' %}&lt; 2 Years
+            {% elif search_expanded_from == '10y' %}&lt; 10 Years
+            {% elif search_expanded_from == 'over10' %}Over 10 Years
+            {% endif %}
+        </strong>
+    </div>
+    {% endif %}
+
+    {% if sales %}
+    <div class="customers-result-bar">
+        <span class="result-count">{{ filtered_count }} sale{{ filtered_count|pluralize }}</span>
+    </div>
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th>Activity ID</th>
+                    <th>Customer</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Location</th>
+                    <th>Linked Order</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sale in sales %}
+                <tr>
+                    <td>
+                        <a href="{% url 'sale_detail' sale.pk %}" class="customer-name-link">
+                            {{ sale.anthill_activity_id }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if sale.customer %}
+                        <a href="{% url 'customer_detail' sale.customer.pk %}" class="customer-name-link">
+                            {{ sale.customer.name|default:sale.customer_name }}
+                        </a>
+                        {% else %}
+                        {{ sale.customer_name|default:"-" }}
+                        {% endif %}
+                    </td>
+                    <td>{{ sale.activity_type|default:"-" }}</td>
+                    <td>
+                        <span class="customer-active-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}active{% else %}inactive{% endif %}">
+                            {{ sale.status|default:"-" }}
+                        </span>
+                    </td>
+                    <td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                    <td>{{ sale.location|default:"-" }}</td>
+                    <td>
+                        {% if sale.order %}
+                        <a href="{% url 'order_details' sale.order.id %}" class="customer-order-badge">
+                            {{ sale.order.sale_number }}
+                        </a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="customers-empty-state">
+        <i class="bi bi-bag"></i>
+        <p>No sales found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="customers-pagination">
+        <div class="pagination-info">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} sales
+        </div>
+        <div class="pagination-controls">
+            {% if page_obj.has_previous %}
+            <a href="?page=1&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                    <a href="?page={{ num }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                    <a href="?page={{ num }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                    <span class="page-ellipsis">&hellip;</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}&age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const searchInput = document.getElementById('sale-search');
+let searchTimeout;
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('age')) params.set('age', '{{ age_filter }}');
+            window.location.href = '?' + params.toString();
+        }, 500);
+    });
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('age')) params.set('age', '{{ age_filter }}');
+            window.location.href = '?' + params.toString();
+        }
+    });
+    searchInput.focus();
+}
+</script>
+{% endblock %}
