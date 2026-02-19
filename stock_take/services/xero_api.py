@@ -268,6 +268,53 @@ def get_contacts(page=1):
     return _api_get("Contacts", params={"page": page})
 
 
+def get_all_contacts():
+    """
+    Fetch ALL contacts from Xero by paginating through all pages.
+    Returns a list of contact dicts.
+    """
+    all_contacts = []
+    page = 1
+    while True:
+        result = get_contacts(page=page)
+        if not result or "Contacts" not in result:
+            break
+        contacts = result["Contacts"]
+        if not contacts:
+            break
+        all_contacts.extend(contacts)
+        # Xero returns 100 contacts per page
+        if len(contacts) < 100:
+            break
+        page += 1
+    return all_contacts
+
+
+def get_invoices_for_contact(contact_id):
+    """
+    Fetch all invoices for a specific Xero contact.
+    Returns a list of invoice dicts.
+    """
+    all_invoices = []
+    page = 1
+    while True:
+        result = _api_get("Invoices", params={
+            "ContactIDs": contact_id,
+            "page": page,
+            "Statuses": "AUTHORISED,PAID,VOIDED",
+        })
+        if not result or "Invoices" not in result:
+            break
+        invoices = result["Invoices"]
+        if not invoices:
+            break
+        all_invoices.extend(invoices)
+        if len(invoices) < 100:
+            break
+        page += 1
+    return all_invoices
+
+
 def search_contacts_by_name(name):
     """
     Search Xero contacts by name using the searchTerm parameter.

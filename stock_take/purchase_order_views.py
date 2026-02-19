@@ -11,9 +11,68 @@ import logging
 import requests
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+
+def _get_board_product_rows_for_pdf(po):
+    """
+    For Carnehill board POs, group PNX items by material + dimensions
+    and return lightweight objects that the PDF generator can iterate.
+    Returns a list of objects (or an empty list if this PO has no boards).
+    """
+    boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+    if not boards_po:
+        return []
+
+    pnx_items = list(boards_po.pnx_items.all())
+    if not pnx_items:
+        return []
+
+    from collections import defaultdict
+    from decimal import Decimal
+
+    groups = defaultdict(lambda: {
+        'matname': '', 'cleng': 0, 'cwidth': 0,
+        'total_qty': Decimal('0'), 'total_cost': Decimal('0'),
+    })
+    for item in pnx_items:
+        key = (item.matname, float(item.cleng), float(item.cwidth))
+        grp = groups[key]
+        grp['matname'] = item.matname
+        grp['cleng'] = float(item.cleng)
+        grp['cwidth'] = float(item.cwidth)
+        grp['total_qty'] += item.cnt
+        grp['total_cost'] += item.get_cost()
+
+    class _BoardRow:
+        """Lightweight duck-type wrapper matching PurchaseOrderProduct interface."""
+        def __init__(self, sku, name, qty, unit_price, line_total):
+            self.sku = sku
+            self.supplier_code = ''
+            self.stock_item = None
+            self.name = name
+            self.description = name
+            self.order_quantity = qty
+            self.quantity = qty
+            self.order_price = unit_price
+            self.line_total = line_total
+
+    rows = []
+    for key, grp in sorted(groups.items(), key=lambda x: x[0]):
+        sku = f"{grp['matname'].rstrip('_')}_{int(grp['cwidth'])}"
+        qty = grp['total_qty']
+        cost = grp['total_cost']
+        unit_price = (cost / qty) if qty else Decimal('0')
+        rows.append(_BoardRow(
+            sku=sku,
+            name=f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm",
+            qty=qty,
+            unit_price=unit_price,
+            line_total=cost,
+        ))
+    return rows
 
 
 def _format_date(date_str):
@@ -695,6 +754,29 @@ def purchase_order_detail(request, po_id):
                 original_customer_name = f'{desc_order.first_name} {desc_order.last_name}'.strip()
                 original_customer_number = desc_order.sale_number
 
+    # ── Compute expected delivery date for email template ──────
+    # If the PO already has one, use it; otherwise calculate from lead time
+    expected_delivery_date = ''
+    if purchase_order.expected_date:
+        try:
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+                try:
+                    expected_delivery_date = datetime.strptime(purchase_order.expected_date, fmt).strftime('%d/%m/%Y')
+                    break
+                except ValueError:
+                    continue
+        except Exception:
+            expected_delivery_date = purchase_order.expected_date
+    if not expected_delivery_date:
+        lead_days = (supplier_obj.estimate_lead_time if supplier_obj and supplier_obj.estimate_lead_time else 10)
+        exp_dt = datetime.now() + timedelta(days=lead_days)
+        # Push weekends to Monday
+        if exp_dt.weekday() == 5:
+            exp_dt += timedelta(days=2)
+        elif exp_dt.weekday() == 6:
+            exp_dt += timedelta(days=1)
+        expected_delivery_date = exp_dt.strftime('%d/%m/%Y')
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -714,6 +796,7 @@ def purchase_order_detail(request, po_id):
         'attachments': purchase_order.attachments.all(),
         'original_customer_name': original_customer_name,
         'original_customer_number': original_customer_number,
+        'expected_delivery_date': expected_delivery_date,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -1338,7 +1421,11 @@ def supplier_save(request, supplier_id):
 def purchase_order_download_pdf(request, po_id):
     """Download a Purchase Order as a PDF"""
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
-    products = po.products.select_related('stock_item').all()
+    products = list(po.products.select_related('stock_item').all())
+
+    # For Carnehill board POs: if no regular products, use grouped PNX board items
+    if not products:
+        products = _get_board_product_rows_for_pdf(po)
 
     pdf_buffer = generate_purchase_order_pdf(po, products)
 
@@ -1463,17 +1550,52 @@ def purchase_order_send_email(request, po_id):
     if not subject:
         subject = f'Purchase Order {po.display_number} - Sliderobes'
 
+    # ── Auto-calculate expected date if not already set ────────
+    if not po.expected_date:
+        supplier_obj = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
+        lead_days = (supplier_obj.estimate_lead_time if supplier_obj and supplier_obj.estimate_lead_time else 10)
+        expected = datetime.now() + timedelta(days=lead_days)
+        # Push weekends to Monday
+        if expected.weekday() == 5:  # Saturday
+            expected += timedelta(days=2)
+        elif expected.weekday() == 6:  # Sunday
+            expected += timedelta(days=1)
+        po.expected_date = expected.strftime('%Y-%m-%d')
+
+    # Format the expected date for display in the email
+    expected_display = ''
+    if po.expected_date:
+        try:
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+                try:
+                    exp_dt = datetime.strptime(po.expected_date, fmt)
+                    expected_display = exp_dt.strftime('%d/%m/%Y')
+                    break
+                except ValueError:
+                    continue
+        except Exception:
+            expected_display = po.expected_date
+
     if not body:
         body = (
             f'Dear {po.supplier_name or "Supplier"},\n\n'
             f'Please find attached Purchase Order {po.display_number}.\n\n'
+        )
+        if expected_display:
+            body += f'Expected delivery date: {expected_display}\n\n'
+        body += (
             f'If you have any questions, please do not hesitate to contact us.\n\n'
             f'Kind regards,\n'
             f'Sliderobes'
         )
 
     # Generate the PDF
-    products = po.products.select_related('stock_item').all()
+    products = list(po.products.select_related('stock_item').all())
+
+    # For Carnehill board POs: if no regular products, use grouped PNX board items
+    if not products:
+        products = _get_board_product_rows_for_pdf(po)
+
     pdf_buffer = generate_purchase_order_pdf(po, products)
     pdf_filename = f'Purchase_Order_{po.display_number}.pdf'
 
@@ -1509,7 +1631,7 @@ def purchase_order_send_email(request, po_id):
         # Lock the issue date to today if not already set
         if not po.issue_date:
             po.issue_date = datetime.now().strftime('%d/%m/%Y')
-        update_fields = ['email_sent', 'email_sent_at', 'email_sent_to', 'issue_date']
+        update_fields = ['email_sent', 'email_sent_at', 'email_sent_to', 'issue_date', 'expected_date']
 
         # Auto-approve the PO when email is sent
         if po.status == 'Draft':

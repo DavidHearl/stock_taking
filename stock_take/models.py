@@ -482,6 +482,28 @@ class Accessory(models.Model):
     ordered = models.BooleanField(default=False, help_text='Ordered for OS Doors')
     missing = models.BooleanField(default=False, help_text='True if SKU not found in stock')
     is_allocated = models.BooleanField(default=False, help_text='True if stock has been physically used/deducted')
+    
+    # Cut-to-size dimensions (for glass items)
+    cut_width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Cut-to-size width in mm')
+    cut_height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Cut-to-size height in mm')
+
+    @property
+    def is_cut_to_size(self):
+        """Check if this item requires cut-to-size dimensions"""
+        if 'cut to size' in (self.name or '').lower():
+            return True
+        if 'cut to size' in (self.description or '').lower():
+            return True
+        if self.stock_item and 'cut to size' in (self.stock_item.description or '').lower():
+            return True
+        return False
+
+    @property
+    def cut_size_display(self):
+        """Formatted cut-to-size dimensions"""
+        if self.cut_width and self.cut_height:
+            return f"{self.cut_width:.0f} x {self.cut_height:.0f}mm"
+        return ''
 
     @property
     def available_quantity(self):
@@ -1388,7 +1410,7 @@ class Invoice(models.Model):
     ]
 
     # WorkGuru identifiers
-    workguru_id = models.IntegerField(unique=True, help_text='WorkGuru Invoice ID')
+    workguru_id = models.IntegerField(unique=True, null=True, blank=True, help_text='WorkGuru Invoice ID')
     invoice_number = models.CharField(max_length=50, db_index=True)
 
     # Client

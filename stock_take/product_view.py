@@ -198,6 +198,7 @@ def add_product(request):
         try:
             source = StockItem.objects.get(id=copy_from_id)
             prefill = {
+                'sku': source.sku or '',
                 'name': f'Copy of {source.name}',
                 'description': source.description or '',
                 'cost': str(source.cost or '0'),

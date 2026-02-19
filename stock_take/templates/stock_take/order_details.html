@@ -764,7 +764,7 @@
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} <span class="badge badge-info badge-ml">Additional</span>{% endif %}</h3>
+                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} <span class="badge badge-info badge-ml">Additional</span>{% endif %}{% if bpo_data.purchase_order.email_sent_at %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
                 </div>
                 <div class="header-actions">
                     <!-- File status indicators -->
@@ -1196,6 +1196,7 @@
                                 <th style="width: 30px;"><input type="checkbox" id="glass-select-all" title="Select all"></th>
                                 <th>SKU</th>
                                 <th>Name</th>
+                                <th>Cut Size</th>
                                 <th>Qty</th>
                                 <th>Cost</th>
                                 <th>Stock</th>
@@ -1206,8 +1207,31 @@
                             {% for glass in glass_items %}
                             <tr data-accessory-id="{{ glass.id }}" {% if glass.is_allocated %}class="allocated-row"{% endif %}>
                                 <td><input type="checkbox" class="checkbox-input glass-select" data-accessory-id="{{ glass.id }}" data-allocated="{{ glass.is_allocated|yesno:'1,0' }}"></td>
-                                <td>{{ glass.sku }}</td>
+                                <td>{% if glass.stock_item %}<a href="{% url 'product_detail' glass.stock_item.id %}" class="sku-link">{{ glass.sku }}</a>{% else %}{{ glass.sku }}{% endif %}</td>
                                 <td>{{ glass.name }}</td>
+                                <td class="cut-size-cell">
+                                    {% if glass.is_cut_to_size %}
+                                    <div class="cut-size-inputs">
+                                        <input type="number" class="cut-size-input" 
+                                               id="cut-width-{{ glass.id }}" 
+                                               value="{{ glass.cut_width|default_if_none:''|floatformat:0 }}" 
+                                               placeholder="W" min="1" step="1" title="Width (mm)"
+                                               data-accessory-id="{{ glass.id }}" data-field="cut_width">
+                                        <span class="cut-size-x">&times;</span>
+                                        <input type="number" class="cut-size-input" 
+                                               id="cut-height-{{ glass.id }}" 
+                                               value="{{ glass.cut_height|default_if_none:''|floatformat:0 }}" 
+                                               placeholder="H" min="1" step="1" title="Height (mm)"
+                                               data-accessory-id="{{ glass.id }}" data-field="cut_height">
+                                        <span class="cut-size-unit">mm</span>
+                                        <button type="button" class="cut-size-save-btn" onclick="saveCutSize({{ glass.id }})" title="Save dimensions">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                    </div>
+                                    {% else %}
+                                    <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <input type="number" class="quantity-input accessory-quantity" 
                                            value="{{ glass.quantity|floatformat:0 }}" 
@@ -1239,9 +1263,9 @@
                             </tr>
                             {% endfor %}
                             <tr class="table-total-row">
-                                <td colspan="4" class="text-right">Total:</td>
+                                <td colspan="5" class="text-right">Total:</td>
                                 <td>£{{ glass_items|sum_accessory_costs }}</td>
-                                <td colspan="1"></td>
+                                <td colspan="2"></td>
                             </tr>
                         </tbody>
                     </table>
@@ -1805,6 +1829,16 @@
                 <button type="button" class="modal-close" onclick="closeModal('addBoardModal')">✕</button>
             </div>
             <div class="modal-body">
+                {% if boards_po_list|length > 1 %}
+                <div class="form-group" id="board-po-select-group">
+                    <label for="add-board-po-select">Board PO *</label>
+                    <select class="form-input" id="add-board-po-select">
+                        {% for bpo_data in boards_po_list %}
+                        <option value="{{ bpo_data.po.id }}">{{ bpo_data.po.po_number }}{% if not bpo_data.is_primary %} (Additional){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
                 <div class="form-group">
                     <label for="add-board-barcode">Barcode *</label>
                     <input type="text" class="form-input" id="add-board-barcode" placeholder="e.g., BRD001">
@@ -3797,6 +3831,11 @@ function openModal(modalId, boardsPoId) {
     if (modal) {
         modal.classList.add('active');
         document.body.classList.add('modal-open');
+        // Pre-select the board PO in dropdown if it exists
+        const poSelect = document.getElementById('add-board-po-select');
+        if (poSelect && boardsPoId) {
+            poSelect.value = boardsPoId;
+        }
     }
 }
 
@@ -3850,7 +3889,10 @@ function addBoardItem() {
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
         body: JSON.stringify({
-            boards_po_id: activeBoardsPoId,
+            boards_po_id: document.getElementById('add-board-po-select')
+                ? document.getElementById('add-board-po-select').value
+                : activeBoardsPoId,
+            order_id: {{ order.id }},
             barcode: barcode,
             matname: matname,
             cleng: cleng,
@@ -4229,6 +4271,37 @@ function addGlassToOrder(stockItemId, sku, name) {
         console.error('Error adding glass:', error);
         showAlert('Error adding glass item', 'danger');
     });
+}
+
+function saveCutSize(accessoryId) {
+    const widthInput = document.getElementById('cut-width-' + accessoryId);
+    const heightInput = document.getElementById('cut-height-' + accessoryId);
+    const width = widthInput ? widthInput.value : '';
+    const height = heightInput ? heightInput.value : '';
+
+    fetch(`/order/{{ order.id }}/save-cut-size/${accessoryId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ cut_width: width, cut_height: height })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Brief green flash on inputs to confirm save
+            [widthInput, heightInput].forEach(inp => {
+                if (inp) {
+                    inp.style.borderColor = '#28a745';
+                    setTimeout(() => inp.style.borderColor = '', 1500);
+                }
+            });
+        } else {
+            showAlert('Error saving dimensions: ' + (data.error || ''), 'danger');
+        }
+    })
+    .catch(err => showAlert('Error: ' + err.message, 'danger'));
 }
 
 
@@ -4838,31 +4911,31 @@ function renderPNXAnalysisModal() {
     const newCount = pnxStagingData.newItems.length;
     
     // Action Summary at the top
-    html += '<div style="background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 15px; margin-bottom: 25px; border-radius: 4px;">';
-    html += '<h5 style="margin: 0 0 10px 0; color: #1976D2;"><i class="bi bi-info-circle-fill"></i> PNX Staging - Review Before Import</h5>';
+    html += '<div style="background-color: var(--bg-tertiary, #2a2d35); border: 1px solid var(--border-color, #3a3d45); padding: 18px 20px; margin-bottom: 25px; border-radius: 6px;">';
+    html += '<h5 style="margin: 0 0 12px 0; color: var(--text-primary, #e0e0e0); font-weight: 600;"><i class="bi bi-info-circle-fill" style="opacity: 0.7; color: #6ea8fe;"></i> PNX Staging - Review Before Import</h5>';
     html += '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; font-size: 14px;">';
     
     if (newCount > 0) {
         html += '<div>';
-        html += '<div style="color: #155724; font-weight: 600;"><i class="bi bi-plus-circle"></i> Will Add</div>';
-        html += `<div style="font-size: 20px; font-weight: bold; color: #155724;">${newCount}</div>`;
-        html += '<div style="font-size: 12px; color: #6c757d;">new items</div>';
+        html += '<div style="color: #4ade80; font-weight: 600;"><i class="bi bi-plus-circle"></i> Will Add</div>';
+        html += `<div style="font-size: 22px; font-weight: bold; color: #4ade80;">${newCount}</div>`;
+        html += '<div style="font-size: 12px; color: var(--text-secondary, #9ca3af);">new items</div>';
         html += '</div>';
     }
     
     if (updateCount > 0) {
         html += '<div>';
-        html += '<div style="color: #856404; font-weight: 600;"><i class="bi bi-arrow-up-circle"></i> Will Update</div>';
-        html += `<div style="font-size: 20px; font-weight: bold; color: #856404;">${updateCount}</div>`;
-        html += '<div style="font-size: 12px; color: #6c757d;">quantity changes</div>';
+        html += '<div style="color: #fbbf24; font-weight: 600;"><i class="bi bi-arrow-up-circle"></i> Will Update</div>';
+        html += `<div style="font-size: 22px; font-weight: bold; color: #fbbf24;">${updateCount}</div>`;
+        html += '<div style="font-size: 12px; color: var(--text-secondary, #9ca3af);">quantity changes</div>';
         html += '</div>';
     }
     
     if (duplicateCount > 0) {
         html += '<div>';
-        html += '<div style="color: #6c757d; font-weight: 600;"><i class="bi bi-dash-circle"></i> Will Ignore</div>';
-        html += `<div style="font-size: 20px; font-weight: bold; color: #6c757d;">${duplicateCount}</div>`;
-        html += '<div style="font-size: 12px; color: #6c757d;">duplicates</div>';
+        html += '<div style="color: #9ca3af; font-weight: 600;"><i class="bi bi-dash-circle"></i> Will Ignore</div>';
+        html += `<div style="font-size: 22px; font-weight: bold; color: #9ca3af;">${duplicateCount}</div>`;
+        html += '<div style="font-size: 12px; color: var(--text-secondary, #9ca3af);">duplicates</div>';
         html += '</div>';
     }
     
@@ -4871,12 +4944,12 @@ function renderPNXAnalysisModal() {
     // New Items Section
     if (newCount > 0) {
         html += '<div style="margin-bottom: 25px;">';
-        html += '<h4 style="color: #155724; margin-bottom: 15px; border-bottom: 2px solid #c3e6cb; padding-bottom: 10px;">';
+        html += '<h4 style="color: #4ade80; margin-bottom: 15px; border-bottom: 2px solid rgba(74,222,128,0.3); padding-bottom: 10px;">';
         html += '<i class="bi bi-plus-circle-fill"></i> Items to Add (' + newCount + ')';
         html += '</h4>';
-        html += '<table class="table table-sm table-striped" style="font-size: 13px;">';
-        html += '<thead style="background-color: #d4edda;">';
-        html += '<tr><th>Barcode</th><th>Material</th><th>Dimensions</th><th>Customer</th><th>Quantity</th></tr>';
+        html += '<table class="table table-sm" style="font-size: 0.85rem;">';
+        html += '<thead><tr style="border-bottom: 2px solid rgba(74,222,128,0.4);">';
+        html += '<th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Barcode</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Material</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Dimensions</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Customer</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Quantity</th></tr>';
         html += '</thead><tbody>';
         pnxStagingData.newItems.forEach(item => {
             html += '<tr>';
@@ -4884,7 +4957,7 @@ function renderPNXAnalysisModal() {
             html += `<td>${item.matname}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.customer || ''}</td>`;
-            html += `<td><span style="background-color: #d4edda; padding: 3px 8px; border-radius: 3px; font-weight: 600;">${item.qty}</span></td>`;
+            html += `<td><span style="background-color: rgba(74,222,128,0.2); padding: 3px 10px; border-radius: 4px; font-weight: 600; color: #4ade80;">${item.qty}</span></td>`;
             html += '</tr>';
         });
         html += '</tbody></table>';
@@ -4894,12 +4967,12 @@ function renderPNXAnalysisModal() {
     // Updated Items Section
     if (updateCount > 0) {
         html += '<div style="margin-bottom: 25px;">';
-        html += '<h4 style="color: #856404; margin-bottom: 15px; border-bottom: 2px solid #ffc107; padding-bottom: 10px;">';
+        html += '<h4 style="color: #fbbf24; margin-bottom: 15px; border-bottom: 2px solid rgba(251,191,36,0.3); padding-bottom: 10px;">';
         html += '<i class="bi bi-arrow-up-circle-fill"></i> Quantity Updates (' + updateCount + ')';
         html += '</h4>';
-        html += '<table class="table table-sm table-striped" style="font-size: 13px;">';
-        html += '<thead style="background-color: #fff3cd;">';
-        html += '<tr><th>Barcode</th><th>Material</th><th>Dimensions</th><th>Current</th><th>New</th><th>Change</th></tr>';
+        html += '<table class="table table-sm" style="font-size: 0.85rem;">';
+        html += '<thead><tr style="border-bottom: 2px solid rgba(251,191,36,0.4);">';
+        html += '<th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Barcode</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Material</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Dimensions</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Current</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">New</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Change</th></tr>';
         html += '</thead><tbody>';
         pnxStagingData.updatedItems.forEach(item => {
             const change = item.qty - item.old_qty;
@@ -4908,8 +4981,8 @@ function renderPNXAnalysisModal() {
             html += `<td>${item.matname}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.old_qty}</td>`;
-            html += `<td><strong style="color: #856404;">${item.qty}</strong></td>`;
-            html += `<td><span style="background-color: #fff3cd; padding: 3px 8px; border-radius: 3px; font-weight: 600; color: #856404;">+${change}</span></td>`;
+            html += `<td><strong style="color: #fbbf24;">${item.qty}</strong></td>`;
+            html += `<td><span style="background-color: rgba(251,191,36,0.2); padding: 3px 10px; border-radius: 4px; font-weight: 600; color: #fbbf24;">+${change}</span></td>`;
             html += '</tr>';
         });
         html += '</tbody></table>';
@@ -4920,7 +4993,7 @@ function renderPNXAnalysisModal() {
     if (duplicateCount > 0) {
         html += '<div id="duplicates-section" style="margin-bottom: 25px;">';
         html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">';
-        html += '<h4 style="color: #6c757d; margin: 0; border-bottom: 2px solid #dee2e6; padding-bottom: 10px; flex-grow: 1;">';
+        html += '<h4 style="color: var(--text-secondary, #9ca3af); margin: 0; border-bottom: 2px solid var(--border-color, #3a3d45); padding-bottom: 10px; flex-grow: 1;">';
         html += '<i class="bi bi-dash-circle-fill"></i> Items to Ignore (' + duplicateCount + ')';
         html += '</h4>';
         html += '<button type="button" class="btn btn-sm btn-outline-success" onclick="moveSelectedDuplicatesToImport()" style="margin-left: 15px;">';
@@ -4930,11 +5003,10 @@ function renderPNXAnalysisModal() {
         html += '<p style="color: #6c757d; font-size: 13px; margin-bottom: 10px;">';
         html += '<em>These items already exist with the same quantity. Select items below to include them in the import anyway.</em>';
         html += '</p>';
-        html += '<table class="table table-sm table-striped" style="font-size: 13px;">';
-        html += '<thead style="background-color: #f8f9fa;">';
-        html += '<tr>';
-        html += '<th style="width: 40px;"><input type="checkbox" id="select-all-duplicates" onchange="toggleAllDuplicates(this.checked)"></th>';
-        html += '<th>Barcode</th><th>Material</th><th>Dimensions</th><th>Quantity</th>';
+        html += '<table class="table table-sm" style="font-size: 0.85rem;">';
+        html += '<thead><tr style="border-bottom: 2px solid var(--border-color, #3a3d45);">';
+        html += '<th style="width: 40px; color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase;"><input type="checkbox" id="select-all-duplicates" onchange="toggleAllDuplicates(this.checked)"></th>';
+        html += '<th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Barcode</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Material</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Dimensions</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Quantity</th>';
         html += '</tr>';
         html += '</thead><tbody id="duplicates-tbody">';
         pnxStagingData.duplicateItems.forEach((item, index) => {

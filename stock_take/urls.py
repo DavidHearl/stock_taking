@@ -26,6 +26,7 @@ urlpatterns = [
     path('import/', views.import_csv, name='import_csv'),
     path('export/', views.export_csv, name='export_csv'),
     path('update/<int:item_id>/', views.update_item, name='update_item'),
+    path('update-product-quantity/', views.update_product_quantity, name='update_product_quantity'),
     
     # Invoices
     path('invoices/', invoices_list, name='invoices_list'),
@@ -205,6 +206,7 @@ urlpatterns = [
     path('stock-take/update-accessory-quantities/', views.update_accessory_quantities, name='update_accessory_quantities'),
     path('stock-take/add-accessory-item/<int:order_id>/', views.add_accessory_item, name='add_accessory_item'),
     path('stock-take/regenerate-csv/<int:order_id>/', views.regenerate_csv, name='regenerate_csv'),
+    path('order/<int:order_id>/save-cut-size/<int:accessory_id>/', views.save_cut_size, name='save_cut_size'),
     path('boards-summary/', views.boards_summary, name='boards_summary'),
     path('os-doors-summary/', views.os_doors_summary, name='os_doors_summary'),
     path('remedials/', views.remedials, name='remedials'),

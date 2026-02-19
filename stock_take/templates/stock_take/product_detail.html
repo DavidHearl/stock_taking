@@ -5,6 +5,8 @@
 
 {% block nav_stock_active %}active{% endblock %}
 
+{% block page_title %}Product Details{% endblock %}
+
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/order_details.css' %}">
 <link rel="stylesheet" href="{% static 'css/product_detail.css' %}">
@@ -228,7 +230,17 @@
                 <h3>Stock Levels &amp; Location</h3>
                 <div class="info-row">
                     <div class="info-label">Current Quantity</div>
-                    <div class="info-value" data-field="quantity" data-value="{{ product.quantity }}">{{ product.quantity }}</div>
+                    <div class="info-value qty-inline-edit" data-field="quantity" data-value="{{ product.quantity }}">
+                        <span class="qty-display" id="qty-display">{{ product.quantity }}</span>
+                        <button class="btn btn-sm btn-outline-primary qty-edit-btn" onclick="showQtyEdit()" title="Edit quantity">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <div class="qty-edit-controls" id="qty-edit-controls" style="display: none;">
+                            <input type="number" class="form-input qty-edit-input" id="qty-edit-input" value="{{ product.quantity }}" step="1" min="0">
+                            <button class="btn btn-sm btn-success" onclick="saveQuickQty()" title="Save"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-secondary" onclick="cancelQtyEdit()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                    </div>
                 </div>
                 <div class="info-row">
                     <div class="info-label">Allocated to Jobs</div>
@@ -994,6 +1006,47 @@ async function removeProductImage() {
         }
     } catch (error) {
         alert('Failed to remove image: ' + error);
+    }
+}
+
+/* ── Quick Quantity Edit ────────────────────────── */
+function showQtyEdit() {
+    document.getElementById('qty-display').style.display = 'none';
+    document.querySelector('.qty-edit-btn').style.display = 'none';
+    document.getElementById('qty-edit-controls').style.display = 'flex';
+    document.getElementById('qty-edit-input').focus();
+    document.getElementById('qty-edit-input').select();
+}
+
+function cancelQtyEdit() {
+    document.getElementById('qty-display').style.display = '';
+    document.querySelector('.qty-edit-btn').style.display = '';
+    document.getElementById('qty-edit-controls').style.display = 'none';
+    document.getElementById('qty-edit-input').value = {{ product.quantity }};
+}
+
+async function saveQuickQty() {
+    const newQty = parseInt(document.getElementById('qty-edit-input').value) || 0;
+    try {
+        const response = await fetch('{% url "update_product_quantity" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({
+                item_id: {{ product.id }},
+                quantity: newQty
+            })
+        });
+        const result = await response.json();
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to update quantity'));
+        }
+    } catch (error) {
+        alert('Failed to update quantity: ' + error);
     }
 }
 </script>

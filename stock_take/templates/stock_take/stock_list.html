@@ -50,28 +50,16 @@
 
     <!-- Action Buttons -->
     <div class="stock-header-actions">
-        <button type="button" id="updateItemsBtn" class="btn btn-success btn-sm stock-update-btn" onclick="saveAllTrackingChanges()">
+        <button type="button" id="updateItemsBtn" class="btn btn-success btn-sm stock-update-btn" onclick="saveAllChanges()">
             <i class="bi bi-save"></i> Update <span id="changesCount" class="badge badge-light">0</span>
         </button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('importModal')">
-            <i class="bi bi-upload"></i> Import CSV
-        </button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="openModal('importHistoryModal')">
-            <i class="bi bi-clock-history"></i> History
-        </button>
+        <a href="{% url 'add_product' %}" class="btn btn-primary btn-sm stock-add-btn">
+            <i class="bi bi-plus-lg"></i> Add Product
+        </a>
     </div>
 </div>
 
-<!-- Recent Import Alert -->
-{% if latest_import %}
-<div class="stock-import-alert">
-    <i class="bi bi-info-circle"></i>
-    <strong>Last Import:</strong>
-    {{ latest_import.imported_at|date:"d M Y H:i" }}
-    <span style="color: var(--text-muted);">({{ latest_import.filename }})</span>
-    <span class="import-count">{{ latest_import.record_count }} items</span>
-</div>
-{% endif %}
+
 
 <!-- Search & Filters -->
 <div class="stock-search-bar">
@@ -135,7 +123,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -158,7 +146,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -181,7 +169,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -204,7 +192,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -255,7 +243,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -306,7 +294,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -357,7 +345,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -408,7 +396,7 @@
                                 <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
                             </select>
                         </td>
-                        <td class="text-center qty-cell">{{ item.quantity }}</td>
+                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
                         <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     </tr>
                     {% endfor %}
@@ -433,80 +421,7 @@
 </div>
 {% endif %}
 
-<!-- Import Modal -->
-<div class="modal" id="importModal">
-    <div class="modal-overlay" onclick="closeModal('importModal')"></div>
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3><i class="bi bi-upload"></i> Import CSV File</h3>
-            <button type="button" class="modal-close" onclick="closeModal('importModal')">&times;</button>
-        </div>
-        <form method="post" action="{% url 'import_csv' %}" enctype="multipart/form-data">
-            {% csrf_token %}
-            <div class="modal-body">
-                <div class="alert alert-warning">
-                    <strong>Warning:</strong> This will delete all existing stock data and replace it with the imported data.
-                </div>
-                <div class="form-group">
-                    <label for="csv_file">Choose CSV File</label>
-                    <input type="file" id="csv_file" name="csv_file" accept=".csv" required
-                        style="padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); width: 100%;">
-                </div>
-                <div class="alert alert-info">
-                    <strong>CSV Format:</strong> Sku, Name, Cost, Category, Location, Quantity, SerialOrBatch
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('importModal')">Cancel</button>
-                <button type="submit" class="btn btn-primary btn-sm">Import Data</button>
-            </div>
-        </form>
-    </div>
-</div>
 
-<!-- Import History Modal -->
-<div class="modal" id="importHistoryModal">
-    <div class="modal-overlay" onclick="closeModal('importHistoryModal')"></div>
-    <div class="modal-content" style="max-width: 800px;">
-        <div class="modal-header">
-            <h3><i class="bi bi-clock-history"></i> Import History</h3>
-            <button type="button" class="modal-close" onclick="closeModal('importHistoryModal')">&times;</button>
-        </div>
-        <div class="modal-body">
-            <table class="stock-table">
-                <thead>
-                    <tr>
-                        <th>Import Date</th>
-                        <th>Filename</th>
-                        <th class="text-right">Records</th>
-                        <th class="text-center">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for import in import_history %}
-                    <tr id="import-row-{{ import.id }}">
-                        <td>{{ import.imported_at|date:"d M Y H:i" }}</td>
-                        <td>{{ import.filename }}</td>
-                        <td class="text-right">{{ import.record_count }}</td>
-                        <td class="text-center">
-                            <button class="btn btn-danger btn-sm" onclick="deleteImport({{ import.id }}, '{{ import.filename }}')">
-                                <i class="bi bi-trash"></i> Delete
-                            </button>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="4" style="text-align: center; padding: 24px; color: var(--text-muted);">No import history found</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('importHistoryModal')">Close</button>
-        </div>
-    </div>
-</div>
 
 {% endif %}
 {% endblock %}
@@ -638,17 +553,19 @@ function trackChange(selectElement) {
 function updateSaveButton() {
     const btn = document.getElementById('updateItemsBtn');
     const countBadge = document.getElementById('changesCount');
+    const total = pendingChanges.size + pendingQtyChanges.size;
     
-    if (pendingChanges.size > 0) {
+    if (total > 0) {
         btn.classList.add('visible');
-        countBadge.textContent = pendingChanges.size;
+        countBadge.textContent = total;
     } else {
         btn.classList.remove('visible');
     }
 }
 
-function saveAllTrackingChanges() {
-    if (pendingChanges.size === 0) return;
+function saveAllChanges() {
+    const totalChanges = pendingChanges.size + pendingQtyChanges.size;
+    if (totalChanges === 0) return;
     
     const btn = document.getElementById('updateItemsBtn');
     const csrfToken = '{{ csrf_token }}';
@@ -656,18 +573,33 @@ function saveAllTrackingChanges() {
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
     
-    const updatePromises = Array.from(pendingChanges.entries()).map(([itemId, trackingType]) => {
-        return fetch(`/update/${itemId}/`, {
+    const promises = [];
+    
+    // Tracking type changes
+    Array.from(pendingChanges.entries()).forEach(([itemId, trackingType]) => {
+        promises.push(fetch(`/update/${itemId}/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'X-CSRFToken': csrfToken
             },
             body: `tracking_type=${encodeURIComponent(trackingType)}&csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}`
-        });
+        }));
     });
     
-    Promise.all(updatePromises)
+    // Quantity changes
+    Array.from(pendingQtyChanges.entries()).forEach(([itemId, newQty]) => {
+        promises.push(fetch('{% url "update_product_quantity" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ item_id: itemId, quantity: newQty })
+        }));
+    });
+    
+    Promise.all(promises)
         .then(responses => {
             if (responses.every(r => r.ok)) {
                 setTimeout(() => location.reload(), 500);
@@ -678,7 +610,8 @@ function saveAllTrackingChanges() {
         .catch(() => {
             alert('Error updating items. Please try again.');
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-save"></i> Update <span id="changesCount" class="badge badge-light">' + pendingChanges.size + '</span>';
+            const count = pendingChanges.size + pendingQtyChanges.size;
+            btn.innerHTML = '<i class="bi bi-save"></i> Update <span id="changesCount" class="badge badge-light">' + count + '</span>';
         });
 }
 
@@ -692,27 +625,85 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-/* ── Delete Import ──────────────────────────────── */
-function deleteImport(importId, filename) {
-    if (!confirm(`Delete the import record for "${filename}"?`)) return;
-    
-    fetch(`/stock/delete-import/${importId}/`, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            const row = document.getElementById(`import-row-${importId}`);
-            if (row) row.remove();
+/* ── Inline Quantity Edit ───────────────────────── */
+let activeQtyCell = null;
+const pendingQtyChanges = new Map(); // itemId -> newQty
+
+function startQtyEdit(td) {
+    // Don't re-enter if already editing this cell
+    if (td === activeQtyCell) return;
+    // Close any existing edit
+    cancelActiveQtyEdit();
+
+    activeQtyCell = td;
+    const itemId = td.dataset.itemId;
+    // Use pending value if one exists, otherwise current
+    const currentQty = pendingQtyChanges.has(itemId) ? pendingQtyChanges.get(itemId) : td.dataset.qty;
+    td.innerHTML = `<input type="number" class="qty-inline-input" value="${currentQty}" min="0" step="1"
+        data-item-id="${itemId}" data-original="${td.dataset.qty}"
+        onkeydown="handleQtyKey(event, this)"
+        onblur="stageQtyEdit(this)">`;
+    const input = td.querySelector('input');
+    input.focus();
+    input.select();
+}
+
+function handleQtyKey(e, input) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        const itemId = input.dataset.itemId;
+        const original = input.dataset.original;
+        const td = input.closest('td');
+        // Revert: remove pending change and restore original
+        pendingQtyChanges.delete(itemId);
+        td.textContent = original;
+        td.style.color = '';
+        td.style.fontWeight = '';
+        activeQtyCell = null;
+        updateSaveButton();
+    }
+}
+
+function stageQtyEdit(input) {
+    const td = input.closest('td');
+    const itemId = input.dataset.itemId;
+    const original = parseInt(input.dataset.original);
+    const newQty = parseInt(input.value) || 0;
+
+    if (newQty === original) {
+        // No change — remove any pending and restore
+        pendingQtyChanges.delete(itemId);
+        td.textContent = original;
+        td.style.color = '';
+        td.style.fontWeight = '';
+    } else {
+        // Stage the change — show visually but don't save yet
+        pendingQtyChanges.set(itemId, newQty);
+        td.textContent = newQty;
+        td.dataset.qty = original; // keep original for revert
+        td.style.color = 'var(--accent-green, #4caf50)';
+        td.style.fontWeight = '600';
+    }
+    activeQtyCell = null;
+    updateSaveButton();
+}
+
+function cancelActiveQtyEdit() {
+    if (!activeQtyCell) return;
+    const input = activeQtyCell.querySelector('input');
+    if (input) {
+        const itemId = input.dataset.itemId;
+        const original = input.dataset.original;
+        if (pendingQtyChanges.has(itemId)) {
+            activeQtyCell.textContent = pendingQtyChanges.get(itemId);
         } else {
-            alert('Error: ' + (data.error || 'Unknown'));
+            activeQtyCell.textContent = original;
         }
-    })
-    .catch(() => alert('Network error'));
+    }
+    activeQtyCell = null;
 }
 </script>
 {% endblock %}

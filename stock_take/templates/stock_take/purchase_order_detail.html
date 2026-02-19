@@ -4,8 +4,9 @@
 
 {% block title %}{{ purchase_order.display_number }} - Purchase Order{% endblock %}
 
-{% block nav_stock_active %}active{% endblock %}
 {% block nav_purchase_orders_active %}active{% endblock %}
+
+{% block page_title %}Purchase Order Details{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
@@ -353,11 +354,18 @@
                         <td>
                             <div class="product-name-row">
                                 <span class="po-view-val">{{ product.name|default:"-" }}</span>
-                                <button class="alloc-link-btn" onclick="event.stopPropagation(); toggleAllocRow({{ product.id }})" title="Link to customer orders">
-                                    <i class="bi bi-link-45deg"></i>
-                                    {% if product.allocations.count %}<span class="alloc-count">{{ product.allocations.count }}</span>{% endif %}
+                                {% if purchase_order.project_name == 'Stock' %}
+                                <button class="alloc-link-btn" onclick="event.stopPropagation(); toggleAllocRow({{ product.id }})" title="Allocate stock to customer orders">
+                                    <i class="bi bi-diagram-3"></i>
+                                    {% if product.allocations.count %}
+                                    <span class="alloc-count">{{ product.allocations.count }}</span>
+                                    {% endif %}
                                 </button>
+                                {% endif %}
                             </div>
+                            {% if product.description %}
+                            <div class="po-product-description po-view-val">{{ product.description }}</div>
+                            {% endif %}
                             <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
                         </td>
                         <td class="text-right">
@@ -384,31 +392,48 @@
                             <button class="btn-inline-delete" onclick="deleteProduct({{ product.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
                         </td>
                     </tr>
-                    <tr class="allocation-row" id="alloc-row-{{ product.id }}" data-product-id="{{ product.id }}" style="display:none;">
-                        <td colspan="8">
-                            <div class="allocation-container">
-                                <div class="allocation-tags" id="alloc-tags-{{ product.id }}">
-                                    {% for alloc in product.allocations.all %}
-                                    <span class="allocation-tag" data-alloc-id="{{ alloc.id }}">
-                                        <a href="{% url 'order_details' alloc.order.id %}" class="alloc-link">{{ alloc.order.sale_number }}</a>
-                                        <span class="alloc-customer">{% if alloc.order.customer %}{{ alloc.order.customer }}{% elif alloc.order.first_name %}{{ alloc.order.first_name }} {{ alloc.order.last_name }}{% else %}Unknown{% endif %}</span>
-                                        <span class="alloc-qty">x{{ alloc.quantity|floatformat:0 }}</span>
-                                        <button class="alloc-remove" onclick="event.stopPropagation(); removeAllocation({{ purchase_order.workguru_id }}, {{ product.id }}, {{ alloc.id }}, this)" title="Remove">&times;</button>
-                                    </span>
-                                    {% endfor %}
-                                </div>
-                                <div class="alloc-form" id="alloc-form-{{ product.id }}">
-                                    <div class="alloc-search-wrapper">
-                                        <input type="text" class="alloc-order-search" id="alloc-search-{{ product.id }}" placeholder="Search by name or order number..." autocomplete="off" oninput="searchOrders(this.value, {{ product.id }})">
-                                        <input type="hidden" id="alloc-order-{{ product.id }}">
-                                        <div class="alloc-search-results" id="alloc-results-{{ product.id }}"></div>
-                                    </div>
-                                    <input type="number" class="alloc-qty-input" id="alloc-qty-{{ product.id }}" value="1" min="1" step="1" placeholder="Qty">
-                                    <button class="alloc-save-btn" onclick="saveAllocation({{ purchase_order.workguru_id }}, {{ product.id }})" title="Add"><i class="bi bi-check-lg"></i></button>
+                    {% if purchase_order.project_name == 'Stock' %}
+                    {# Sub-allocation rows for stock POs - shown as indented rows #}
+                    {% for alloc in product.allocations.all %}
+                    <tr class="alloc-sub-row" data-product-id="{{ product.id }}" data-alloc-id="{{ alloc.id }}">
+                        <td></td>
+                        <td colspan="2">
+                            <div class="alloc-sub-detail">
+                                <i class="bi bi-arrow-return-right alloc-sub-indent"></i>
+                                <a href="{% url 'order_details' alloc.order.id %}" class="alloc-sub-link">{{ alloc.order.sale_number }}</a>
+                                <span class="alloc-sub-customer">{% if alloc.order.customer %}{{ alloc.order.customer }}{% elif alloc.order.first_name %}{{ alloc.order.first_name }} {{ alloc.order.last_name }}{% else %}Unknown{% endif %}</span>
+                            </div>
+                        </td>
+                        <td class="text-right"><span class="alloc-sub-qty">{{ alloc.quantity|floatformat:0 }}</span></td>
+                        <td colspan="3"></td>
+                        <td class="text-center">
+                            <button class="alloc-sub-remove" onclick="removeAllocation({{ purchase_order.workguru_id }}, {{ product.id }}, {{ alloc.id }}, this)" title="Remove allocation"><i class="bi bi-x-lg"></i></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {# Add allocation form row (hidden, toggled by the alloc button) #}
+                    <tr class="alloc-sub-add-row" id="alloc-row-{{ product.id }}" data-product-id="{{ product.id }}" style="display:none;">
+                        <td></td>
+                        <td colspan="2">
+                            <div class="alloc-sub-detail">
+                                <i class="bi bi-arrow-return-right alloc-sub-indent"></i>
+                                <div class="alloc-search-wrapper">
+                                    <input type="text" class="alloc-order-search" id="alloc-search-{{ product.id }}" placeholder="Search by name or order number..." autocomplete="off" oninput="searchOrders(this.value, {{ product.id }})">
+                                    <input type="hidden" id="alloc-order-{{ product.id }}">
+                                    <div class="alloc-search-results" id="alloc-results-{{ product.id }}"></div>
                                 </div>
                             </div>
                         </td>
+                        <td class="text-right">
+                            <input type="number" class="alloc-qty-input" id="alloc-qty-{{ product.id }}" value="1" min="1" step="1" placeholder="Qty">
+                        </td>
+                        <td colspan="3"></td>
+                        <td class="text-center">
+                            <button class="alloc-save-btn" onclick="saveAllocation({{ purchase_order.workguru_id }}, {{ product.id }})" title="Add"><i class="bi bi-check-lg"></i></button>
+                            <button class="alloc-sub-remove" onclick="toggleAllocRow({{ product.id }})" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </td>
                     </tr>
+                    {% endif %}
                     {% empty %}
                     {% endfor %}
                     {% for bp in board_product_rows %}
@@ -683,6 +708,8 @@
                 <textarea id="send-body" class="modal-textarea" rows="8">Dear {{ purchase_order.supplier_name|default:"Supplier" }},
 
 Please find attached Purchase Order {{ purchase_order.display_number }}.
+
+Expected delivery date: {{ expected_delivery_date }}
 
 If you have any questions, please do not hesitate to contact us.
 
@@ -1470,33 +1497,46 @@ function saveAllocation(poId, productId) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            const tagsContainer = document.getElementById('alloc-tags-' + productId);
-            const tag = document.createElement('span');
-            tag.className = 'allocation-tag';
-            tag.dataset.allocId = data.allocation.id;
-            tag.innerHTML = `
-                <a href="/order/${data.allocation.order_id}/" class="alloc-link">${data.allocation.sale_number}</a>
-                <span class="alloc-customer">${data.allocation.customer_name}</span>
-                <span class="alloc-qty">x${Math.round(data.allocation.quantity)}</span>
-                <button class="alloc-remove" onclick="event.stopPropagation(); removeAllocation(${poId}, ${productId}, ${data.allocation.id}, this)" title="Remove">&times;</button>
+            // Insert a new sub-row before the add-form row
+            const addRow = document.getElementById('alloc-row-' + productId);
+            const newRow = document.createElement('tr');
+            newRow.className = 'alloc-sub-row';
+            newRow.dataset.productId = productId;
+            newRow.dataset.allocId = data.allocation.id;
+            newRow.innerHTML = `
+                <td></td>
+                <td colspan="2">
+                    <div class="alloc-sub-detail">
+                        <i class="bi bi-arrow-return-right alloc-sub-indent"></i>
+                        <a href="/order/${data.allocation.order_id}/" class="alloc-sub-link">${data.allocation.sale_number}</a>
+                        <span class="alloc-sub-customer">${data.allocation.customer_name}</span>
+                    </div>
+                </td>
+                <td class="text-right"><span class="alloc-sub-qty">${Math.round(data.allocation.quantity)}</span></td>
+                <td colspan="3"></td>
+                <td class="text-center">
+                    <button class="alloc-sub-remove" onclick="removeAllocation(${poId}, ${productId}, ${data.allocation.id}, this)" title="Remove allocation"><i class="bi bi-x-lg"></i></button>
+                </td>
             `;
-            tagsContainer.appendChild(tag);
+            addRow.parentNode.insertBefore(newRow, addRow);
 
-            // Update the count badge on the link button
-            const productRow = document.querySelector(`tr[data-product-id='${productId}']`);
+            // Update the count badge on the alloc button
+            const productRow = document.querySelector(`tr[data-product-id='${productId}']:not(.alloc-sub-row):not(.alloc-sub-add-row)`);
+            const subRowCount = document.querySelectorAll(`tr.alloc-sub-row[data-product-id='${productId}']`).length;
             const badge = productRow.querySelector('.alloc-count');
-            const tagCount = document.getElementById('alloc-tags-' + productId).querySelectorAll('.allocation-tag').length;
             if (badge) {
-                badge.textContent = tagCount;
+                badge.textContent = subRowCount;
             } else {
                 const btn = productRow.querySelector('.alloc-link-btn');
-                const span = document.createElement('span');
-                span.className = 'alloc-count';
-                span.textContent = tagCount;
-                btn.appendChild(span);
+                if (btn) {
+                    const span = document.createElement('span');
+                    span.className = 'alloc-count';
+                    span.textContent = subRowCount;
+                    btn.appendChild(span);
+                }
             }
 
-            // Reset search but keep row visible for more allocations
+            // Reset search but keep row visible
             document.getElementById('alloc-search-' + productId).value = '';
             document.getElementById('alloc-order-' + productId).value = '';
             document.getElementById('alloc-qty-' + productId).value = '1';
@@ -1521,15 +1561,18 @@ function removeAllocation(poId, productId, allocId, btn) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            const tag = btn.closest('.allocation-tag');
-            tag.remove();
+            // Remove the sub-row
+            const subRow = btn.closest('tr.alloc-sub-row');
+            if (subRow) {
+                subRow.remove();
+            }
 
             // Update the count badge
-            const productRow = document.querySelector(`tr[data-product-id='${productId}']`);
-            const tagCount = document.getElementById('alloc-tags-' + productId).querySelectorAll('.allocation-tag').length;
-            const badge = productRow.querySelector('.alloc-count');
-            if (tagCount > 0 && badge) {
-                badge.textContent = tagCount;
+            const productRow = document.querySelector(`tr[data-product-id='${productId}']:not(.alloc-sub-row):not(.alloc-sub-add-row)`);
+            const subRowCount = document.querySelectorAll(`tr.alloc-sub-row[data-product-id='${productId}']`).length;
+            const badge = productRow ? productRow.querySelector('.alloc-count') : null;
+            if (subRowCount > 0 && badge) {
+                badge.textContent = subRowCount;
             } else if (badge) {
                 badge.remove();
             }
@@ -1547,12 +1590,15 @@ function autoCalcExpectedDate() {
     const issueDateInput = document.getElementById('po-issue-date');
     const expectedDateInput = document.getElementById('po-expected-date');
     if (!issueDateInput || !expectedDateInput || !issueDateInput.value) return;
-    const issueDate = new Date(issueDateInput.value);
-    if (isNaN(issueDate)) return;
-    issueDate.setDate(issueDate.getDate() + leadTimeDays);
-    const yyyy = issueDate.getFullYear();
-    const mm = String(issueDate.getMonth() + 1).padStart(2, '0');
-    const dd = String(issueDate.getDate()).padStart(2, '0');
+    const d = new Date(issueDateInput.value);
+    if (isNaN(d)) return;
+    d.setDate(d.getDate() + leadTimeDays);
+    // Push weekends to Monday
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2); // Saturday → Monday
+    if (d.getDay() === 0) d.setDate(d.getDate() + 1); // Sunday → Monday
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
     expectedDateInput.value = `${yyyy}-${mm}-${dd}`;
 }
 

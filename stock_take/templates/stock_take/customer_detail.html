@@ -3,8 +3,9 @@
 
 {% block title %}{{ customer.name }} - Customer{% endblock %}
 
-{% block nav_stock_active %}active{% endblock %}
 {% block nav_customers_active %}active{% endblock %}
+
+{% block page_title %}Customer Details{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
@@ -217,7 +218,7 @@
                             </td>
                             <td>{{ sale.activity_type|default:"-" }}</td>
                             <td>
-                                <span class="order-status-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}finished{% else %}active{% endif %}">
+                                <span class="order-status-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}status-complete{% elif sale.status|lower == 'closed' %}status-closed{% elif sale.status|lower == 'dead' %}status-dead{% elif sale.status|lower == 'open' %}status-open{% else %}status-open{% endif %}">
                                     {{ sale.status|default:"-" }}
                                 </span>
                             </td>
@@ -338,10 +339,45 @@
 
         <!-- Invoices Tab -->
         <div class="customer-tab-content" id="tab-invoices">
+            {% if invoices %}
+            <div class="customer-table-container">
+                <table class="customer-orders-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Date</th>
+                            <th>Due Date</th>
+                            <th>Total</th>
+                            <th>Paid</th>
+                            <th>Outstanding</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inv in invoices %}
+                        <tr>
+                            <td>{{ inv.invoice_number }}</td>
+                            <td>{{ inv.date|date:"d/m/Y"|default:"-" }}</td>
+                            <td>{{ inv.due_date|date:"d/m/Y"|default:"-" }}</td>
+                            <td>£{{ inv.total|floatformat:2 }}</td>
+                            <td>£{{ inv.amount_paid|floatformat:2 }}</td>
+                            <td>£{{ inv.amount_outstanding|floatformat:2 }}</td>
+                            <td>
+                                <span class="order-status-badge {% if inv.payment_status == 'paid' %}status-complete{% elif inv.payment_status == 'partial' %}status-open{% elif inv.is_overdue %}status-dead{% else %}status-open{% endif %}">
+                                    {% if inv.is_overdue %}Overdue{% else %}{{ inv.get_payment_status_display }}{% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
             <div class="customer-tab-empty">
                 <i class="bi bi-receipt"></i>
-                <p>Invoice data will be available once synced from WorkGuru.</p>
+                <p>No invoices linked to this customer.</p>
             </div>
+            {% endif %}
         </div>
 
         <!-- Quotes Tab -->

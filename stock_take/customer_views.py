@@ -3,7 +3,7 @@ from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
 from django.db.models import Count, Max, Sum, Q
 from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-from .models import Customer, Order, PurchaseOrder, AnthillSale
+from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice
 import logging
 import requests
 import json
@@ -371,6 +371,9 @@ def customer_detail(request, pk):
     # Get Anthill sales for this customer
     anthill_sales = customer.anthill_sales.all().order_by('-activity_date')
 
+    # Get invoices linked to this customer
+    invoices = Invoice.objects.filter(customer=customer).order_by('-date')
+
     # Get contacts from raw_data
     contacts = []
     if customer.raw_data and isinstance(customer.raw_data, dict):
@@ -383,6 +386,8 @@ def customer_detail(request, pk):
         'contacts': contacts,
         'anthill_sales': anthill_sales,
         'anthill_sales_count': anthill_sales.count(),
+        'invoices': invoices,
+        'invoice_count': invoices.count(),
     }
 
     return render(request, 'stock_take/customer_detail.html', context)

@@ -257,6 +257,15 @@ def generate_purchase_order_pdf(purchase_order, products):
         Paragraph('<b>PO Number:</b>', styles['LabelText']),
         Paragraph(purchase_order.display_number or '', styles['ValueText']),
     ])
+    # Expected delivery date
+    expected_str = ''
+    if purchase_order.expected_date:
+        expected_str = _format_date(purchase_order.expected_date)
+    if expected_str:
+        right_data.append([
+            Paragraph('<b>Expected:</b>', styles['LabelText']),
+            Paragraph(expected_str, styles['ValueText']),
+        ])
     # ABN from supplier
     abn = ''
     if supplier and supplier.abn:
@@ -353,16 +362,21 @@ def generate_purchase_order_pdf(purchase_order, products):
         # Use supplier_code from the linked StockItem if available, then fall back
         # to the code stored directly on the PO line
         code = ''
-        if product.stock_item and product.stock_item.supplier_code:
+        if product.stock_item and product.stock_item.supplier_code and product.stock_item.supplier_code.strip() not in ('', '-'):
             code = product.stock_item.supplier_code
-        elif product.supplier_code:
+        elif product.supplier_code and product.supplier_code.strip() not in ('', '-'):
             code = product.supplier_code
         else:
             code = product.sku or ''
 
+        # Combine name and description for display
+        desc_text = str(product.name or '')
+        if product.description and product.description != desc_text:
+            desc_text = f'{desc_text}<br/><font size="7" color="#6b7280">{product.description}</font>' if desc_text else str(product.description)
+
         table_data.append([
             Paragraph(str(code), styles['CellText']),
-            Paragraph(str(product.name or product.description or ''), styles['CellText']),
+            Paragraph(desc_text, styles['CellText']),
             Paragraph(f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}', styles['CellTextRight']),
             Paragraph(f'{rate:,.2f}', styles['CellTextRight']),
             Paragraph(f'{line_total:,.2f}', styles['CellTextRight']),

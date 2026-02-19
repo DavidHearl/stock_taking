@@ -5,7 +5,7 @@ from django.db.models.functions import TruncWeek, TruncMonth
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
-from .models import Order, PurchaseOrder
+from .models import Order, PurchaseOrder, StockItem
 
 
 @login_required
@@ -33,7 +33,7 @@ def dashboard(request):
     while current_date <= today:
         # Get Monday of the week
         week_start = current_date - timedelta(days=current_date.weekday())
-        weeks_data[week_start] = {'fits': 0, 'profit': Decimal('0.00')}
+        weeks_data[week_start] = {'fits': 0, 'sales': Decimal('0.00')}
         current_date += timedelta(weeks=1)
     
     # Fill in actual data by iterating through orders
@@ -41,7 +41,7 @@ def dashboard(request):
         week_start = order.fit_date - timedelta(days=order.fit_date.weekday())
         if week_start in weeks_data:
             weeks_data[week_start]['fits'] += 1
-            weeks_data[week_start]['profit'] += order.profit
+            weeks_data[week_start]['sales'] += order.total_value_exc_vat or Decimal('0.00')
     
     # Convert to lists for Chart.js (sorted by week)
     sorted_weeks = sorted(weeks_data.items())
@@ -59,7 +59,14 @@ def dashboard(request):
     
     labels = [week.strftime('%d %b %Y') for week, _ in sorted_weeks]
     fits_values = [data['fits'] for _, data in sorted_weeks]
-    profit_values = [float(data['profit']) for _, data in sorted_weeks]
+    sales_values = [float(data['sales']) for _, data in sorted_weeks]
+    
+    # This week's sale value
+    this_week_start = today - timedelta(days=today.weekday())
+    this_week_sales = Order.objects.filter(
+        fit_date__gte=this_week_start,
+        fit_date__lte=today
+    ).aggregate(total=Sum('total_value_exc_vat'))['total'] or Decimal('0.00')
     
     # Get count of approved POs waiting to arrive
     pending_pos = PurchaseOrder.objects.filter(
@@ -67,6 +74,11 @@ def dashboard(request):
     ).exclude(
         status__in=['Received', 'Invoiced', 'Cancelled', 'Closed']
     ).count()
+    
+    # Total stock value
+    stock_items = StockItem.objects.filter(tracking_type='stock', quantity__gt=0)
+    total_stock_value = sum(item.cost * item.quantity for item in stock_items) or Decimal('0.00')
+    stock_item_count = stock_items.count()
     
     # Monthly board costs - aggregate materials_cost by month over last 12 months
     twelve_months_ago = today.replace(day=1) - timedelta(days=365)
@@ -113,14 +125,17 @@ def dashboard(request):
             'labels': labels,
             'values': fits_values,
         }),
-        'profit_chart_data': json.dumps({
+        'sales_chart_data': json.dumps({
             'labels': labels,
-            'values': profit_values,
+            'values': sales_values,
         }),
         'board_cost_chart_data': json.dumps({
             'labels': board_cost_labels,
             'values': board_cost_values,
         }),
         'pending_pos_count': pending_pos,
+        'total_stock_value': '{:,.0f}'.format(total_stock_value),
+        'stock_item_count': '{:,}'.format(stock_item_count),
+        'this_week_sales': '{:,.0f}'.format(this_week_sales),
     }
     return render(request, 'stock_take/dashboard.html', context)

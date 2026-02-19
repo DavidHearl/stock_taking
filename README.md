@@ -131,7 +131,87 @@ For a typical small stock-taking application:
 - Click on map markers to see order details
 - Use "Fit All" to show all locations, "Reset View" to return to Northern Ireland overview
 
+---
 
+## Anthill CRM Sync
+
+Import customers and sales data from Anthill CRM into the local database.
+
+### Standalone Script
+
+```bash
+# Full sync (customers + sales)
+python sync_anthill_customers.py
+
+# Only sync sales for existing customers
+python sync_anthill_customers.py --sales-only
+
+# Only import new customers (skip sales phase)
+python sync_anthill_customers.py --skip-sales
+
+# Import last 365 days only
+python sync_anthill_customers.py --days 365
+
+# Dry run — preview what would be synced without saving
+python sync_anthill_customers.py --dry-run
+```
+
+### Management Command
+
+```bash
+# Full sync with customer details
+python manage.py sync_anthill_customers
+
+# Dry run
+python manage.py sync_anthill_customers --dry-run
+
+# Limit to first 100 customers
+python manage.py sync_anthill_customers --limit 100
+
+# Skip fetching full customer details (faster)
+python manage.py sync_anthill_customers --skip-details
+```
+
+---
+
+## Xero Integration
+
+Match local customers to Xero contacts and fetch invoice payment data.
+
+> **Prerequisite:** You must first connect to Xero via the **Xero Status** page
+> in the web app (`/xero/status/`). This establishes the OAuth2 token needed for
+> all API calls.
+
+### Sync Customers to Xero
+
+Fetches all contacts from Xero and matches them to local Customer records by
+name. Stores the Xero Contact ID on each matched customer.
+
+```bash
+# Full customer sync
+python manage.py sync_xero_customers
+
+# Dry run — see what would be matched without saving
+python manage.py sync_xero_customers --dry-run
+```
+
+### Sync Invoices from Xero
+
+For every customer with a confirmed Xero Contact ID, fetches their invoices and
+updates (or creates) local Invoice records with payment status.
+
+```bash
+# Full invoice sync
+python manage.py sync_xero_invoices
+
+# Dry run — preview without saving
+python manage.py sync_xero_invoices --dry-run
+
+# Sync invoices for a single customer (by database PK)
+python manage.py sync_xero_invoices --customer 123
+```
+
+---
 
 ## Colour Pallet
 Background Colour #272831 - 39, 40, 49

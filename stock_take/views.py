@@ -249,42 +249,42 @@ def load_order_details_ajax(request, sale_number):
     price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
     
-    try:
-        order = Order.objects.select_related('boards_po').prefetch_related(
-            'accessories__stock_item',
-            'boards_po__pnx_items',
-            'os_doors'
-        ).get(sale_number=sale_number)
-        
-        # Load PNX items if boards_po exists
-        if order.boards_po:
-            order.order_pnx_items = list(order.boards_po.pnx_items.filter(customer__icontains=order.sale_number))
-            # Calculate cost for each item and total
-            for item in order.order_pnx_items:
-                item.calculated_cost = item.get_cost(price_per_sqm)
-            order.pnx_total_cost = sum(item.calculated_cost for item in order.order_pnx_items)
-        else:
-            order.order_pnx_items = []
-            order.pnx_total_cost = 0
-        
-        # Separate glass items from accessories
-        all_accessories = order.accessories.all()
-        glass_items = [acc for acc in all_accessories if acc.sku.upper().startswith('GLS')]
-        raumplus_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS') and '_RAU_' in acc.sku.upper()]
-        non_glass_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS') and '_RAU_' not in acc.sku.upper()]
-        
-        # Render the detail row HTML
-        html = render_to_string('stock_take/partials/order_detail_row.html', {
-            'order': order,
-            'price_per_sqm': price_per_sqm,
-            'glass_items': glass_items,
-            'raumplus_accessories': raumplus_accessories,
-            'non_glass_accessories': non_glass_accessories,
-        })
-        
-        return JsonResponse({'success': True, 'html': html})
-    except Order.DoesNotExist:
+    order = Order.objects.select_related('boards_po').prefetch_related(
+        'accessories__stock_item',
+        'boards_po__pnx_items',
+        'os_doors'
+    ).filter(sale_number=sale_number).first()
+    
+    if not order:
         return JsonResponse({'success': False, 'error': 'Order not found'})
+    
+    # Load PNX items if boards_po exists
+    if order.boards_po:
+        order.order_pnx_items = list(order.boards_po.pnx_items.filter(customer__icontains=order.sale_number))
+        # Calculate cost for each item and total
+        for item in order.order_pnx_items:
+            item.calculated_cost = item.get_cost(price_per_sqm)
+        order.pnx_total_cost = sum(item.calculated_cost for item in order.order_pnx_items)
+    else:
+        order.order_pnx_items = []
+        order.pnx_total_cost = 0
+    
+    # Separate glass items from accessories
+    all_accessories = order.accessories.all()
+    glass_items = [acc for acc in all_accessories if acc.sku.upper().startswith('GLS')]
+    raumplus_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS') and '_RAU_' in acc.sku.upper()]
+    non_glass_accessories = [acc for acc in all_accessories if not acc.sku.upper().startswith('GLS') and '_RAU_' not in acc.sku.upper()]
+    
+    # Render the detail row HTML
+    html = render_to_string('stock_take/partials/order_detail_row.html', {
+        'order': order,
+        'price_per_sqm': price_per_sqm,
+        'glass_items': glass_items,
+        'raumplus_accessories': raumplus_accessories,
+        'non_glass_accessories': non_glass_accessories,
+    })
+    
+    return JsonResponse({'success': True, 'html': html})
 
 @login_required
 def load_order_indicators_ajax(request):
@@ -1733,6 +1733,21 @@ def add_board_item(request):
         try:
             data = json.loads(request.body)
             boards_po_id = data.get('boards_po_id')
+            order_id = data.get('order_id')
+            
+            # If no boards_po_id provided, try to auto-resolve from the order
+            if not boards_po_id and order_id:
+                try:
+                    order_obj = Order.objects.get(id=order_id)
+                    all_pos = order_obj.all_boards_pos
+                    if len(all_pos) == 1:
+                        boards_po_id = all_pos[0].id
+                    elif len(all_pos) == 0:
+                        return JsonResponse({'success': False, 'error': 'No Boards PO assigned to this order. Assign one in the Job Info section first.'})
+                    else:
+                        return JsonResponse({'success': False, 'error': 'Multiple Boards POs found. Please select which one to add the board to.'})
+                except Order.DoesNotExist:
+                    return JsonResponse({'success': False, 'error': 'Order not found'})
             
             if not boards_po_id:
                 return JsonResponse({'success': False, 'error': 'No Boards PO specified'})
@@ -2242,11 +2257,21 @@ def add_accessories_to_po(request):
         added = 0
         for acc in accessories:
             max_sort += 1
+            # Build description — cut-to-size dimensions so they appear on the PO
+            # For customer POs the order is already shown in the Project section,
+            # so only include the order reference for Stock POs.
+            desc_parts = []
+            if acc.cut_width and acc.cut_height:
+                desc_parts.append(f'{acc.cut_width:.0f} x {acc.cut_height:.0f}mm')
+            if po.project_name == 'Stock' and acc.order:
+                desc_parts.append(f'For order {acc.order.sale_number}')
+            description = ' | '.join(desc_parts)
+
             PurchaseOrderProduct.objects.create(
                 purchase_order=po,
                 sku=acc.sku or '',
                 name=acc.name or '',
-                description=f'For order {acc.order.sale_number}' if acc.order else '',
+                description=description,
                 order_price=acc.cost_price or 0,
                 order_quantity=acc.quantity or 0,
                 line_total=round(float(acc.cost_price or 0) * float(acc.quantity or 0), 2),
@@ -4251,6 +4276,54 @@ def schedule_update_status(request, schedule_id):
     
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
+@login_required
+def update_product_quantity(request):
+    """Quick AJAX endpoint to update a product's quantity and log stock history"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+    try:
+        import json
+        data = json.loads(request.body)
+        item_id = data.get('item_id')
+        new_quantity = int(data.get('quantity', 0))
+        reason = data.get('reason', '').strip()
+
+        item = StockItem.objects.get(id=item_id)
+        old_quantity = item.quantity
+        change_amount = new_quantity - old_quantity
+
+        if change_amount == 0:
+            return JsonResponse({'success': True, 'message': 'No change', 'quantity': item.quantity})
+
+        item.quantity = new_quantity
+        item.last_checked = timezone.now()
+        item.save()
+
+        # Log stock history
+        StockHistory.objects.create(
+            stock_item=item,
+            quantity=new_quantity,
+            change_amount=change_amount,
+            change_type='adjustment',
+            reference='',
+            notes=reason or f'Manual quantity update from {old_quantity} to {new_quantity}',
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        # Clear cache
+        from django.core.cache import cache
+        cache.clear()
+
+        return JsonResponse({
+            'success': True,
+            'quantity': item.quantity,
+            'total_value': float(item.cost * item.quantity),
+        })
+    except StockItem.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Product not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+
 def update_item(request, item_id):
     """Update a single stock item via AJAX"""
     if request.method == 'POST':
@@ -5377,6 +5450,56 @@ def add_accessory_item(request, order_id):
             return JsonResponse({'success': False, 'error': str(e)})
     
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def save_cut_size(request, order_id, accessory_id):
+    """Save cut-to-size dimensions for a glass accessory item."""
+    import json
+    from decimal import Decimal, InvalidOperation
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    order = get_object_or_404(Order, id=order_id)
+    accessory = get_object_or_404(Accessory, id=accessory_id, order=order)
+
+    try:
+        data = json.loads(request.body)
+        width_val = data.get('cut_width')
+        height_val = data.get('cut_height')
+        width_raw = str(width_val).strip() if width_val not in (None, '') else ''
+        height_raw = str(height_val).strip() if height_val not in (None, '') else ''
+
+        accessory.cut_width = Decimal(width_raw) if width_raw else None
+        accessory.cut_height = Decimal(height_raw) if height_raw else None
+        accessory.save(update_fields=['cut_width', 'cut_height'])
+
+        # ── Propagate dimensions to any existing PO product lines ──
+        # Match by stock_item + PO linked to the same order (project_number)
+        if accessory.stock_item and accessory.order:
+            from .models import PurchaseOrderProduct
+            po_products = PurchaseOrderProduct.objects.filter(
+                stock_item=accessory.stock_item,
+                purchase_order__project_number=accessory.order.sale_number,
+            )
+            for po_prod in po_products:
+                desc_parts = []
+                if accessory.cut_width and accessory.cut_height:
+                    desc_parts.append(f'{accessory.cut_width:.0f} x {accessory.cut_height:.0f}mm')
+                # Only include order ref for Stock POs
+                if po_prod.purchase_order.project_name == 'Stock' and accessory.order:
+                    desc_parts.append(f'For order {accessory.order.sale_number}')
+                po_prod.description = ' | '.join(desc_parts)
+                po_prod.save(update_fields=['description'])
+
+        return JsonResponse({
+            'success': True,
+            'cut_width': float(accessory.cut_width) if accessory.cut_width else None,
+            'cut_height': float(accessory.cut_height) if accessory.cut_height else None,
+        })
+    except (json.JSONDecodeError, InvalidOperation) as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
 
 @login_required
