@@ -48,23 +48,33 @@ def customers_list(request):
         )
     ).order_by('name', 'last_name', 'first_name')
 
-    # Apply location filter from profile
-    if location_filter:
+    # Apply location filter from profile (skip when searching so results
+    # include customers whose record has no location set)
+    if location_filter and not search_query:
         customers_base = customers_base.filter(location__iexact=location_filter)
 
     # Build search Q filter
     search_q = None
     if search_query:
-        search_q = (
-            Q(name__icontains=search_query) |
-            Q(first_name__icontains=search_query) |
-            Q(last_name__icontains=search_query) |
-            Q(email__icontains=search_query) |
-            Q(phone__icontains=search_query) |
-            Q(code__icontains=search_query) |
-            Q(city__icontains=search_query) |
-            Q(postcode__icontains=search_query)
-        )
+        # Split into individual terms so "Lewis McKee" matches
+        # first_name="Lewis" + last_name="McKee"
+        terms = search_query.split()
+        per_term_qs = []
+        for term in terms:
+            per_term_qs.append(
+                Q(name__icontains=term) |
+                Q(first_name__icontains=term) |
+                Q(last_name__icontains=term) |
+                Q(email__icontains=term) |
+                Q(phone__icontains=term) |
+                Q(code__icontains=term) |
+                Q(city__icontains=term) |
+                Q(postcode__icontains=term)
+            )
+        # All terms must match (AND), but each term can match any field
+        search_q = per_term_qs[0]
+        for extra in per_term_qs[1:]:
+            search_q &= extra
 
     # Date bracket filters
     def bracket_filter(qs, bracket):
@@ -406,19 +416,27 @@ def sales_list(request):
 
     sales_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
 
-    if location_filter:
+    if location_filter and not search_query:
         sales_base = sales_base.filter(location__iexact=location_filter)
 
-    # Search
+    # Search — split into individual terms so multi-word searches work
     search_q = None
     if search_query:
-        search_q = (
-            Q(customer_name__icontains=search_query) |
-            Q(anthill_activity_id__icontains=search_query) |
-            Q(activity_type__icontains=search_query) |
-            Q(status__icontains=search_query) |
-            Q(customer__name__icontains=search_query)
-        )
+        terms = search_query.split()
+        per_term_qs = []
+        for term in terms:
+            per_term_qs.append(
+                Q(customer_name__icontains=term) |
+                Q(anthill_activity_id__icontains=term) |
+                Q(activity_type__icontains=term) |
+                Q(status__icontains=term) |
+                Q(customer__name__icontains=term) |
+                Q(customer__first_name__icontains=term) |
+                Q(customer__last_name__icontains=term)
+            )
+        search_q = per_term_qs[0]
+        for extra in per_term_qs[1:]:
+            search_q &= extra
 
     # Date bracket filters
     def bracket_filter(qs, bracket):
