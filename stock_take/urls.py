@@ -5,7 +5,7 @@ from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, sales_list, sale_detail
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
@@ -60,6 +60,9 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/attach-media-file/', purchase_order_attach_media_file, name='purchase_order_attach_media_file'),
     path('purchase-order/<int:po_id>/product/<int:product_id>/add-allocation/', product_add_allocation, name='product_add_allocation'),
     path('purchase-order/<int:po_id>/product/<int:product_id>/delete-allocation/<int:allocation_id>/', product_delete_allocation, name='product_delete_allocation'),
+    path('purchase-order/<int:po_id>/upload-invoice/', po_upload_invoice, name='po_upload_invoice'),
+    path('purchase-order/<int:po_id>/update-invoice/<int:invoice_id>/', po_update_invoice, name='po_update_invoice'),
+    path('purchase-order/<int:po_id>/delete-invoice/<int:invoice_id>/', po_delete_invoice, name='po_delete_invoice'),
     
     # Suppliers
     path('suppliers/', suppliers_list, name='suppliers_list'),

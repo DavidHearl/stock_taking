@@ -929,6 +929,35 @@ class PurchaseOrderAttachment(models.Model):
         return f"{self.purchase_order.display_number} - {self.filename}"
 
 
+class PurchaseOrderInvoice(models.Model):
+    """Supplier invoice attached to a purchase order."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('paid', 'Paid'),
+    ]
+
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='invoices')
+    invoice_number = models.CharField(max_length=100, blank=True)
+    file = models.FileField(upload_to='po_invoices/', blank=True, null=True)
+    filename = models.CharField(max_length=255, blank=True)
+    date = models.DateField(null=True, blank=True, help_text='Invoice date')
+    due_date = models.DateField(null=True, blank=True, help_text='Payment due date')
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, default='GBP')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True)
+    uploaded_by = models.CharField(max_length=200, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', '-uploaded_at']
+
+    def __str__(self):
+        return f"{self.purchase_order.display_number} – Invoice {self.invoice_number or '(no number)'}"
+
+
 class PurchaseOrderProject(models.Model):
     """Associates a PurchaseOrder with one or more projects/orders.
 

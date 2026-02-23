@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, Supplier, SupplierContact
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, Supplier, SupplierContact
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -451,6 +451,7 @@ def purchase_order_detail(request, po_id):
         'supplier_email': supplier_email,
         'supplier_contacts': supplier_contacts,
         'attachments': purchase_order.attachments.all(),
+        'po_invoices': purchase_order.invoices.all(),
         'original_customer_name': original_customer_name,
         'original_customer_number': original_customer_number,
         'expected_delivery_date': expected_delivery_date,
@@ -1672,6 +1673,173 @@ def purchase_order_delete_attachment(request, po_id, attachment_id):
     except Exception:
         pass
     attachment.delete()
+
+    return JsonResponse({'success': True})
+
+
+# ── PO Invoices ────────────────────────────────────────────
+
+@login_required
+def po_upload_invoice(request, po_id):
+    """Upload a supplier invoice to a purchase order."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    invoice_number = request.POST.get('invoice_number', '').strip()
+    date_str = request.POST.get('date', '').strip()
+    due_date_str = request.POST.get('due_date', '').strip()
+    amount = request.POST.get('amount', '0').strip()
+    notes = request.POST.get('notes', '').strip()
+    status = request.POST.get('status', 'pending').strip()
+    uploaded_file = request.FILES.get('file')
+
+    from decimal import Decimal, InvalidOperation
+    try:
+        amount_val = Decimal(amount) if amount else Decimal('0')
+    except (InvalidOperation, ValueError):
+        amount_val = Decimal('0')
+
+    inv_date = None
+    inv_due_date = None
+    if date_str:
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+            try:
+                from datetime import datetime as _dt
+                inv_date = _dt.strptime(date_str, fmt).date()
+                break
+            except ValueError:
+                continue
+    if due_date_str:
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+            try:
+                from datetime import datetime as _dt
+                inv_due_date = _dt.strptime(due_date_str, fmt).date()
+                break
+            except ValueError:
+                continue
+
+    invoice = PurchaseOrderInvoice(
+        purchase_order=po,
+        invoice_number=invoice_number,
+        date=inv_date,
+        due_date=inv_due_date,
+        amount=amount_val,
+        status=status,
+        notes=notes,
+        uploaded_by=request.user.get_full_name() or request.user.username,
+    )
+
+    if uploaded_file:
+        invoice.file = uploaded_file
+        invoice.filename = uploaded_file.name
+
+    invoice.save()
+
+    return JsonResponse({
+        'success': True,
+        'invoice': {
+            'id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'filename': invoice.filename,
+            'date': invoice.date.strftime('%d-%m-%Y') if invoice.date else '',
+            'due_date': invoice.due_date.strftime('%d-%m-%Y') if invoice.due_date else '',
+            'amount': str(invoice.amount),
+            'currency': invoice.currency,
+            'status': invoice.status,
+            'notes': invoice.notes,
+            'uploaded_by': invoice.uploaded_by,
+            'uploaded_at': invoice.uploaded_at.strftime('%d-%m-%Y %H:%M'),
+            'url': invoice.file.url if invoice.file else '',
+        }
+    })
+
+
+@login_required
+def po_update_invoice(request, po_id, invoice_id):
+    """Update an existing PO invoice (status, amount, notes, etc.)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    import json
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    invoice = get_object_or_404(PurchaseOrderInvoice, id=invoice_id, purchase_order=po)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    from decimal import Decimal, InvalidOperation
+
+    if 'invoice_number' in data:
+        invoice.invoice_number = data['invoice_number'].strip()
+    if 'status' in data and data['status'] in dict(PurchaseOrderInvoice.STATUS_CHOICES):
+        invoice.status = data['status']
+    if 'amount' in data:
+        try:
+            invoice.amount = Decimal(str(data['amount']))
+        except (InvalidOperation, ValueError):
+            pass
+    if 'notes' in data:
+        invoice.notes = data['notes'].strip()
+    if 'date' in data:
+        date_str = data['date'].strip()
+        if date_str:
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+                try:
+                    from datetime import datetime as _dt
+                    invoice.date = _dt.strptime(date_str, fmt).date()
+                    break
+                except ValueError:
+                    continue
+        else:
+            invoice.date = None
+    if 'due_date' in data:
+        dd_str = data['due_date'].strip()
+        if dd_str:
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+                try:
+                    from datetime import datetime as _dt
+                    invoice.due_date = _dt.strptime(dd_str, fmt).date()
+                    break
+                except ValueError:
+                    continue
+        else:
+            invoice.due_date = None
+
+    invoice.save()
+
+    return JsonResponse({
+        'success': True,
+        'invoice': {
+            'id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'date': invoice.date.strftime('%d-%m-%Y') if invoice.date else '',
+            'due_date': invoice.due_date.strftime('%d-%m-%Y') if invoice.due_date else '',
+            'amount': str(invoice.amount),
+            'status': invoice.status,
+            'notes': invoice.notes,
+        }
+    })
+
+
+@login_required
+def po_delete_invoice(request, po_id, invoice_id):
+    """Delete a supplier invoice from a purchase order."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    invoice = get_object_or_404(PurchaseOrderInvoice, id=invoice_id, purchase_order=po)
+
+    if invoice.file:
+        try:
+            invoice.file.delete(save=False)
+        except Exception:
+            pass
+    invoice.delete()
 
     return JsonResponse({'success': True})
 

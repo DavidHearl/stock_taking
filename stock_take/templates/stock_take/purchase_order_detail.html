@@ -660,6 +660,118 @@
         </div>
     </div>
 
+    <!-- Invoices Section -->
+    <div class="po-products-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3><i class="bi bi-receipt"></i> Invoices</h3>
+            <button class="btn btn-sm btn-primary" onclick="toggleInvoiceForm()">
+                <i class="bi bi-plus-lg"></i> Add Invoice
+            </button>
+        </div>
+
+        <!-- Add Invoice Form (hidden by default) -->
+        <div id="invoice-add-form" class="po-invoice-form" style="display: none;">
+            <form id="invoice-upload-form" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="po-invoice-form-grid">
+                    <div class="po-invoice-field">
+                        <label>Invoice Number</label>
+                        <input type="text" id="inv-number" placeholder="e.g. INV-001" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Date</label>
+                        <input type="date" id="inv-date" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Due Date</label>
+                        <input type="date" id="inv-due-date" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Amount (£)</label>
+                        <input type="number" id="inv-amount" step="0.01" min="0" placeholder="0.00" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Status</label>
+                        <select id="inv-status" class="po-invoice-input">
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="paid">Paid</option>
+                        </select>
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>File (optional)</label>
+                        <input type="file" id="inv-file" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field po-invoice-field-wide">
+                        <label>Notes</label>
+                        <input type="text" id="inv-notes" placeholder="Optional notes" class="po-invoice-input">
+                    </div>
+                </div>
+                <div class="po-invoice-form-actions">
+                    <button type="button" class="btn btn-sm btn-success" onclick="submitInvoice()">
+                        <i class="bi bi-check-lg"></i> Save Invoice
+                    </button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleInvoiceForm()">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div id="invoices-list">
+            {% if po_invoices %}
+            <div class="po-table-container">
+                <table class="po-products-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Date</th>
+                            <th>Due Date</th>
+                            <th style="text-align: right;">Amount</th>
+                            <th>Status</th>
+                            <th>File</th>
+                            <th>Notes</th>
+                            <th style="width: 80px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoices-tbody">
+                        {% for inv in po_invoices %}
+                        <tr id="invoice-row-{{ inv.id }}">
+                            <td>{{ inv.invoice_number|default:"—" }}</td>
+                            <td>{{ inv.date|date:"d-m-Y"|default:"—" }}</td>
+                            <td>{{ inv.due_date|date:"d-m-Y"|default:"—" }}</td>
+                            <td style="text-align: right;">£{{ inv.amount|floatformat:2 }}</td>
+                            <td>
+                                <span class="po-invoice-status po-invoice-status-{{ inv.status }}">
+                                    {{ inv.get_status_display }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if inv.file %}
+                                <a href="{{ inv.file.url }}" download class="po-boards-file-link">
+                                    <i class="bi bi-file-earmark-arrow-down"></i> {{ inv.filename }}
+                                </a>
+                                {% else %}
+                                <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ inv.notes|default:"" }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" onclick="deleteInvoice({{ inv.id }})" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted" id="no-invoices-msg">No invoices attached yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
     {% endif %}
 </div>
 
@@ -1442,6 +1554,66 @@ function attachBoardsFiles() {
             setTimeout(() => location.reload(), 800);
         } else {
             showNotification(data.error || 'Failed to attach files', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+// ---- Invoices ----
+function toggleInvoiceForm() {
+    const form = document.getElementById('invoice-add-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+function submitInvoice() {
+    const formData = new FormData();
+    formData.append('invoice_number', document.getElementById('inv-number').value);
+    formData.append('date', document.getElementById('inv-date').value);
+    formData.append('due_date', document.getElementById('inv-due-date').value);
+    formData.append('amount', document.getElementById('inv-amount').value);
+    formData.append('status', document.getElementById('inv-status').value);
+    formData.append('notes', document.getElementById('inv-notes').value);
+
+    const fileInput = document.getElementById('inv-file');
+    if (fileInput.files.length) {
+        formData.append('file', fileInput.files[0]);
+    }
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/upload-invoice/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Invoice added successfully', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification(data.error || 'Failed to add invoice', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+function deleteInvoice(invoiceId) {
+    if (!confirm('Delete this invoice?')) return;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-invoice/${invoiceId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById(`invoice-row-${invoiceId}`);
+            if (row) row.remove();
+            showNotification('Invoice deleted', 'success');
+        } else {
+            showNotification(data.error || 'Delete failed', 'error');
         }
     })
     .catch(err => showNotification('Error: ' + err.message, 'error'));
