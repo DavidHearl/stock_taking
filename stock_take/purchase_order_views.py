@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, ProductCustomerAllocation, StockItem, Supplier, SupplierContact
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, Supplier, SupplierContact
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -399,6 +399,41 @@ def purchase_order_detail(request, po_id):
             exp_dt += timedelta(days=1)
         expected_delivery_date = exp_dt.strftime('%d/%m/%Y')
 
+    # ── Fetch multi-project entries ──────────────────────────
+    po_projects = list(purchase_order.projects.select_related('order', 'order__customer').all())
+
+    # Auto-seed: if no PurchaseOrderProject rows exist yet, create them from
+    # the legacy project_name / linked_order fields so the new UI has data.
+    if not po_projects:
+        if purchase_order.project_name == 'Stock':
+            PurchaseOrderProject.objects.create(
+                purchase_order=purchase_order, project_type='stock',
+                label='Stock', sort_order=0)
+        if linked_order:
+            customer_name = f'{linked_order.first_name} {linked_order.last_name}'.strip()
+            if linked_order.customer and linked_order.customer.name:
+                customer_name = linked_order.customer.name
+            PurchaseOrderProject.objects.create(
+                purchase_order=purchase_order, project_type='customer',
+                order=linked_order,
+                label=f'{linked_order.sale_number} - {customer_name}' if customer_name else linked_order.sale_number,
+                sort_order=1)
+        elif purchase_order.project_name and purchase_order.project_name != 'Stock':
+            # Try to find matching order for legacy customer name
+            legacy_order = Order.objects.filter(
+                Q(sale_number=purchase_order.project_number) |
+                Q(last_name__iexact=purchase_order.project_name)
+            ).first()
+            PurchaseOrderProject.objects.create(
+                purchase_order=purchase_order, project_type='customer',
+                order=legacy_order,
+                label=f'{purchase_order.project_number} - {purchase_order.project_name}'.strip(' -'),
+                sort_order=1)
+        po_projects = list(purchase_order.projects.select_related('order', 'order__customer').all())
+
+    # Determine if any project is stock (for allocation UI visibility)
+    has_stock_project = any(p.project_type == 'stock' for p in po_projects)
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -419,6 +454,8 @@ def purchase_order_detail(request, po_id):
         'original_customer_name': original_customer_name,
         'original_customer_number': original_customer_number,
         'expected_delivery_date': expected_delivery_date,
+        'po_projects': po_projects,
+        'has_stock_project': has_stock_project,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -426,7 +463,9 @@ def purchase_order_detail(request, po_id):
 
 @login_required
 def purchase_order_toggle_project(request, po_id):
-    """Toggle PO project between customer link and Stock (AJAX)"""
+    """Toggle PO project between customer link and Stock (AJAX) – legacy endpoint.
+    Now also kept for backwards-compat but the new multi-project endpoints are preferred.
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
     
@@ -440,7 +479,6 @@ def purchase_order_toggle_project(request, po_id):
     mode = data.get('mode')  # 'stock' or 'customer'
     
     if mode == 'stock':
-        # Save original customer info in description metadata, then set to Stock
         po.project_name = 'Stock'
         po.project_number = ''
         po.project_id = None
@@ -463,6 +501,90 @@ def purchase_order_toggle_project(request, po_id):
         })
     else:
         return JsonResponse({'error': 'Invalid mode. Use "stock" or "customer".'}, status=400)
+
+
+@login_required
+def po_add_project(request, po_id):
+    """Add a project entry (Stock or Customer order) to a PO (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    project_type = data.get('project_type', 'customer')  # 'stock' or 'customer'
+
+    if project_type == 'stock':
+        # Prevent duplicate stock entries
+        if po.projects.filter(project_type='stock').exists():
+            return JsonResponse({'error': 'Stock entry already exists'}, status=400)
+        proj = PurchaseOrderProject.objects.create(
+            purchase_order=po,
+            project_type='stock',
+            label='Stock',
+            sort_order=0,
+        )
+        return JsonResponse({
+            'success': True,
+            'project': {
+                'id': proj.id,
+                'project_type': 'stock',
+                'label': 'Stock',
+                'order_id': None,
+                'sale_number': '',
+            }
+        })
+    elif project_type == 'customer':
+        order_id = data.get('order_id')
+        if not order_id:
+            return JsonResponse({'error': 'order_id is required for customer projects'}, status=400)
+        order = get_object_or_404(Order, id=order_id)
+
+        # Prevent duplicate order entries
+        if po.projects.filter(order=order).exists():
+            return JsonResponse({'error': 'This order is already linked to this PO'}, status=400)
+
+        customer_name = f'{order.first_name} {order.last_name}'.strip()
+        if order.customer and order.customer.name:
+            customer_name = order.customer.name
+        label = f'{order.sale_number} - {customer_name}' if customer_name else order.sale_number
+
+        max_sort = po.projects.count()
+        proj = PurchaseOrderProject.objects.create(
+            purchase_order=po,
+            project_type='customer',
+            order=order,
+            label=label,
+            sort_order=max_sort,
+        )
+        return JsonResponse({
+            'success': True,
+            'project': {
+                'id': proj.id,
+                'project_type': 'customer',
+                'label': label,
+                'order_id': order.id,
+                'sale_number': order.sale_number,
+            }
+        })
+    else:
+        return JsonResponse({'error': 'Invalid project_type'}, status=400)
+
+
+@login_required
+def po_remove_project(request, po_id, project_id):
+    """Remove a project entry from a PO (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    proj = get_object_or_404(PurchaseOrderProject, id=project_id, purchase_order=po)
+    proj.delete()
+    return JsonResponse({'success': True})
 
 
 @login_required

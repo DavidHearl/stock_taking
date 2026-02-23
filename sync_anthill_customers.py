@@ -37,6 +37,7 @@ Usage
 import os
 import sys
 import argparse
+import random
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -73,7 +74,12 @@ SALE_ACTIVITY_TYPES_KEYWORDS = {'sale'}
 # Anthill SOAP helpers
 # ════════════════════════════════════════════════════════════════════════
 
-def soap_request(action: str, body_xml: str, retries: int = 3) -> str:
+# Retry delays in seconds for transient errors / timeouts
+RETRY_DELAYS = [15, 30, 45, 60, 120]
+MAX_RETRIES = len(RETRY_DELAYS)
+
+
+def soap_request(action: str, body_xml: str) -> str:
     """Send a SOAP request to Anthill, with retry on transient errors."""
     envelope = f'''<?xml version="1.0" encoding="utf-8"?>
 <soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -95,7 +101,7 @@ def soap_request(action: str, body_xml: str, retries: int = 3) -> str:
         'SOAPAction': f'{NAMESPACE}{action}',
     }
 
-    for attempt in range(1, retries + 1):
+    for attempt in range(MAX_RETRIES):
         try:
             resp = requests.post(
                 BASE_URL, data=envelope.encode('utf-8'),
@@ -103,18 +109,19 @@ def soap_request(action: str, body_xml: str, retries: int = 3) -> str:
             )
             if resp.status_code == 200:
                 return resp.text
-            if resp.status_code >= 500 and attempt < retries:
-                wait = 2 ** attempt
-                print(f'  ⚠ Server error {resp.status_code}, retrying in {wait}s …')
+            if resp.status_code >= 500 and attempt < MAX_RETRIES - 1:
+                wait = RETRY_DELAYS[attempt]
+                print(f'  ⚠ Server error {resp.status_code} (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait}s …')
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
         except requests.exceptions.Timeout:
-            if attempt < retries:
-                wait = 2 ** attempt
-                print(f'  ⚠ Timeout, retrying in {wait}s …')
+            if attempt < MAX_RETRIES - 1:
+                wait = RETRY_DELAYS[attempt]
+                print(f'  ⚠ Timeout (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait}s …')
                 time.sleep(wait)
             else:
+                print(f'  ✗ Timeout after {MAX_RETRIES} attempts, giving up.')
                 raise
     return ''
 
@@ -527,7 +534,12 @@ Examples:
         phase1_scanned = 0
         phase1_processed = 0
 
-        for page_num in range(args.start_page, end_page + 1):
+        # Randomise page order to cover more of the dataset across runs
+        phase1_pages = list(range(args.start_page, end_page + 1))
+        random.shuffle(phase1_pages)
+        print(f'  Page order randomised ({len(phase1_pages)} pages)')
+
+        for page_idx, page_num in enumerate(phase1_pages, 1):
             if page_num == 1 and args.start_page == 1:
                 summaries = first_page
             else:
@@ -575,13 +587,13 @@ Examples:
                     stats['errors'] += 1
                     print(f'  ✗ Error fetching sales for {anthill_id}: {e}')
 
-            # ── Page progress ──
+            # ── Page progress (only log every page since Phase 1 is usually smaller) ──
             elapsed = time.time() - start_time
             rate = phase1_scanned / elapsed if elapsed > 0 else 0
             remaining = (total_records - phase1_scanned) / rate if rate > 0 else 0
 
             print(
-                f'  Page {page_num:>5}/{end_page} | '
+                f'  Page {page_idx:>5}/{len(phase1_pages)} (pg {page_num}) | '
                 f'Scanned: {phase1_scanned:>7,} | '
                 f'Customers: {phase1_processed:>5,} | '
                 f'Sales: {page_sales:>3} | '
@@ -604,15 +616,22 @@ Examples:
         print(f'  Pages {page_range_label}\n')
 
         phase2_scanned = 0
+        phase2_batch_new = 0     # accumulator for log-throttling
+        phase2_batch_skip = 0
 
-        for page_num in range(args.start_page, end_page + 1):
+        # Randomise page order so each run covers different parts of the dataset
+        phase2_pages = list(range(args.start_page, end_page + 1))
+        random.shuffle(phase2_pages)
+        print(f'  Page order randomised ({len(phase2_pages)} pages)')
+
+        for page_idx, page_num in enumerate(phase2_pages, 1):
             if page_num == 1 and args.start_page == 1:
                 summaries = first_page
             else:
                 _, _, summaries = find_customers(page_num, args.page_size, days)
 
             if not summaries:
-                break
+                continue   # page may be empty; keep going with other shuffled pages
 
             page_new = 0
             page_skip = 0
@@ -689,18 +708,29 @@ Examples:
                     stats['errors'] += 1
                     print(f'  ✗ Error on customer {anthill_id}: {e}')
 
-            # ── Page progress ──
-            elapsed = time.time() - phase2_start
-            rate = phase2_scanned / elapsed if elapsed > 0 else 0
-            remaining = (total_records - phase2_scanned) / rate if rate > 0 else 0
+            # ── Throttled progress logging ──
+            phase2_batch_new += page_new
+            phase2_batch_skip += page_skip
 
-            print(
-                f'  Page {page_num:>5}/{end_page} | '
-                f'Scanned: {phase2_scanned:>7,} | '
-                f'New: {page_new:>3} | Skip: {page_skip:>3} | '
-                f'Rate: {rate:.0f}/s | '
-                f'ETA: {_format_time(remaining)}'
-            )
+            # Log every 100 records when new data is coming in, otherwise every 1,000
+            log_interval = 100 if phase2_batch_new > 0 else 1000
+            if phase2_scanned % log_interval < args.page_size or page_idx == len(phase2_pages):
+                elapsed = time.time() - phase2_start
+                rate = phase2_scanned / elapsed if elapsed > 0 else 0
+                remaining = (total_records - phase2_scanned) / rate if rate > 0 else 0
+
+                total_created = stats['customers_created'] + stats['leads_created']
+                total_updated = stats['customers_updated'] + stats['leads_updated']
+
+                print(
+                    f'  Progress: {phase2_scanned:>7,}/{total_records:,} | '
+                    f'Batch {phase2_batch_new} new, {phase2_batch_skip} skip | '
+                    f'Total: created={total_created}, updated={total_updated}, errors={stats["errors"]} | '
+                    f'Rate: {rate:.0f}/s | '
+                    f'ETA: {_format_time(remaining)}'
+                )
+                phase2_batch_new = 0
+                phase2_batch_skip = 0
 
     # ── Summary ──
     total_elapsed = time.time() - start_time

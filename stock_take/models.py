@@ -929,6 +929,33 @@ class PurchaseOrderAttachment(models.Model):
         return f"{self.purchase_order.display_number} - {self.filename}"
 
 
+class PurchaseOrderProject(models.Model):
+    """Associates a PurchaseOrder with one or more projects/orders.
+
+    A PO can be for 'Stock' and/or for specific customer orders.  Each entry
+    carries the label displayed in the Project section (e.g. "Stock",
+    "S12345 - Smith", etc.) and an optional link to the local Order record.
+    """
+    TYPE_CHOICES = [
+        ('stock', 'Stock'),
+        ('customer', 'Customer'),
+    ]
+
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='projects')
+    project_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default='customer')
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True, related_name='po_projects',
+                              help_text='Linked local order (null for stock entries)')
+    label = models.CharField(max_length=255, blank=True, help_text='Display label, e.g. "Stock" or customer name')
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sort_order', 'created_at']
+
+    def __str__(self):
+        return f"{self.purchase_order.display_number} → {self.label or self.project_type}"
+
+
 class ProductCustomerAllocation(models.Model):
     """Links a quantity of a PO product line to a specific order/customer."""
     product = models.ForeignKey(PurchaseOrderProduct, on_delete=models.CASCADE, related_name='allocations')

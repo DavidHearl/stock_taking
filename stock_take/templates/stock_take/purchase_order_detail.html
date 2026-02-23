@@ -125,35 +125,51 @@
             </div>
         </div>
         <div class="po-overview-row">
-            <div class="po-overview-item">
+            <div class="po-overview-item po-projects-section">
                 <span class="po-overview-label">Project
-                    <button class="btn-project-toggle" id="project-toggle-btn"
-                        data-customer-name="{{ original_customer_name }}"
-                        data-customer-number="{{ original_customer_number }}"
+                    <button class="btn-project-add" id="project-add-stock-btn"
                         data-po-id="{{ purchase_order.workguru_id }}"
-                        onclick="toggleProjectStock()"
-                        title="{% if purchase_order.project_name == 'Stock' %}Switch to Customer{% else %}Switch to Stock{% endif %}">
-                        {% if purchase_order.project_name == 'Stock' %}
-                            <i class="bi bi-person"></i>
-                        {% else %}
-                            <i class="bi bi-box-seam"></i>
-                        {% endif %}
+                        onclick="addProjectStock()"
+                        title="Add Stock entry">
+                        <i class="bi bi-box-seam"></i>
+                    </button>
+                    <button class="btn-project-add" id="project-add-customer-btn"
+                        data-po-id="{{ purchase_order.workguru_id }}"
+                        onclick="toggleProjectCustomerSearch()"
+                        title="Link a customer order">
+                        <i class="bi bi-person-plus"></i>
                     </button>
                 </span>
-                <span class="po-overview-value po-view-val" data-field="project_name" id="project-display">
-                    {% if purchase_order.project_name == 'Stock' %}
-                        <span class="po-stock-badge">Stock</span>
-                    {% elif linked_order %}
-                        <a href="{% url 'order_details' linked_order.id %}" class="po-project-link" title="View order {{ linked_order.sale_number }}">
-                            <i class="bi bi-box-arrow-up-right"></i> {{ purchase_order.project_number }} - {{ purchase_order.project_name }}
-                        </a>
-                    {% elif purchase_order.project_name %}
-                        {{ purchase_order.project_number }} - {{ purchase_order.project_name }}
-                    {% else %}
-                        -
-                    {% endif %}
-                </span>
-                <input class="po-edit-input po-edit-val" data-field="project_name" value="{{ purchase_order.project_name|default:'' }}" style="display:none;" placeholder="Project name">
+                <div class="po-projects-list" id="project-display">
+                    {% for proj in po_projects %}
+                    <div class="po-project-entry {% if proj.project_type == 'stock' %}is-stock{% endif %}" data-project-id="{{ proj.id }}">
+                        {% if proj.project_type == 'stock' %}
+                            <span class="po-stock-badge">Stock</span>
+                        {% elif proj.order %}
+                            <a href="{% url 'order_details' proj.order.id %}" class="po-project-link" title="View order {{ proj.order.sale_number }}">
+                                <i class="bi bi-box-arrow-up-right"></i> {{ proj.label }}
+                            </a>
+                        {% else %}
+                            <span>{{ proj.label }}</span>
+                        {% endif %}
+                        <button class="btn-project-remove" onclick="removeProject({{ purchase_order.workguru_id }}, {{ proj.id }}, this)" title="Remove"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    {% empty %}
+                    <span class="po-projects-empty">No projects assigned</span>
+                    {% endfor %}
+                </div>
+                {# Inline search for adding a customer order #}
+                <div class="po-project-search-wrapper" id="project-customer-search" style="display:none;">
+                    <input type="text" class="po-project-search-input" id="project-search-input"
+                        placeholder="Search by name or order number..." autocomplete="off"
+                        oninput="searchProjectOrders(this.value)">
+                    <input type="hidden" id="project-search-order-id">
+                    <div class="po-project-search-results" id="project-search-results"></div>
+                    <div class="po-project-search-actions">
+                        <button class="alloc-save-btn" onclick="addProjectCustomer()" title="Add"><i class="bi bi-check-lg"></i></button>
+                        <button class="alloc-sub-remove" onclick="toggleProjectCustomerSearch()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                </div>
             </div>
             <div class="po-overview-item">
                 <span class="po-overview-label">Issue Date</span>
@@ -354,14 +370,12 @@
                         <td>
                             <div class="product-name-row">
                                 <span class="po-view-val">{{ product.name|default:"-" }}</span>
-                                {% if purchase_order.project_name == 'Stock' %}
-                                <button class="alloc-link-btn" onclick="event.stopPropagation(); toggleAllocRow({{ product.id }})" title="Allocate stock to customer orders">
+                                <button class="alloc-link-btn" onclick="event.stopPropagation(); toggleAllocRow({{ product.id }})" title="Allocate to customer orders">
                                     <i class="bi bi-diagram-3"></i>
                                     {% if product.allocations.count %}
                                     <span class="alloc-count">{{ product.allocations.count }}</span>
                                     {% endif %}
                                 </button>
-                                {% endif %}
                             </div>
                             {% if product.description %}
                             <div class="po-product-description po-view-val">{{ product.description }}</div>
@@ -392,8 +406,7 @@
                             <button class="btn-inline-delete" onclick="deleteProduct({{ product.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
                         </td>
                     </tr>
-                    {% if purchase_order.project_name == 'Stock' %}
-                    {# Sub-allocation rows for stock POs - shown as indented rows #}
+                    {# Sub-allocation rows – always visible so distribution is clear #}
                     {% for alloc in product.allocations.all %}
                     <tr class="alloc-sub-row" data-product-id="{{ product.id }}" data-alloc-id="{{ alloc.id }}">
                         <td></td>
@@ -433,7 +446,6 @@
                             <button class="alloc-sub-remove" onclick="toggleAllocRow({{ product.id }})" title="Cancel"><i class="bi bi-x-lg"></i></button>
                         </td>
                     </tr>
-                    {% endif %}
                     {% empty %}
                     {% endfor %}
                     {% for bp in board_product_rows %}
@@ -746,54 +758,167 @@ Sliderobes</textarea>
 
 <script>
 let editMode = false;
+const poId = {{ purchase_order.workguru_id }};
 
-function toggleProjectStock() {
-    const btn = document.getElementById('project-toggle-btn');
-    const display = document.getElementById('project-display');
-    const poId = btn.dataset.poId;
-    const customerName = btn.dataset.customerName;
-    const customerNumber = btn.dataset.customerNumber;
-    const isCurrentlyStock = display.querySelector('.po-stock-badge') !== null;
+// ===== Multi-Project Management =====
 
-    const mode = isCurrentlyStock ? 'customer' : 'stock';
-    const payload = { mode: mode };
-    if (mode === 'customer') {
-        payload.customer_name = customerName;
-        payload.customer_number = customerNumber;
-    }
-
-    btn.disabled = true;
-    fetch(`/purchase-order/${poId}/toggle-project/`, {
+function addProjectStock() {
+    fetch(`/purchase-order/${poId}/add-project/`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ project_type: 'stock' }),
     })
-    .then(res => res.json())
-    .then(result => {
-        if (result.success) {
-            if (result.project_name === 'Stock') {
-                display.innerHTML = '<span class="po-stock-badge">Stock</span>';
-                btn.innerHTML = '<i class="bi bi-person"></i>';
-                btn.title = 'Switch to Customer';
-            } else {
-                const text = (result.project_number ? result.project_number + ' - ' : '') + result.project_name;
-                display.textContent = text;
-                btn.innerHTML = '<i class="bi bi-box-seam"></i>';
-                btn.title = 'Switch to Stock';
-            }
-            showNotification('Project updated to ' + result.project_name, 'success');
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const list = document.getElementById('project-display');
+            // Remove "No projects assigned" placeholder
+            const empty = list.querySelector('.po-projects-empty');
+            if (empty) empty.remove();
+
+            const entry = document.createElement('div');
+            entry.className = 'po-project-entry is-stock';
+            entry.dataset.projectId = data.project.id;
+            entry.innerHTML = `
+                <span class="po-stock-badge">Stock</span>
+                <button class="btn-project-remove" onclick="removeProject(${poId}, ${data.project.id}, this)" title="Remove"><i class="bi bi-x-lg"></i></button>
+            `;
+            list.appendChild(entry);
+            showNotification('Stock entry added', 'success');
         } else {
-            showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
+            showNotification(data.error || 'Failed to add stock entry', 'error');
         }
-        btn.disabled = false;
     })
-    .catch(err => {
-        showNotification('Network error: ' + err.message, 'error');
-        btn.disabled = false;
-    });
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+let projectSearchTimeout = null;
+
+function toggleProjectCustomerSearch() {
+    const wrapper = document.getElementById('project-customer-search');
+    if (wrapper.style.display === 'none') {
+        wrapper.style.display = 'block';
+        document.getElementById('project-search-input').focus();
+    } else {
+        wrapper.style.display = 'none';
+        document.getElementById('project-search-input').value = '';
+        document.getElementById('project-search-order-id').value = '';
+        document.getElementById('project-search-results').innerHTML = '';
+        document.getElementById('project-search-results').style.display = 'none';
+    }
+}
+
+function searchProjectOrders(query) {
+    clearTimeout(projectSearchTimeout);
+    const resultsDiv = document.getElementById('project-search-results');
+
+    if (query.length < 2) {
+        resultsDiv.innerHTML = '';
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    projectSearchTimeout = setTimeout(() => {
+        fetch(`/api/order-search/?q=${encodeURIComponent(query)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.results && data.results.length > 0) {
+                resultsDiv.innerHTML = data.results.map(o =>
+                    `<div class="alloc-search-item" onclick="selectProjectOrder(${o.id}, '${o.sale_number}', '${o.customer_name.replace(/'/g, "\\'")}')">
+                        <span class="alloc-result-name">${o.customer_name}</span>
+                        <span class="alloc-result-sale">${o.sale_number}</span>
+                    </div>`
+                ).join('');
+                resultsDiv.style.display = 'block';
+            } else {
+                resultsDiv.innerHTML = '<div class="alloc-search-empty">No orders found</div>';
+                resultsDiv.style.display = 'block';
+            }
+        })
+        .catch(() => { resultsDiv.style.display = 'none'; });
+    }, 250);
+}
+
+function selectProjectOrder(orderId, saleNumber, customerName) {
+    document.getElementById('project-search-order-id').value = orderId;
+    document.getElementById('project-search-input').value = customerName + ' - ' + saleNumber;
+    document.getElementById('project-search-results').style.display = 'none';
+}
+
+function addProjectCustomer() {
+    const orderId = document.getElementById('project-search-order-id').value;
+    if (!orderId) {
+        showNotification('Please search and select an order', 'error');
+        return;
+    }
+
+    fetch(`/purchase-order/${poId}/add-project/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ project_type: 'customer', order_id: parseInt(orderId) }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const list = document.getElementById('project-display');
+            const empty = list.querySelector('.po-projects-empty');
+            if (empty) empty.remove();
+
+            const entry = document.createElement('div');
+            entry.className = 'po-project-entry';
+            entry.dataset.projectId = data.project.id;
+            const orderUrl = data.project.order_id ? `/order/${data.project.order_id}/` : '#';
+            entry.innerHTML = `
+                <a href="${orderUrl}" class="po-project-link" title="View order ${data.project.sale_number}">
+                    <i class="bi bi-box-arrow-up-right"></i> ${data.project.label}
+                </a>
+                <button class="btn-project-remove" onclick="removeProject(${poId}, ${data.project.id}, this)" title="Remove"><i class="bi bi-x-lg"></i></button>
+            `;
+            list.appendChild(entry);
+
+            // Reset search
+            toggleProjectCustomerSearch();
+            showNotification('Customer order linked', 'success');
+        } else {
+            showNotification(data.error || 'Failed to link customer order', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+function removeProject(poId, projectId, btn) {
+    if (!confirm('Remove this project entry?')) return;
+
+    fetch(`/purchase-order/${poId}/remove-project/${projectId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: '{}',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const entry = btn.closest('.po-project-entry');
+            if (entry) entry.remove();
+            // Show empty placeholder if none left
+            const list = document.getElementById('project-display');
+            if (!list.querySelector('.po-project-entry')) {
+                list.innerHTML = '<span class="po-projects-empty">No projects assigned</span>';
+            }
+            showNotification('Project entry removed', 'success');
+        } else {
+            showNotification(data.error || 'Failed to remove', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
 }
 
 function toggleEditMode() {
