@@ -4,157 +4,128 @@
 
 {% block title %}Order Details - {{ order.sale_number }}{% endblock %}
 
+{% block page_title %}
+<span style="display:flex;align-items:center;gap:10px;">
+    <a href="{% url 'ordering' %}" style="color:var(--text-secondary);text-decoration:none;font-size:1.1rem;" title="Back to Orders"><i class="bi bi-arrow-left"></i></a>
+    Order Details: {{ order.first_name }} {{ order.last_name }}{% if order.sale_number %} <span style="font-weight:400;opacity:0.7;">({{ order.sale_number }})</span>{% endif %}
+</span>
+{% endblock %}
+
 {% block extra_css %}
 <link href="{% static 'css/order_details.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
 <div class="page-content">
-    <div class="page-header">
-        <h1>Order Details - {{order.first_name}} {{order.last_name}} - ({{ order.sale_number }})</h1>
-        <div class="header-actions">
-            <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary" title="Download Summary Document PDF">
-                <i class="bi bi-file-earmark-pdf"></i> Summary Document
-            </a>
-            <a href="{% url 'ordering' %}" class="btn btn-secondary">
-                ← Back to Orders
-            </a>
-        </div>
-    </div>
-
     <div class="order-details-grid">
         <div class="main-column">
-            <!-- Workflow Stage Card -->
-            <div class="card workflow-stage-card">
-                <div class="card-header">
-                    <h3>Workflow Stage</h3>
-                    <button class="btn btn-secondary btn-sm" onclick="openWorkflowModal()">
-                        <i class="bi bi-diagram-3"></i> View Full Workflow
-                    </button>
-                </div>
-                <div class="card-body padded">
-                    <div class="workflow-current-stage">
+            <!-- Compact Workflow Stage -->
+            <div class="card workflow-compact">
+                <div class="workflow-compact-row">
+                    <!-- Stage + Category -->
+                    <div class="workflow-compact-info">
                         {% if workflow_progress.current_stage %}
-                        <div class="stage-info {{ workflow_progress.current_stage.role }}">
-                            <div class="stage-meta">
-                                <h4>{{ workflow_progress.current_stage.name }}</h4>
-                                <span class="stage-role-badge">{{ workflow_progress.current_stage.get_role_display }}</span>
-                                <span class="stage-phase-badge">{{ workflow_progress.current_stage.get_phase_display }}</span>
-                                {% if workflow_progress.current_stage.expected_days %}
-                                <span class="stage-days">{{ workflow_progress.current_stage.expected_days }} day{{ workflow_progress.current_stage.expected_days|pluralize }}</span>
-                                {% endif %}
-                            </div>
-                            <p class="stage-description">{{ workflow_progress.current_stage.description }}</p>
-                        </div>
-                        
-                        <!-- Tasks for Current Stage -->
-                        {% if workflow_progress.current_stage.tasks.all %}
-                        <div class="stage-tasks-toggle" onclick="toggleStageTasks()">
-                            <span><i class="bi bi-list-check"></i> Criteria ({{ workflow_progress.current_stage.tasks.all|length }})</span>
-                            <i class="bi bi-chevron-down toggle-arrow"></i>
-                        </div>
-                        <div class="stage-tasks collapsed" id="stage-tasks-content">
-                            {% for task in workflow_progress.current_stage.tasks.all %}
-                            {% with completion=task_completions|get_item:task.id %}
-                            <div class="task-item task-type-{{ task.task_type }}">
-                                {% if task.task_type == 'decision_matrix' %}
-                                    <div class="task-decision-matrix">
-                                        <strong>{{ task.description }}</strong>
-                                        <div class="decision-options">
-                                            <button class="decision-btn decision-proceed {% if completion.selected_option == 'proceed' %}active{% endif %}" 
-                                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">
-                                                <i class="bi bi-arrow-right-circle"></i> Proceed to Next Step
-                                            </button>
-                                            <button class="decision-btn decision-postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
-                                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">
-                                                <i class="bi bi-clock-history"></i> Postpone
-                                            </button>
-                                            <button class="decision-btn decision-dead {% if completion.selected_option == 'dead' %}active{% endif %}"
-                                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">
-                                                <i class="bi bi-x-circle"></i> Mark as Dead/Inactive
-                                            </button>
-                                        </div>
-                                    </div>
-                                {% elif task.task_type == 'radio' %}
-                                    <div class="task-radio-group">
-                                        <strong>{{ task.description }}</strong>
-                                        {% if task.options %}
-                                        {% for option in task.options|split_options %}
-                                        <label class="radio-option">
-                                            <input type="radio" name="task_{{ task.id }}" value="{{ option }}"
-                                                   {% if completion.selected_option == option %}checked{% endif %}
-                                                   onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/>
-                                            {{ option }}
-                                        </label>
-                                        {% endfor %}
-                                        {% endif %}
-                                    </div>
-                                {% elif task.task_type == 'dropdown' %}
-                                    <div class="task-dropdown-group">
-                                        <label>
-                                            <strong>{{ task.description }}</strong>
-                                            <select class="task-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
-                                                <option value="">Select...</option>
-                                                {% if task.options %}
-                                                {% for option in task.options|split_options %}
-                                                <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
-                                                {% endfor %}
-                                                {% endif %}
-                                            </select>
-                                        </label>
-                                    </div>
-                                {% elif task.task_type == 'attachment' %}
-                                    <label class="task-attachment">
-                                        <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                               onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                                        {{ task.description }}
-                                        <span class="badge-attachment"><i class="bi bi-paperclip"></i></span>
-                                        {% if completion.attachment %}
-                                        <a href="{{ completion.attachment.url }}" target="_blank" class="attachment-link">View File</a>
-                                        {% endif %}
-                                    </label>
-                                    <input type="file" id="attachment_{{ task.id }}" class="attachment-input" 
-                                           onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
-                                {% else %}
-                                    <label class="required-label">
-                                        <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                               onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                                        {{ task.description }}
-                                        {% if task.task_type == 'requirement' %}
-                                        <span class="badge-required">Required</span>
-                                        {% endif %}
-                                    </label>
-                                {% endif %}
-                            </div>
-                            {% endwith %}
-                            {% endfor %}
-                        </div>
+                        <span class="wf-badge wf-phase">{{ workflow_progress.current_stage.get_phase_display }}</span>
+                        <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
+                        {% if workflow_progress.current_stage.expected_days %}
+                        <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
                         {% endif %}
+                        {% else %}
+                        <span class="wf-badge wf-none">No stage set</span>
+                        {% endif %}
+                    </div>
+                    <!-- Navigation -->
+                    <div class="workflow-compact-nav">
+                        <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+                        <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
+                        <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
+                            <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
+                        </button>
+                    </div>
+                </div>
 
-                        <!-- Stage Navigation Buttons -->
-                        <div class="stage-navigation">
-                            <button class="btn-stage-nav btn-previous" onclick="revertToPreviousStage({{ order.id }})">
-                                <i class="bi bi-arrow-left-circle"></i> Revert to Previous Stage
-                            </button>
-                            <button class="btn-stage-nav btn-next" onclick="progressToNextStage({{ order.id }})">
-                                Progress to Next Stage <i class="bi bi-arrow-right-circle"></i>
-                            </button>
+                <!-- Expandable detail panel -->
+                <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
+                    {% if workflow_progress.current_stage %}
+                    {% if workflow_progress.current_stage.description %}
+                    <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
+                    {% endif %}
+                    
+                    {% if workflow_progress.current_stage.tasks.all %}
+                    <div class="wf-tasks">
+                        {% for task in workflow_progress.current_stage.tasks.all %}
+                        {% with completion=task_completions|get_item:task.id %}
+                        <div class="wf-task-item">
+                            {% if task.task_type == 'decision_matrix' %}
+                                <span class="wf-task-label">{{ task.description }}</span>
+                                <div class="wf-decision-btns">
+                                    <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}" 
+                                            onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
+                                    <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
+                                            onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
+                                    <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
+                                            onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
+                                </div>
+                            {% elif task.task_type == 'radio' %}
+                                <span class="wf-task-label">{{ task.description }}</span>
+                                <div class="wf-radio-group">
+                                    {% if task.options %}{% for option in task.options|split_options %}
+                                    <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
+                                           {% if completion.selected_option == option %}checked{% endif %}
+                                           onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/> {{ option }}</label>
+                                    {% endfor %}{% endif %}
+                                </div>
+                            {% elif task.task_type == 'dropdown' %}
+                                <label class="wf-task-label">{{ task.description }}
+                                    <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
+                                        <option value="">Select...</option>
+                                        {% if task.options %}{% for option in task.options|split_options %}
+                                        <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
+                                        {% endfor %}{% endif %}
+                                    </select>
+                                </label>
+                            {% elif task.task_type == 'attachment' %}
+                                <label class="wf-check">
+                                    <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                           onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
+                                    {{ task.description }} <i class="bi bi-paperclip" style="opacity:0.5;"></i>
+                                    {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
+                                </label>
+                                <input type="file" id="attachment_{{ task.id }}" class="attachment-input" 
+                                       onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
+                            {% else %}
+                                <label class="wf-check">
+                                    <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                           onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
+                                    {{ task.description }}
+                                    {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
+                                </label>
+                            {% endif %}
                         </div>
-                        {% endif %}
+                        {% endwith %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% endif %}
+
+                    <div class="wf-detail-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="openWorkflowModal()">
+                            <i class="bi bi-diagram-3"></i> Full Workflow
+                        </button>
                     </div>
                 </div>
             </div>
             
             <div class="card">
-                <div class="card-header">
-                    <h3>Edit Order Information</h3>
-                    <div class="header-links">
-                        <select class="order-type-select" onchange="updateOrderType(this, {{ order.id }})">
-                            <option value="sale" {% if order.order_type == 'sale' %}selected{% endif %}>Sale</option>
-                            <option value="remedial" {% if order.order_type == 'remedial' %}selected{% endif %}>Remedial</option>
-                            <option value="warranty" {% if order.order_type == 'warranty' %}selected{% endif %}>Warranty</option>
-                        </select>
-                    </div>
+                <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                    <h3>Order Information</h3>
+                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary btn-sm" style="font-size:0.75rem;padding:3px 10px;" title="Download Summary Document PDF">
+                        <i class="bi bi-file-earmark-pdf"></i> Summary
+                    </a>
                 </div>
                 
                 <!-- Form Errors Display -->
@@ -176,8 +147,8 @@
                 
                 <!-- Edit Order Information -->
                 <div class="card-body padded">
-                    <div class="form-grid-2col">
-                        <!-- Left Column: Customer Info + Job Info -->
+                    <div class="form-grid-3col">
+                        <!-- Column 1: Customer Info -->
                         <div>
                             <!-- Customer Info -->
                             <div>
@@ -198,7 +169,7 @@
                                         <div class="field-value" id="anthill-id-display">{{ order.anthill_id|default:"Not specified" }}</div>
                                         {% if order.anthill_id %}
                                             <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                                <i class="bi bi-box-arrow-up-right"></i> View Anthill Customer
+                                                <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
                                             </a>
                                         {% endif %}
                                     </div>
@@ -238,8 +209,101 @@
                                 </button>
                             </div>
                             </div>
+                        </div>
                         
-                            <!-- Job Info Section -->
+                        <!-- Column 2: Sale Info -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title sale">Sale Info</h4>
+                                <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
+                                    <i class="bi bi-pencil"></i> Edit
+                                </button>
+                            </div>
+                            <div id="sale-display" class="info-display">
+                                <div>
+                                    <div class="field-label">Sale Number</div>
+                                    <div class="field-row-with-button">
+                                        <div class="field-value-medium" id="sale-number-display">{{ order.sale_number }}</div>
+                                        {% if order.sale_number %}
+                                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                                <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Customer Number</div>
+                                    <div class="field-value" id="customer-number-display">{{ order.customer_number }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Designer</div>
+                                    <div class="field-value" id="designer-display">{{ order.designer|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Order Date</div>
+                                    <div class="field-value" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Fit Date</div>
+                                    <div class="field-value" id="fit-date-display">{{ order.fit_date|date:"d M Y"|default:"Not set" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Total Value (Inc VAT)</div>
+                                    <div class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            <div id="sale-edit" class="info-edit">
+                                <div>
+                                    <label class="form-label">Sale Number</label>
+                                    <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
+                                </div>
+                                <div>
+                                    <label class="form-label">Customer Number</label>
+                                    <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
+                                </div>
+                                <div>
+                                    <label class="form-label">Designer</label>
+                                    <div class="flex-row-gap">
+                                        <select class="form-input flex-1" id="designer-input">
+                                            <option value="">Select designer...</option>
+                                            {% for designer in designers %}
+                                                <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddDesignerInline()" title="Add new designer">
+                                            <i class="bi bi-plus-lg"></i>
+                                        </button>
+                                    </div>
+                                    <div id="new-designer-inline" class="new-person-inline">
+                                        <input type="text" id="new-designer-name-inline" class="form-input flex-1" placeholder="New designer name">
+                                        <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesignerInline()" title="Cancel">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="form-label">Order Date</label>
+                                    <input type="date" class="form-input" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
+                                </div>
+                                <div>
+                                    <label class="form-label">Fit Date</label>
+                                    <input type="date" class="form-input" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
+                                </div>
+                                <div>
+                                    <label class="form-label">Total Value (Inc VAT)</label>
+                                    <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
+                                </div>
+                                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
+                                    <i class="bi bi-check-lg"></i> Save Sale Info
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Column 3: Job Info -->
+                        <div>
                             <div class="job-section-spacing">
                                 <div class="info-section-header">
                                     <h4 class="info-section-title job">Job Info</h4>
@@ -268,14 +332,6 @@
                                                 <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="createNextBoardsPO({{ order.id }})" title="Create new PO with next available number">
                                                     <i class="bi bi-plus-lg"></i>
                                                 </button>
-                                                {% endif %}
-                                                {% if order.workguru_id and not order.boards_po %}
-                                                <a href="{% url 'create_workguru_po' order.id %}" 
-                                                   class="btn btn-sm btn-primary btn-icon-add" 
-                                                   title="Create PO in WorkGuru"
-                                                   onclick="return confirm('Create a new Purchase Order in WorkGuru for this order?');">
-                                                    <i class="bi bi-cloud-plus"></i>
-                                                </a>
                                                 {% endif %}
                                             </div>
                                             {% if order.boards_po and boards_purchase_order %}
@@ -333,112 +389,6 @@
                                     </div>
                                     {% endif %}
                                 </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Right Column: Sale Info -->
-                        <div>
-                            <div class="info-section-header">
-                                <h4 class="info-section-title sale">Sale Info</h4>
-                                <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
-                                    <i class="bi bi-pencil"></i> Edit
-                                </button>
-                            </div>
-                            <div id="sale-display" class="info-display">
-                                <div>
-                                    <div class="field-label">Sale Number</div>
-                                    <div class="field-row-with-button">
-                                        <div class="field-value-medium" id="sale-number-display">{{ order.sale_number }}</div>
-                                        {% if order.sale_number %}
-                                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                                <i class="bi bi-box-arrow-up-right"></i> View Anthill Sale
-                                            </a>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Customer Number</div>
-                                    <div class="field-value" id="customer-number-display">{{ order.customer_number }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Designer</div>
-                                    <div class="field-value" id="designer-display">{{ order.designer|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">WorkGuru ID</div>
-                                    <div class="field-row-with-button">
-                                        <div class="field-value" id="workguru-id-display">{{ order.workguru_id|default:"Not set" }}</div>
-                                        {% if order.workguru_id %}
-                                            <a href="https://uk.workguru.io/App/Projects/Detail/{{ order.workguru_id }}" target="_blank" class="btn btn-sm btn-outline-primary external-link-btn">
-                                                <i class="bi bi-box-arrow-up-right"></i> View WorkGuru Project
-                                            </a>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Order Date</div>
-                                    <div class="field-value" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Fit Date</div>
-                                    <div class="field-value" id="fit-date-display">{{ order.fit_date|date:"d M Y"|default:"Not set" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Total Value (Inc VAT)</div>
-                                    <div class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
-                                </div>
-                            </div>
-                            <div id="sale-edit" class="info-edit">
-                                <div>
-                                    <label class="form-label">Sale Number</label>
-                                    <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Customer Number</label>
-                                    <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Designer</label>
-                                    <div class="flex-row-gap">
-                                        <select class="form-input flex-1" id="designer-input">
-                                            <option value="">Select designer...</option>
-                                            {% for designer in designers %}
-                                                <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
-                                            {% endfor %}
-                                        </select>
-                                        <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddDesignerInline()" title="Add new designer">
-                                            <i class="bi bi-plus-lg"></i>
-                                        </button>
-                                    </div>
-                                    <div id="new-designer-inline" class="new-person-inline">
-                                        <input type="text" id="new-designer-name-inline" class="form-input flex-1" placeholder="New designer name">
-                                        <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
-                                            <i class="bi bi-check-lg"></i>
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesignerInline()" title="Cancel">
-                                            <i class="bi bi-x-lg"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="form-label">WorkGuru ID</label>
-                                    <input type="text" class="form-input" id="workguru-id-input" value="{{ order.workguru_id }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Order Date</label>
-                                    <input type="date" class="form-input" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Fit Date</label>
-                                    <input type="date" class="form-input" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Total Value (Inc VAT)</label>
-                                    <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
-                                </div>
-                                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
-                                    <i class="bi bi-check-lg"></i> Save Sale Info
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -671,84 +621,6 @@
                             </label>
                         </div>
                     </div>
-                </div>
-            </div>
-            
-            <!-- Order Summary Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h3>Order Summary</h3>
-                </div>
-                <div class="card-body padded">
-                    <dl class="summary-list">
-                        <div class="summary-row">
-                            <dt>Time Allowance:</dt>
-                            <dd>{{ order.time_allowance }} days</dd>
-                        </div>
-                        <div class="summary-row remove-border">
-                            <dt>Boards PO:</dt>
-                            <dd>
-                                {% if order.boards_po %}
-                                    <strong>{{ order.boards_po.po_number }}</strong>
-                                    {% for extra_po in order.additional_boards_pos.all %}
-                                        <span class="badge badge-info" style="margin-left: 4px;">{{ extra_po.po_number }}</span>
-                                    {% endfor %}
-                                {% else %}
-                                    <span class="text-muted">Not assigned</span>
-                                {% endif %}
-                                {% if order.boards_po and order.boards_po.file %}
-                                    <span class="file-status" title="PNX File">
-                                        {% if order.boards_po.file %}
-                                            <a href="{{ order.boards_po.file.url }}" download class="btn-icon" title="Download PNX">
-                                                <i class="bi bi-download"></i>
-                                            </a>
-                                        {% endif %}
-                                        PNX
-                                    </span>
-                                {% endif %}
-                            </dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Boards Ordered:</dt>
-                            <dd>
-                                {% if order.all_materials_ordered %}
-                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
-                                {% else %}
-                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
-                                {% endif %}
-                            </dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Boards Received:</dt>
-                            <dd>
-                                {% if order.order_boards_received %}
-                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
-                                {% else %}
-                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
-                                {% endif %}
-                            </dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>All Items Ordered:</dt>
-                            <dd>
-                                {% if order.all_items_ordered %}
-                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
-                                {% else %}
-                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
-                                {% endif %}
-                            </dd>
-                        </div>
-                        <div class="summary-row">
-                            <dt>Job Finished:</dt>
-                            <dd>
-                                {% if order.job_finished %}
-                                    <span class="costing-badge success"><i class="bi bi-check"></i></span>
-                                {% else %}
-                                    <span class="costing-badge danger"><i class="bi bi-x"></i></span>
-                                {% endif %}
-                            </dd>
-                        </div>
-                    </dl>
                 </div>
             </div>
         </div>
@@ -2431,7 +2303,6 @@ function saveSaleInfo(orderId) {
         sale_number: document.getElementById('sale-number-input').value,
         customer_number: document.getElementById('customer-number-input').value,
         designer_id: designerId,
-        workguru_id: document.getElementById('workguru-id-input').value,
         order_date: document.getElementById('order-date-input').value,
         fit_date: document.getElementById('fit-date-input').value,
         total_value_inc_vat: document.getElementById('total-value-input').value
@@ -2452,7 +2323,6 @@ function saveSaleInfo(orderId) {
             document.getElementById('sale-number-display').textContent = data.sale_number;
             document.getElementById('customer-number-display').textContent = data.customer_number;
             document.getElementById('designer-display').textContent = designerId ? designerName : 'Not assigned';
-            document.getElementById('workguru-id-display').textContent = data.workguru_id || 'Not set';
             
             // Format dates for display
             const orderDate = new Date(data.order_date);
@@ -4459,6 +4329,14 @@ function performCSVRegeneration(orderId) {
 }
 
 // Workflow functions
+function toggleWorkflowAccordion() {
+    const body = document.getElementById('workflow-accordion-body');
+    const btn = document.querySelector('.wf-expand');
+    if (!body) return;
+    body.classList.toggle('collapsed');
+    if (btn) btn.classList.toggle('open');
+}
+
 function toggleStageTasks() {
     const content = document.getElementById('stage-tasks-content');
     const toggle = document.querySelector('.stage-tasks-toggle');

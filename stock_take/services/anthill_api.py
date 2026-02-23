@@ -6,6 +6,7 @@ the Anthill CRM system (customers, contacts, sales, etc.).
 """
 
 import os
+import time
 import logging
 import xml.etree.ElementTree as ET
 import requests
@@ -158,7 +159,7 @@ class AnthillAPI:
           <pageSize>{page_size}</pageSize>
         </FindCustomers>'''
 
-        root = self._soap_request('FindCustomers', body)
+        root = self._soap_request('FindCustomers', body, timeout=120)
         result = root.find(f'.//{{{NAMESPACE}}}FindCustomersResult')
 
         if result is None:
@@ -320,15 +321,37 @@ class AnthillAPI:
     # ------------------------------------------------------------------
     # Iterate all customers (generator)
     # ------------------------------------------------------------------
-    def iter_all_customers(self, page_size: int = 1000):
+    def iter_all_customers(self, page_size: int = 1000, days_back: int = 36500):
         """
         Generator that yields all customer search results, auto-paginating.
+
+        Args:
+            page_size: Results per page (max 1000)
+            days_back: How many days back to search (default ~100 years = all records)
 
         Yields dicts with: id, name, type, created, location
         """
         page = 1
+        max_retries = 3
         while True:
-            result = self.find_customers(page=page, page_size=page_size)
+            # Retry logic for transient timeouts
+            result = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = self.find_customers(page=page, page_size=page_size, days_back=days_back)
+                    break
+                except AnthillAPIError as e:
+                    if 'Timeout' in str(e) or 'timed out' in str(e):
+                        wait = 5 * attempt
+                        logger.warning(
+                            f'Anthill: Timeout on page {page} (attempt {attempt}/{max_retries}), '
+                            f'retrying in {wait}s...'
+                        )
+                        time.sleep(wait)
+                        if attempt == max_retries:
+                            raise
+                    else:
+                        raise
             total = result['total_records']
 
             if page == 1:

@@ -42,6 +42,9 @@
                 <span></span>
                 <span></span>
             </button>
+            <button class="mobile-nav-close" id="mobileNavClose" title="Close menu">
+                <i class="bi bi-x-lg"></i>
+            </button>
         </div>
 
         {% if user.is_authenticated %}
@@ -69,16 +72,16 @@
                     <a href="{% url 'ordering' %}" class="nav-link" title="Orders"><span class="nav-text">Orders</span></a>
                     {% endif %}
                     {% if role_perms.customers.can_view or is_role_admin %}
-                    <a href="{% url 'sales_list' %}" class="nav-link {% block nav_sales_active %}{% endblock %}" title="Sales"><span class="nav-text">Sales</span></a>
-                    {% endif %}
-                    {% if role_perms.customers.can_view or is_role_admin %}
                     <a href="{% url 'customers_list' %}" class="nav-link {% block nav_customers_active %}{% endblock %}" title="Customers"><span class="nav-text">Customers</span></a>
-                    {% endif %}
-                    {% if role_perms.customers.can_view or is_role_admin %}
-                    <a href="{% url 'leads_list' %}" class="nav-link {% block nav_leads_active %}{% endblock %}" title="Leads"><span class="nav-text">Leads</span></a>
                     {% endif %}
                     {% if role_perms.remedials.can_view or is_role_admin %}
                     <a href="{% url 'remedials' %}" class="nav-link {% block nav_remedials_active %}{% endblock %}" title="Remedials"><span class="nav-text">Remedials</span></a>
+                    {% endif %}
+                    {% if role_perms.customers.can_view or is_role_admin %}
+                    <a href="{% url 'sales_list' %}" class="nav-link {% block nav_sales_active %}{% endblock %}" title="Events"><span class="nav-text">Events</span></a>
+                    {% endif %}
+                    {% if role_perms.customers.can_view or is_role_admin %}
+                    <a href="{% url 'leads_list' %}" class="nav-link {% block nav_leads_active %}{% endblock %}" title="Contacts"><span class="nav-text">Contacts</span></a>
                     {% endif %}
                 </div>
             </div>
@@ -131,7 +134,7 @@
             {% endif %}
 
             <!-- Products & Stock Section -->
-            {% if role_perms.stock_list.can_view or role_perms.stock_take.can_view or role_perms.completed_stock_takes.can_view or role_perms.categories.can_view or role_perms.substitutions.can_view or is_role_admin %}
+            {% if role_perms.stock_list.can_view or role_perms.stock_take.can_view or role_perms.substitutions.can_view or is_role_admin %}
             <div class="nav-section">
                 <div class="nav-section-header" onclick="toggleSection('products')" title="Products">
                     <span class="nav-label"><i class="bi bi-box-seam"></i><span class="nav-text">Products & Stock</span></span>
@@ -143,12 +146,6 @@
                     {% endif %}
                     {% if role_perms.stock_take.can_view or is_role_admin %}
                     <a href="{% url 'schedule_list' %}" class="nav-link {% block nav_schedules_active %}{% endblock %}" title="Stock Take"><span class="nav-text">Stock Take</span></a>
-                    {% endif %}
-                    {% if role_perms.completed_stock_takes.can_view or is_role_admin %}
-                    <a href="{% url 'completed_stock_takes' %}" class="nav-link {% block nav_completed_stock_takes_active %}{% endblock %}" title="Completed Stock Takes"><span class="nav-text">Completed Stock Takes</span></a>
-                    {% endif %}
-                    {% if role_perms.categories.can_view or is_role_admin %}
-                    <a href="{% url 'category_list' %}" class="nav-link {% block nav_categories_active %}{% endblock %}" title="Categories"><span class="nav-text">Categories</span></a>
                     {% endif %}
                     {% if role_perms.substitutions.can_view or is_role_admin %}
                     <a href="{% url 'substitutions' %}" class="nav-link {% block nav_substitutions_active %}{% endblock %}" title="Substitutions"><span class="nav-text">Substitutions</span></a>
@@ -255,13 +252,20 @@
         {% endif %}
     </div>
 
+    <!-- Mobile Overlay -->
+    <div class="mobile-overlay" id="mobileOverlay"></div>
+
     <!-- Top Navbar -->
     <div class="top-navbar" id="topNavbar">
         {% if user.is_authenticated %}
         <div class="top-navbar-left">
+            <button class="mobile-hamburger" id="mobileHamburger" title="Menu">
+                <i class="bi bi-list"></i>
+            </button>
             <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
         </div>
         <div class="top-navbar-right">
+            {% block page_actions %}{% endblock %}
             <div class="top-search">
                 <form method="GET" action="{% url 'global_search' %}">
                     <input type="search" name="q" placeholder="Search everything..." value="{{ request.GET.q }}">
@@ -371,6 +375,58 @@
             mainContent.classList.toggle('expanded');
             topNavbar.classList.toggle('expanded');
             localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+
+        // Mobile hamburger menu
+        const mobileHamburger = document.getElementById('mobileHamburger');
+        const mobileOverlay = document.getElementById('mobileOverlay');
+
+        function openMobileNav() {
+            sidebar.classList.add('mobile-open');
+            mobileOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeMobileNav() {
+            sidebar.classList.remove('mobile-open');
+            mobileOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        if (mobileHamburger) {
+            mobileHamburger.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (sidebar.classList.contains('mobile-open')) {
+                    closeMobileNav();
+                } else {
+                    openMobileNav();
+                }
+            });
+        }
+
+        if (mobileOverlay) {
+            mobileOverlay.addEventListener('click', closeMobileNav);
+        }
+
+        const mobileNavClose = document.getElementById('mobileNavClose');
+        if (mobileNavClose) {
+            mobileNavClose.addEventListener('click', closeMobileNav);
+        }
+
+        // Close mobile nav on link click
+        sidebar.querySelectorAll('.nav-link').forEach(function(link) {
+            link.addEventListener('click', function() {
+                if (window.innerWidth <= 768) {
+                    closeMobileNav();
+                }
+            });
+        });
+
+        // Handle resize - close mobile nav if resizing to desktop
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                closeMobileNav();
+            }
         });
 
         // Section toggle functionality

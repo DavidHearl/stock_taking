@@ -3,135 +3,216 @@
 
 {% block title %}Remedials{% endblock %}
 
+{% block nav_remedials_active %}active{% endblock %}
+
 {% block extra_css %}
-<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
-<link href="{% static 'css/remedials.css' %}" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
 {% endblock %}
 
+{% block page_title %}Remedials{% endblock %}
+
 {% block content %}
-<div class="remedials-container">
-    <div class="remedials-header">
-        <h1>Remedial Orders</h1>
-        <a href="{% url 'remedial_report' %}" class="btn btn-secondary">
-            <i class="bi bi-file-text"></i> View Report
-        </a>
-    </div>
-
-    <!-- Create New Remedial Section -->
-    <div class="create-remedial-section">
-        <h3>Create New Remedial</h3>
-        <form method="post" class="remedial-form">
-            {% csrf_token %}
-            <div class="form-group">
-                <label for="original_order_id">Select Original Order:</label>
-                <select name="original_order_id" id="original_order_id" required>
-                    <option value="">-- Select an order --</option>
-                    {% for order in available_orders %}
-                    <option class="order-value" value="{{ order.id }}">
-                        {{ order.sale_number }} - {{ order.first_name }} {{ order.last_name }} ({{ order.order_date }})
-                    </option>
-                    {% endfor %}
-                </select>
+<div class="content-card">
+    <!-- Search & Filters -->
+    <div class="customers-controls">
+        <div class="customers-search">
+            <div class="search-input-wrapper">
+                <i class="bi bi-search"></i>
+                <input type="text" id="remedial-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, or type..." autocomplete="off">
             </div>
-            
-            <div class="form-group">
-                <label for="remedial_notes">Notes (Optional):</label>
-                <textarea name="remedial_notes" id="remedial_notes" placeholder="Enter any notes about this remedial..."></textarea>
-            </div>
-            
-            <button type="submit" class="btn btn-primary">Create Remedial</button>
-        </form>
+        </div>
+        <div class="customers-filter-tabs">
+            <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'open' %}active{% endif %}">
+                Open ({{ count_open }})
+            </a>
+            <a href="?status=closed{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'closed' %}active{% endif %}">
+                Closed ({{ count_closed }})
+            </a>
+            <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">
+                All ({{ count_all }})
+            </a>
+        </div>
+        {% if location_filter %}
+        <div class="customers-location-badge">
+            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
+        </div>
+        {% endif %}
     </div>
 
-    <!-- Search Box -->
-    <div class="search-box">
-        <input type="text" id="remedialSearch" placeholder="🔍 Search remedial orders...">
+    {% if anthill_remedials %}
+    <div class="customers-result-bar">
+        <span class="result-count">{{ filtered_count }} remedial{{ filtered_count|pluralize }}</span>
     </div>
-
-    <!-- Remedial Orders List -->
-    <div class="card">
-        <table class="table orders-table" id="remedial-table">
+    <div class="customers-table-container">
+        <table class="customers-table">
             <thead>
                 <tr>
-                    <th>Remedial #</th>
-                    <th>Original Order</th>
+                    <th>Activity ID</th>
                     <th>Customer</th>
-                    <th>Customer #</th>
-                    <th>Created Date</th>
-                    <th>Scheduled Date</th>
-                    <th>Boards PO</th>
+                    <th>Type</th>
                     <th>Status</th>
-                    <th>Days Open</th>
-                    <th>Actions</th>
+                    <th>Date</th>
+                    <th>Location</th>
+                    <th>Linked Order</th>
                 </tr>
             </thead>
             <tbody>
-                {% for remedial in remedial_orders %}
-                <tr class="remedial-row">
-                    <td><span class="remedial-badge">{{ remedial.remedial_number }}</span></td>
-                    <td>{{ remedial.original_order.sale_number }}</td>
-                    <td>{{ remedial.first_name }} {{ remedial.last_name }}</td>
-                    <td>{{ remedial.customer_number }}</td>
-                    <td>{{ remedial.created_date }}</td>
-                    <td>
-                        {% if remedial.scheduled_date %}
-                            {{ remedial.scheduled_date }}
-                        {% else %}
-                            <span class="text-muted">Not scheduled</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if remedial.boards_po %}
-                            {{ remedial.boards_po.po_number }}
-                            {% if remedial.boards_po.boards_ordered %}
-                                <span class="status-icon success" title="Ordered">✓</span>
-                            {% else %}
-                                <span class="status-icon danger" title="Not Ordered">✗</span>
-                            {% endif %}
-                        {% else %}
-                            <span class="text-muted">Not assigned</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if remedial.is_completed %}
-                            <span class="badge badge-success">Completed</span>
-                        {% else %}
-                            <span class="badge badge-warning">In Progress</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ remedial.days_since_created }}</td>
-                    <td>
-                        <a href="{% url 'order_details' remedial.original_order.id %}" class="btn btn-sm btn-primary">View Order</a>
-                    </td>
-                </tr>
-                {% empty %}
+                {% for event in anthill_remedials %}
                 <tr>
-                    <td colspan="10" style="text-align: center; padding: 40px;">
-                        <p class="text-muted">No remedial orders found. Create one above.</p>
+                    <td>
+                        <a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">
+                            {{ event.anthill_activity_id }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if event.customer %}
+                        <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">
+                            {{ event.customer.name|default:event.customer_name }}
+                        </a>
+                        {% else %}
+                        {{ event.customer_name|default:"-" }}
+                        {% endif %}
+                    </td>
+                    <td>{{ event.activity_type|default:"-" }}</td>
+                    <td>
+                        <span class="customer-active-badge {% if event.status|lower == 'closed' %}inactive{% else %}active{% endif %}">
+                            {{ event.status|default:"-" }}
+                        </span>
+                    </td>
+                    <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                    <td>{{ event.location|default:"-" }}</td>
+                    <td>
+                        {% if event.order %}
+                        <a href="{% url 'order_details' event.order.id %}" class="customer-order-badge">
+                            {{ event.order.sale_number }}
+                        </a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    {% else %}
+    <div class="customers-empty-state">
+        <i class="bi bi-wrench"></i>
+        <p>No remedial events found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="customers-pagination">
+        <div class="pagination-info">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} remedials
+        </div>
+        <div class="pagination-controls">
+            {% if page_obj.has_previous %}
+            <a href="?page=1&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                    <span class="page-ellipsis">&hellip;</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 
+<!-- Local Remedial Orders -->
+{% if remedial_orders %}
+<div class="content-card" style="margin-top: 20px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; cursor: pointer;" onclick="document.getElementById('local-remedials-section').style.display = document.getElementById('local-remedials-section').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-icon').classList.toggle('bi-chevron-down'); this.querySelector('.toggle-icon').classList.toggle('bi-chevron-right');">
+        <h3 style="margin: 0; font-size: 1rem; color: var(--text-primary);">
+            <i class="bi bi-chevron-right toggle-icon"></i> Local Remedial Orders ({{ remedial_orders|length }})
+        </h3>
+    </div>
+    <div id="local-remedials-section" style="display: none;">
+        <div class="customers-table-container">
+            <table class="customers-table">
+                <thead>
+                    <tr>
+                        <th>Remedial #</th>
+                        <th>Original Order</th>
+                        <th>Customer</th>
+                        <th>Created</th>
+                        <th>Scheduled</th>
+                        <th>Status</th>
+                        <th>Days Open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for remedial in remedial_orders %}
+                    <tr>
+                        <td><span class="customer-order-badge">{{ remedial.remedial_number }}</span></td>
+                        <td>
+                            <a href="{% url 'order_details' remedial.original_order.id %}" class="customer-name-link">
+                                {{ remedial.original_order.sale_number }}
+                            </a>
+                        </td>
+                        <td>{{ remedial.first_name }} {{ remedial.last_name }}</td>
+                        <td>{{ remedial.created_date|date:"d/m/Y" }}</td>
+                        <td>{{ remedial.scheduled_date|date:"d/m/Y"|default:"-" }}</td>
+                        <td>
+                            <span class="customer-active-badge {% if remedial.is_completed %}active{% else %}inactive{% endif %}">
+                                {% if remedial.is_completed %}Completed{% else %}In Progress{% endif %}
+                            </span>
+                        </td>
+                        <td>{{ remedial.days_since_created }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
-    // Search functionality
-    document.addEventListener('DOMContentLoaded', function() {
-        const searchInput = document.getElementById('remedialSearch');
-        const tableBody = document.querySelector('#remedial-table tbody');
-        
-        searchInput.addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            const rows = tableBody.querySelectorAll('tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                const shouldShow = text.includes(searchTerm);
-                row.style.display = shouldShow ? '' : 'none';
-            });
-        });
+const searchInput = document.getElementById('remedial-search');
+let searchTimeout;
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('status')) params.set('status', '{{ status_filter }}');
+            window.location.href = '?' + params.toString();
+        }, 500);
     });
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('status')) params.set('status', '{{ status_filter }}');
+            window.location.href = '?' + params.toString();
+        }
+    });
+    searchInput.focus();
+}
 </script>
 {% endblock %}

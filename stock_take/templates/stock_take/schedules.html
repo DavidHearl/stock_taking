@@ -1,9 +1,16 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Stock Takes - {{ block.super }}{% endblock %}
+{% block title %}Stock Take - {{ block.super }}{% endblock %}
 
 {% block nav_schedules_active %}active{% endblock %}
+
+{% block page_title %}Stock Take{% endblock %}
+{% block page_actions %}
+<button id="open-history-btn" class="btn btn-secondary btn-sm">
+    <i class="bi bi-clock-history"></i> History
+</button>
+{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/schedules.css' %}">
@@ -12,74 +19,144 @@
 {% block extra_js %}
 <script>
 function getCookie(name) {
-  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-  return m ? m.pop() : '';
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return m ? m.pop() : '';
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Delete schedule
-    document.addEventListener('click', function(e) {
-        if (e.target.closest('.delete-schedule-btn')) {
-            e.preventDefault();
-            const btn = e.target.closest('.delete-schedule-btn');
-            const scheduleId = btn.dataset.id;
-            
-            if (confirm('Are you sure you want to delete this schedule?')) {
-                fetch('{% url "delete_schedule" 0 %}'.replace('0', scheduleId), {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': getCookie('csrftoken')
-                    }
-                })
-                .then(() => location.reload())
-                .catch(() => alert('Error deleting schedule.'));
-            }
-        }
+    // ── Inline stock count update ──
+    document.querySelectorAll('.count-input').forEach(function(input) {
+        const itemId = input.dataset.itemId;
+        const systemQty = parseInt(input.dataset.systemQty);
+
+        input.addEventListener('input', function() {
+            const row = input.closest('tr');
+            const counted = parseInt(input.value) || 0;
+            const variance = counted - systemQty;
+            const varianceEl = row.querySelector('.variance-cell');
+            varianceEl.textContent = variance;
+            varianceEl.className = 'variance-cell' + (variance > 0 ? ' positive' : variance < 0 ? ' negative' : '');
+        });
     });
-    
-    // Edit schedule
-    document.addEventListener('click', function(e) {
-        if (e.target.closest('.edit-schedule-btn')) {
-            e.preventDefault();
-            const btn = e.target.closest('.edit-schedule-btn');
-            
-            // Populate the edit modal with current values
-            document.getElementById('editScheduleId').value = btn.dataset.id;
-            document.getElementById('editScheduleName').value = btn.dataset.name;
-            document.getElementById('editScheduleDate').value = btn.dataset.date;
-            document.getElementById('editScheduleDescription').value = btn.dataset.description || '';
-            document.getElementById('editScheduleLocations').value = btn.dataset.locations || '';
-            document.getElementById('editScheduleAssigned').value = btn.dataset.assigned || '';
-            document.getElementById('editScheduleNotes').value = btn.dataset.notes || '';
-            
-            // Show the edit modal
-            openModal('editScheduleModal');
-        }
-    });
-    
-    // Edit schedule form submission
-    const editForm = document.getElementById('editScheduleForm');
-    if (editForm) {
-        editForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const scheduleId = document.getElementById('editScheduleId').value;
-            const formData = new FormData(this);
-            
-            fetch('{% url "schedule_edit" 0 %}'.replace('0', scheduleId), {
+
+    document.querySelectorAll('.save-count-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const row = btn.closest('tr');
+            const itemId = btn.dataset.itemId;
+            const input = row.querySelector('.count-input');
+            const counted = parseInt(input.value) || 0;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i>';
+
+            fetch('{% url "update_stock_count" %}', {
                 method: 'POST',
-                body: formData
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: 'item_id=' + itemId + '&counted_quantity=' + counted
             })
-            .then(response => response.json())
+            .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    location.reload();
+                    btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                    btn.classList.add('saved');
+                    row.querySelector('.system-qty').textContent = data.new_quantity;
+                    row.querySelector('.variance-cell').textContent = '0';
+                    row.querySelector('.variance-cell').className = 'variance-cell';
+                    input.dataset.systemQty = data.new_quantity;
+
+                    // Update last-checked
+                    const checkedCell = row.querySelector('.last-checked');
+                    if (checkedCell) checkedCell.textContent = 'Just now';
+
+                    // Increment counters
+                    updateCountedStats();
                 } else {
-                    alert('Error updating schedule: ' + data.error);
+                    btn.innerHTML = '<i class="bi bi-x-lg"></i>';
+                    alert('Error: ' + (data.error || 'Unknown error'));
                 }
             })
-            .catch(() => alert('Error updating schedule.'));
+            .catch(() => {
+                btn.innerHTML = '<i class="bi bi-x-lg"></i>';
+                alert('Network error');
+            })
+            .finally(() => {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    if (!btn.classList.contains('saved')) {
+                        btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+                    }
+                }, 2000);
+            });
         });
+    });
+
+    // Save All button
+    document.querySelectorAll('.save-all-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const section = btn.dataset.section;
+            const rows = document.querySelectorAll('.' + section + '-row');
+            rows.forEach(function(row) {
+                const saveBtn = row.querySelector('.save-count-btn');
+                if (saveBtn && !saveBtn.classList.contains('saved')) {
+                    saveBtn.click();
+                }
+            });
+        });
+    });
+
+    function updateCountedStats() {
+        const saved = document.querySelectorAll('.save-count-btn.saved');
+        const statEl = document.getElementById('counted-today-stat');
+        if (statEl) {
+            statEl.textContent = parseInt(statEl.textContent) + 1;
+        }
     }
+
+    // Category accordion toggles
+    document.querySelectorAll('.category-toggle').forEach(function(toggle) {
+        toggle.addEventListener('click', function() {
+            const target = document.getElementById(toggle.dataset.target);
+            const icon = toggle.querySelector('.toggle-icon');
+            if (target.style.display === 'none') {
+                target.style.display = '';
+                icon.classList.replace('bi-chevron-right', 'bi-chevron-down');
+            } else {
+                target.style.display = 'none';
+                icon.classList.replace('bi-chevron-down', 'bi-chevron-right');
+            }
+        });
+    });
+
+    // Tab switching
+    document.querySelectorAll('.stock-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.stock-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const target = tab.dataset.tab;
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(target).classList.add('active');
+        });
+    });
+
+    // History modal
+    const historyModal = document.getElementById('history-modal');
+    document.getElementById('open-history-btn').addEventListener('click', function() {
+        historyModal.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    });
+    document.getElementById('close-history-modal').addEventListener('click', function() {
+        historyModal.classList.remove('open');
+        document.body.style.overflow = '';
+    });
+    historyModal.addEventListener('click', function(e) {
+        if (e.target === historyModal) {
+            historyModal.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+    });
 });
 </script>
 {% endblock %}
@@ -88,145 +165,492 @@ document.addEventListener('DOMContentLoaded', function() {
 {% block content %}
 {% if user.is_authenticated %}
 <div class="page-content">
-    <div class="page-header">
-        <h1>Stock Takes</h1>
-        <button type="button" class="btn btn-primary" onclick="openModal('scheduleModal')">
-            <i class="bi bi-plus-lg"></i> Add New Schedule
+    <!-- Tabs: Stock / Non-Stock / Raumplus / Categories -->
+    <div class="tab-bar">
+        <button type="button" class="stock-tab active" data-tab="stock-panel">
+            <i class="bi bi-box-seam"></i> Stock Items
+            <span class="tab-count">{{ total_stock }}</span>
         </button>
-    </div>
-
-    <div class="stats-bar">
-        <div class="stat-box">
-            <span class="stat-value">{{ pending_count }}</span>
-            <span class="stat-label">Pending</span>
-        </div>
-        <div class="stat-box">
-            <span class="stat-value">{{ in_progress_count }}</span>
-            <span class="stat-label">In Progress</span>
-        </div>
-        <div class="stat-box">
-            <span class="stat-value">{{ completed_count }}</span>
-            <span class="stat-label">Completed</span>
-        </div>
-        {% if auto_schedules_count > 0 %}
-        <div class="stat-box">
-            <span class="stat-value info">{{ auto_schedules_count }}</span>
-            <span class="stat-label">Auto-generated</span>
-        </div>
+        <button type="button" class="stock-tab" data-tab="non-stock-panel">
+            <i class="bi bi-archive"></i> Non-Stock Items
+            <span class="tab-count">{{ total_non_stock }}</span>
+        </button>
+        <button type="button" class="stock-tab" data-tab="raumplus-panel">
+            <i class="bi bi-gear"></i> Raumplus
+            <span class="tab-count">{{ total_raumplus }}</span>
+        </button>
+        <button type="button" class="stock-tab" data-tab="categories-panel">
+            <i class="bi bi-grid"></i> Categories
+            <span class="tab-count">{{ categories|length }}</span>
+        </button>
+        {% if unclassified_count > 0 %}
+        <span class="unclassified-notice">
+            <i class="bi bi-exclamation-triangle"></i> {{ unclassified_count }} unclassified items
+        </span>
         {% endif %}
     </div>
 
-    <div class="schedule-card">
-        <div class="schedule-card-header">
-            <h2>⏱️ Pending Stock Takes</h2>
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- STOCK ITEMS PANEL                           -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="stock-panel" class="tab-panel active">
+
+        <!-- Stats -->
+        <div class="stats-bar">
+            <div class="stat-box">
+                <span class="stat-value">{{ total_stock }}</span>
+                <span class="stat-label">Total Stock Items</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value" id="counted-today-stat">{{ stock_counted_today }}</span>
+                <span class="stat-label">Counted Today</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value {% if stock_never_checked > 0 %}warning{% endif %}">{{ stock_never_checked }}</span>
+                <span class="stat-label">Never Checked</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value {% if stock_below_par > 0 %}danger{% endif %}">{{ stock_below_par }}</span>
+                <span class="stat-label">Below Par Level</span>
+            </div>
         </div>
-        {% if pending_schedules %}
-            {% include 'stock_take/schedule_table.html' with schedules=pending_schedules hide_description=True hide_assigned_to=True %}
-        {% else %}
+
+        <!-- Everyday Plan -->
+        <div class="schedule-card">
+            <div class="schedule-card-header">
+                <h2>Q{{ quarter_number }} Day {{ day_number }}/{{ total_days }} — {{ total_plan_items }} items over {{ cycle_days }} days</h2>
+                <div class="plan-controls">
+                    {% if day_number > 1 %}
+                    <a href="?day={{ day_number|add:"-1" }}" class="btn btn-sm btn-secondary"><i class="bi bi-chevron-left"></i></a>
+                    {% endif %}
+                    <span class="plan-info">{{ todays_items|length }} items today</span>
+                    {% if day_number < total_days %}
+                    <a href="?day={{ day_number|add:"1" }}" class="btn btn-sm btn-secondary"><i class="bi bi-chevron-right"></i></a>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if todays_items %}
+            <div class="count-table-wrap">
+                <table class="count-table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th class="hide-mobile">Name</th>
+                            <th class="hide-mobile">Category</th>
+                            <th class="hide-mobile">Location</th>
+                            <th class="text-center">System Qty</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Variance</th>
+                            <th class="text-center hide-mobile">Last Checked</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in todays_items %}
+                        <tr class="stock-row{% if '_RAU_' in item.sku %} raumplus-highlight{% endif %}" id="item-{{ item.id }}">
+                            <td class="sku-cell">
+                                <span class="sku-text">{{ item.sku }}</span>
+                                <span class="mobile-name">{{ item.name|truncatechars:40 }}</span>
+                            </td>
+                            <td class="hide-mobile">{{ item.name|truncatechars:50 }}</td>
+                            <td class="hide-mobile"><span class="cat-badge" {% if item.category %}style="border-left: 3px solid {{ item.category.color }}"{% endif %}>{{ item.category.name|default:"—" }}</span></td>
+                            <td class="hide-mobile">{{ item.location }}</td>
+                            <td class="text-center"><span class="system-qty">{{ item.quantity }}</span></td>
+                            <td class="text-center">
+                                <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
+                            </td>
+                            <td class="text-center"><span class="variance-cell">0</span></td>
+                            <td class="text-center last-checked hide-mobile">
+                                {% if item.last_checked %}
+                                    {{ item.last_checked|timesince }} ago
+                                {% else %}
+                                    <span class="never-checked">Never</span>
+                                {% endif %}
+                            </td>
+                            <td class="save-cell">
+                                <button class="btn btn-sm btn-primary save-count-btn" data-item-id="{{ item.id }}">
+                                    <i class="bi bi-check-lg"></i> <span class="hide-mobile">Save</span>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <button class="btn btn-success save-all-btn" data-section="stock">
+                    <i class="bi bi-check-all"></i> Save All Counts
+                </button>
+            </div>
+            {% else %}
             <div class="empty-state">
-                <div class="empty-state-icon">✓</div>
-                <h5>No Pending Schedules</h5>
-                <p>All stock takes are either in progress or completed.</p>
+                <div class="empty-state-icon"><i class="bi bi-check-circle"></i></div>
+                <h5>No Items for Today</h5>
+                <p>All stock items have been allocated to other days or none are classified as "Stock" yet.</p>
             </div>
-        {% endif %}
-    </div>
-</div>
+            {% endif %}
+        </div>
 
-<!-- Schedule Modal -->
-<div class="modal" id="scheduleModal">
-    <div class="modal-overlay" onclick="closeModal('scheduleModal')"></div>
-    <div class="modal-dialog" style="max-width: 800px;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Create New Schedule</h3>
-                <button type="button" class="modal-close" onclick="closeModal('scheduleModal')">✕</button>
+        <!-- Full Stock Inventory (collapsed by category) -->
+        <div class="schedule-card">
+            <div class="schedule-card-header">
+                <h2>All Stock Items by Category</h2>
             </div>
-            <form method="post" action="{% url 'schedule_create' %}">
-                {% csrf_token %}
-                <div class="modal-body">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="scheduleName">Name</label>
-                            <input type="text" class="form-input" id="scheduleName" name="name" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="scheduleDate">Scheduled Date</label>
-                            <input type="datetime-local" class="form-input" id="scheduleDate" name="scheduled_date" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="scheduleDescription">Description</label>
-                        <textarea class="form-textarea" id="scheduleDescription" name="description" rows="3"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="scheduleGroups">Stock Take Groups</label>
-                        <select class="form-select" id="scheduleGroups" name="stock_take_groups" multiple>
-                            {% for group in stock_take_groups %}
-                                <option value="{{ group.id }}">{{ group.category.name }} - {{ group.name }}</option>
+            {% for cat_name, items in stock_by_category.items %}
+            <div class="category-section">
+                <button class="category-toggle" data-target="stock-cat-{{ forloop.counter }}">
+                    <i class="bi bi-chevron-right toggle-icon"></i>
+                    <strong>{{ cat_name }}</strong>
+                    <span class="cat-item-count">{{ items|length }} items</span>
+                </button>
+                <div id="stock-cat-{{ forloop.counter }}" style="display: none;">
+                    <div class="count-table-wrap">
+                    <table class="count-table compact">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th class="hide-mobile">Name</th>
+                                <th class="hide-mobile">Location</th>
+                                <th class="text-center">System Qty</th>
+                                <th class="text-center">Count</th>
+                                <th class="text-center">Variance</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            <tr class="stock-row">
+                                <td class="sku-cell">
+                                    <span class="sku-text">{{ item.sku }}</span>
+                                    <span class="mobile-name">{{ item.name|truncatechars:40 }}</span>
+                                </td>
+                                <td class="hide-mobile">{{ item.name|truncatechars:40 }}</td>
+                                <td class="hide-mobile">{{ item.location }}</td>
+                                <td class="text-center"><span class="system-qty">{{ item.quantity }}</span></td>
+                                <td class="text-center">
+                                    <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
+                                </td>
+                                <td class="text-center"><span class="variance-cell">0</span></td>
+                                <td class="save-cell">
+                                    <button class="btn btn-sm btn-primary save-count-btn" data-item-id="{{ item.id }}">
+                                        <i class="bi bi-check-lg"></i> <span class="hide-mobile">Save</span>
+                                    </button>
+                                </td>
+                            </tr>
                             {% endfor %}
-                        </select>
-                        <small class="form-text">Hold Ctrl/Cmd to select multiple groups</small>
+                        </tbody>
+                    </table>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">💾 Create Schedule</button>
+            </div>
+            {% empty %}
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="bi bi-box"></i></div>
+                <h5>No Stock Items</h5>
+                <p>No items are classified as "Stock" yet. Set the tracking type on individual products.</p>
+            </div>
+            {% endfor %}
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- NON-STOCK ITEMS PANEL                       -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="non-stock-panel" class="tab-panel">
+
+        <!-- Stats -->
+        <div class="stats-bar">
+            <div class="stat-box">
+                <span class="stat-value">{{ total_non_stock }}</span>
+                <span class="stat-label">Total Non-Stock Items</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">{{ non_stock_counted_today }}</span>
+                <span class="stat-label">Counted Today</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value {% if non_stock_never_checked > 0 %}warning{% endif %}">{{ non_stock_never_checked }}</span>
+                <span class="stat-label">Never Checked</span>
+            </div>
+        </div>
+
+        {% for cat_name, items in non_stock_by_category.items %}
+        <div class="schedule-card">
+            <div class="schedule-card-header">
+                <h2>{{ cat_name }}</h2>
+                <span class="cat-item-count">{{ items|length }} items</span>
+            </div>
+            <div class="count-table-wrap">
+                <table class="count-table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th class="hide-mobile">Name</th>
+                            <th class="hide-mobile">Location</th>
+                            <th class="text-center">System Qty</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Variance</th>
+                            <th class="text-center hide-mobile">Last Checked</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}
+                        <tr class="non-stock-row">
+                            <td class="sku-cell">
+                                <span class="sku-text">{{ item.sku }}</span>
+                                <span class="mobile-name">{{ item.name|truncatechars:40 }}</span>
+                            </td>
+                            <td class="hide-mobile">{{ item.name|truncatechars:50 }}</td>
+                            <td class="hide-mobile">{{ item.location }}</td>
+                            <td class="text-center"><span class="system-qty">{{ item.quantity }}</span></td>
+                            <td class="text-center">
+                                <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
+                            </td>
+                            <td class="text-center"><span class="variance-cell">0</span></td>
+                            <td class="text-center last-checked hide-mobile">
+                                {% if item.last_checked %}
+                                    {{ item.last_checked|timesince }} ago
+                                {% else %}
+                                    <span class="never-checked">Never</span>
+                                {% endif %}
+                            </td>
+                            <td class="save-cell">
+                                <button class="btn btn-sm btn-primary save-count-btn" data-item-id="{{ item.id }}">
+                                    <i class="bi bi-check-lg"></i> <span class="hide-mobile">Save</span>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% empty %}
+        <div class="schedule-card">
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="bi bi-archive"></i></div>
+                <h5>No Non-Stock Items</h5>
+                <p>No items are classified as "Non-Stock" yet. Set the tracking type on individual products.</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- RAUMPLUS PANEL                              -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="raumplus-panel" class="tab-panel">
+
+        <!-- Stats -->
+        <div class="stats-bar compact">
+            <div class="stat-box">
+                <span class="stat-value">{{ total_raumplus }}</span>
+                <span class="stat-label">Raumplus Items</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value" id="rau-counted-today-stat">{{ raumplus_counted_today }}</span>
+                <span class="stat-label">Counted Today</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value {% if raumplus_never_checked > 0 %}warning{% endif %}">{{ raumplus_never_checked }}</span>
+                <span class="stat-label">Never Checked</span>
+            </div>
+        </div>
+
+        {% for cat_name, items in raumplus_by_category.items %}
+        <div class="schedule-card">
+            <div class="schedule-card-header">
+                <h2>{{ cat_name }}</h2>
+                <span class="cat-item-count">{{ items|length }} items</span>
+            </div>
+            <div class="count-table-wrap">
+                <table class="count-table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th class="hide-mobile">Name</th>
+                            <th class="hide-mobile">Location</th>
+                            <th class="text-center">System Qty</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Variance</th>
+                            <th class="text-center hide-mobile">Last Checked</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}
+                        <tr class="raumplus-row">
+                            <td class="sku-cell">
+                                <span class="sku-text">{{ item.sku }}</span>
+                                <span class="mobile-name">{{ item.name|truncatechars:40 }}</span>
+                            </td>
+                            <td class="hide-mobile">{{ item.name|truncatechars:50 }}</td>
+                            <td class="hide-mobile">{{ item.location }}</td>
+                            <td class="text-center"><span class="system-qty">{{ item.quantity }}</span></td>
+                            <td class="text-center">
+                                <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
+                            </td>
+                            <td class="text-center"><span class="variance-cell">0</span></td>
+                            <td class="text-center last-checked hide-mobile">
+                                {% if item.last_checked %}
+                                    {{ item.last_checked|timesince }} ago
+                                {% else %}
+                                    <span class="never-checked">Never</span>
+                                {% endif %}
+                            </td>
+                            <td class="save-cell">
+                                <button class="btn btn-sm btn-primary save-count-btn" data-item-id="{{ item.id }}">
+                                    <i class="bi bi-check-lg"></i> <span class="hide-mobile">Save</span>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% empty %}
+        <div class="schedule-card">
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="bi bi-gear"></i></div>
+                <h5>No Raumplus Items</h5>
+                <p>Items with <code>_RAU_</code> in their SKU will appear here.</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- CATEGORIES PANEL                            -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="categories-panel" class="tab-panel">
+
+        <div class="stats-bar">
+            <div class="stat-box">
+                <span class="stat-value">{{ categories|length }}</span>
+                <span class="stat-label">Categories</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">{{ stock_take_groups|length }}</span>
+                <span class="stat-label">Stock Take Groups</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value {% if unclassified_count > 0 %}warning{% endif %}">{{ unclassified_count }}</span>
+                <span class="stat-label">Unclassified Items</span>
+            </div>
+        </div>
+
+        {% for category in categories %}
+        <div class="schedule-card">
+            <div class="schedule-card-header">
+                <h2>
+                    {% if category.color %}<span class="cat-color-dot" style="background: {{ category.color }}"></span>{% endif %}
+                    {{ category.name }}
+                </h2>
+                <div class="cat-header-meta">
+                    <span class="cat-item-count">{{ category.item_count }} items</span>
+                    {% if category.unassigned_items > 0 %}
+                    <span class="cat-unassigned-badge">{{ category.unassigned_items }} unassigned</span>
+                    {% endif %}
                 </div>
-            </form>
+            </div>
+            {% if category.stock_take_groups.all %}
+            <div class="cat-groups-list">
+                {% for group in category.stock_take_groups.all %}
+                <div class="cat-group-row">
+                    <span class="group-badge" style="background: {{ group.color|default:'#6b7280' }}">{{ group.name }}</span>
+                    <span class="group-item-count">{{ group.stock_items.count }} items</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="cat-no-groups">
+                <span class="text-secondary">No stock take groups defined for this category</span>
+            </div>
+            {% endif %}
+        </div>
+        {% empty %}
+        <div class="schedule-card">
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="bi bi-grid"></i></div>
+                <h5>No Categories</h5>
+                <p>Categories will appear here once stock items are imported and categorised.</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- HISTORY MODAL                               -->
+<!-- ═══════════════════════════════════════════ -->
+<div id="history-modal" class="history-modal-overlay">
+    <div class="history-modal">
+        <div class="history-modal-header">
+            <h2><i class="bi bi-clock-history"></i> Completed Stock Takes</h2>
+            <button id="close-history-modal" class="modal-close-btn"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="history-modal-stats">
+            <div class="stat-box">
+                <span class="stat-value">{{ completed_last_7 }}</span>
+                <span class="stat-label">Last 7 Days</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">{{ completed_last_30 }}</span>
+                <span class="stat-label">Last 30 Days</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">{{ completed_total }}</span>
+                <span class="stat-label">All Time</span>
+            </div>
+        </div>
+        <div class="history-modal-body">
+            {% if completed_schedules %}
+            <table class="count-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Groups</th>
+                        <th>Assigned To</th>
+                        <th>Completed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for schedule in completed_schedules %}
+                    <tr>
+                        <td>
+                            <strong>{{ schedule.name }}</strong>
+                            {% if schedule.auto_generated %}<span class="badge badge-info">Auto</span>{% endif %}
+                        </td>
+                        <td>
+                            <div class="groups-list">
+                                {% for group in schedule.stock_take_groups.all %}
+                                <span class="group-badge" style="background: {{ group.color|default:'#6b7280' }}">{{ group.name }}</span>
+                                {% empty %}
+                                <span class="text-secondary">—</span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td>{{ schedule.assigned_to|default:"—" }}</td>
+                        <td class="last-checked">{{ schedule.completed_date|date:"d M Y" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state" style="padding: 40px 20px;">
+                <div class="empty-state-icon"><i class="bi bi-clock-history"></i></div>
+                <h5>No Completed Stock Takes</h5>
+                <p>Completed stock take schedules will appear here.</p>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
-<!-- Edit Schedule Modal -->
-<div class="modal" id="editScheduleModal">
-    <div class="modal-overlay" onclick="closeModal('editScheduleModal')"></div>
-    <div class="modal-dialog" style="max-width: 800px;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Edit Schedule</h3>
-                <button type="button" class="modal-close" onclick="closeModal('editScheduleModal')">✕</button>
-            </div>
-            <form id="editScheduleForm">
-                {% csrf_token %}
-                <input type="hidden" id="editScheduleId" name="schedule_id">
-                <div class="modal-body">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="editScheduleName">Name</label>
-                            <input type="text" class="form-input" id="editScheduleName" name="name" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="editScheduleDate">Scheduled Date</label>
-                            <input type="datetime-local" class="form-input" id="editScheduleDate" name="scheduled_date" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="editScheduleDescription">Description</label>
-                        <textarea class="form-textarea" id="editScheduleDescription" name="description" rows="3"></textarea>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="editScheduleLocations">Locations</label>
-                            <input type="text" class="form-input" id="editScheduleLocations" name="locations" placeholder="Comma-separated locations">
-                        </div>
-                        <div class="form-group">
-                            <label for="editScheduleAssigned">Assigned To</label>
-                            <input type="text" class="form-input" id="editScheduleAssigned" name="assigned_to">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="editScheduleNotes">Notes</label>
-                        <textarea class="form-textarea" id="editScheduleNotes" name="notes" rows="3"></textarea>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('editScheduleModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">💾 Update Schedule</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-</div>
 {% endif %}
 {% endblock %}

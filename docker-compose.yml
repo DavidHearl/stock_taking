@@ -38,13 +38,41 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS}
       DATABASE_URL: ${DATABASE_URL}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
-      WORKGURU_API_KEY: ${WORKGURU_API_KEY}
-      WORKGURU_SECRET_KEY: ${WORKGURU_SECRET_KEY}
       BUCKET_ACCESS_ID: ${BUCKET_ACCESS_ID}
       BUCKET_SECRET_KEY: ${BUCKET_SECRET_KEY}
       BUCKET_NAME: ${BUCKET_NAME}
       BUCKET_ENDPOINT_URL: ${BUCKET_ENDPOINT_URL}
       BUCKET_REGION: ${BUCKET_REGION}
+
+  # Scheduled tasks — syncs recent Anthill customers at 08:00 & 12:00 daily
+  scheduler:
+    build: .
+    entrypoint: []
+    networks: [traefik-net]
+    volumes:
+      - /srv/media/stock_taking:/app/media
+    restart: unless-stopped
+    command: >
+      sh -c "
+        apt-get update && apt-get install -y --no-install-recommends cron &&
+        rm -rf /var/lib/apt/lists/* &&
+        printenv | grep -E '^(DJANGO_|SECRET_|DEBUG|ALLOWED_|DATABASE_|ANTHILL_)' | sed 's/=\(.*\)/=\"\1\"/' > /etc/environment &&
+        echo 'SHELL=/bin/sh' > /etc/cron.d/anthill-sync &&
+        echo '0 8 * * * root . /etc/environment; cd /app && python manage.py sync_recent_customers >> /var/log/cron.log 2>&1' >> /etc/cron.d/anthill-sync &&
+        echo '0 12 * * * root . /etc/environment; cd /app && python manage.py sync_recent_customers >> /var/log/cron.log 2>&1' >> /etc/cron.d/anthill-sync &&
+        echo '' >> /etc/cron.d/anthill-sync &&
+        chmod 0644 /etc/cron.d/anthill-sync &&
+        touch /var/log/cron.log &&
+        cron && tail -f /var/log/cron.log
+      "
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE}
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+      DATABASE_URL: ${DATABASE_URL}
+      ANTHILL_USERNAME: ${ANTHILL_USERNAME}
+      ANTHILL_PASSWORD: ${ANTHILL_PASSWORD}
 
 networks:
   traefik-net:

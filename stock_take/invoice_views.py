@@ -1,6 +1,5 @@
 """
-Invoice views – displays invoices from the local DB and provides a
-streaming sync endpoint that pulls data from WorkGuru.
+Invoice views – displays invoices from the local DB.
 """
 
 import json
@@ -12,12 +11,6 @@ from django.contrib.auth.decorators import login_required
 from django.http import StreamingHttpResponse
 
 from .models import Invoice
-from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-from .services.workguru_invoices import (
-    fetch_all_invoice_ids,
-    fetch_invoice_detail,
-    upsert_invoice,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -105,126 +98,27 @@ def invoice_detail(request, invoice_id):
     return render(request, 'stock_take/invoice_detail.html', context)
 
 
-# ── Sync via SSE (incremental by default) ─────────────────────────
+# ── Sync via SSE (WorkGuru removed — stub) ────────────────────────
 @login_required
 def sync_invoices_stream(request):
     """
-    SSE endpoint – streams sync progress to the browser.
-
-    Query params:
-        ?full=1  – force full resync of every invoice (slower but
-                   refreshes payment data for all records).
+    SSE endpoint – previously synced invoices from WorkGuru.
+    WorkGuru integration has been removed. Invoices are now synced from Xero.
     """
-    force_full = request.GET.get('full') == '1'
 
     def _sse(payload):
         return f"data: {json.dumps(payload)}\n\n"
 
     def event_stream():
-        try:
-            api = WorkGuruAPI.authenticate()
-
-            # -- Step 1: fetch all invoice summaries -----------------
-            yield _sse({'status': 'progress', 'message': 'Connecting to WorkGuru...'})
-
-            try:
-                summaries = fetch_all_invoice_ids(api)
-            except WorkGuruAPIError as e:
-                yield _sse({'error': str(e)})
-                return
-
-            api_total = len(summaries)
-            api_ids = {s['id'] for s in summaries if s.get('id')}
-
-            # -- Step 2: determine which invoices are new ------------
-            existing_ids = set(
-                Invoice.objects.values_list('workguru_id', flat=True)
-            )
-            new_ids = api_ids - existing_ids
-            skipped = len(existing_ids & api_ids)
-
-            if force_full:
-                to_sync = [s for s in summaries if s.get('id')]
-                yield _sse({
-                    'status': 'progress',
-                    'message': (
-                        f'Full sync: {api_total} invoices from WorkGuru. '
-                        f'Fetching detail for all...'
-                    ),
-                })
-            else:
-                to_sync = [s for s in summaries if s.get('id') in new_ids]
-                yield _sse({
-                    'status': 'progress',
-                    'message': (
-                        f'Found {api_total} invoices in WorkGuru. '
-                        f'{len(new_ids)} new, {skipped} already synced.'
-                    ),
-                })
-
-            if not to_sync:
-                yield _sse({
-                    'status': 'complete',
-                    'created': 0,
-                    'updated': 0,
-                    'skipped': skipped,
-                    'total': api_total,
-                    'errors': [],
-                })
-                return
-
-            # -- Step 3: sync each invoice ---------------------------
-            created = 0
-            updated = 0
-            errors = []
-            total_to_sync = len(to_sync)
-
-            for idx, summary in enumerate(to_sync, 1):
-                wg_id = summary['id']
-                inv_num = summary.get('invoiceNumber', f'ID {wg_id}')
-
-                try:
-                    # Fetch accurate detail from GetInvoiceById
-                    detail = fetch_invoice_detail(api, wg_id)
-                    inv_data = detail if detail else summary
-
-                    invoice_obj, was_created = upsert_invoice(inv_data)
-
-                    if was_created:
-                        created += 1
-                    else:
-                        updated += 1
-
-                except Exception as exc:
-                    errors.append(f"{inv_num}: {exc}")
-                    logger.error(f"Error syncing invoice {inv_num}: {exc}", exc_info=True)
-
-                # Progress every 5 invoices (or on the last one)
-                if idx % 5 == 0 or idx == total_to_sync:
-                    yield _sse({
-                        'status': 'progress',
-                        'message': (
-                            f'Syncing {idx}/{total_to_sync}... '
-                            f'({created} created, {updated} updated'
-                            f'{", " + str(len(errors)) + " errors" if errors else ""})'
-                        ),
-                    })
-
-            # -- Step 4: done ----------------------------------------
-            yield _sse({
-                'status': 'complete',
-                'created': created,
-                'updated': updated,
-                'skipped': skipped,
-                'total': api_total,
-                'errors': errors,
-            })
-
-        except WorkGuruAPIError as e:
-            yield _sse({'error': str(e)})
-        except Exception as e:
-            logger.error(f"Invoice sync error: {e}", exc_info=True)
-            yield _sse({'error': str(e)})
+        yield _sse({
+            'status': 'complete',
+            'message': 'WorkGuru sync has been removed. Use Xero invoice sync instead.',
+            'created': 0,
+            'updated': 0,
+            'skipped': 0,
+            'total': 0,
+            'errors': [],
+        })
 
     response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'

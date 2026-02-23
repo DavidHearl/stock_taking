@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale
 
 import csv
 import io
@@ -159,7 +159,7 @@ def search_customers(request):
     if len(query) < 2:
         return JsonResponse({'customers': []})
     
-    # Search in Customer table — include the name field from WorkGuru
+    # Search in Customer table
     customers_from_table = Customer.objects.filter(
         Q(name__icontains=query) |
         Q(first_name__icontains=query) |
@@ -2864,7 +2864,6 @@ def update_sale_info(request, order_id):
         
         order.sale_number = data.get('sale_number', '')
         order.customer_number = data.get('customer_number', '')
-        order.workguru_id = data.get('workguru_id', '')
         
         # Handle designer field
         designer_id = data.get('designer_id')
@@ -4377,37 +4376,221 @@ def update_item(request, item_id):
     
     return HttpResponse('Method not allowed', status=405)
 
+def _get_name_group(name):
+    """Extract a grouping key from an item name by removing trailing sizes, numbers, and variants.
+    E.g. 'Soft Close Hinge 35mm Left' → 'Soft Close Hinge'
+         'Track Top 1800mm'           → 'Track Top'
+         'Handle Bar 300mm Chrome'    → 'Handle Bar Chrome'
+    """
+    import re
+    # Remove common size/dimension patterns (e.g. 35mm, 1800mm, 2.4m, 100x50)
+    cleaned = re.sub(r'\b\d+(\.\d+)?\s*(mm|cm|m|kg|g|ml|l)\b', '', name, flags=re.IGNORECASE)
+    # Remove standalone numbers (e.g. "1800", "300")
+    cleaned = re.sub(r'\b\d+\b', '', cleaned)
+    # Remove directional/variant suffixes
+    cleaned = re.sub(r'\b(left|right|lh|rh|pair|set|each|per|pk|pack)\b', '', cleaned, flags=re.IGNORECASE)
+    # Collapse whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Remove trailing punctuation
+    cleaned = cleaned.rstrip(' -–/')
+    return cleaned or name
+
+
+def _quarter_workday(today):
+    """Return the 1-based workday number within the current quarter.
+    
+    Quarter starts: Jan 1, Apr 1, Jul 1, Oct 1.
+    Only weekdays (Mon-Fri) are counted.
+    """
+    from datetime import date, timedelta
+    # Determine quarter start
+    q_month = ((today.month - 1) // 3) * 3 + 1  # 1, 4, 7, or 10
+    quarter_start = date(today.year, q_month, 1)
+
+    # Count weekdays from quarter_start to today (inclusive)
+    workday = 0
+    d = quarter_start
+    while d <= today:
+        if d.weekday() < 5:  # Mon-Fri
+            workday += 1
+        d += timedelta(days=1)
+    return max(workday, 1)
+
+
 def schedule_list(request):
-    """Display all schedules grouped by status with priority sorting"""
-    all_schedules = Schedule.objects.prefetch_related('stock_take_groups').all()
-    
-    # Sort by priority (weighting) and date
-    pending_schedules = all_schedules.filter(status='pending').annotate(
-        priority=models.Sum('stock_take_groups__weighting')
-    ).order_by('-priority', 'scheduled_date')
-    
-    in_progress_schedules = all_schedules.filter(status='in_progress').order_by('scheduled_date')
-    completed_schedules = all_schedules.filter(status='completed').order_by('-scheduled_date')
-    
-    # Get auto-generated schedules count
-    auto_schedules_count = pending_schedules.filter(auto_generated=True).count()
-    
-    categories = Category.objects.filter(parent=None)
+    """Stock Take page — tabs: Stock, Non-Stock, Raumplus, Categories"""
+    from collections import defaultdict, OrderedDict
+    from datetime import date, timedelta
+    import math
+    import re
+
+    CYCLE_DAYS = 65  # Full stock take every ~65 working days (quarterly)
+
+    # ── Raumplus items (SKU contains _RAU_) ──
+    raumplus_items = StockItem.objects.filter(
+        sku__icontains='_RAU_'
+    ).select_related('category', 'stock_take_group').order_by('category__name', 'name')
+
+    raumplus_by_category = defaultdict(list)
+    for item in raumplus_items:
+        cat_name = item.category.name if item.category else 'Uncategorised'
+        raumplus_by_category[cat_name].append(item)
+
+    total_raumplus = raumplus_items.count()
+    raumplus_counted_today = raumplus_items.filter(last_checked__date=date.today()).count()
+    raumplus_never_checked = raumplus_items.filter(last_checked__isnull=True).count()
+
+    # ── Stock items (tracking_type='stock', excluding Raumplus) ──
+    stock_items = StockItem.objects.filter(
+        tracking_type='stock'
+    ).exclude(
+        sku__icontains='_RAU_'
+    ).select_related('category', 'stock_take_group').order_by('category__name', 'name')
+
+    # Group stock items by category
+    stock_by_category = defaultdict(list)
+    for item in stock_items:
+        cat_name = item.category.name if item.category else 'Uncategorised'
+        stock_by_category[cat_name].append(item)
+
+    # ── Everyday plan: Stock + Raumplus combined, 65-day quarterly cycle ──
+    # Combine both sets then sort by name-group so related items are counted together
+    all_plan_items = list(stock_items) + list(raumplus_items)
+    all_plan_items.sort(key=lambda item: (_get_name_group(item.name), item.name))
+
+    total_plan_items = len(all_plan_items)
+    items_per_day = math.ceil(total_plan_items / CYCLE_DAYS) if total_plan_items > 0 else 1
+    total_days = CYCLE_DAYS
+
+    # Calculate which workday of the quarter we're on (1-based, wraps at 65)
+    today = date.today()
+    quarter_workday = _quarter_workday(today)
+    day_number = ((quarter_workday - 1) % total_days) + 1
+
+    # Allow override from query param for previewing other days
+    day_number = int(request.GET.get('day', day_number))
+    day_number = max(1, min(day_number, total_days))
+
+    start_idx = (day_number - 1) * items_per_day
+    end_idx = start_idx + items_per_day
+    todays_items = all_plan_items[start_idx:end_idx]
+
+    # Group today's items by name-group for display
+    todays_by_group = OrderedDict()
+    for item in todays_items:
+        group_key = _get_name_group(item.name)
+        if group_key not in todays_by_group:
+            todays_by_group[group_key] = []
+        todays_by_group[group_key].append(item)
+
+    # Categorise today's items
+    todays_by_category = defaultdict(list)
+    for item in todays_items:
+        cat_name = item.category.name if item.category else 'Uncategorised'
+        todays_by_category[cat_name].append(item)
+
+    # Stats for stock items (excluding Raumplus)
+    total_stock = stock_items.count()
+    stock_counted_today = stock_items.filter(last_checked__date=date.today()).count()
+    stock_never_checked = stock_items.filter(last_checked__isnull=True).count()
+    stock_below_par = stock_items.filter(quantity__lt=models.F('par_level')).count()
+
+    # ── Non-Stock items (tracking_type='non-stock', excluding Raumplus) ──
+    non_stock_items = StockItem.objects.filter(
+        tracking_type='non-stock'
+    ).exclude(
+        sku__icontains='_RAU_'
+    ).select_related('category', 'stock_take_group').order_by('category__name', 'name')
+
+    non_stock_by_category = defaultdict(list)
+    for item in non_stock_items:
+        cat_name = item.category.name if item.category else 'Uncategorised'
+        non_stock_by_category[cat_name].append(item)
+
+    total_non_stock = non_stock_items.count()
+    non_stock_counted_today = non_stock_items.filter(last_checked__date=date.today()).count()
+    non_stock_never_checked = non_stock_items.filter(last_checked__isnull=True).count()
+
+    # ── Not-classified items (for awareness) ──
+    unclassified_count = StockItem.objects.filter(tracking_type='not-classified').count()
+
+    # ── Completed stock takes (for history modal) ──
+    completed_schedules = Schedule.objects.filter(
+        status='completed',
+        completed_date__isnull=False
+    ).prefetch_related('stock_take_groups__category').order_by('-completed_date')[:50]
+
+    now = timezone.now()
+    completed_last_7 = Schedule.objects.filter(
+        status='completed', completed_date__gte=now - timedelta(days=7)
+    ).count()
+    completed_last_30 = Schedule.objects.filter(
+        status='completed', completed_date__gte=now - timedelta(days=30)
+    ).count()
+    completed_total = Schedule.objects.filter(status='completed').count()
+
+    # ── Categories with item counts (for manage panel) ──
+    categories = Category.objects.filter(parent=None).prefetch_related(
+        'stock_take_groups__stock_items',
+        'stockitem_set'
+    ).annotate(
+        item_count=models.Count('stockitem')
+    ).order_by('name')
+
+    for category in categories:
+        category.unassigned_items = category.stockitem_set.filter(stock_take_group__isnull=True).count()
+
     stock_take_groups = StockTakeGroup.objects.select_related('category').all()
-    
+
+    # Quarter info for display
+    q_num = ((today.month - 1) // 3) + 1
+    q_month = ((today.month - 1) // 3) * 3 + 1
+    quarter_start = date(today.year, q_month, 1)
+
     context = {
-        'schedules': all_schedules,
-        'pending_schedules': pending_schedules,
-        'in_progress_schedules': in_progress_schedules,
+        # Stock section
+        'stock_items': stock_items,
+        'stock_by_category': dict(stock_by_category),
+        'total_stock': total_stock,
+        'stock_counted_today': stock_counted_today,
+        'stock_never_checked': stock_never_checked,
+        'stock_below_par': stock_below_par,
+        # Everyday plan (Stock + Raumplus combined)
+        'todays_items': todays_items,
+        'todays_by_category': dict(todays_by_category),
+        'todays_by_group': dict(todays_by_group),
+        'total_plan_items': total_plan_items,
+        'items_per_day': items_per_day,
+        'day_number': day_number,
+        'total_days': total_days,
+        'cycle_days': CYCLE_DAYS,
+        'quarter_number': q_num,
+        'quarter_start': quarter_start,
+        'quarter_workday': quarter_workday,
+        # Raumplus section
+        'raumplus_items': raumplus_items,
+        'raumplus_by_category': dict(raumplus_by_category),
+        'total_raumplus': total_raumplus,
+        'raumplus_counted_today': raumplus_counted_today,
+        'raumplus_never_checked': raumplus_never_checked,
+        # Non-stock section
+        'non_stock_items': non_stock_items,
+        'non_stock_by_category': dict(non_stock_by_category),
+        'total_non_stock': total_non_stock,
+        'non_stock_counted_today': non_stock_counted_today,
+        'non_stock_never_checked': non_stock_never_checked,
+        # Classification
+        'unclassified_count': unclassified_count,
+        # Completed stock takes (history modal)
         'completed_schedules': completed_schedules,
-        'pending_count': pending_schedules.count(),
-        'in_progress_count': in_progress_schedules.count(),
-        'completed_count': completed_schedules.count(),
-        'auto_schedules_count': auto_schedules_count,
+        'completed_last_7': completed_last_7,
+        'completed_last_30': completed_last_30,
+        'completed_total': completed_total,
+        # Categories
         'categories': categories,
         'stock_take_groups': stock_take_groups,
     }
-    
+
     return render(request, 'stock_take/schedules.html', context)
 
 def schedule_create(request):
@@ -6008,167 +6191,6 @@ def generate_summary_document(request, order_id):
     return response
 
 
-@login_required
-def push_accessories_to_workguru(request, order_id):
-    """Push accessories to WorkGuru project via API."""
-    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-    from .services.workguru_accessories import push_accessories_to_project
-
-    order = get_object_or_404(Order, id=order_id)
-
-    if not order.workguru_id:
-        messages.error(request, 'This order does not have a WorkGuru Project ID.')
-        return redirect('order_details', order_id=order_id)
-
-    if not order.accessories.exists():
-        messages.error(request, 'No accessories to push to WorkGuru.')
-        return redirect('order_details', order_id=order_id)
-
-    try:
-        api = WorkGuruAPI.authenticate()
-        result = push_accessories_to_project(api, order)
-
-        if result['success_count'] > 0:
-            messages.success(
-                request,
-                f"Successfully pushed {result['success_count']} item(s) to WorkGuru "
-                f"project {order.workguru_id} ({result['method']} mode)."
-            )
-        if result['error_count'] > 0:
-            error_summary = f"Failed to push {result['error_count']} item(s). "
-            error_summary += '; '.join(result['errors'][:3])
-            if len(result['errors']) > 3:
-                error_summary += f'... and {len(result["errors"]) - 3} more'
-            messages.error(request, error_summary)
-
-    except WorkGuruAPIError as e:
-        messages.error(request, str(e))
-
-    return redirect('order_details', order_id=order_id)
-
-
-@login_required
-def create_workguru_po(request, order_id):
-    """Create a Purchase Order in WorkGuru and link it as the Boards PO for this order."""
-    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-    from .services.workguru_boards import create_boards_po_in_workguru
-
-    order = get_object_or_404(Order, id=order_id)
-
-    if not order.workguru_id:
-        messages.error(request, 'This order does not have a WorkGuru Project ID. Set it first.')
-        return redirect('order_details', order_id=order_id)
-
-    if order.boards_po:
-        messages.warning(request, f'This order already has a Boards PO ({order.boards_po.po_number}).')
-        return redirect('order_details', order_id=order_id)
-
-    try:
-        api = WorkGuruAPI.authenticate()
-        po_number = create_boards_po_in_workguru(api, order)
-        messages.success(request, f'WorkGuru PO {po_number} created and linked to this order.')
-    except WorkGuruAPIError as e:
-        messages.error(request, str(e))
-
-    return redirect('order_details', order_id=order_id)
-
-
-@login_required
-def push_boards_to_workguru_po(request, order_id):
-    """Push board line items and PNX/CSV files to the WorkGuru Purchase Order."""
-    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-    from .services.workguru_boards import push_boards_to_po
-
-    order = get_object_or_404(Order, id=order_id)
-
-    if not order.workguru_id:
-        messages.error(request, 'This order does not have a WorkGuru Project ID.')
-        return redirect('order_details', order_id=order_id)
-
-    if not order.boards_po:
-        messages.error(request, 'This order does not have a Boards PO. Create one first.')
-        return redirect('order_details', order_id=order_id)
-
-    try:
-        api = WorkGuruAPI.authenticate()
-        summary = push_boards_to_po(api, order)
-
-        msg_parts = [f"{summary['line_count']} board line item(s) added to PO {order.boards_po.po_number}"]
-        if summary['stock_count']:
-            msg_parts.append(f"{summary['stock_count']} existing stock")
-        if summary['adhoc_count']:
-            msg_parts.append(f"{summary['adhoc_count']} using generic boards product")
-        if summary['files_uploaded']:
-            msg_parts.append(f"{summary['files_uploaded']} file(s) uploaded")
-        messages.success(request, ' | '.join(msg_parts))
-
-    except WorkGuruAPIError as e:
-        messages.error(request, str(e))
-
-    return redirect('order_details', order_id=order_id)
-
-
-@login_required
-def create_workguru_os_doors_po(request, order_id):
-    """Create a Purchase Order in WorkGuru for OS Doors."""
-    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-    from .services.workguru_os_doors import create_os_doors_po_in_workguru
-
-    order = get_object_or_404(Order, id=order_id)
-
-    if not order.workguru_id:
-        messages.error(request, 'This order does not have a WorkGuru Project ID. Set it first.')
-        return redirect('order_details', order_id=order_id)
-
-    if order.os_doors_po:
-        messages.warning(request, f'This order already has an OS Doors PO ({order.os_doors_po}).')
-        return redirect('order_details', order_id=order_id)
-
-    try:
-        api = WorkGuruAPI.authenticate()
-        po_number = create_os_doors_po_in_workguru(api, order)
-        messages.success(request, f'WorkGuru OS Doors PO {po_number} created and linked to this order.')
-    except WorkGuruAPIError as e:
-        messages.error(request, str(e))
-
-    return redirect('order_details', order_id=order_id)
-
-
-@login_required
-def push_os_doors_to_workguru_po(request, order_id):
-    """Push OS Door line items to the WorkGuru Purchase Order."""
-    from .services.workguru_api import WorkGuruAPI, WorkGuruAPIError
-    from .services.workguru_os_doors import push_os_doors_to_po
-
-    order = get_object_or_404(Order, id=order_id)
-
-    if not order.workguru_id:
-        messages.error(request, 'This order does not have a WorkGuru Project ID.')
-        return redirect('order_details', order_id=order_id)
-
-    if not order.os_doors_po:
-        messages.error(request, 'This order does not have an OS Doors PO. Create one first.')
-        return redirect('order_details', order_id=order_id)
-
-    if not order.os_doors.exists():
-        messages.error(request, 'No OS door items found for this order.')
-        return redirect('order_details', order_id=order_id)
-
-    try:
-        api = WorkGuruAPI.authenticate()
-        summary = push_os_doors_to_po(api, order)
-
-        msg_parts = [f"{summary['line_count']} OS door line item(s) added to PO {order.os_doors_po}"]
-        if summary['stock_count']:
-            msg_parts.append(f"{summary['stock_count']} stock")
-        if summary['adhoc_count']:
-            msg_parts.append(f"{summary['adhoc_count']} adhoc")
-        messages.success(request, ' | '.join(msg_parts))
-
-    except WorkGuruAPIError as e:
-        messages.error(request, str(e))
-
-    return redirect('order_details', order_id=order_id)
 
 
 @login_required
@@ -6429,32 +6451,78 @@ def update_stock_items_batch(request):
 
 @login_required
 def remedials(request):
-    """View to manage remedial orders - create and view remedials"""
-    
-    # Get all remedial orders
+    """View to manage remedial orders - show Anthill remedial events and local remedials"""
+    from django.utils import timezone
+    from django.core.paginator import Paginator
+    from datetime import timedelta
+
+    search_query = request.GET.get('q', '').strip()
+    status_filter = request.GET.get('status', 'open')
+
+    # Location from user profile
+    profile = getattr(request.user, 'profile', None)
+    location_filter = profile.selected_location if profile else ''
+
+    # --- Anthill remedial events ---
+    anthill_remedials = AnthillSale.objects.select_related('customer', 'order').filter(
+        activity_type__icontains='remedial'
+    ).order_by('-activity_date')
+
+    if location_filter:
+        anthill_remedials = anthill_remedials.filter(location__iexact=location_filter)
+
+    # Status filter
+    if status_filter == 'open':
+        anthill_remedials = anthill_remedials.exclude(status__iexact='closed')
+    elif status_filter == 'closed':
+        anthill_remedials = anthill_remedials.filter(status__iexact='closed')
+    # 'all' shows everything
+
+    # Counts
+    base_qs = AnthillSale.objects.filter(activity_type__icontains='remedial')
+    if location_filter:
+        base_qs = base_qs.filter(location__iexact=location_filter)
+    count_open = base_qs.exclude(status__iexact='closed').count()
+    count_closed = base_qs.filter(status__iexact='closed').count()
+    count_all = base_qs.count()
+
+    # Search
+    if search_query:
+        anthill_remedials = anthill_remedials.filter(
+            models.Q(customer_name__icontains=search_query) |
+            models.Q(anthill_activity_id__icontains=search_query) |
+            models.Q(activity_type__icontains=search_query) |
+            models.Q(customer__name__icontains=search_query)
+        )
+
+    # Pagination
+    page_number = request.GET.get('page', 1)
+    paginator = Paginator(anthill_remedials, 100)
+    page_obj = paginator.get_page(page_number)
+
+    # --- Local remedial orders (legacy) ---
     remedial_orders = Remedial.objects.select_related('original_order', 'boards_po').prefetch_related('accessories').order_by('-created_date')
-    
+
     # Get all orders for selection (to create remedials from)
     available_orders = Order.objects.exclude(
         job_finished=True
-    ).select_related('boards_po').order_by('-order_date')[:100]  # Limit to recent 100
-    
+    ).select_related('boards_po').order_by('-order_date')[:100]
+
     if request.method == 'POST':
         # Handle creating a new remedial order
         try:
             original_order_id = request.POST.get('original_order_id')
-            remedial_reason = request.POST.get('remedial_notes', '')  # Using 'remedial_notes' from form
-            
+            remedial_reason = request.POST.get('remedial_notes', '')
+
             if not original_order_id:
                 messages.error(request, 'Please select an order to create a remedial for.')
                 return redirect('remedials')
-            
+
             original_order = Order.objects.get(id=original_order_id)
-            
+
             # Generate unique remedial number
             latest_remedial = Remedial.objects.order_by('-id').first()
             if latest_remedial and latest_remedial.remedial_number:
-                # Extract number from REM-001 format
                 try:
                     last_num = int(latest_remedial.remedial_number.split('-')[1])
                     new_num = last_num + 1
@@ -6462,10 +6530,9 @@ def remedials(request):
                     new_num = 1
             else:
                 new_num = 1
-            
+
             remedial_number = f"REM-{new_num:03d}"
-            
-            # Create new remedial order
+
             remedial = Remedial.objects.create(
                 original_order=original_order,
                 remedial_number=remedial_number,
@@ -6476,18 +6543,27 @@ def remedials(request):
                 address=original_order.address,
                 postcode=original_order.postcode,
             )
-            
+
             messages.success(request, f'Remedial {remedial_number} created for {original_order.first_name} {original_order.last_name} (Order: {original_order.sale_number})')
             return redirect('remedials')
-            
+
         except Order.DoesNotExist:
             messages.error(request, 'Original order not found.')
             return redirect('remedials')
         except Exception as e:
             messages.error(request, f'Error creating remedial: {str(e)}')
             return redirect('remedials')
-    
+
     return render(request, 'stock_take/remedials.html', {
+        'anthill_remedials': page_obj,
+        'page_obj': page_obj,
+        'filtered_count': paginator.count,
+        'search_query': search_query,
+        'status_filter': status_filter,
+        'location_filter': location_filter,
+        'count_open': count_open,
+        'count_closed': count_closed,
+        'count_all': count_all,
         'remedial_orders': remedial_orders,
         'available_orders': available_orders,
     })

@@ -18,12 +18,12 @@ class Customer(models.Model):
     
     # Core details (from WorkGuru)
     name = models.CharField(max_length=255, blank=True, help_text='Client name from WorkGuru')
-    code = models.CharField(max_length=50, blank=True, null=True, help_text='Client code')
+    code = models.CharField(max_length=100, blank=True, null=True, help_text='Client code')
     email = models.EmailField(max_length=254, blank=True, null=True)
-    phone = models.CharField(max_length=50, blank=True, null=True)
-    fax = models.CharField(max_length=50, blank=True, null=True)
+    phone = models.CharField(max_length=100, blank=True, null=True)
+    fax = models.CharField(max_length=100, blank=True, null=True)
     website = models.URLField(max_length=300, blank=True, null=True)
-    abn = models.CharField(max_length=50, blank=True, null=True, help_text='Tax / ABN / VAT number')
+    abn = models.CharField(max_length=100, blank=True, null=True, help_text='Tax / ABN / VAT number')
     
     # Address fields
     address = models.CharField(max_length=255, blank=True)
@@ -39,7 +39,7 @@ class Customer(models.Model):
     currency = models.CharField(max_length=10, blank=True, null=True)
     credit_days = models.CharField(max_length=20, blank=True, null=True)
     credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    credit_terms_type = models.CharField(max_length=50, blank=True, null=True)
+    credit_terms_type = models.CharField(max_length=100, blank=True, null=True)
     price_tier = models.CharField(max_length=100, blank=True, null=True)
     price_tier_id = models.IntegerField(null=True, blank=True)
     
@@ -91,14 +91,15 @@ class Lead(models.Model):
         ('email', 'Email'),
         ('walk_in', 'Walk-In'),
         ('advertisement', 'Advertisement'),
+        ('anthill', 'Anthill CRM'),
         ('other', 'Other'),
     ]
 
     # Core details
     name = models.CharField(max_length=255, help_text='Lead / contact name')
     email = models.EmailField(max_length=254, blank=True, null=True)
-    phone = models.CharField(max_length=50, blank=True, null=True)
-    mobile = models.CharField(max_length=50, blank=True, null=True)
+    phone = models.CharField(max_length=100, blank=True, null=True)
+    mobile = models.CharField(max_length=100, blank=True, null=True)
     website = models.URLField(max_length=300, blank=True, null=True)
 
     # Address fields
