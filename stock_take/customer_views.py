@@ -159,9 +159,11 @@ def customers_list(request):
 
 
 @login_required
-def customer_detail(request, pk):
+def customer_detail(request, customer_name):
     """Display detailed view of a single customer"""
-    customer = get_object_or_404(Customer, pk=pk)
+    # URL uses + for spaces (e.g. Aiste+Kizeleviciene)
+    name = customer_name.replace('+', ' ')
+    customer = get_object_or_404(Customer, name=name)
 
     # Get linked orders
     orders = Order.objects.filter(customer=customer).order_by('-order_date')
@@ -241,7 +243,7 @@ def customer_save(request, pk):
     if update_fields:
         customer.save(update_fields=update_fields)
 
-    return JsonResponse({'success': True})
+    return JsonResponse({'success': True, 'url_name': customer.url_name})
 
 
 @login_required
@@ -388,7 +390,7 @@ def customer_create(request):
     )
 
     messages.success(request, f'Customer "{customer.name}" created successfully.')
-    return redirect('customer_detail', pk=customer.pk)
+    return redirect('customer_detail', customer_name=customer.url_name)
 
 
 # ════════════════════════════════════════════════════════════════════════

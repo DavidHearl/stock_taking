@@ -682,11 +682,8 @@ def purchase_order_save(request, po_id):
                         product.invoice_price = float(prod_data['invoice_price']) if prod_data['invoice_price'] else 0
                     except (ValueError, TypeError):
                         pass
-                if 'line_total' in prod_data:
-                    try:
-                        product.line_total = float(prod_data['line_total']) if prod_data['line_total'] else 0
-                    except (ValueError, TypeError):
-                        pass
+                # Always recalculate line_total from order_price * order_quantity
+                product.line_total = round(float(product.order_price) * float(product.order_quantity), 2)
                 for field in ('sku', 'supplier_code', 'name', 'description'):
                     if field in prod_data:
                         setattr(product, field, prod_data[field])

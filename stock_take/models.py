@@ -67,6 +67,12 @@ class Customer(models.Model):
             return self.name
         return f"{self.first_name} {self.last_name}".strip() or f"Customer #{self.pk}"
     
+    @property
+    def url_name(self):
+        """Return customer name formatted for use in URLs (spaces replaced with +)"""
+        name = self.name or f"{self.first_name} {self.last_name}".strip()
+        return name.replace(' ', '+') if name else str(self.pk)
+    
     class Meta:
         ordering = ['name', 'last_name', 'first_name']
 
