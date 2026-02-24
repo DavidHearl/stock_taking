@@ -11,6 +11,7 @@ from .admin_views import admin_users, admin_templates, admin_roles, admin_settin
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
+from .cad_views import cad_db_upload, cad_db_download, cad_db_status
 from .profile_views import user_profile, user_profile_save, user_change_password
 from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact
 from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
@@ -170,6 +171,7 @@ urlpatterns = [
     path('stock-take/boards-po/<int:boards_po_id>/replace-pnx/', views.replace_pnx_file, name='replace_pnx_file'),
     path('ordering/upload-accessories-csv/', views.upload_accessories_csv, name='upload_accessories_csv'),
     path('order/<int:order_id>/', views.order_details, name='order_details'),
+    path('order/<int:order_id>/delete/', views.order_delete, name='order_delete'),
     path('order/<int:order_id>/update-customer/', views.update_customer_info, name='update_customer_info'),
     path('order/<int:order_id>/update-sale/', views.update_sale_info, name='update_sale_info'),
     path('order/<int:order_id>/update-order-type/', views.update_order_type, name='update_order_type'),
@@ -313,4 +315,9 @@ urlpatterns = [
     path('xero/api/create-customer/', xero_create_customer, name='xero_create_customer'),
     path('xero/api/customer-search/', xero_customer_search, name='xero_customer_search'),
     path('xero/api/check-contact/', xero_check_contact, name='xero_check_contact'),
+
+    # CAD Database API
+    path('api/cad-db/upload/', cad_db_upload, name='cad_db_upload'),
+    path('api/cad-db/download/', cad_db_download, name='cad_db_download'),
+    path('api/cad-db/status/', cad_db_status, name='cad_db_status'),
 ]

@@ -233,3 +233,4 @@ else:
 
 # Claim Service API Key (for automated PDF uploads from remote PC)
 CLAIM_UPLOAD_API_KEY = os.getenv('CLAIM_UPLOAD_API_KEY', 'change-me-in-production')
+CAD_DB_API_KEY = os.getenv('CAD_DB_API_KEY', 'change-me-in-production')

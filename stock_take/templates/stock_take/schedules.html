@@ -93,19 +93,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Save All button
-    document.querySelectorAll('.save-all-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            const section = btn.dataset.section;
-            const rows = document.querySelectorAll('.' + section + '-row');
-            rows.forEach(function(row) {
-                const saveBtn = row.querySelector('.save-count-btn');
-                if (saveBtn && !saveBtn.classList.contains('saved')) {
-                    saveBtn.click();
-                }
-            });
-        });
-    });
 
     function updateCountedStats() {
         const saved = document.querySelectorAll('.save-count-btn.saved');
@@ -195,26 +182,6 @@ document.addEventListener('DOMContentLoaded', function() {
     <!-- ═══════════════════════════════════════════ -->
     <div id="stock-panel" class="tab-panel active">
 
-        <!-- Stats -->
-        <div class="stats-bar">
-            <div class="stat-box">
-                <span class="stat-value">{{ total_stock }}</span>
-                <span class="stat-label">Total Stock Items</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value" id="counted-today-stat">{{ stock_counted_today }}</span>
-                <span class="stat-label">Counted Today</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value {% if stock_never_checked > 0 %}warning{% endif %}">{{ stock_never_checked }}</span>
-                <span class="stat-label">Never Checked</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value {% if stock_below_par > 0 %}danger{% endif %}">{{ stock_below_par }}</span>
-                <span class="stat-label">Below Par Level</span>
-            </div>
-        </div>
-
         <!-- Everyday Plan -->
         <div class="schedule-card">
             <div class="schedule-card-header">
@@ -223,7 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     {% if day_number > 1 %}
                     <a href="?day={{ day_number|add:"-1" }}" class="btn btn-sm btn-secondary"><i class="bi bi-chevron-left"></i></a>
                     {% endif %}
-                    <span class="plan-info">{{ todays_items|length }} items today</span>
+                    <span class="plan-info">{{ today_date }}</span>
                     {% if day_number < total_days %}
                     <a href="?day={{ day_number|add:"1" }}" class="btn btn-sm btn-secondary"><i class="bi bi-chevron-right"></i></a>
                     {% endif %}
@@ -236,7 +203,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     <thead>
                         <tr>
                             <th>SKU</th>
-                            <th class="hide-mobile">Name</th>
                             <th class="hide-mobile">Category</th>
                             <th class="hide-mobile">Location</th>
                             <th class="text-center hide-mobile">System Qty</th>
@@ -253,7 +219,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <span class="sku-text">{{ item.sku }}</span>
                                 <span class="mobile-name">{{ item.name }}</span>
                             </td>
-                            <td class="hide-mobile">{{ item.name }}</td>
                             <td class="hide-mobile"><span class="cat-badge" {% if item.category %}style="border-left: 3px solid {{ item.category.color }}"{% endif %}>{{ item.category.name|default:"—" }}</span></td>
                             <td class="hide-mobile">{{ item.location }}</td>
                             <td class="text-center hide-mobile"><span class="system-qty">{{ item.quantity }}</span></td>
@@ -278,16 +243,65 @@ document.addEventListener('DOMContentLoaded', function() {
                     </tbody>
                 </table>
             </div>
-            <div class="card-footer">
-                <button class="btn btn-success save-all-btn" data-section="stock">
-                    <i class="bi bi-check-all"></i> Save All Counts
-                </button>
-            </div>
             {% else %}
             <div class="empty-state">
                 <div class="empty-state-icon"><i class="bi bi-check-circle"></i></div>
                 <h5>No Items for Today</h5>
                 <p>All stock items have been allocated to other days or none are classified as "Stock" yet.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Activity Log -->
+        <div class="schedule-card">
+            <div class="schedule-card-header">
+                <button class="category-toggle" data-target="activity-log">
+                    <i class="bi bi-chevron-right toggle-icon"></i>
+                    <strong>Activity Log</strong>
+                    <span class="cat-item-count">{{ recent_activity|length }} entries</span>
+                </button>
+            </div>
+            {% if recent_activity %}
+            <div id="activity-log" class="category-items" style="display: none;">
+                <table class="count-table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th class="hide-mobile">Counted By</th>
+                            <th class="text-center">Qty</th>
+                            <th class="text-center">Variance</th>
+                            <th class="text-end">When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in recent_activity %}
+                        <tr>
+                            <td class="sku-cell">
+                                <span class="sku-text">{{ entry.stock_item.sku }}</span>
+                                <span class="mobile-name">{{ entry.stock_item.name }}</span>
+                            </td>
+                            <td class="hide-mobile">{{ entry.created_by.get_full_name|default:entry.created_by.username|default:"System" }}</td>
+                            <td class="text-center">{{ entry.quantity }}</td>
+                            <td class="text-center">
+                                {% if entry.change_amount > 0 %}
+                                    <span style="color: var(--success-color);">+{{ entry.change_amount }}</span>
+                                {% elif entry.change_amount < 0 %}
+                                    <span style="color: var(--danger-color);">{{ entry.change_amount }}</span>
+                                {% else %}
+                                    <span style="color: var(--text-secondary);">0</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end" style="white-space: nowrap;">{{ entry.created_at|timesince }} ago</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="bi bi-clock-history"></i></div>
+                <h5>No Activity Yet</h5>
+                <p>Stock take counts will appear here as items are counted.</p>
             </div>
             {% endif %}
         </div>

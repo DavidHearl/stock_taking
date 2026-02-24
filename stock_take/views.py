@@ -3140,6 +3140,19 @@ def update_job_checkbox(request, order_id):
         return JsonResponse({'success': False, 'error': str(e)})
 
 @login_required
+def order_delete(request, order_id):
+    """Delete an order and all related data"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    order = get_object_or_404(Order, id=order_id)
+    sale_number = order.sale_number or f"#{order_id}"
+    order.delete()
+
+    messages.success(request, f'Order {sale_number} deleted.')
+    return redirect('ordering')
+
+@login_required
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
@@ -4468,8 +4481,23 @@ def schedule_list(request):
     day_number = ((quarter_workday - 1) % total_days) + 1
 
     # Allow override from query param for previewing other days
+    natural_day = day_number
     day_number = int(request.GET.get('day', day_number))
     day_number = max(1, min(day_number, total_days))
+
+    # Calculate the calendar date for the viewed day
+    workday_offset = day_number - natural_day
+    viewed_date = today
+    if workday_offset > 0:
+        while workday_offset > 0:
+            viewed_date += timedelta(days=1)
+            if viewed_date.weekday() < 5:
+                workday_offset -= 1
+    elif workday_offset < 0:
+        while workday_offset < 0:
+            viewed_date -= timedelta(days=1)
+            if viewed_date.weekday() < 5:
+                workday_offset += 1
 
     start_idx = (day_number - 1) * items_per_day
     end_idx = start_idx + items_per_day
@@ -4589,6 +4617,11 @@ def schedule_list(request):
         # Categories
         'categories': categories,
         'stock_take_groups': stock_take_groups,
+        'today_date': viewed_date.strftime('%A %d %B %Y'),
+        # Activity log - recent stock take counts
+        'recent_activity': StockHistory.objects.filter(
+            change_type='stock_take'
+        ).select_related('stock_item', 'created_by').order_by('-created_at')[:50],
     }
 
     return render(request, 'stock_take/schedules.html', context)
@@ -4864,10 +4897,17 @@ def update_stock_count(request):
             item.last_checked = timezone.now()
             item.save()
             
-            # Create a stock adjustment record (we'll add this model later)
-            # For now, just return success
-            
+            # Create stock history record
             variance = counted_quantity - old_quantity
+            StockHistory.objects.create(
+                stock_item=item,
+                quantity=counted_quantity,
+                change_amount=variance,
+                change_type='stock_take',
+                reference=f'Stock take count',
+                notes=notes if notes else f'Counted {counted_quantity} (was {old_quantity})',
+                created_by=request.user if request.user.is_authenticated else None,
+            )
             
             return JsonResponse({
                 'success': True, 
