@@ -629,6 +629,7 @@ class StockItem(models.Model):
                                        null=True, blank=True, related_name='stock_items')
     supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_items')
     supplier_code = models.CharField(max_length=100, blank=True, default='', help_text="Supplier's own product/part code")
+    supplier_sku = models.CharField(max_length=100, blank=True, default='', help_text="Supplier's SKU for this product")
     category_name = models.CharField(max_length=100, blank=True)  # For CSV compatibility
     location = models.CharField(max_length=100)
     quantity = models.IntegerField(db_index=True)

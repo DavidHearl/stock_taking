@@ -131,6 +131,10 @@ def add_product(request):
                 serial_or_batch=data.get('serial_or_batch', ''),
             )
             
+            # Supplier fields
+            product.supplier_code = data.get('supplier_code', '')
+            product.supplier_sku = data.get('supplier_sku', '')
+
             # Optional FK fields
             category_id = data.get('category_id')
             if category_id:
@@ -219,6 +223,7 @@ def add_product(request):
                 'box_height': str(source.box_height) if source.box_height else '',
                 'box_quantity': str(source.box_quantity) if source.box_quantity else '',
                 'supplier_code': source.supplier_code or '',
+                'supplier_sku': source.supplier_sku or '',
             }
         except StockItem.DoesNotExist:
             pass

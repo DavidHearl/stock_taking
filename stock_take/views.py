@@ -6474,6 +6474,8 @@ def update_stock_items_batch(request):
                         item.description = item_data['description']
                     if 'supplier_code' in item_data:
                         item.supplier_code = item_data['supplier_code']
+                    if 'supplier_sku' in item_data:
+                        item.supplier_sku = item_data['supplier_sku']
                     # Product dimensions
                     for dim_field in ('length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'):
                         if dim_field in item_data:
