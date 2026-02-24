@@ -6,7 +6,7 @@
 
 {% block nav_purchase_orders_active %}active{% endblock %}
 
-{% block page_title %}Purchase Order Details{% endblock %}
+{% block page_title %}<a href="{% url 'purchase_orders_list' %}" style="color: inherit; text-decoration: none; margin-right: 8px;" title="Back to Purchase Orders"><i class="bi bi-arrow-left"></i></a>Purchase Order Details{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
@@ -52,9 +52,6 @@
             </div>
         </div>
         <div class="po-detail-actions">
-            <a href="{% url 'purchase_orders_list' %}" class="btn btn-sm btn-secondary">
-                <i class="bi bi-arrow-left"></i> Back
-            </a>
             {% if purchase_order.status == 'Draft' %}
             <button class="btn btn-sm btn-approve" id="approve-btn" onclick="updatePOStatus('Approved')">
                 <i class="bi bi-check-circle"></i> Approve
@@ -772,6 +769,26 @@
 <!-- Product search dropdown (outside table container to avoid overflow clipping) -->
 <div class="product-search-results" id="product-search-results" style="display:none;"></div>
 
+<!-- Receive PO Confirmation Modal -->
+<div class="modal-overlay" id="receive-modal" style="display:none;" onclick="closeReceiveModal(event)">
+    <div class="modal-dialog" style="max-width: 480px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-box-arrow-in-down"></i> Receive Purchase Order</h3>
+            <button class="modal-close" onclick="closeReceiveModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Mark <strong>{{ purchase_order.display_number }}</strong> as received?</p>
+            <p style="margin:0;color:var(--text-secondary);font-size:0.85rem;">This will update all linked items (boards/doors) as received.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeReceiveModal()">Cancel</button>
+            <button type="button" class="btn-save" id="confirm-receive-btn" onclick="confirmReceivePO()">
+                <i class="bi bi-box-arrow-in-down"></i> Confirm Receive
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Attach from Media Modal -->
 <div class="modal-overlay" id="media-files-modal" style="display:none;" onclick="closeMediaFilesModal(event)">
     <div class="modal-dialog" style="max-width: 700px;" onclick="event.stopPropagation()">
@@ -1114,9 +1131,16 @@ function showNotification(message, type) {
 }
 
 function receivePO() {
-    if (!confirm('Mark this PO as received? This will update all linked items (boards/doors) as received.')) {
-        return;
-    }
+    document.getElementById('receive-modal').style.display = 'flex';
+}
+
+function closeReceiveModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('receive-modal').style.display = 'none';
+}
+
+function confirmReceivePO() {
+    closeReceiveModal();
     const btn = document.getElementById('receive-btn');
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Receiving...';

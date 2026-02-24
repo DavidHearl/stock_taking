@@ -15,14 +15,14 @@
 {% block content %}
 <div class="content-card">
     <div class="purchase-orders-header">
-        <h1><i class="bi bi-clipboard-check"></i> Purchase Orders</h1>
         <div class="po-stats">
-            <div class="po-stat-item">
-                <span class="po-stat-value">{{ total_filtered }}</span>
-                <span>Showing</span>
-            </div>
+            <span class="po-stat-label">Showing</span>
+            <span class="po-stat-value">{{ total_filtered }}</span>
         </div>
         <div class="po-actions">
+            <button class="btn btn-outline" title="Carnehill Summary — Approved POs awaiting delivery" onclick="document.getElementById('carnehillModal').style.display='flex'">
+                <i class="bi bi-truck"></i> <span>Carnehill Summary</span>
+            </button>
             <button class="btn btn-success" title="Create new Purchase Order" onclick="document.getElementById('createPOModal').style.display='flex'">
                 <i class="bi bi-plus-lg"></i> <span>New PO</span>
             </button>
@@ -367,4 +367,54 @@ function startSync() {
         </form>
     </div>
 </div>
+
+<!-- Carnehill Summary Modal -->
+<div class="modal-overlay" id="carnehillModal" style="display:none;">
+    <div class="modal-box" style="max-width: 520px;">
+        <div class="modal-header">
+            <h2><i class="bi bi-truck"></i> Carnehill Summary</h2>
+            <button class="modal-close" onclick="document.getElementById('carnehillModal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body">
+            {% if carnehill_pos %}
+            <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 13px;">Select POs to include in the summary report:</p>
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleAllCarnehill(true)" style="font-size: 12px; padding: 3px 10px;">Select All</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleAllCarnehill(false)" style="font-size: 12px; padding: 3px 10px;">Deselect All</button>
+            </div>
+            <div style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px;">
+                {% for po in carnehill_pos %}
+                <label style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border-color);{% if forloop.last %} border-bottom: none;{% endif %}">
+                    <input type="checkbox" class="carnehill-po-cb" value="{{ po.id }}" checked>
+                    <span style="font-weight: 600; min-width: 70px;">{{ po.display_number }}</span>
+                    <span style="color: var(--text-secondary); font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ po.description|default:"—" }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color: var(--text-secondary); margin: 0;">No approved Carnehill POs found.</p>
+            {% endif %}
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('carnehillModal').style.display='none'">Cancel</button>
+            {% if carnehill_pos %}
+            <button type="button" class="btn-save" onclick="openCarnehillSummary()"><i class="bi bi-file-earmark-pdf"></i> Generate PDF</button>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleAllCarnehill(checked) {
+    document.querySelectorAll('.carnehill-po-cb').forEach(cb => cb.checked = checked);
+}
+
+function openCarnehillSummary() {
+    const checked = document.querySelectorAll('.carnehill-po-cb:checked');
+    if (checked.length === 0) { alert('Please select at least one PO.'); return; }
+    const ids = Array.from(checked).map(cb => cb.value).join(',');
+    window.open("{% url 'carnehill_summary' %}?ids=" + ids, '_blank');
+    document.getElementById('carnehillModal').style.display = 'none';
+}
+</script>
 {% endblock %}

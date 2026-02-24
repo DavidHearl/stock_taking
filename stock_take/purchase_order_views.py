@@ -162,6 +162,13 @@ def purchase_orders_list(request):
     # Supplier objects for the create PO modal
     supplier_objects = Supplier.objects.filter(is_active=True).order_by('name')
 
+    # Carnehill approved POs for the summary modal
+    carnehill_pos = (
+        PurchaseOrder.objects
+        .filter(supplier_name__icontains='Carnehill', status='Approved')
+        .order_by('-display_number')
+    )
+
     # Batch-lookup linked orders (project_id -> Order.workguru_id)
     # Batch-lookup linked orders using multiple strategies
     linked_orders_map = {}  # keyed by PO pk
@@ -232,6 +239,7 @@ def purchase_orders_list(request):
         'approved_count': status_counts.get('Approved', 0),
         'received_count': status_counts.get('Received', 0),
         'cancelled_count': status_counts.get('Cancelled', 0),
+        'carnehill_pos': carnehill_pos,
     }
     
     return render(request, 'stock_take/purchase_orders_list.html', context)
@@ -723,6 +731,7 @@ def purchase_order_receive(request, po_id):
     po.save(update_fields=['status', 'received_date'])
 
     # Handle Carnehill (boards) POs — mark PNX items as received
+    is_carnehill = (po.supplier_name or '').lower().find('carnehill') >= 0
     boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
     if boards_po:
         for pnx_item in boards_po.pnx_items.all():
@@ -742,12 +751,13 @@ def purchase_order_receive(request, po_id):
                 door.save(update_fields=['received', 'received_quantity'])
                 received_items += 1
 
-    # Mark regular product lines as received
-    for product in po.products.all():
-        if product.received_quantity < product.order_quantity:
-            product.received_quantity = product.order_quantity
-            product.save(update_fields=['received_quantity'])
-            received_items += 1
+    # Mark regular product lines as received (skip for Carnehill — boards don't update stock)
+    if not is_carnehill:
+        for product in po.products.all():
+            if product.received_quantity < product.order_quantity:
+                product.received_quantity = product.order_quantity
+                product.save(update_fields=['received_quantity'])
+                received_items += 1
 
     return JsonResponse({
         'success': True,
@@ -2244,3 +2254,232 @@ def purchase_order_search(request):
         })
 
     return JsonResponse({'results': results})
+
+
+@login_required
+def carnehill_summary(request):
+    """Generate a PDF summary of all Carnehill POs that are Approved but not Received."""
+    from decimal import Decimal
+    from .po_pdf_generator import (
+        _get_styles, _format_date, BRAND_DARK, BRAND_ACCENT, HEADER_BG,
+        ROW_ALT, BORDER_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
+    )
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepTogether
+    )
+    from reportlab.lib.styles import ParagraphStyle
+    import io, os
+
+    # Accept optional comma-separated PO IDs from query param
+    selected_ids = request.GET.get('ids', '').strip()
+    if selected_ids:
+        id_list = [int(x) for x in selected_ids.split(',') if x.strip().isdigit()]
+        pos = (
+            PurchaseOrder.objects
+            .filter(id__in=id_list, supplier_name__icontains='Carnehill', status='Approved')
+            .order_by('-display_number')
+        )
+    else:
+        pos = (
+            PurchaseOrder.objects
+            .filter(supplier_name__icontains='Carnehill', status='Approved')
+            .order_by('-display_number')
+        )
+
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title='Carnehill Summary',
+    )
+
+    elements = []
+    page_width = landscape(A4)[0] - 30 * mm
+
+    # ─── LOGO ──────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+        logo.hAlign = 'CENTER'
+        elements.append(logo)
+        elements.append(Spacer(1, 6 * mm))
+
+    # ─── TITLE ─────────────────────────────────────────────
+    from datetime import datetime as _dt
+    title_style = ParagraphStyle('SummaryTitle', parent=styles['POTitle'], fontSize=14, leading=18)
+    elements.append(Paragraph(
+        '<b>Carnehill Summary — Approved POs</b>',
+        title_style
+    ))
+    elements.append(Paragraph(
+        f'Generated {_dt.now().strftime("%d/%m/%Y")}  ·  {pos.count()} purchase order{"s" if pos.count() != 1 else ""}',
+        styles['AddressText']
+    ))
+    elements.append(Spacer(1, 8 * mm))
+
+    grand_total = Decimal('0')
+
+    for po in pos:
+        po_elements = []
+
+        # PO header row: number | description | issued | expected
+        po_total = po.total or Decimal('0')
+        grand_total += po_total
+
+        issue = _format_date(po.issue_date) if po.issue_date else '—'
+        expected = _format_date(po.expected_date) if po.expected_date else '—'
+
+        header_data = [[
+            Paragraph(f'<b>{po.display_number or po.number or "—"}</b>', styles['SupplierName']),
+            Paragraph(po.description or '', styles['AddressText']),
+            Paragraph(f'<font color="#6b7280">Issued:</font> {issue}', styles['CellTextRight']),
+            Paragraph(f'<font color="#6b7280">Expected:</font> {expected}', styles['CellTextRight']),
+        ]]
+        header_tbl = Table(header_data, colWidths=[page_width * 0.15, page_width * 0.40, page_width * 0.22, page_width * 0.23])
+        header_tbl.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, 0), HEADER_BG),
+            ('LINEBELOW', (0, 0), (-1, 0), 0.6, BRAND_ACCENT),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        po_elements.append(header_tbl)
+        po_elements.append(Spacer(1, 1 * mm))
+
+        # Products table
+        products = list(po.products.all())
+        is_board_po = False
+        board_items = []
+        if not products:
+            # Fall back to PNX board items
+            boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+            if boards_po:
+                board_items = list(boards_po.pnx_items.all())
+                is_board_po = bool(board_items)
+            if not is_board_po:
+                products = _get_board_product_rows_for_pdf(po)
+
+        if is_board_po and board_items:
+            # Board PO — show individual items with E1-E4 tick columns
+            col_widths = [
+                page_width * 0.30,   # Material
+                page_width * 0.20,   # Dimensions
+                page_width * 0.08,   # E1
+                page_width * 0.08,   # E2
+                page_width * 0.08,   # E3
+                page_width * 0.08,   # E4
+                page_width * 0.10,   # Qty
+            ]
+            table_data = [[
+                Paragraph('<b>Material</b>', styles['CellText']),
+                Paragraph('<b>Dimensions</b>', styles['CellText']),
+                Paragraph('<b>E1</b>', styles['CellTextRight']),
+                Paragraph('<b>E2</b>', styles['CellTextRight']),
+                Paragraph('<b>E3</b>', styles['CellTextRight']),
+                Paragraph('<b>E4</b>', styles['CellTextRight']),
+                Paragraph('<b>Qty</b>', styles['CellTextRight']),
+            ]]
+            for item in sorted(board_items, key=lambda x: (x.matname, float(x.cleng), float(x.cwidth))):
+                tick = '\u2713'
+                table_data.append([
+                    Paragraph(str(item.matname or ''), styles['CellText']),
+                    Paragraph(f'{float(item.cleng):.0f} \u00d7 {float(item.cwidth):.0f} mm', styles['CellText']),
+                    Paragraph(tick if item.prfid1 else '', styles['CellTextRight']),
+                    Paragraph(tick if item.prfid2 else '', styles['CellTextRight']),
+                    Paragraph(tick if item.prfid3 else '', styles['CellTextRight']),
+                    Paragraph(tick if item.prfid4 else '', styles['CellTextRight']),
+                    Paragraph(f'{int(item.cnt)}', styles['CellTextRight']),
+                ])
+        elif products:
+            col_widths = [
+                page_width * 0.20,   # Code
+                page_width * 0.65,   # Description
+                page_width * 0.15,   # Qty
+            ]
+            table_data = [[
+                Paragraph('<b>Code</b>', styles['CellText']),
+                Paragraph('<b>Description</b>', styles['CellText']),
+                Paragraph('<b>Qty</b>', styles['CellTextRight']),
+            ]]
+            for p in products:
+                qty = p.order_quantity or getattr(p, 'quantity', 0) or Decimal('0')
+
+                code = ''
+                if hasattr(p, 'stock_item') and p.stock_item and getattr(p.stock_item, 'supplier_code', ''):
+                    code = p.stock_item.supplier_code
+                elif hasattr(p, 'supplier_code') and p.supplier_code:
+                    code = p.supplier_code
+                else:
+                    code = p.sku or ''
+
+                table_data.append([
+                    Paragraph(str(code), styles['CellText']),
+                    Paragraph(str(p.name or getattr(p, 'description', '') or ''), styles['CellText']),
+                    Paragraph(f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}', styles['CellTextRight']),
+                ])
+
+        if (is_board_po and board_items) or products:
+            last_col = len(col_widths) - 1
+            prod_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+            prod_style = [
+                ('LINEBELOW', (0, 0), (-1, 0), 0.6, BRAND_DARK),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                ('LINEBELOW', (0, 1), (-1, -1), 0.2, BORDER_COLOR),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ('ALIGN', (last_col, 0), (last_col, -1), 'RIGHT'),
+            ]
+            # Centre-align E1-E4 tick columns for board POs
+            if is_board_po and board_items:
+                for ec in range(2, 6):
+                    prod_style.append(('ALIGN', (ec, 0), (ec, -1), 'CENTER'))
+            # Alternate row shading
+            for i in range(1, len(table_data)):
+                if i % 2 == 0:
+                    prod_style.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+
+            prod_table.setStyle(TableStyle(prod_style))
+            po_elements.append(prod_table)
+
+        po_elements.append(Spacer(1, 4 * mm))
+        elements.append(KeepTogether(po_elements))
+
+    # ─── GRAND TOTAL ──────────────────────────────────────────
+    elements.append(Spacer(1, 4 * mm))
+    total_data = [[
+        Paragraph('', styles['CellText']),
+        Paragraph(f'<b>{pos.count()} approved PO{"s" if pos.count() != 1 else ""}</b>', styles['GrandTotalLabel']),
+    ]]
+    total_tbl = Table(total_data, colWidths=[page_width * 0.55, page_width * 0.45])
+    total_tbl.setStyle(TableStyle([
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LINEABOVE', (1, 0), (-1, 0), 1, BRAND_DARK),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    elements.append(total_tbl)
+
+    # Build
+    doc.build(elements)
+    buffer.seek(0)
+
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="carnehill_summary_{_dt.now().strftime("%Y%m%d")}.pdf"'
+    return response

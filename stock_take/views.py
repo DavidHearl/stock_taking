@@ -7344,14 +7344,38 @@ def generate_and_attach_pnx(request, order_id):
         return JsonResponse({'success': False, 'error': 'Order must have a Boards PO assigned to attach PNX file.'})
     
     try:
-        # Get database path - look in project root directory (where .env is)
-        db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
+        # Get database from Django storage (DigitalOcean Spaces) and write to a temp file
+        from django.core.files.storage import default_storage
+        import tempfile
         
-        if not os.path.exists(db_path):
-            return JsonResponse({'success': False, 'error': f'CAD database not found at: {db_path}. Please ensure cad_data.db is in the project root directory.'})
+        CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
         
-        # Generate PNX content using customer number (CAD number)
-        pnx_content = generate_board_order_file(order.customer_number, db_path)
+        # First check local fallback, then try remote storage
+        local_db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
+        
+        if os.path.exists(local_db_path):
+            db_path = local_db_path
+            tmp_file = None
+        elif default_storage.exists(CAD_DB_STORAGE_PATH):
+            # Download from storage to a temp file for sqlite3 access
+            tmp_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+            with default_storage.open(CAD_DB_STORAGE_PATH, 'rb') as remote_db:
+                tmp_file.write(remote_db.read())
+            tmp_file.close()
+            db_path = tmp_file.name
+        else:
+            return JsonResponse({'success': False, 'error': 'CAD database not found. Please ensure the CAD sync has been run.'})
+        
+        try:
+            # Generate PNX content using customer number (CAD number)
+            pnx_content = generate_board_order_file(order.customer_number, db_path)
+        finally:
+            # Clean up temp file if we downloaded from storage
+            if tmp_file:
+                try:
+                    os.unlink(tmp_file.name)
+                except OSError:
+                    pass
         
         if not pnx_content or pnx_content.strip() == '':
             return JsonResponse({'success': False, 'error': f'No board data found for CAD Number {order.customer_number}.'})
@@ -7518,6 +7542,11 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 # Format: BFS-SD-413491
                 customer_value = f"{site}-{designer_initials}-{sale_number}" if designer_initials else f"{site}-{sale_number}"
                 
+                # Append customer first/last name
+                customer_name = f"{order.first_name} {order.last_name}".strip()
+                if customer_name:
+                    customer_value = f"{customer_value} {customer_name}"
+                
                 barcode = row.get('BARCODE', '').strip()
                 matname = row.get('MATNAME', '').strip()
                 cleng = Decimal(row.get('CLENG', '0').strip() or '0')
@@ -7592,6 +7621,11 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
             if order.designer and order.designer.name:
                 designer_initials = ''.join(word[0].upper() for word in order.designer.name.split() if word)
             csv_customer_value = f"BFS-{designer_initials}-{order.sale_number}"
+            
+            # Append customer first/last name
+            csv_customer_name = f"{order.first_name} {order.last_name}".strip()
+            if csv_customer_name:
+                csv_customer_value = f"{csv_customer_value} {csv_customer_name}"
             
             # Re-parse PNX for CSV generation (to include all fields)
             io_string_csv = io.StringIO(pnx_content)
