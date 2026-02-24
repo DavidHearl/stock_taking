@@ -1047,6 +1047,9 @@
                         <i class="bi bi-plus-lg"></i> Add Glass
                     </button>
                     {% if glass_items %}
+                    <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-glass-changes" style="display: none;">
+                        <i class="bi bi-save"></i> Save Changes
+                    </button>
                     <button type="button" class="btn btn-sm btn-danger hidden" id="delete-glass-selected" title="Delete selected">
                         <i class="bi bi-trash"></i> <span id="glass-selected-count">0</span>
                     </button>
@@ -1105,7 +1108,7 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <input type="number" class="quantity-input accessory-quantity" 
+                                    <input type="number" class="quantity-input glass-quantity" 
                                            value="{{ glass.quantity|floatformat:0 }}" 
                                            data-accessory-id="{{ glass.id }}"
                                            data-original-quantity="{{ glass.quantity|floatformat:0 }}"
@@ -2167,25 +2170,33 @@
 <!-- Modal for Stock Allocation Confirmation -->
 <div class="modal" id="allocationModal">
     <div class="modal-overlay" onclick="closeModal('allocationModal')"></div>
-    <div class="modal-dialog modal-dialog-lg">
+    <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="bi bi-box-arrow-in-down"></i> Confirm Stock Allocation</h3>
                 <button type="button" class="modal-close" onclick="closeModal('allocationModal')">✕</button>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 12px; color: var(--text-secondary);">
-                    Review the items below. Adjust quantities if needed, then confirm to deduct from stock.
+                <div style="padding: 12px 16px; background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; margin-bottom: 16px;">
+                    <p style="margin: 0 0 8px 0; font-weight: 600; color: var(--text-primary); font-size: 0.95rem;">
+                        <i class="bi bi-exclamation-triangle" style="color: #ffc107;"></i> Before proceeding, please ensure:
+                    </p>
+                    <ul style="margin: 0; padding-left: 20px; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6;">
+                        <li>All quantities are correct on the order page</li>
+                        <li>Any unnecessary items have been removed</li>
+                        <li>All items are linked to the correct stock product</li>
+                    </ul>
+                </div>
+                <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 0.9rem;">
+                    This will deduct <strong id="alloc-item-count">0</strong> item(s) from stock. This action can be reversed by unchecking the Materials Allocated checkbox.
                 </p>
-                <div class="table-container">
+                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
                     <table class="table" id="allocation-modal-table">
                         <thead>
                             <tr>
                                 <th>SKU</th>
                                 <th>Name</th>
-                                <th style="width:90px;">Qty</th>
-                                <th>In Stock</th>
-                                <th>After Allocation</th>
+                                <th style="text-align: center;">Qty</th>
                             </tr>
                         </thead>
                         <tbody id="allocation-modal-body">
@@ -2193,7 +2204,6 @@
                         </tbody>
                     </table>
                 </div>
-                <div id="allocation-warnings" style="margin-top:12px;"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('allocationModal')">Cancel</button>
@@ -2736,6 +2746,74 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Handle PNX received quantity changes (just track changes, don't save)
     // Track Accessory quantity changes
+    let glassChanges = {};
+    
+    document.querySelectorAll('.glass-quantity').forEach(function(input) {
+        input.addEventListener('input', function() {
+            const accessoryId = this.getAttribute('data-accessory-id');
+            const quantity = parseFloat(this.value) || 0;
+            const originalQuantity = parseFloat(this.getAttribute('data-original-quantity')) || 0;
+            
+            if (quantity !== originalQuantity) {
+                glassChanges[accessoryId] = quantity;
+                const saveGlassBtn = document.getElementById('save-glass-changes');
+                if (saveGlassBtn) saveGlassBtn.style.display = 'inline-block';
+            } else {
+                delete glassChanges[accessoryId];
+                if (Object.keys(glassChanges).length === 0) {
+                    const saveGlassBtn = document.getElementById('save-glass-changes');
+                    if (saveGlassBtn) saveGlassBtn.style.display = 'none';
+                }
+            }
+        });
+    });
+
+    const saveGlassBtn = document.getElementById('save-glass-changes');
+    if (saveGlassBtn) {
+        saveGlassBtn.addEventListener('click', function() {
+            if (Object.keys(glassChanges).length === 0) {
+                showAlert('No changes to save.', 'info');
+                return;
+            }
+
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
+
+            fetch('/stock-take/update-accessory-quantities/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({ changes: glassChanges })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert('Glass quantities updated successfully!', 'success');
+                    glassChanges = {};
+                    this.style.display = 'none';
+                    document.querySelectorAll('.glass-quantity').forEach(function(input) {
+                        input.setAttribute('data-original-quantity', input.value);
+                    });
+                    if (data.csv_regenerated) {
+                        showAlert('Processed CSV regenerated with new quantities.', 'info');
+                        setTimeout(() => location.reload(), 1500);
+                    }
+                } else {
+                    showAlert('Error saving quantities: ' + data.error, 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-save"></i> Save Changes';
+                }
+            })
+            .catch(error => {
+                showAlert('Error saving quantities', 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-save"></i> Save Changes';
+            });
+        });
+    }
+
     let accessoryChanges = {};
     
     document.querySelectorAll('.accessory-quantity').forEach(function(input) {
@@ -3098,164 +3176,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ─── Toggle materials allocation (Job Info checkbox) ────────────────────
-    function toggleMaterialsAllocated(orderId, allocate, checkbox) {
-        if (!allocate) {
-            // Unallocate – simple confirm
-            const msg = 'Unallocate all materials?\n\nThis will add quantities back to stock.';
-            if (!confirm(msg)) {
-                checkbox.checked = true;
-                return;
-            }
-            doAllocation(orderId, false, {}, checkbox);
-            return;
-        }
-
-        // Allocate – show modal with editable quantities
-        const tbody = document.getElementById('allocation-modal-body');
-        const warnings = document.getElementById('allocation-warnings');
-        tbody.innerHTML = '';
-        warnings.innerHTML = '';
-
-        // Gather unallocated accessories from the page
-        const rows = document.querySelectorAll('#accessories-table tbody tr[data-accessory-id], #glass-table tbody tr[data-accessory-id]');
-        let hasItems = false;
-
-        rows.forEach(row => {
-            const allocated = row.classList.contains('allocated-row');
-            if (allocated) return; // skip already-allocated rows
-
-            const accId = row.getAttribute('data-accessory-id');
-            const sku = row.querySelector('td:nth-child(2)').textContent.trim();
-            const name = row.querySelector('td:nth-child(3)').textContent.trim();
-            const qtyInput = row.querySelector('.accessory-quantity');
-            const qty = qtyInput ? parseInt(qtyInput.value) || 0 : 0;
-
-            // Parse stock info from stacked .accessory-price-info div
-            const priceInfo = row.querySelector('.accessory-price-info');
-            let stockQty = '-';
-            let afterAlloc = '-';
-            let isLow = false;
-
-            if (priceInfo) {
-                const stockDiv = priceInfo.querySelector('div:first-child');
-                if (stockDiv) {
-                    const match = stockDiv.textContent.match(/Stock:\s*(-?\d+)/);
-                    if (match) {
-                        stockQty = parseInt(match[1]);
-                        afterAlloc = stockQty - qty;
-                        isLow = afterAlloc < 0;
-                    }
-                }
-            }
-
-            const tr = document.createElement('tr');
-            if (isLow) tr.style.background = 'rgba(220, 53, 69, 0.08)';
-            tr.innerHTML = `
-                <td><code>${sku}</code></td>
-                <td>${name}</td>
-                <td><input type="number" class="quantity-input alloc-modal-qty" data-acc-id="${accId}" value="${qty}" min="0" step="1" style="width:80px;" oninput="updateAllocPreview()"></td>
-                <td>${stockQty}</td>
-                <td class="alloc-after" data-stock="${typeof stockQty === 'number' ? stockQty : ''}"
-                    style="${isLow ? 'color:#dc3545;font-weight:bold;' : 'color:#28a745;'}">${afterAlloc}</td>
-            `;
-            tbody.appendChild(tr);
-            hasItems = true;
-        });
-
-        if (!hasItems) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="padding:16px;color:var(--text-secondary);">No unallocated accessories found.</td></tr>';
-            document.getElementById('confirm-allocation-btn').disabled = true;
-        } else {
-            document.getElementById('confirm-allocation-btn').disabled = false;
-        }
-
-        // Store the checkbox ref and order id for the confirm action
-        window._allocOrderId = orderId;
-        window._allocCheckbox = checkbox;
-        openModal('allocationModal');
-    }
-
-    function updateAllocPreview() {
-        document.querySelectorAll('#allocation-modal-body tr').forEach(row => {
-            const qtyInput = row.querySelector('.alloc-modal-qty');
-            const afterCell = row.querySelector('.alloc-after');
-            if (!qtyInput || !afterCell) return;
-            const stock = afterCell.getAttribute('data-stock');
-            if (stock === '') { afterCell.textContent = '-'; return; }
-            const newQty = parseInt(qtyInput.value) || 0;
-            const remaining = parseInt(stock) - newQty;
-            afterCell.textContent = remaining;
-            afterCell.style.color = remaining < 0 ? '#dc3545' : '#28a745';
-            afterCell.style.fontWeight = remaining < 0 ? 'bold' : 'normal';
-            row.style.background = remaining < 0 ? 'rgba(220, 53, 69, 0.08)' : '';
-        });
-
-        // Show warning if any items go negative
-        const negatives = document.querySelectorAll('#allocation-modal-body .alloc-after');
-        let hasNeg = false;
-        negatives.forEach(c => { if (parseInt(c.textContent) < 0) hasNeg = true; });
-        const warnings = document.getElementById('allocation-warnings');
-        if (hasNeg) {
-            warnings.innerHTML = '<div style="padding:8px 12px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:6px;color:#dc3545;font-size:0.9rem;"><i class="bi bi-exclamation-triangle"></i> Some items will go below zero stock. You can still proceed.</div>';
-        } else {
-            warnings.innerHTML = '';
-        }
-    }
-
-    function confirmAllocation() {
-        const orderId = window._allocOrderId;
-        const checkbox = window._allocCheckbox;
-
-        // Collect quantity overrides
-        const quantities = {};
-        document.querySelectorAll('.alloc-modal-qty').forEach(input => {
-            const accId = input.getAttribute('data-acc-id');
-            quantities[accId] = parseInt(input.value) || 0;
-        });
-
-        const btn = document.getElementById('confirm-allocation-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Allocating...';
-
-        doAllocation(orderId, true, quantities, checkbox);
-    }
-
-    function doAllocation(orderId, allocate, quantities, checkbox) {
-        fetch('{% url "allocate_accessories" order.id %}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            },
-            body: JSON.stringify({ allocate: allocate, quantities: quantities })
-        })
-        .then(res => {
-            if (!res.ok) console.error('Allocate response not OK:', res.status);
-            return res.json();
-        })
-        .then(data => {
-            if (data.success) {
-                closeModal('allocationModal');
-                const verb = allocate ? 'allocated' : 'unallocated';
-                showAlert(`${data.count} item(s) ${verb}, ${data.stock_changes} stock change(s) made.`, 'success');
-                location.reload();
-            } else {
-                showAlert('Error: ' + (data.error || 'Unknown error'), 'danger');
-                checkbox.checked = !allocate;
-                const btn = document.getElementById('confirm-allocation-btn');
-                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
-            }
-        })
-        .catch(err => {
-            console.error('Allocate fetch error:', err);
-            showAlert('Error: ' + err.message, 'danger');
-            checkbox.checked = !allocate;
-            const btn = document.getElementById('confirm-allocation-btn');
-            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
-        });
-    }
-
     // Track OS Doors changes
     let osDoorsChanges = {};
 
@@ -3427,6 +3347,109 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// ─── Toggle materials allocation (Job Info checkbox) ────────────────────
+function toggleMaterialsAllocated(orderId, allocate, checkbox) {
+    if (!allocate) {
+        const msg = 'Unallocate all materials?\n\nThis will add quantities back to stock.';
+        if (!confirm(msg)) {
+            checkbox.checked = true;
+            return;
+        }
+        doAllocation(orderId, false, {}, checkbox);
+        return;
+    }
+
+    // Allocate – show confirmation modal with item summary
+    const tbody = document.getElementById('allocation-modal-body');
+    tbody.innerHTML = '';
+
+    const rows = document.querySelectorAll(
+        '#accessories-table tbody tr[data-accessory-id], ' +
+        '#glass-table tbody tr[data-accessory-id], ' +
+        '#raumplus-table tbody tr[data-accessory-id]'
+    );
+    let itemCount = 0;
+
+    rows.forEach(row => {
+        if (row.classList.contains('allocated-row')) return;
+
+        const sku = row.querySelector('td:nth-child(2)').textContent.trim();
+        const name = row.querySelector('td:nth-child(3)').textContent.trim();
+        const qtyInput = row.querySelector('.accessory-quantity, .glass-quantity');
+        const qty = qtyInput ? parseInt(qtyInput.value) || 0 : 0;
+
+        if (qty === 0) return;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><code>${sku}</code></td>
+            <td>${name}</td>
+            <td style="text-align: center;">${qty}</td>
+        `;
+        tbody.appendChild(tr);
+        itemCount++;
+    });
+
+    document.getElementById('alloc-item-count').textContent = itemCount;
+
+    if (itemCount === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:16px;color:var(--text-secondary);">No unallocated items found.</td></tr>';
+        document.getElementById('confirm-allocation-btn').disabled = true;
+    } else {
+        document.getElementById('confirm-allocation-btn').disabled = false;
+    }
+
+    window._allocOrderId = orderId;
+    window._allocCheckbox = checkbox;
+    openModal('allocationModal');
+}
+
+function confirmAllocation() {
+    const orderId = window._allocOrderId;
+    const checkbox = window._allocCheckbox;
+
+    const btn = document.getElementById('confirm-allocation-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Allocating...';
+
+    doAllocation(orderId, true, {}, checkbox);
+}
+
+function doAllocation(orderId, allocate, quantities, checkbox) {
+    fetch('{% url "allocate_accessories" order.id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ allocate: allocate, quantities: quantities })
+    })
+    .then(res => {
+        if (!res.ok) console.error('Allocate response not OK:', res.status);
+        return res.json();
+    })
+    .then(data => {
+        if (data.success) {
+            closeModal('allocationModal');
+            const verb = allocate ? 'allocated' : 'unallocated';
+            showAlert(`${data.count} item(s) ${verb}, ${data.stock_changes} stock change(s) made.`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (data.error || 'Unknown error'), 'danger');
+            checkbox.checked = !allocate;
+            const btn = document.getElementById('confirm-allocation-btn');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
+        }
+    })
+    .catch(err => {
+        console.error('Allocate fetch error:', err);
+        showAlert('Error: ' + err.message, 'danger');
+        checkbox.checked = !allocate;
+        const btn = document.getElementById('confirm-allocation-btn');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
+    });
+}
 
 // Alert functions (global scope so they can be used by all functions)
 function showAlert(message, type) {

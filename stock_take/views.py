@@ -7563,11 +7563,14 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 # Check if item exists and needs updating
                 if key in existing_items:
                     existing_item = existing_items[key]
-                    # Update if quantity increased OR if force importing
-                    if existing_item.cnt < cnt or force_import:
-                        # Update quantity, customer field, and edging fields
-                        existing_item.cnt = cnt
+                    # Always update customer field
+                    needs_save = False
+                    if existing_item.customer != customer_value:
                         existing_item.customer = customer_value
+                        needs_save = True
+                    # Update quantity and other fields if quantity increased OR if force importing
+                    if existing_item.cnt < cnt or force_import:
+                        existing_item.cnt = cnt
                         existing_item.grain = row.get('GRAIN', '').strip()
                         existing_item.articlename = row.get('ARTICLENAME', '').strip()
                         existing_item.partdesc = row.get('PARTDESC', '').strip()
@@ -7576,9 +7579,10 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                         existing_item.prfid3 = row.get('PRFID3', '').strip()
                         existing_item.prfid4 = row.get('PRFID4', '').strip()
                         existing_item.ordername = row.get('ORDERNAME', '').strip()
-                        existing_item.save()
+                        needs_save = True
                         items_updated += 1
-                    # If it's a duplicate and not force importing, skip it
+                    if needs_save:
+                        existing_item.save()
                 else:
                     # Create new item
                     PNXItem.objects.create(
