@@ -1759,13 +1759,6 @@ def add_board_item(request):
             # Get the linked order (reverse relation - boards_po has many orders)
             linked_order = boards_po.orders.first()
             
-            # Get designer initials from the linked order's designer
-            designer_initials = ''
-            if linked_order and linked_order.designer:
-                # Get initials from designer name (e.g., "John Smith" -> "JS")
-                name_parts = linked_order.designer.name.split()
-                designer_initials = ''.join([part[0].upper() for part in name_parts if part])
-            
             # Create the new PNX item
             pnx_item = PNXItem.objects.create(
                 boards_po=boards_po,
@@ -1780,8 +1773,7 @@ def add_board_item(request):
                 prfid2=data.get('prfid2', ''),
                 prfid3=data.get('prfid3', ''),
                 prfid4=data.get('prfid4', ''),
-                # Set customer based on linked order
-                customer=f"BFS-{designer_initials}-{linked_order.sale_number}" if linked_order else '',
+                customer=_build_customer_value(linked_order),
                 ordername=linked_order.sale_number if linked_order else '',
             )
             
@@ -1811,15 +1803,19 @@ def reimport_pnx(request, boards_po_id):
             content = boards_po.file.read().decode('utf-8')
             reader = csv.DictReader(io.StringIO(content), delimiter=';')
             
+            # Resolve linked order for customer value
+            linked_order = boards_po.orders.select_related('designer').first()
+            customer_value = _build_customer_value(linked_order)
+            
             count = 0
             for row in reader:
                 barcode = row.get('BARCODE', '').strip()
                 if not barcode:
                     continue
                 
-                customer_field = row.get('CUSTOMER', '').strip()
                 ordername_field = row.get('ORDERNAME', '').strip()
-                customer_value = ordername_field if not customer_field and ordername_field else customer_field
+                # Use resolved customer value, fall back to file content
+                item_customer = customer_value or row.get('CUSTOMER', '').strip()
                 
                 PNXItem.objects.create(
                     boards_po=boards_po,
@@ -1828,7 +1824,7 @@ def reimport_pnx(request, boards_po_id):
                     cleng=Decimal(str(row.get('CLENG', '0').strip() or '0')),
                     cwidth=Decimal(str(row.get('CWIDTH', '0').strip() or '0')),
                     cnt=Decimal(str(row.get('CNT', '0').strip() or '0')),
-                    customer=customer_value,
+                    customer=item_customer,
                     grain=row.get('GRAIN', '').strip(),
                     articlename=row.get('ARTICLENAME', '').strip(),
                     partdesc=row.get('PARTDESC', '').strip(),
@@ -1846,6 +1842,20 @@ def reimport_pnx(request, boards_po_id):
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 
+def _build_customer_value(order):
+    """Build the structured customer string: BFS-INITIALS-SALE FirstName LastName"""
+    if not order:
+        return ''
+    designer_initials = ''
+    if order.designer and order.designer.name:
+        designer_initials = ''.join(word[0].upper() for word in order.designer.name.split() if word)
+    value = f"BFS-{designer_initials}-{order.sale_number}" if designer_initials else f"BFS-{order.sale_number}"
+    customer_name = f"{order.first_name} {order.last_name}".strip()
+    if customer_name:
+        value = f"{value} {customer_name}"
+    return value
+
+
 def regenerate_pnx_csv_files(boards_po):
     """Regenerate both PNX and CSV files from current PNX items.
     Uses Django's storage backend (ContentFile + .save()) so files are
@@ -1858,6 +1868,16 @@ def regenerate_pnx_csv_files(boards_po):
     
     if not pnx_items.exists():
         return
+    
+    # Resolve linked order to rebuild the customer value
+    linked_order = boards_po.orders.select_related('designer').first()
+    customer_value = _build_customer_value(linked_order)
+    
+    # Update customer field on all items if we have a linked order
+    if customer_value:
+        pnx_items.update(customer=customer_value)
+        # Re-fetch after update
+        pnx_items = boards_po.pnx_items.all().order_by('barcode')
     
     # Generate PNX content (semicolon-delimited)
     pnx_output = io.StringIO()
@@ -6170,12 +6190,8 @@ def download_pnx_as_csv(request, order_id):
         messages.error(request, 'No PNX items found for this order.')
         return redirect('order_details', order_id=order_id)
     
-    # Build CUSTOMER field: BFS-<designer_initials>-<sale_number>
-    designer_initials = ''
-    if order.designer and order.designer.name:
-        # Get initials from designer name (e.g., "John Smith" -> "JS")
-        designer_initials = ''.join(word[0].upper() for word in order.designer.name.split() if word)
-    customer_value = f"BFS-{designer_initials}-{order.sale_number}"
+    # Build CUSTOMER field using the shared helper
+    customer_value = _build_customer_value(order)
     
     # Create CSV in memory
     output = io.StringIO()
@@ -7526,26 +7542,8 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 customer_field = row.get('CUSTOMER', '').strip()
                 ordername_field = row.get('ORDERNAME', '').strip()
                 
-                # Build structured customer value: SITE-DESIGNER-SALENUMBER
-                # Site: default to BFS
-                site = "BFS"
-                
-                # Designer: get initials from order's designer
-                designer_initials = ""
-                if order.designer:
-                    name_parts = order.designer.name.split()
-                    designer_initials = ''.join([part[0].upper() for part in name_parts if part])
-                
-                # Sale number from order
-                sale_number = order.sale_number
-                
-                # Format: BFS-SD-413491
-                customer_value = f"{site}-{designer_initials}-{sale_number}" if designer_initials else f"{site}-{sale_number}"
-                
-                # Append customer first/last name
-                customer_name = f"{order.first_name} {order.last_name}".strip()
-                if customer_name:
-                    customer_value = f"{customer_value} {customer_name}"
+                # Build customer value using the shared helper
+                customer_value = _build_customer_value(order)
                 
                 barcode = row.get('BARCODE', '').strip()
                 matname = row.get('MATNAME', '').strip()
@@ -7616,16 +7614,8 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
             # Write header - exact order as specified
             csv_writer.writerow(['BARCODE', 'MATNAME', 'CLENG', 'CWIDTH', 'CNT', 'GRAIN', 'CUSTOMER', 'ORDERNAME', 'ARTICLENAME', 'PARTDESC', 'PRFID1', 'PRFID3', 'PRFID4', 'PRFID2'])
             
-            # Build CUSTOMER field for CSV
-            designer_initials = ''
-            if order.designer and order.designer.name:
-                designer_initials = ''.join(word[0].upper() for word in order.designer.name.split() if word)
-            csv_customer_value = f"BFS-{designer_initials}-{order.sale_number}"
-            
-            # Append customer first/last name
-            csv_customer_name = f"{order.first_name} {order.last_name}".strip()
-            if csv_customer_name:
-                csv_customer_value = f"{csv_customer_value} {csv_customer_name}"
+            # Build CUSTOMER field for CSV using the shared helper
+            csv_customer_value = _build_customer_value(order)
             
             # Re-parse PNX for CSV generation (to include all fields)
             io_string_csv = io.StringIO(pnx_content)
