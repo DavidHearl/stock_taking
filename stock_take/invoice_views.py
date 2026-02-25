@@ -10,7 +10,7 @@ from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import StreamingHttpResponse, JsonResponse
 
-from .models import Invoice, PurchaseOrder
+from .models import Invoice, PurchaseOrder, PurchaseOrderProduct
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +91,24 @@ def invoice_detail(request, invoice_id):
     payments = invoice.payments.all()
     linked_pos = invoice.purchase_orders.all().order_by('display_number')
 
+    # For each linked PO, annotate with partial-linking info
+    linked_pos_info = []
+    for po in linked_pos:
+        total_products = po.products.count()
+        linked_products = invoice.linked_products.filter(purchase_order=po).count()
+        linked_pos_info.append({
+            'po': po,
+            'total_products': total_products,
+            'linked_products': linked_products,
+            'is_partial': 0 < linked_products < total_products,
+        })
+
     context = {
         'invoice': invoice,
         'line_items': line_items,
         'payments': payments,
         'linked_pos': linked_pos,
+        'linked_pos_info': linked_pos_info,
     }
     return render(request, 'stock_take/invoice_detail.html', context)
 
@@ -406,3 +419,126 @@ def invoice_unlink_po(request, invoice_id):
     invoice.purchase_orders.remove(po)
 
     return JsonResponse({'success': True})
+
+
+# ── Upload / download / delete invoice attachment ─────────────────
+@login_required
+def invoice_upload_attachment(request, invoice_id):
+    """Upload a PDF/file attachment to an invoice (multipart form POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        return JsonResponse({'error': 'No file provided'}, status=400)
+
+    # Delete old attachment if present
+    if invoice.attachment:
+        invoice.attachment.delete(save=False)
+
+    invoice.attachment = uploaded
+    invoice.save(update_fields=['attachment'])
+
+    return JsonResponse({
+        'success': True,
+        'filename': uploaded.name,
+        'url': invoice.attachment.url,
+    })
+
+
+@login_required
+def invoice_delete_attachment(request, invoice_id):
+    """Delete the attachment from an invoice (POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+    if invoice.attachment:
+        invoice.attachment.delete(save=False)
+        invoice.attachment = None
+        invoice.save(update_fields=['attachment'])
+
+    return JsonResponse({'success': True})
+
+
+# ── PO products for partial linking ──────────────────────────────
+@login_required
+def po_products_for_linking(request, po_id):
+    """Return the products on a PO so the user can pick which to link.
+
+    Also returns which products are already linked to a given invoice.
+    """
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    invoice_id = request.GET.get('invoice_id', '')
+
+    already_linked_ids = set()
+    if invoice_id:
+        try:
+            inv = Invoice.objects.get(id=int(invoice_id))
+            already_linked_ids = set(
+                inv.linked_products.filter(purchase_order=po).values_list('id', flat=True)
+            )
+        except (Invoice.DoesNotExist, ValueError):
+            pass
+
+    products = po.products.all().order_by('sort_order', 'id')
+    results = []
+    for p in products:
+        results.append({
+            'id': p.id,
+            'sku': p.sku or '',
+            'name': p.name or '',
+            'description': p.description or '',
+            'quantity': str(p.order_quantity or p.quantity or 0),
+            'line_total': str(p.line_total),
+            'linked': p.id in already_linked_ids,
+        })
+
+    return JsonResponse({'products': results, 'po_display_number': po.display_number or po.number or str(po.workguru_id)})
+
+
+@login_required
+def invoice_set_linked_products(request, invoice_id):
+    """Set the linked products for a specific PO on this invoice (POST).
+
+    Body: { po_id: int, product_ids: [int, ...] }
+    If product_ids is empty, all products are unlinked for that PO.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    po_id = data.get('po_id')
+    product_ids = data.get('product_ids', [])
+
+    if not po_id:
+        return JsonResponse({'error': 'po_id required'}, status=400)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    # Remove all product links for this PO first
+    existing = invoice.linked_products.filter(purchase_order=po)
+    invoice.linked_products.remove(*existing)
+
+    # Add selected ones
+    if product_ids:
+        products_to_link = PurchaseOrderProduct.objects.filter(
+            id__in=product_ids, purchase_order=po
+        )
+        invoice.linked_products.add(*products_to_link)
+
+    linked_count = invoice.linked_products.filter(purchase_order=po).count()
+    total_count = po.products.count()
+
+    return JsonResponse({
+        'success': True,
+        'linked_count': linked_count,
+        'total_count': total_count,
+    })

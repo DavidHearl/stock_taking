@@ -8,7 +8,7 @@ from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, sales_list, sale_detail
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
-from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po
+from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
 from .cad_views import cad_db_upload, cad_db_download, cad_db_status
@@ -37,7 +37,11 @@ urlpatterns = [
     path('invoices/<int:invoice_id>/', invoice_detail, name='invoice_detail'),
     path('invoices/<int:invoice_id>/link-po/', invoice_link_po, name='invoice_link_po'),
     path('invoices/<int:invoice_id>/unlink-po/', invoice_unlink_po, name='invoice_unlink_po'),
+    path('invoices/<int:invoice_id>/upload-attachment/', invoice_upload_attachment, name='invoice_upload_attachment'),
+    path('invoices/<int:invoice_id>/delete-attachment/', invoice_delete_attachment, name='invoice_delete_attachment'),
+    path('invoices/<int:invoice_id>/set-linked-products/', invoice_set_linked_products, name='invoice_set_linked_products'),
     path('api/invoice-search/', invoice_search, name='invoice_search'),
+    path('api/po-products/<int:po_id>/', po_products_for_linking, name='po_products_for_linking'),
 
     # Purchase Orders
     path('purchase-orders/', purchase_orders_list, name='purchase_orders_list'),

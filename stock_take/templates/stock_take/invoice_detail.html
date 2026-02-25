@@ -231,7 +231,7 @@
         </div>
     </div>
 
-    {% if linked_pos %}
+    {% if linked_pos_info %}
     <div class="inv-table-container" style="max-height: none;">
         <table class="inv-table">
             <thead>
@@ -241,25 +241,42 @@
                     <th>Project</th>
                     <th>Status</th>
                     <th style="text-align: right;">Total</th>
+                    <th>Items</th>
                     <th style="width: 60px;"></th>
                 </tr>
             </thead>
             <tbody id="linked-pos-tbody">
-                {% for po in linked_pos %}
-                <tr id="linked-po-row-{{ po.workguru_id }}">
+                {% for info in linked_pos_info %}
+                <tr id="linked-po-row-{{ info.po.workguru_id }}">
                     <td>
-                        <a href="{% url 'purchase_order_detail' po.workguru_id %}">
-                            {{ po.display_number }}
+                        <a href="{% url 'purchase_order_detail' info.po.workguru_id %}">
+                            {{ info.po.display_number }}
                         </a>
                     </td>
-                    <td>{{ po.supplier_name|default:"—" }}</td>
-                    <td>{{ po.project_name|default:"—" }}</td>
+                    <td>{{ info.po.supplier_name|default:"—" }}</td>
+                    <td>{{ info.po.project_name|default:"—" }}</td>
                     <td>
-                        <span class="inv-status {{ po.status|lower }}">{{ po.status|default:"—" }}</span>
+                        <span class="inv-status {{ info.po.status|lower }}">{{ info.po.status|default:"—" }}</span>
                     </td>
-                    <td class="number-cell">£{{ po.total|floatformat:2 }}</td>
+                    <td class="number-cell">£{{ info.po.total|floatformat:2 }}</td>
                     <td>
-                        <button class="btn btn-sm btn-danger" onclick="unlinkPO({{ po.workguru_id }})" title="Unlink">
+                        {% if info.total_products > 1 %}
+                        <button class="btn btn-sm btn-outline-secondary" onclick="openPartialLinkModal({{ info.po.workguru_id }})" title="Select which items to link">
+                            {% if info.linked_products > 0 %}
+                            <span id="partial-badge-{{ info.po.workguru_id }}">{{ info.linked_products }}/{{ info.total_products }}</span>
+                            {% else %}
+                            <span id="partial-badge-{{ info.po.workguru_id }}">All ({{ info.total_products }})</span>
+                            {% endif %}
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
+                        {% elif info.total_products == 1 %}
+                        <span class="text-muted" style="font-size:0.8rem;">1 item</span>
+                        {% else %}
+                        <span class="text-muted" style="font-size:0.8rem;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="unlinkPO({{ info.po.workguru_id }})" title="Unlink">
                             <i class="bi bi-x-lg"></i>
                         </button>
                     </td>
@@ -275,11 +292,61 @@
     {% endif %}
 </div>
 
+<!-- Attachment Section -->
+<div class="inv-detail-section">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 class="inv-section-title" style="margin: 0;"><i class="bi bi-paperclip"></i> Attachment</h3>
+    </div>
+    <div id="attachment-area">
+        {% if invoice.attachment %}
+        <div id="attachment-info" style="display:flex; align-items:center; gap:12px; padding:12px; background:var(--bg-secondary); border-radius:6px;">
+            <i class="bi bi-file-earmark-pdf" style="font-size:1.5rem; color:#dc3545;"></i>
+            <div style="flex:1;">
+                <a href="{{ invoice.attachment.url }}" target="_blank" style="font-weight:600;">{{ invoice.attachment.name|cut:"invoice_attachments/" }}</a>
+            </div>
+            <button class="btn btn-sm btn-danger" onclick="deleteAttachment()" title="Remove attachment">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+        {% else %}
+        <div id="attachment-info" style="display:none;"></div>
+        {% endif %}
+        <div id="attachment-upload" {% if invoice.attachment %}style="display:none;"{% endif %}>
+            <form id="attachment-form" style="display:flex; align-items:center; gap:10px;">
+                <input type="file" id="attachment-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" class="form-input" style="flex:1;">
+                <button type="button" class="btn btn-sm btn-primary" onclick="uploadAttachment()">
+                    <i class="bi bi-upload"></i> Upload
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Partial Link Modal -->
+<div class="modal-overlay" id="partial-link-modal" style="display:none;" onclick="closePartialLinkModal(event)">
+    <div class="modal-dialog" style="max-width:600px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-list-check"></i> Select Items — <span id="partial-link-po-name"></span></h3>
+            <button class="modal-close" onclick="closePartialLinkModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="partial-link-body" style="max-height:400px; overflow-y:auto;">
+            <p class="text-muted">Loading products...</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closePartialLinkModal()">Cancel</button>
+            <button type="button" class="btn-save" onclick="savePartialLink()">
+                <i class="bi bi-check-lg"></i> Save Selection
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 let poSearchTimer = null;
+let currentPartialPoId = null;
 
 function togglePOSearch() {
     const form = document.getElementById('po-search-form');
@@ -385,6 +452,147 @@ function unlinkPO(poId) {
             }
         } else {
             alert(data.error || 'Unlink failed');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+// ── Attachment upload / delete ─────────────────────────────────
+function uploadAttachment() {
+    const fileInput = document.getElementById('attachment-file');
+    if (!fileInput.files.length) {
+        alert('Please select a file');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    fetch(`/invoices/{{ invoice.id }}/upload-attachment/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Upload failed');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function deleteAttachment() {
+    if (!confirm('Remove this attachment?')) return;
+
+    fetch(`/invoices/{{ invoice.id }}/delete-attachment/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('attachment-info').style.display = 'none';
+            document.getElementById('attachment-upload').style.display = 'block';
+            document.getElementById('attachment-file').value = '';
+        } else {
+            alert(data.error || 'Delete failed');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+// ── Partial PO linking ─────────────────────────────────────────
+function openPartialLinkModal(poId) {
+    currentPartialPoId = poId;
+    const modal = document.getElementById('partial-link-modal');
+    const body = document.getElementById('partial-link-body');
+    body.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px;">Loading products...</p>';
+    modal.style.display = 'flex';
+
+    fetch(`/api/po-products/${poId}/?invoice_id={{ invoice.id }}`)
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('partial-link-po-name').textContent = data.po_display_number || `PO #${poId}`;
+
+        if (!data.products || data.products.length === 0) {
+            body.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px;">No products on this PO.</p>';
+            return;
+        }
+
+        let html = '<table class="inv-table" style="margin:0;"><thead><tr>'
+            + '<th style="width:40px;"><input type="checkbox" id="partial-select-all" onchange="toggleAllPartialProducts(this)"></th>'
+            + '<th>SKU</th><th>Name</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Total</th>'
+            + '</tr></thead><tbody>';
+
+        const anyLinked = data.products.some(p => p.linked);
+        data.products.forEach(p => {
+            const checked = p.linked ? 'checked' : (!anyLinked ? 'checked' : '');
+            html += `<tr>
+                <td><input type="checkbox" class="partial-product-cb" value="${p.id}" ${checked}></td>
+                <td style="font-size:0.82rem;">${p.sku || '—'}</td>
+                <td style="font-size:0.82rem;">${p.name || '—'}</td>
+                <td class="number-cell" style="font-size:0.82rem;">${p.quantity}</td>
+                <td class="number-cell" style="font-size:0.82rem;">£${parseFloat(p.line_total).toFixed(2)}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        body.innerHTML = html;
+    })
+    .catch(err => {
+        body.innerHTML = '<p style="color:#dc3545;padding:20px;">Error loading products</p>';
+    });
+}
+
+function closePartialLinkModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('partial-link-modal').style.display = 'none';
+    currentPartialPoId = null;
+}
+
+function toggleAllPartialProducts(masterCb) {
+    document.querySelectorAll('.partial-product-cb').forEach(cb => {
+        cb.checked = masterCb.checked;
+    });
+}
+
+function savePartialLink() {
+    if (!currentPartialPoId) return;
+
+    const selectedIds = [];
+    document.querySelectorAll('.partial-product-cb:checked').forEach(cb => {
+        selectedIds.push(parseInt(cb.value));
+    });
+
+    fetch(`/invoices/{{ invoice.id }}/set-linked-products/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            po_id: currentPartialPoId,
+            product_ids: selectedIds
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Update the badge text
+            const badge = document.getElementById(`partial-badge-${currentPartialPoId}`);
+            if (badge) {
+                if (data.linked_count > 0 && data.linked_count < data.total_count) {
+                    badge.textContent = `${data.linked_count}/${data.total_count}`;
+                } else {
+                    badge.textContent = `All (${data.total_count})`;
+                }
+            }
+            closePartialLinkModal();
+        } else {
+            alert(data.error || 'Failed to save selection');
         }
     })
     .catch(err => alert('Error: ' + err.message));

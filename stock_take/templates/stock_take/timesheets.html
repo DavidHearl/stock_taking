@@ -9,14 +9,17 @@
 {% block content %}
 <div class="page-content">
     <!-- All Timesheets Table -->
-    <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header">
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
             <h3><i class="bi bi-table"></i> All Timesheets</h3>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openAddTimesheetModal()">
+                <i class="bi bi-plus-lg"></i> Add Timesheet
+            </button>
         </div>
-        <div class="card-body">
+        <div class="card-body" style="padding: 0;">
             {% if timesheets %}
             <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-                <table class="table">
+                <table class="table ts-table">
                     <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;">
                         <tr>
                             <th>Date</th>
@@ -44,9 +47,9 @@
                             </td>
                             <td>
                                 {% if ts.timesheet_type == 'installation' %}
-                                <span class="badge badge-blue">Installation</span>
+                                <span class="badge badge-installation">Installation</span>
                                 {% else %}
-                                <span class="badge badge-purple">Manufacturing</span>
+                                <span class="badge badge-manufacturing">Manufacturing</span>
                                 {% endif %}
                             </td>
                             <td>{{ ts.worker_name }}</td>
@@ -71,33 +74,32 @@
                     </tbody>
                 </table>
             </div>
-            <p class="text-muted" style="margin-top: 10px; font-size: 0.85rem;">
-                Showing latest 100 timesheets. To add new timesheets, go to the order details page.
+            <p class="text-muted" style="margin: 8px 12px; font-size: 0.8rem;">
+                Showing latest 100 timesheets.
             </p>
             {% else %}
             <div class="empty-state">
-                <i class="bi bi-clock" style="font-size: 3rem; color: #6c757d;"></i>
+                <i class="bi bi-clock" style="font-size: 2.5rem; color: #6c757d;"></i>
                 <p>No timesheets recorded yet.</p>
-                <p class="text-muted">Timesheets can be added from order detail pages.</p>
             </div>
             {% endif %}
         </div>
     </div>
 
     {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
-    <div class="row" style="display: flex; gap: 20px; flex-wrap: wrap;">
+    <div class="row" style="display: flex; gap: 16px; flex-wrap: wrap;">
         <!-- Factory Workers Section -->
-        <div class="card" style="flex: 1; min-width: 400px;">
+        <div class="card" style="flex: 1; min-width: 380px;">
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <h3><i class="bi bi-person-gear"></i> Factory Workers</h3>
                 <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">
                     <i class="bi bi-plus-lg"></i> Add Worker
                 </button>
             </div>
-            <div class="card-body">
+            <div class="card-body" style="padding: 0;">
                 {% if factory_workers %}
                 <div class="table-container">
-                    <table class="table">
+                    <table class="table ts-table">
                         <thead>
                             <tr>
                                 <th>Name</th>
@@ -112,15 +114,15 @@
                                 <td>
                                     <input type="text" class="form-input form-input-sm worker-name" 
                                            data-id="{{ worker.id }}" value="{{ worker.name }}"
-                                           style="max-width: 150px;">
+                                           style="max-width: 140px;">
                                 </td>
                                 <td>
-                                    <div style="display: flex; align-items: center; gap: 3px;">
+                                    <div style="display: flex; align-items: center; gap: 2px;">
                                         <span>£</span>
                                         <input type="number" step="0.01" min="0" 
                                                class="form-input form-input-sm worker-rate" 
                                                data-id="{{ worker.id }}" value="{{ worker.hourly_rate }}"
-                                               style="max-width: 80px;">
+                                               style="max-width: 70px;">
                                         <span>/hr</span>
                                     </div>
                                 </td>
@@ -146,9 +148,9 @@
                 </div>
                 {% else %}
                 <div class="empty-state" id="no-workers-message">
-                    <i class="bi bi-person-x" style="font-size: 3rem; color: #6c757d;"></i>
+                    <i class="bi bi-person-x" style="font-size: 2.5rem; color: #6c757d;"></i>
                     <p>No factory workers added yet.</p>
-                    <button type="button" class="btn btn-primary" onclick="openAddWorkerModal()">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">
                         <i class="bi bi-plus-lg"></i> Add First Worker
                     </button>
                 </div>
@@ -156,23 +158,25 @@
             </div>
         </div>
 
-        <!-- Fitters Section (Read-only info) -->
-        <div class="card" style="flex: 1; min-width: 400px;">
+        <!-- Fitters Section -->
+        <div class="card" style="flex: 1; min-width: 380px;">
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <h3><i class="bi bi-people"></i> Fitters (Installation)</h3>
-                <small class="text-muted">Fixed pricing per job</small>
+                <h3><i class="bi bi-people"></i> Fitters</h3>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openAddFitterModal()">
+                    <i class="bi bi-plus-lg"></i> Add Fitter
+                </button>
             </div>
-            <div class="card-body">
+            <div class="card-body" style="padding: 0;">
                 {% if fitters %}
                 <div class="table-container">
-                    <table class="table">
+                    <table class="table ts-table">
                         <thead>
                             <tr>
                                 <th>Name</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="fitters-table">
                             {% for fitter in fitters %}
                             <tr class="{% if not fitter.active %}text-muted{% endif %}">
                                 <td>{{ fitter.name }}</td>
@@ -188,15 +192,10 @@
                         </tbody>
                     </table>
                 </div>
-                <p class="text-muted" style="margin-top: 15px; font-size: 0.85rem;">
-                    <i class="bi bi-info-circle"></i> Fitters are paid a fixed price per installation job. 
-                    They can be added when creating installation timesheets on order pages.
-                </p>
                 {% else %}
                 <div class="empty-state">
-                    <i class="bi bi-people" style="font-size: 3rem; color: #6c757d;"></i>
+                    <i class="bi bi-people" style="font-size: 2.5rem; color: #6c757d;"></i>
                     <p>No fitters added yet.</p>
-                    <p class="text-muted">Fitters can be added from order pages.</p>
                 </div>
                 {% endif %}
             </div>
@@ -205,11 +204,112 @@
     {% endif %}
 </div>
 
+<!-- Add Timesheet Modal -->
+<div class="modal" id="addTimesheetModal">
+    <div class="modal-overlay" onclick="closeModal('addTimesheetModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Timesheet</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addTimesheetModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Order Search -->
+                <div class="form-group">
+                    <label for="ts_order_search">Order *</label>
+                    <div style="position: relative;">
+                        <input type="text" class="form-input" id="ts_order_search" placeholder="Search by sale number or customer name..." autocomplete="off">
+                        <input type="hidden" id="ts_order_id">
+                        <div id="ts_order_results" class="autocomplete-dropdown" style="display:none;"></div>
+                    </div>
+                </div>
+                <!-- Type -->
+                <div class="form-group">
+                    <label for="ts_type">Type *</label>
+                    <select class="form-input" id="ts_type" onchange="onTimesheetTypeChange()">
+                        <option value="installation">Installation</option>
+                        <option value="manufacturing">Manufacturing</option>
+                    </select>
+                </div>
+                <!-- Date -->
+                <div class="form-group">
+                    <label for="ts_date">Date *</label>
+                    <input type="date" class="form-input" id="ts_date">
+                </div>
+                <!-- Installation fields -->
+                <div id="ts_installation_fields">
+                    <div class="form-group">
+                        <label for="ts_fitter">Fitter</label>
+                        <select class="form-input" id="ts_fitter">
+                            <option value="">-- Select Fitter --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ts_helper">Helper (Optional)</label>
+                        <select class="form-input" id="ts_helper">
+                            <option value="">-- None --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ts_price">Price (£) *</label>
+                        <input type="number" step="0.01" min="0" class="form-input" id="ts_price" placeholder="0.00">
+                    </div>
+                </div>
+                <!-- Manufacturing fields -->
+                <div id="ts_manufacturing_fields" style="display:none;">
+                    <div class="form-group">
+                        <label for="ts_factory_worker">Factory Worker *</label>
+                        <select class="form-input" id="ts_factory_worker">
+                            <option value="">-- Select Worker --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ts_hours">Hours *</label>
+                        <input type="number" step="0.25" min="0" class="form-input" id="ts_hours" placeholder="0">
+                    </div>
+                </div>
+                <!-- Description -->
+                <div class="form-group">
+                    <label for="ts_description">Description</label>
+                    <input type="text" class="form-input" id="ts_description" placeholder="Optional description">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addTimesheetModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitTimesheet()">Add Timesheet</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Fitter Modal -->
+<div class="modal" id="addFitterModal">
+    <div class="modal-overlay" onclick="closeModal('addFitterModal')"></div>
+    <div class="modal-dialog" style="max-width: 400px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Fitter</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addFitterModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="new_fitter_name">Name *</label>
+                    <input type="text" class="form-input" id="new_fitter_name" placeholder="Fitter name" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addFitterModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addFitter()">Add Fitter</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
 <!-- Add Worker Modal -->
 <div class="modal" id="addWorkerModal">
     <div class="modal-overlay" onclick="closeModal('addWorkerModal')"></div>
-    <div class="modal-dialog">
+    <div class="modal-dialog" style="max-width: 400px;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Add Factory Worker</h3>
@@ -244,7 +344,7 @@
             </div>
             <div class="modal-body">
                 <p>Are you sure you want to delete <strong id="delete-worker-name"></strong>?</p>
-                <p class="text-muted">This action cannot be undone. Any timesheets associated with this worker will remain but will no longer be linked.</p>
+                <p class="text-muted" style="font-size: 0.85rem;">This action cannot be undone.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button>
@@ -256,31 +356,36 @@
 {% endif %}
 
 <style>
-/* Timesheet table header */
-.table thead th {
-    padding: 12px 14px;
+/* Compact table styling */
+.ts-table thead th {
+    padding: 6px 10px;
     text-align: left;
     font-weight: 600;
     color: var(--text-secondary);
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     border-bottom: 2px solid var(--border-color);
     white-space: nowrap;
 }
 
-.table tbody td {
-    padding: 11px 14px;
+.ts-table tbody td {
+    padding: 5px 10px;
     border-bottom: 1px solid var(--border-color);
     color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+.ts-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
 /* Toggle Switch */
 .toggle-switch {
     position: relative;
     display: inline-block;
-    width: 50px;
-    height: 24px;
+    width: 42px;
+    height: 22px;
 }
 
 .toggle-switch input {
@@ -298,14 +403,14 @@
     bottom: 0;
     background-color: #ccc;
     transition: .3s;
-    border-radius: 24px;
+    border-radius: 22px;
 }
 
 .toggle-slider:before {
     position: absolute;
     content: "";
-    height: 18px;
-    width: 18px;
+    height: 16px;
+    width: 16px;
     left: 3px;
     bottom: 3px;
     background-color: white;
@@ -318,16 +423,27 @@
 }
 
 .toggle-switch input:checked + .toggle-slider:before {
-    transform: translateX(26px);
+    transform: translateX(20px);
 }
 
-/* Badge styles */
+/* Badge styles — matching costing report colours */
 .badge {
     display: inline-block;
-    padding: 4px 8px;
-    font-size: 0.75rem;
+    padding: 3px 8px;
+    font-size: 0.7rem;
     font-weight: 600;
     border-radius: 4px;
+    white-space: nowrap;
+}
+
+.badge-installation {
+    background-color: rgba(139, 92, 246, 0.15);
+    color: #8b5cf6;
+}
+
+.badge-manufacturing {
+    background-color: rgba(240, 173, 78, 0.15);
+    color: #d97706;
 }
 
 .badge-success {
@@ -340,43 +456,72 @@
     color: #4b5563;
 }
 
-.badge-blue {
-    background-color: #dbeafe;
-    color: #1e40af;
-}
-
-.badge-purple {
-    background-color: #ede9fe;
-    color: #5b21b6;
-}
-
 /* Form input small */
 .form-input-sm {
-    padding: 4px 8px;
-    font-size: 0.85rem;
+    padding: 3px 6px;
+    font-size: 0.82rem;
 }
 
 /* Empty state */
 .empty-state {
     text-align: center;
-    padding: 40px 20px;
+    padding: 24px 16px;
 }
 
 .empty-state p {
-    margin: 10px 0;
+    margin: 8px 0;
     color: #6c757d;
+    font-size: 0.85rem;
 }
 
 /* Muted text for inactive rows */
 tr.text-muted td {
     opacity: 0.6;
 }
+
+/* Order search autocomplete dropdown */
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover {
+    background: var(--bg-secondary);
+}
+
+.autocomplete-item .sale-num {
+    font-weight: 600;
+    color: var(--primary-color);
+}
 </style>
 
 <script>
 let deleteWorkerId = null;
+let orderSearchTimeout = null;
 
+// ═══════════════════════════════════════
 // Modal functions
+// ═══════════════════════════════════════
 function openModal(modalId) {
     document.getElementById(modalId).classList.add('active');
 }
@@ -385,6 +530,199 @@ function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
 }
 
+// ═══════════════════════════════════════
+// Add Timesheet
+// ═══════════════════════════════════════
+function openAddTimesheetModal() {
+    // Reset form
+    document.getElementById('ts_order_search').value = '';
+    document.getElementById('ts_order_id').value = '';
+    document.getElementById('ts_order_results').style.display = 'none';
+    document.getElementById('ts_type').value = 'installation';
+    document.getElementById('ts_date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('ts_price').value = '';
+    document.getElementById('ts_hours').value = '';
+    document.getElementById('ts_description').value = '';
+    onTimesheetTypeChange();
+    loadFittersAndWorkers();
+    openModal('addTimesheetModal');
+}
+
+function onTimesheetTypeChange() {
+    const type = document.getElementById('ts_type').value;
+    document.getElementById('ts_installation_fields').style.display = type === 'installation' ? 'block' : 'none';
+    document.getElementById('ts_manufacturing_fields').style.display = type === 'manufacturing' ? 'block' : 'none';
+}
+
+function loadFittersAndWorkers() {
+    // Load fitters
+    fetch('/api/get-fitters/')
+        .then(r => r.json())
+        .then(data => {
+            const fitterSel = document.getElementById('ts_fitter');
+            const helperSel = document.getElementById('ts_helper');
+            fitterSel.innerHTML = '<option value="">-- Select Fitter --</option>';
+            helperSel.innerHTML = '<option value="">-- None --</option>';
+            (data.fitters || []).forEach(f => {
+                fitterSel.innerHTML += `<option value="${f.id}">${f.name}</option>`;
+                helperSel.innerHTML += `<option value="${f.id}">${f.name}</option>`;
+            });
+        });
+    // Load factory workers
+    fetch('/api/get-factory-workers/')
+        .then(r => r.json())
+        .then(data => {
+            const sel = document.getElementById('ts_factory_worker');
+            sel.innerHTML = '<option value="">-- Select Worker --</option>';
+            (data.workers || []).forEach(w => {
+                sel.innerHTML += `<option value="${w.id}">${w.name} (£${parseFloat(w.hourly_rate).toFixed(2)}/hr)</option>`;
+            });
+        });
+}
+
+// Order search autocomplete
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('ts_order_search');
+    const resultsDiv = document.getElementById('ts_order_results');
+
+    input.addEventListener('input', function() {
+        clearTimeout(orderSearchTimeout);
+        const q = this.value.trim();
+        if (q.length < 2) {
+            resultsDiv.style.display = 'none';
+            return;
+        }
+        orderSearchTimeout = setTimeout(() => {
+            fetch('/api/order-search/?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.results && data.results.length) {
+                        resultsDiv.innerHTML = data.results.map(o =>
+                            `<div class="autocomplete-item" onclick="selectOrder(${o.id}, '${o.sale_number}', '${(o.customer_name || '').replace(/'/g, "\\'")}')">
+                                <span class="sale-num">${o.sale_number}</span> — ${o.customer_name || 'Unknown'}
+                            </div>`
+                        ).join('');
+                        resultsDiv.style.display = 'block';
+                    } else {
+                        resultsDiv.innerHTML = '<div class="autocomplete-item" style="color:#999;">No orders found</div>';
+                        resultsDiv.style.display = 'block';
+                    }
+                });
+        }, 300);
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !resultsDiv.contains(e.target)) {
+            resultsDiv.style.display = 'none';
+        }
+    });
+});
+
+function selectOrder(id, saleNum, customerName) {
+    document.getElementById('ts_order_id').value = id;
+    document.getElementById('ts_order_search').value = saleNum + ' — ' + customerName;
+    document.getElementById('ts_order_results').style.display = 'none';
+}
+
+function submitTimesheet() {
+    const orderId = document.getElementById('ts_order_id').value;
+    if (!orderId) {
+        alert('Please select an order');
+        return;
+    }
+
+    const type = document.getElementById('ts_type').value;
+    const date = document.getElementById('ts_date').value;
+    const description = document.getElementById('ts_description').value;
+
+    const payload = {
+        timesheet_type: type,
+        date: date,
+        description: description,
+    };
+
+    if (type === 'installation') {
+        const fitterId = document.getElementById('ts_fitter').value;
+        const helperId = document.getElementById('ts_helper').value;
+        const price = document.getElementById('ts_price').value;
+        if (!price) { alert('Please enter a price'); return; }
+        payload.fitter_id = fitterId || null;
+        payload.helper_id = helperId || null;
+        payload.price = price;
+    } else {
+        const workerId = document.getElementById('ts_factory_worker').value;
+        const hours = document.getElementById('ts_hours').value;
+        if (!workerId) { alert('Please select a factory worker'); return; }
+        if (!hours) { alert('Please enter hours'); return; }
+        payload.factory_worker_id = workerId;
+        payload.hours = hours;
+    }
+
+    fetch('/order/' + orderId + '/add-timesheet/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+        },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('addTimesheetModal');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('Error adding timesheet');
+    });
+}
+
+// ═══════════════════════════════════════
+// Add Fitter
+// ═══════════════════════════════════════
+function openAddFitterModal() {
+    document.getElementById('new_fitter_name').value = '';
+    openModal('addFitterModal');
+}
+
+function addFitter() {
+    const name = document.getElementById('new_fitter_name').value.trim();
+    if (!name) {
+        alert('Please enter a fitter name');
+        return;
+    }
+
+    fetch('/api/add-fitter/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+        },
+        body: JSON.stringify({ name: name })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('addFitterModal');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('Error adding fitter');
+    });
+}
+
+// ═══════════════════════════════════════
+// Factory Workers CRUD
+// ═══════════════════════════════════════
 function openAddWorkerModal() {
     document.getElementById('new_worker_name').value = '';
     document.getElementById('new_worker_rate').value = '15.00';
@@ -415,7 +753,6 @@ function addWorker() {
     .then(data => {
         if (data.success) {
             closeModal('addWorkerModal');
-            // Reload page to show new worker
             location.reload();
         } else {
             alert('Error adding worker: ' + (data.error || 'Unknown error'));
@@ -453,14 +790,9 @@ function saveWorker(workerId) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Show success feedback
             const btn = row.querySelector('.btn-success');
             btn.innerHTML = '<i class="bi bi-check-circle-fill"></i>';
-            setTimeout(() => {
-                btn.innerHTML = '<i class="bi bi-check-lg"></i>';
-            }, 1500);
-            
-            // Update row styling based on active status
+            setTimeout(() => { btn.innerHTML = '<i class="bi bi-check-lg"></i>'; }, 1500);
             if (data.worker.active) {
                 row.classList.remove('text-muted');
             } else {
@@ -496,11 +828,8 @@ function deleteWorker() {
     .then(data => {
         if (data.success) {
             closeModal('deleteConfirmModal');
-            // Remove row from table
             const row = document.getElementById('worker-row-' + deleteWorkerId);
-            if (row) {
-                row.remove();
-            }
+            if (row) row.remove();
             deleteWorkerId = null;
         } else {
             alert('Error deleting worker: ' + (data.error || 'Unknown error'));
@@ -512,6 +841,9 @@ function deleteWorker() {
     });
 }
 
+// ═══════════════════════════════════════
+// Utility
+// ═══════════════════════════════════════
 function getCsrfToken() {
     const name = 'csrftoken';
     let cookieValue = null;

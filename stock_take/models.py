@@ -1525,6 +1525,18 @@ class Invoice(models.Model):
         help_text='Purchase orders this invoice is attached to',
     )
 
+    # Linked PO products (partial linking – specific line items from POs)
+    linked_products = models.ManyToManyField(
+        'PurchaseOrderProduct', blank=True, related_name='linked_invoices',
+        help_text='Specific PO line items this invoice covers',
+    )
+
+    # PDF attachment
+    attachment = models.FileField(
+        upload_to='invoice_attachments/', blank=True, null=True,
+        help_text='PDF or document attached to this invoice',
+    )
+
     # Metadata
     raw_data = models.JSONField(null=True, blank=True, help_text='Full API response')
     synced_at = models.DateTimeField(null=True, blank=True, help_text='Last sync timestamp')
