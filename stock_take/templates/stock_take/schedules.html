@@ -118,9 +118,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Tab switching
-    document.querySelectorAll('.stock-tab').forEach(function(tab) {
+    document.querySelectorAll('.stock-tab-btn').forEach(function(tab) {
         tab.addEventListener('click', function() {
-            document.querySelectorAll('.stock-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.stock-tab-btn').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             const target = tab.dataset.tab;
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -144,7 +144,30 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.style.overflow = '';
         }
     });
+
+    // Activity log search
+    const activitySearch = document.getElementById('activity-search');
+    if (activitySearch) {
+        activitySearch.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            const clearBtn = document.getElementById('activity-search-clear');
+            clearBtn.style.display = query ? 'block' : 'none';
+            const rows = document.querySelectorAll('#activity-log-table tbody tr');
+            rows.forEach(function(row) {
+                const sku = row.querySelector('.sku-text')?.textContent.toLowerCase() || '';
+                const name = row.querySelector('.mobile-name')?.textContent.toLowerCase() || '';
+                row.style.display = (sku.includes(query) || name.includes(query)) ? '' : 'none';
+            });
+        });
+    }
 });
+
+function clearActivitySearch() {
+    const input = document.getElementById('activity-search');
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+}
 </script>
 {% endblock %}
 
@@ -152,29 +175,41 @@ document.addEventListener('DOMContentLoaded', function() {
 {% block content %}
 {% if user.is_authenticated %}
 <div class="page-content">
-    <!-- Tabs: Stock / Non-Stock / Raumplus / Categories -->
-    <div class="tab-bar">
-        <button type="button" class="stock-tab active" data-tab="stock-panel">
-            <i class="bi bi-box-seam"></i> Stock Items
-            <span class="tab-count">{{ total_stock }}</span>
-        </button>
-        <button type="button" class="stock-tab" data-tab="non-stock-panel">
-            <i class="bi bi-archive"></i> Non-Stock Items
-            <span class="tab-count">{{ total_non_stock }}</span>
-        </button>
-        <button type="button" class="stock-tab" data-tab="raumplus-panel">
-            <i class="bi bi-gear"></i> Raumplus
-            <span class="tab-count">{{ total_raumplus }}</span>
-        </button>
-        <button type="button" class="stock-tab" data-tab="categories-panel">
-            <i class="bi bi-grid"></i> Categories
-            <span class="tab-count">{{ categories|length }}</span>
-        </button>
+    <!-- Header Bar -->
+    <div class="stock-header-bar">
+        <div class="stock-tab-group">
+            <button type="button" class="stock-tab-btn tab-all active" data-tab="stock-panel">
+                <i class="bi bi-box-seam"></i> Stock Items
+                <span class="tab-count">{{ total_stock }}</span>
+            </button>
+            <button type="button" class="stock-tab-btn" data-tab="non-stock-panel">
+                <i class="bi bi-archive"></i> Non-Stock
+                <span class="tab-count">{{ total_non_stock }}</span>
+            </button>
+            <button type="button" class="stock-tab-btn" data-tab="raumplus-panel">
+                <i class="bi bi-gear"></i> Raumplus
+                <span class="tab-count">{{ total_raumplus }}</span>
+            </button>
+            <button type="button" class="stock-tab-btn" data-tab="categories-panel">
+                <i class="bi bi-grid"></i> Categories
+                <span class="tab-count">{{ categories|length }}</span>
+            </button>
+        </div>
+
         {% if unclassified_count > 0 %}
         <span class="unclassified-notice">
-            <i class="bi bi-exclamation-triangle"></i> {{ unclassified_count }} unclassified items
+            <i class="bi bi-exclamation-triangle"></i> {{ unclassified_count }} unclassified
         </span>
         {% endif %}
+
+        <div class="header-sep"></div>
+
+        <!-- Actions (right-aligned) -->
+        <div class="stock-header-actions">
+            <a href="{% url 'export_all_stock_pdf' %}" class="btn btn-primary btn-sm" target="_blank">
+                <i class="bi bi-printer"></i> Print Sheet
+            </a>
+        </div>
     </div>
 
     <!-- ═══════════════════════════════════════════ -->
@@ -263,14 +298,22 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
             {% if recent_activity %}
             <div id="activity-log" class="category-items" style="display: none;">
-                <table class="count-table">
+                <!-- Search -->
+                <div class="activity-search-bar">
+                    <i class="bi bi-search"></i>
+                    <input type="text" id="activity-search" placeholder="Search by SKU or name..." autocomplete="off">
+                    <button class="activity-search-clear" id="activity-search-clear" onclick="clearActivitySearch()">&times;</button>
+                </div>
+                <div class="activity-log-scroll">
+                <table class="count-table" id="activity-log-table">
                     <thead>
                         <tr>
                             <th>SKU</th>
                             <th class="hide-mobile">Counted By</th>
+                            <th class="hide-mobile">Type</th>
                             <th class="text-center">Qty</th>
                             <th class="text-center">Variance</th>
-                            <th class="text-end">When</th>
+                            <th class="text-end">Date</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -281,6 +324,15 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <span class="mobile-name">{{ entry.stock_item.name }}</span>
                             </td>
                             <td class="hide-mobile">{{ entry.created_by.get_full_name|default:entry.created_by.username|default:"System" }}</td>
+                            <td class="hide-mobile">
+                                {% if entry.change_type == 'stock_take' %}
+                                    <span class="badge" style="background: var(--primary-color); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">Stock Take</span>
+                                {% elif entry.change_type == 'adjustment' %}
+                                    <span class="badge" style="background: var(--warning-color); color: #000; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">Stock List</span>
+                                {% else %}
+                                    <span class="badge" style="background: var(--text-secondary); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">{{ entry.get_change_type_display }}</span>
+                                {% endif %}
+                            </td>
                             <td class="text-center">{{ entry.quantity }}</td>
                             <td class="text-center">
                                 {% if entry.change_amount > 0 %}
@@ -291,11 +343,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <span style="color: var(--text-secondary);">0</span>
                                 {% endif %}
                             </td>
-                            <td class="text-end" style="white-space: nowrap;">{{ entry.created_at|timesince }} ago</td>
+                            <td class="text-end" style="white-space: nowrap;">{{ entry.created_at|date:"d M Y" }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
             </div>
             {% else %}
             <div class="empty-state">
@@ -374,22 +427,6 @@ document.addEventListener('DOMContentLoaded', function() {
     <!-- ═══════════════════════════════════════════ -->
     <div id="non-stock-panel" class="tab-panel">
 
-        <!-- Stats -->
-        <div class="stats-bar">
-            <div class="stat-box">
-                <span class="stat-value">{{ total_non_stock }}</span>
-                <span class="stat-label">Total Non-Stock Items</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value">{{ non_stock_counted_today }}</span>
-                <span class="stat-label">Counted Today</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value {% if non_stock_never_checked > 0 %}warning{% endif %}">{{ non_stock_never_checked }}</span>
-                <span class="stat-label">Never Checked</span>
-            </div>
-        </div>
-
         {% for cat_name, items in non_stock_by_category.items %}
         <div class="schedule-card">
             <div class="schedule-card-header">
@@ -458,22 +495,6 @@ document.addEventListener('DOMContentLoaded', function() {
     <!-- ═══════════════════════════════════════════ -->
     <div id="raumplus-panel" class="tab-panel">
 
-        <!-- Stats -->
-        <div class="stats-bar compact">
-            <div class="stat-box">
-                <span class="stat-value">{{ total_raumplus }}</span>
-                <span class="stat-label">Raumplus Items</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value" id="rau-counted-today-stat">{{ raumplus_counted_today }}</span>
-                <span class="stat-label">Counted Today</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value {% if raumplus_never_checked > 0 %}warning{% endif %}">{{ raumplus_never_checked }}</span>
-                <span class="stat-label">Never Checked</span>
-            </div>
-        </div>
-
         {% for cat_name, items in raumplus_by_category.items %}
         <div class="schedule-card">
             <div class="schedule-card-header">
@@ -541,21 +562,6 @@ document.addEventListener('DOMContentLoaded', function() {
     <!-- CATEGORIES PANEL                            -->
     <!-- ═══════════════════════════════════════════ -->
     <div id="categories-panel" class="tab-panel">
-
-        <div class="stats-bar">
-            <div class="stat-box">
-                <span class="stat-value">{{ categories|length }}</span>
-                <span class="stat-label">Categories</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value">{{ stock_take_groups|length }}</span>
-                <span class="stat-label">Stock Take Groups</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-value {% if unclassified_count > 0 %}warning{% endif %}">{{ unclassified_count }}</span>
-                <span class="stat-label">Unclassified Items</span>
-            </div>
-        </div>
 
         {% for category in categories %}
         <div class="schedule-card">

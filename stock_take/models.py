@@ -1519,6 +1519,12 @@ class Invoice(models.Model):
     # Xero / accounting integration
     xero_id = models.CharField(max_length=100, blank=True, null=True)
 
+    # Linked purchase orders (M2M – an invoice can be attached to multiple POs)
+    purchase_orders = models.ManyToManyField(
+        'PurchaseOrder', blank=True, related_name='linked_invoices',
+        help_text='Purchase orders this invoice is attached to',
+    )
+
     # Metadata
     raw_data = models.JSONField(null=True, blank=True, help_text='Full API response')
     synced_at = models.DateTimeField(null=True, blank=True, help_text='Last sync timestamp')
@@ -1605,7 +1611,6 @@ PAGE_SECTIONS = [
         ('product_details', 'Product Details'),
         ('stock_list', 'Stock List'),
         ('stock_take', 'Stock Take'),
-        ('completed_stock_takes', 'Completed Stock Takes'),
         ('categories', 'Categories'),
         ('substitutions', 'Substitutions'),
     ]),

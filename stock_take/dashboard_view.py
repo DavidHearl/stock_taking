@@ -1,11 +1,48 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum
+from django.db.models import Count, Sum, Avg
 from django.db.models.functions import TruncWeek, TruncMonth
+from django.http import JsonResponse
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
 from .models import Order, PurchaseOrder, StockItem
+
+
+def _get_monthly_sales_data(year, month):
+    """Calculate monthly sales stats for a given year/month."""
+    from calendar import monthrange
+    first_day = datetime(year, month, 1).date()
+    last_day = datetime(year, month, monthrange(year, month)[1]).date()
+
+    orders = Order.objects.filter(
+        fit_date__gte=first_day,
+        fit_date__lte=last_day,
+        total_value_exc_vat__gt=0,
+    )
+    agg = orders.aggregate(
+        total=Sum('total_value_exc_vat'),
+        avg=Avg('total_value_exc_vat'),
+        count=Count('id'),
+    )
+    return {
+        'total': float(agg['total'] or 0),
+        'avg': float(agg['avg'] or 0),
+        'count': agg['count'] or 0,
+    }
+
+
+@login_required
+def dashboard_monthly_sales(request):
+    """AJAX endpoint to get monthly sales data for a given year/month."""
+    try:
+        year = int(request.GET.get('year', datetime.now().year))
+        month = int(request.GET.get('month', datetime.now().month))
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid year/month'}, status=400)
+
+    data = _get_monthly_sales_data(year, month)
+    return JsonResponse({'success': True, **data})
 
 
 @login_required
@@ -119,6 +156,43 @@ def dashboard(request):
     sorted_board_months = sorted(board_cost_months.items())
     board_cost_labels = [m.strftime('%b %Y') for m, _ in sorted_board_months]
     board_cost_values = [float(v) for _, v in sorted_board_months]
+
+    # Monthly sales totals - aggregate total_value_exc_vat by month over last 12 months
+    monthly_sales_data = (
+        Order.objects.filter(
+            fit_date__gte=twelve_months_ago,
+            fit_date__lte=today,
+            total_value_exc_vat__gt=0,
+        )
+        .annotate(month=TruncMonth('fit_date'))
+        .values('month')
+        .annotate(total_sales=Sum('total_value_exc_vat'))
+        .order_by('month')
+    )
+
+    monthly_sales_months = {}
+    temp_month = twelve_months_ago
+    while temp_month <= today.replace(day=1):
+        monthly_sales_months[temp_month] = Decimal('0.00')
+        if temp_month.month == 12:
+            temp_month = temp_month.replace(year=temp_month.year + 1, month=1)
+        else:
+            temp_month = temp_month.replace(month=temp_month.month + 1)
+
+    for entry in monthly_sales_data:
+        month_key = entry['month']
+        if hasattr(month_key, 'date'):
+            month_key = month_key.date()
+        month_key = month_key.replace(day=1)
+        if month_key in monthly_sales_months:
+            monthly_sales_months[month_key] = entry['total_sales']
+
+    sorted_sales_months = sorted(monthly_sales_months.items())
+    monthly_sales_labels = [m.strftime('%b %Y') for m, _ in sorted_sales_months]
+    monthly_sales_values = [float(v) for _, v in sorted_sales_months]
+
+    # Current month sales data
+    current_month_sales = _get_monthly_sales_data(today.year, today.month)
     
     context = {
         'fits_chart_data': json.dumps({
@@ -133,9 +207,18 @@ def dashboard(request):
             'labels': board_cost_labels,
             'values': board_cost_values,
         }),
+        'monthly_sales_chart_data': json.dumps({
+            'labels': monthly_sales_labels,
+            'values': monthly_sales_values,
+        }),
         'pending_pos_count': pending_pos,
         'total_stock_value': '{:,.0f}'.format(total_stock_value),
         'stock_item_count': '{:,}'.format(stock_item_count),
         'this_week_sales': '{:,.0f}'.format(this_week_sales),
+        'monthly_sales_total': '{:,.0f}'.format(Decimal(str(current_month_sales['total']))),
+        'monthly_sales_avg': '{:,.0f}'.format(Decimal(str(current_month_sales['avg']))),
+        'monthly_sales_count': current_month_sales['count'],
+        'current_year': today.year,
+        'current_month': today.month,
     }
     return render(request, 'stock_take/dashboard.html', context)

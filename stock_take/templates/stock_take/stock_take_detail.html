@@ -15,6 +15,9 @@
                     <small class="text-muted">{{ schedule.scheduled_date|date:"M d, Y H:i" }} | {{ total_items }} items</small>
                 </div>
                 <div class="btn-group">
+                    <a href="{% url 'export_stock_take_pdf' schedule.id %}" class="btn btn-outline-secondary" target="_blank" title="Print stock take sheet">
+                        <i class="bi bi-printer me-1"></i>Print Sheet
+                    </a>
                     <button class="btn btn-outline-success" id="completeStockTake" disabled title="Update all items before completing">
                         <i class="bi bi-check-circle me-1"></i>Complete Stock Take
                     </button>
@@ -219,14 +222,14 @@ $(document).ready(function() {
         if (confirm('Mark this stock take as complete? This will update the schedule status and cannot be undone.')) {
             $(this).prop('disabled', true).html('<i class="spinner-border spinner-border-sm"></i> Completing...');
             
-            $.post('{% url "schedule_update_status" schedule.id %}', {
+            $.post('{% url "stock_take_update_status" schedule.id %}', {
                 'status': 'completed',
                 'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
             })
             .done(function() {
                 showNotification('Stock take completed successfully!', 'success');
                 setTimeout(() => {
-                    window.location.href = '{% url "schedule_list" %}';
+                    window.location.href = '{% url "stock_take_list" %}';
                 }, 1500);
             })
             .fail(function() {

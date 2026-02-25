@@ -3,12 +3,12 @@ from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
-from .dashboard_view import dashboard
+from .dashboard_view import dashboard, dashboard_monthly_sales
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, sales_list, sale_detail
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
-from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream
+from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
 from .cad_views import cad_db_upload, cad_db_download, cad_db_status
@@ -18,6 +18,7 @@ from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_b
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
+    path('dashboard/monthly-sales/', dashboard_monthly_sales, name='dashboard_monthly_sales'),
 
     # User Profile
     path('profile/', user_profile, name='user_profile'),
@@ -31,8 +32,12 @@ urlpatterns = [
     
     # Invoices
     path('invoices/', invoices_list, name='invoices_list'),
+    path('invoices/create/', create_invoice, name='create_invoice'),
     path('invoices/sync/', sync_invoices_stream, name='sync_invoices'),
     path('invoices/<int:invoice_id>/', invoice_detail, name='invoice_detail'),
+    path('invoices/<int:invoice_id>/link-po/', invoice_link_po, name='invoice_link_po'),
+    path('invoices/<int:invoice_id>/unlink-po/', invoice_unlink_po, name='invoice_unlink_po'),
+    path('api/invoice-search/', invoice_search, name='invoice_search'),
 
     # Purchase Orders
     path('purchase-orders/', purchase_orders_list, name='purchase_orders_list'),
@@ -65,6 +70,9 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/upload-invoice/', po_upload_invoice, name='po_upload_invoice'),
     path('purchase-order/<int:po_id>/update-invoice/<int:invoice_id>/', po_update_invoice, name='po_update_invoice'),
     path('purchase-order/<int:po_id>/delete-invoice/<int:invoice_id>/', po_delete_invoice, name='po_delete_invoice'),
+    path('purchase-order/<int:po_id>/create-invoice/', po_create_invoice, name='po_create_invoice'),
+    path('purchase-order/<int:po_id>/link-invoice/', po_link_invoice, name='po_link_invoice'),
+    path('purchase-order/<int:po_id>/unlink-invoice/', po_unlink_invoice, name='po_unlink_invoice'),
     
     # Suppliers
     path('suppliers/', suppliers_list, name='suppliers_list'),
@@ -81,7 +89,7 @@ urlpatterns = [
     path('sale/<int:pk>/', sale_detail, name='sale_detail'),
     path('customers/', customers_list, name='customers_list'),
     path('customers/create/', customer_create, name='customer_create'),
-    path('customer/<str:customer_name>/', customer_detail, name='customer_detail'),
+    path('customer/<int:pk>/', customer_detail, name='customer_detail'),
     path('customer/<int:pk>/save/', customer_save, name='customer_save'),
     path('customer/<int:pk>/delete/', customer_delete, name='customer_delete'),
     path('customers/bulk-delete/', customers_bulk_delete, name='customers_bulk_delete'),
@@ -115,17 +123,11 @@ urlpatterns = [
     path('assign-item-to-group/', views.assign_item_to_group, name='assign_item_to_group'),
     
 
-    # Schedule management
-    path('schedules/', views.schedule_list, name='schedule_list'),
-    path('schedules/completed/', views.completed_stock_takes, name='completed_stock_takes'),
-    path('schedules/create/', views.schedule_create, name='schedule_create'),
-    path('schedules/edit/<int:schedule_id>/', views.schedule_edit, name='schedule_edit'),
-    path('schedules/update-status/<int:schedule_id>/', views.schedule_update_status, name='schedule_update_status'),
-    path('schedules/delete/<int:schedule_id>/', views.delete_schedule, name='delete_schedule'),
+    # Stock take management
+    path('stock-takes/', views.schedule_list, name='stock_take_list'),
+    path('stock-takes/export-pdf/', views.export_all_stock_pdf, name='export_all_stock_pdf'),
     
     # Stock take functionality
-    path('stock-take/<int:schedule_id>/', views.stock_take_detail, name='stock_take_detail'),
-    path('stock-take/<int:schedule_id>/export/', views.export_stock_take_csv, name='export_stock_take_csv'),
     path('stock-take/update-count/', views.update_stock_count, name='update_stock_count'),
     path('stock-take-groups/delete/<int:group_id>/', views.delete_stock_take_group, name='delete_stock_take_group'),
     

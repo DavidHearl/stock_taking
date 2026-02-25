@@ -460,6 +460,7 @@ def purchase_order_detail(request, po_id):
         'supplier_contacts': supplier_contacts,
         'attachments': purchase_order.attachments.all(),
         'po_invoices': purchase_order.invoices.all(),
+        'linked_invoices': purchase_order.linked_invoices.all().order_by('-date'),
         'original_customer_name': original_customer_name,
         'original_customer_number': original_customer_number,
         'expected_delivery_date': expected_delivery_date,

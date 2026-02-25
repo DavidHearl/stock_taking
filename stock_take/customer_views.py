@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
-from django.db.models import Count, Max, Sum, Q
+from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
 from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice
 import logging
 import json
@@ -20,7 +20,7 @@ def customers_list(request):
     from datetime import timedelta
 
     search_query = request.GET.get('q', '').strip()
-    age_filter = request.GET.get('age', '9m')  # default to <9 months
+    age_filter = request.GET.get('age', '1y')  # default to <1 year
 
     # Location comes from the user's profile (site-wide setting)
     profile = getattr(request.user, 'profile', None)
@@ -29,17 +29,23 @@ def customers_list(request):
     now = timezone.now()
 
     # Define date bracket cutoffs
-    cutoff_9m = now - timedelta(days=274)    # ~9 months
+    cutoff_1y = now - timedelta(days=365)    # ~1 year
     cutoff_2y = now - timedelta(days=730)    # ~2 years
-    cutoff_10y = now - timedelta(days=3650)  # ~10 years
+
+    # Annotate whether each customer has at least one historic sale
+    historic_sale_subquery = AnthillSale.objects.filter(
+        customer=OuterRef('pk'),
+        activity_type__istartswith='Historic'
+    )
 
     # Use the most recent sale date (if available) to determine age bracket.
-    # If a customer had a sale 3 months ago, they are in the <9m bracket
+    # If a customer had a sale 3 months ago, they are in the <1y bracket
     # even if their account was created 10 years ago.
     from django.db.models.functions import Coalesce, Greatest
     customers_base = Customer.objects.prefetch_related('orders').annotate(
         latest_sale=Max('anthill_sales__activity_date'),
         base_date=Coalesce('creation_time', 'anthill_created_date'),
+        has_historic_sale=Exists(historic_sale_subquery),
     ).annotate(
         effective_date=Coalesce(
             Greatest('base_date', 'latest_sale'),
@@ -77,22 +83,24 @@ def customers_list(request):
             search_q &= extra
 
     # Date bracket filters
+    # Historic = customer has at least one sale with activity_type starting with 'Historic'
+    # The date-based brackets exclude historic customers
     def bracket_filter(qs, bracket):
-        if bracket == '9m':
-            return qs.filter(effective_date__gte=cutoff_9m)
-        elif bracket == '2y':
-            return qs.filter(effective_date__gte=cutoff_2y, effective_date__lt=cutoff_9m)
-        elif bracket == '10y':
-            return qs.filter(effective_date__gte=cutoff_10y, effective_date__lt=cutoff_2y)
-        elif bracket == 'over10':
-            return qs.filter(Q(effective_date__lt=cutoff_10y) | Q(effective_date__isnull=True))
+        if bracket == '1y':
+            return qs.filter(has_historic_sale=False, effective_date__gte=cutoff_1y)
+        elif bracket == '1_2y':
+            return qs.filter(has_historic_sale=False, effective_date__gte=cutoff_2y, effective_date__lt=cutoff_1y)
+        elif bracket == '2_10y':
+            return qs.filter(has_historic_sale=False, effective_date__lt=cutoff_2y).exclude(effective_date__isnull=True)
+        elif bracket == 'historic':
+            return qs.filter(has_historic_sale=True)
         return qs
 
     # Compute counts for each bracket (before search, after location filter)
-    count_9m = bracket_filter(customers_base, '9m').count()
-    count_2y = bracket_filter(customers_base, '2y').count()
-    count_10y = bracket_filter(customers_base, '10y').count()
-    count_over10 = bracket_filter(customers_base, 'over10').count()
+    count_1y = bracket_filter(customers_base, '1y').count()
+    count_1_2y = bracket_filter(customers_base, '1_2y').count()
+    count_2_10y = bracket_filter(customers_base, '2_10y').count()
+    count_historic = bracket_filter(customers_base, 'historic').count()
 
     # Apply date filter to get the current bracket's queryset
     customers = bracket_filter(customers_base, age_filter)
@@ -103,10 +111,10 @@ def customers_list(request):
     if search_q:
         # Search across ALL brackets and group results
         bracket_defs = [
-            ('< 9 Months', '9m'),
-            ('< 2 Years', '2y'),
-            ('< 10 Years', '10y'),
-            ('Over 10 Years', 'over10'),
+            ('< 1 Year', '1y'),
+            ('1-2 Years', '1_2y'),
+            ('2+ Years', '2_10y'),
+            ('Historic', 'historic'),
         ]
         search_by_bracket = []
         total_search_count = 0
@@ -147,10 +155,10 @@ def customers_list(request):
         'search_query': search_query,
         'age_filter': age_filter,
         'location_filter': location_filter,
-        'count_9m': count_9m,
-        'count_2y': count_2y,
-        'count_10y': count_10y,
-        'count_over10': count_over10,
+        'count_1y': count_1y,
+        'count_1_2y': count_1_2y,
+        'count_2_10y': count_2_10y,
+        'count_historic': count_historic,
         'search_expanded_from': search_expanded_from,
         'search_by_bracket': search_by_bracket,
     }
@@ -159,11 +167,9 @@ def customers_list(request):
 
 
 @login_required
-def customer_detail(request, customer_name):
+def customer_detail(request, pk):
     """Display detailed view of a single customer"""
-    # URL uses + for spaces (e.g. Aiste+Kizeleviciene)
-    name = customer_name.replace('+', ' ')
-    customer = get_object_or_404(Customer, name=name)
+    customer = get_object_or_404(Customer, pk=pk)
 
     # Get linked orders
     orders = Order.objects.filter(customer=customer).order_by('-order_date')
@@ -390,7 +396,7 @@ def customer_create(request):
     )
 
     messages.success(request, f'Customer "{customer.name}" created successfully.')
-    return redirect('customer_detail', customer_name=customer.url_name)
+    return redirect('customer_detail', pk=customer.pk)
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -405,16 +411,15 @@ def sales_list(request):
     from datetime import timedelta
 
     search_query = request.GET.get('q', '').strip()
-    age_filter = request.GET.get('age', '9m')
+    age_filter = request.GET.get('age', '1y')
 
     # Location from user profile
     profile = getattr(request.user, 'profile', None)
     location_filter = profile.selected_location if profile else ''
 
     now = timezone.now()
-    cutoff_9m = now - timedelta(days=274)
+    cutoff_1y = now - timedelta(days=365)
     cutoff_2y = now - timedelta(days=730)
-    cutoff_10y = now - timedelta(days=3650)
 
     sales_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
 
@@ -441,21 +446,23 @@ def sales_list(request):
             search_q &= extra
 
     # Date bracket filters
+    # Historic = sales with activity_type starting with 'Historic'
+    # Date-based brackets exclude historic sales
     def bracket_filter(qs, bracket):
-        if bracket == '9m':
-            return qs.filter(activity_date__gte=cutoff_9m)
-        elif bracket == '2y':
-            return qs.filter(activity_date__gte=cutoff_2y, activity_date__lt=cutoff_9m)
-        elif bracket == '10y':
-            return qs.filter(activity_date__gte=cutoff_10y, activity_date__lt=cutoff_2y)
-        elif bracket == 'over10':
-            return qs.filter(Q(activity_date__lt=cutoff_10y) | Q(activity_date__isnull=True))
+        if bracket == '1y':
+            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_1y)
+        elif bracket == '1_2y':
+            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_2y, activity_date__lt=cutoff_1y)
+        elif bracket == '2_10y':
+            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__lt=cutoff_2y).exclude(activity_date__isnull=True)
+        elif bracket == 'historic':
+            return qs.filter(activity_type__istartswith='Historic')
         return qs
 
-    count_9m = bracket_filter(sales_base, '9m').count()
-    count_2y = bracket_filter(sales_base, '2y').count()
-    count_10y = bracket_filter(sales_base, '10y').count()
-    count_over10 = bracket_filter(sales_base, 'over10').count()
+    count_1y = bracket_filter(sales_base, '1y').count()
+    count_1_2y = bracket_filter(sales_base, '1_2y').count()
+    count_2_10y = bracket_filter(sales_base, '2_10y').count()
+    count_historic = bracket_filter(sales_base, 'historic').count()
 
     sales = bracket_filter(sales_base, age_filter)
 
@@ -465,7 +472,7 @@ def sales_list(request):
         if filtered.exists():
             sales = filtered
         else:
-            bracket_order = ['9m', '2y', '10y', 'over10']
+            bracket_order = ['1y', '1_2y', '2_10y', 'historic']
             try:
                 start_idx = bracket_order.index(age_filter) + 1
             except ValueError:
@@ -491,10 +498,10 @@ def sales_list(request):
         'search_query': search_query,
         'age_filter': age_filter,
         'location_filter': location_filter,
-        'count_9m': count_9m,
-        'count_2y': count_2y,
-        'count_10y': count_10y,
-        'count_over10': count_over10,
+        'count_1y': count_1y,
+        'count_1_2y': count_1_2y,
+        'count_2_10y': count_2_10y,
+        'count_historic': count_historic,
         'search_expanded_from': search_expanded_from,
     }
 

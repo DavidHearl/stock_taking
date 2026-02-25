@@ -4640,7 +4640,7 @@ def schedule_list(request):
         'today_date': viewed_date.strftime('%A %d %B %Y'),
         # Activity log - recent stock take counts
         'recent_activity': StockHistory.objects.filter(
-            change_type='stock_take'
+            change_type__in=['stock_take', 'adjustment']
         ).select_related('stock_item', 'created_by').order_by('-created_at')[:50],
     }
 
@@ -4668,7 +4668,7 @@ def schedule_create(request):
         except Exception as e:
             messages.error(request, f'Error creating schedule: {str(e)}')
     
-    return redirect('schedule_list')
+    return redirect('stock_take_list')
 
 def schedule_edit(request, schedule_id):
     """Edit an existing schedule"""
@@ -4966,6 +4966,283 @@ def export_stock_take_csv(request, schedule_id):
         ])
     
     return response
+
+
+def export_stock_take_pdf(request, schedule_id):
+    """Generate a printable stock take sheet PDF for manual counting."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    )
+
+    schedule = get_object_or_404(Schedule, id=schedule_id)
+    items = StockItem.objects.filter(
+        stock_take_group__in=schedule.stock_take_groups.all()
+    ).select_related('category', 'stock_take_group').order_by('stock_take_group__name', 'sku')
+
+    # ── Styles ──────────────────────────────────────────
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        'CellText', parent=styles['Normal'], fontSize=8, leading=10,
+        textColor=colors.HexColor('#1a1a2e'),
+    ))
+    styles.add(ParagraphStyle(
+        'GroupTitle', parent=styles['Heading2'], fontSize=11, leading=14,
+        textColor=colors.white, spaceBefore=14, spaceAfter=4,
+    ))
+
+    HEADER_BG = colors.HexColor('#1a1a2e')
+    ROW_ALT = colors.HexColor('#f8f9fc')
+    BORDER = colors.HexColor('#dfe3ec')
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+    )
+    elements = []
+
+    # ── Logo ────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+        logo.hAlign = 'CENTER'
+        elements.append(logo)
+        elements.append(Spacer(1, 4 * mm))
+
+    # ── Title ───────────────────────────────────────────
+    title_style = ParagraphStyle(
+        'Title', parent=styles['Heading1'], fontSize=16, leading=20,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a1a2e'),
+    )
+    elements.append(Paragraph(f'Stock Take Sheet: {schedule.name}', title_style))
+    sub_style = ParagraphStyle(
+        'Sub', parent=styles['Normal'], fontSize=9, leading=12,
+        alignment=TA_CENTER, textColor=colors.HexColor('#6b7280'),
+    )
+    date_str = schedule.scheduled_date.strftime('%d %B %Y') if schedule.scheduled_date else timezone.now().strftime('%d %B %Y')
+    elements.append(Paragraph(f'{date_str}  |  {items.count()} items', sub_style))
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── Group items ─────────────────────────────────────
+    items_by_group = {}
+    for item in items:
+        group = item.stock_take_group
+        items_by_group.setdefault(group, []).append(item)
+
+    col_widths = [28 * mm, 85 * mm, 22 * mm, 28 * mm]  # SKU, Description, QTY, Counted
+    page_width = A4[0] - 30 * mm  # account for margins
+    # Stretch description to fill remaining width
+    col_widths[1] = page_width - col_widths[0] - col_widths[2] - col_widths[3]
+
+    for group, group_items in items_by_group.items():
+        group_name = group.name if group else 'Ungrouped'
+        group_color = colors.HexColor(group.color) if group and group.color else HEADER_BG
+
+        # Group header bar
+        group_table = Table(
+            [[Paragraph(f'<b>{group_name}</b>  ({len(group_items)} items)', styles['GroupTitle'])]],
+            colWidths=[sum(col_widths)],
+        )
+        group_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), group_color),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+            ('LEFTPADDING', (0, 0), (-1, 0), 8),
+            ('ROUNDEDCORNERS', [4, 4, 0, 0]),
+        ]))
+        elements.append(group_table)
+
+        # Table header + rows
+        header = [
+            Paragraph('<b>SKU</b>', styles['CellText']),
+            Paragraph('<b>Description</b>', styles['CellText']),
+            Paragraph('<b>QTY</b>', styles['CellText']),
+            Paragraph('<b>Counted</b>', styles['CellText']),
+        ]
+        data = [header]
+        for item in group_items:
+            data.append([
+                Paragraph(item.sku, styles['CellText']),
+                Paragraph(item.name, styles['CellText']),
+                Paragraph(str(item.quantity), styles['CellText']),
+                '',  # Empty box for manual counting
+            ])
+
+        tbl = Table(data, colWidths=col_widths, repeatRows=1)
+        style_cmds = [
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f4ff')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (2, 0), (3, -1), 'CENTER'),
+        ]
+        # Alternate row shading
+        for i in range(2, len(data), 2):
+            style_cmds.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+        # Make the "Counted" column cells have a visible empty box
+        for i in range(1, len(data)):
+            style_cmds.append(('BACKGROUND', (3, i), (3, i), colors.HexColor('#ffffff')))
+            style_cmds.append(('BOX', (3, i), (3, i), 1, colors.HexColor('#adb5bd')))
+        tbl.setStyle(TableStyle(style_cmds))
+        elements.append(tbl)
+        elements.append(Spacer(1, 6 * mm))
+
+    doc.build(elements)
+    buffer.seek(0)
+
+    response = HttpResponse(buffer.read(), content_type='application/pdf')
+    filename = f'Stock_Take_Sheet_{schedule.name}_{timezone.now().strftime("%Y%m%d")}.pdf'
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response
+
+
+@login_required
+def export_all_stock_pdf(request):
+    """Generate a printable stock take sheet PDF for ALL tracked stock items."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    )
+    from collections import defaultdict
+
+    items = StockItem.objects.filter(
+        tracking_type='stock'
+    ).select_related('category').order_by('category__name', 'sku')
+
+    # ── Styles ──
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        'CellText', parent=styles['Normal'], fontSize=8, leading=10,
+        textColor=colors.HexColor('#1a1a2e'),
+    ))
+    styles.add(ParagraphStyle(
+        'SkuText', parent=styles['Normal'], fontSize=7, leading=9,
+        textColor=colors.HexColor('#1a1a2e'),
+    ))
+    styles.add(ParagraphStyle(
+        'GroupTitle', parent=styles['Heading2'], fontSize=11, leading=14,
+        textColor=colors.white, spaceBefore=14, spaceAfter=4,
+    ))
+
+    HEADER_BG = colors.HexColor('#1a1a2e')
+    ROW_ALT = colors.HexColor('#f8f9fc')
+    BORDER = colors.HexColor('#dfe3ec')
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+    )
+    elements = []
+
+    # ── Logo ──
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+        logo.hAlign = 'CENTER'
+        elements.append(logo)
+        elements.append(Spacer(1, 4 * mm))
+
+    # ── Title ──
+    title_style = ParagraphStyle(
+        'Title', parent=styles['Heading1'], fontSize=16, leading=20,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a1a2e'),
+    )
+    elements.append(Paragraph('Full Stock Take Sheet', title_style))
+    sub_style = ParagraphStyle(
+        'Sub', parent=styles['Normal'], fontSize=9, leading=12,
+        alignment=TA_CENTER, textColor=colors.HexColor('#6b7280'),
+    )
+    elements.append(Paragraph(
+        f'{timezone.now().strftime("%d %B %Y")}  |  {items.count()} items',
+        sub_style,
+    ))
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── Group by category ──
+    items_by_cat = defaultdict(list)
+    for item in items:
+        cat_name = item.category.name if item.category else 'Uncategorised'
+        items_by_cat[cat_name].append(item)
+
+    col_widths = [46 * mm, 85 * mm, 14 * mm, 18 * mm]  # SKU, Description, QTY, Counted
+    page_width = A4[0] - 30 * mm
+    col_widths[1] = page_width - col_widths[0] - col_widths[2] - col_widths[3]
+
+    for cat_name in sorted(items_by_cat.keys()):
+        cat_items = items_by_cat[cat_name]
+
+        # Category header bar
+        cat_table = Table(
+            [[Paragraph(f'<b>{cat_name}</b>  ({len(cat_items)} items)', styles['GroupTitle'])]],
+            colWidths=[sum(col_widths)],
+        )
+        cat_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HEADER_BG),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+            ('LEFTPADDING', (0, 0), (-1, 0), 8),
+            ('ROUNDEDCORNERS', [4, 4, 0, 0]),
+        ]))
+        elements.append(cat_table)
+
+        header = [
+            Paragraph('<b>SKU</b>', styles['CellText']),
+            Paragraph('<b>Description</b>', styles['CellText']),
+            Paragraph('<b>QTY</b>', styles['CellText']),
+            Paragraph('<b>Counted</b>', styles['CellText']),
+        ]
+        data = [header]
+        for item in cat_items:
+            data.append([
+                Paragraph(item.sku, styles['SkuText']),
+                Paragraph(item.name, styles['CellText']),
+                Paragraph(str(item.quantity), styles['CellText']),
+                '',
+            ])
+
+        tbl = Table(data, colWidths=col_widths, repeatRows=1)
+        style_cmds = [
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f4ff')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (2, 0), (3, -1), 'CENTER'),
+        ]
+        for i in range(2, len(data), 2):
+            style_cmds.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+        for i in range(1, len(data)):
+            style_cmds.append(('BACKGROUND', (3, i), (3, i), colors.HexColor('#ffffff')))
+            style_cmds.append(('BOX', (3, i), (3, i), 1, colors.HexColor('#adb5bd')))
+        tbl.setStyle(TableStyle(style_cmds))
+        elements.append(tbl)
+        elements.append(Spacer(1, 6 * mm))
+
+    doc.build(elements)
+    buffer.seek(0)
+
+    response = HttpResponse(buffer.read(), content_type='application/pdf')
+    filename = f'Stock_Take_Sheet_{timezone.now().strftime("%Y%m%d")}.pdf'
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response
+
 
 def delete_stock_take_group(request, group_id):
     """Delete a stock take group"""
@@ -6452,7 +6729,22 @@ def update_stock_items_batch(request):
                     if 'location' in item_data:
                         item.location = item_data['location']
                     if 'quantity' in item_data:
-                        item.quantity = int(item_data['quantity'])
+                        old_quantity = item.quantity
+                        new_quantity = int(item_data['quantity'])
+                        if new_quantity != old_quantity:
+                            item.quantity = new_quantity
+                            # Create stock history record for the change
+                            StockHistory.objects.create(
+                                stock_item=item,
+                                quantity=new_quantity,
+                                change_amount=new_quantity - old_quantity,
+                                change_type='adjustment',
+                                reference='Stock list edit',
+                                notes=f'Changed from {old_quantity} to {new_quantity} via stock list',
+                                created_by=request.user if request.user.is_authenticated else None,
+                            )
+                        else:
+                            item.quantity = new_quantity
                     if 'tracking_type' in item_data:
                         item.tracking_type = item_data['tracking_type']
                     if 'min_order_qty' in item_data:

@@ -15,7 +15,7 @@
 {% block content %}
 <div class="dashboard-page">
     <!-- Stats Cards -->
-    <div class="dashboard-grid">
+    <div class="dashboard-grid dashboard-grid-5">
         <div class="dashboard-card">
             <div class="card-icon">
                 <i class="bi bi-receipt"></i>
@@ -40,6 +40,28 @@
             <div class="card-value">&pound;{{ this_week_sales }}</div>
             <div class="card-subtext">Sales value this week</div>
         </div>
+        <div class="dashboard-card">
+            <div class="card-icon" style="background: rgba(40, 167, 69, 0.12); color: #28a745;">
+                <i class="bi bi-graph-up-arrow"></i>
+            </div>
+            <div class="card-label">
+                <span class="month-switcher-inline">
+                    <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
+                    <span id="monthLabel"></span>
+                    <button class="month-arrow" id="nextMonthBtn" onclick="changeMonth(1)" title="Next month"><i class="bi bi-chevron-right"></i></button>
+                </span>
+            </div>
+            <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
+            <div class="card-subtext">Total monthly sales</div>
+        </div>
+        <div class="dashboard-card">
+            <div class="card-icon" style="background: rgba(99, 102, 241, 0.12); color: var(--accent-color);">
+                <i class="bi bi-calculator"></i>
+            </div>
+            <div class="card-label">Average Sale Value</div>
+            <div class="card-value" id="monthlySalesAvg">&pound;{{ monthly_sales_avg }}</div>
+            <div class="card-subtext" id="monthlySalesCount">{{ monthly_sales_count }} sales this month</div>
+        </div>
     </div>
 
     <!-- Weekly Charts Row -->
@@ -61,14 +83,70 @@
         </div>
     </div>
 
-    <!-- Monthly Board Costs Chart -->
-    <div class="chart-container">
-        <h3><i class="bi bi-box-seam"></i> Monthly Board Costs</h3>
-        <div class="chart-wrapper">
-            <canvas id="boardCostsChart"></canvas>
+    <!-- Monthly Charts Row -->
+    <div class="charts-row">
+        <!-- Monthly Sales Chart -->
+        <div class="chart-container">
+            <h3><i class="bi bi-graph-up-arrow"></i> Monthly Sales</h3>
+            <div class="chart-wrapper">
+                <canvas id="monthlySalesChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Monthly Board Costs Chart -->
+        <div class="chart-container">
+            <h3><i class="bi bi-box-seam"></i> Monthly Board Costs</h3>
+            <div class="chart-wrapper">
+                <canvas id="boardCostsChart"></canvas>
+            </div>
         </div>
     </div>
 </div>
+
+<script>
+// Month Switcher
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+let currentYear = {{ current_year }};
+let currentMonth = {{ current_month }};
+
+function updateMonthLabel() {
+    document.getElementById('monthLabel').textContent = MONTH_NAMES[currentMonth - 1] + ' ' + currentYear;
+    // Disable next if we're on the current month
+    const now = new Date();
+    const isCurrentMonth = currentYear === now.getFullYear() && currentMonth === (now.getMonth() + 1);
+    document.getElementById('nextMonthBtn').disabled = isCurrentMonth;
+}
+
+function changeMonth(delta) {
+    currentMonth += delta;
+    if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+    else if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+    updateMonthLabel();
+    fetchMonthlySales();
+}
+
+function fetchMonthlySales() {
+    const els = [document.getElementById('monthlySalesTotal'), document.getElementById('monthlySalesAvg'), document.getElementById('monthlySalesCount')];
+    els.forEach(c => { if (c) c.style.opacity = '0.4'; });
+
+    fetch(`{% url 'dashboard_monthly_sales' %}?year=${currentYear}&month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('monthlySalesTotal').textContent = '£' + Math.round(data.total).toLocaleString();
+                document.getElementById('monthlySalesAvg').textContent = '£' + Math.round(data.avg).toLocaleString();
+                document.getElementById('monthlySalesCount').textContent = data.count.toLocaleString() + ' sales this month';
+            }
+            els.forEach(c => { if (c) c.style.opacity = '1'; });
+        })
+        .catch(() => {
+            els.forEach(c => { if (c) c.style.opacity = '1'; });
+        });
+}
+
+// Initialise label on load
+document.addEventListener('DOMContentLoaded', function() { updateMonthLabel(); });
+</script>
 
 <script>
 // Fits Per Week Chart
@@ -262,6 +340,91 @@ document.addEventListener('DOMContentLoaded', function() {
             interaction: {
                 intersect: false,
                 mode: 'index'
+            }
+        }
+    });
+
+    // Monthly Sales Chart
+    const monthlySalesCtx = document.getElementById('monthlySalesChart').getContext('2d');
+    const monthlySalesChartData = {{ monthly_sales_chart_data|safe }};
+
+    const monthlySalesGradient = monthlySalesCtx.createLinearGradient(0, 0, 0, 400);
+    monthlySalesGradient.addColorStop(0, 'rgba(40, 167, 69, 0.4)');
+    monthlySalesGradient.addColorStop(1, 'rgba(40, 167, 69, 0.05)');
+
+    new Chart(monthlySalesCtx, {
+        type: 'bar',
+        data: {
+            labels: monthlySalesChartData.labels,
+            datasets: [{
+                label: 'Monthly Sales',
+                data: monthlySalesChartData.values,
+                backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                borderColor: '#28a745',
+                borderWidth: 2,
+                borderRadius: 6,
+                hoverBackgroundColor: 'rgba(40, 167, 69, 0.8)',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#28a745',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            return 'Sales: £' + context.parsed.y.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 11
+                        },
+                        callback: function(value) {
+                            return '£' + value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(108, 117, 125, 0.1)',
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#6c757d',
+                        font: {
+                            size: 10
+                        },
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: {
+                        display: false,
+                        drawBorder: false
+                    },
+                    border: {
+                        display: false
+                    }
+                }
             }
         }
     });

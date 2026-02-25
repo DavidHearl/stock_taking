@@ -43,7 +43,7 @@
                 <span class="meta-label">Client</span>
                 <span class="meta-value">
                     {% if invoice.customer %}
-                    <a href="{% url 'customer_detail' invoice.customer.url_name %}">{{ invoice.client_name }}</a>
+                    <a href="{% url 'customer_detail' invoice.customer.pk %}">{{ invoice.client_name }}</a>
                     {% else %}
                     {{ invoice.client_name|default:"—" }}
                     {% endif %}
@@ -205,4 +205,189 @@
 </div>
 {% endif %}
 
+<!-- Linked Purchase Orders -->
+<div class="inv-detail-section">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 class="inv-section-title" style="margin: 0;"><i class="bi bi-link-45deg"></i> Linked Purchase Orders</h3>
+        <button class="btn btn-sm btn-primary" onclick="togglePOSearch()">
+            <i class="bi bi-plus-lg"></i> Link PO
+        </button>
+    </div>
+
+    <!-- PO search form (hidden by default) -->
+    <div id="po-search-form" style="display: none; margin-bottom: 16px;">
+        <div style="position: relative;">
+            <input type="text" id="po-search-input"
+                   class="po-search-input"
+                   placeholder="Search by PO number, supplier, or project..."
+                   autocomplete="off"
+                   style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem;">
+            <div id="po-search-results"
+                 style="display:none; position:absolute; top:100%; left:0; right:0; z-index:100;
+                        background:var(--bg-primary); border:1px solid var(--border-color);
+                        border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15);
+                        max-height:250px; overflow-y:auto; margin-top:2px;">
+            </div>
+        </div>
+    </div>
+
+    {% if linked_pos %}
+    <div class="inv-table-container" style="max-height: none;">
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>PO Number</th>
+                    <th>Supplier</th>
+                    <th>Project</th>
+                    <th>Status</th>
+                    <th style="text-align: right;">Total</th>
+                    <th style="width: 60px;"></th>
+                </tr>
+            </thead>
+            <tbody id="linked-pos-tbody">
+                {% for po in linked_pos %}
+                <tr id="linked-po-row-{{ po.workguru_id }}">
+                    <td>
+                        <a href="{% url 'purchase_order_detail' po.workguru_id %}">
+                            {{ po.display_number }}
+                        </a>
+                    </td>
+                    <td>{{ po.supplier_name|default:"—" }}</td>
+                    <td>{{ po.project_name|default:"—" }}</td>
+                    <td>
+                        <span class="inv-status {{ po.status|lower }}">{{ po.status|default:"—" }}</span>
+                    </td>
+                    <td class="number-cell">£{{ po.total|floatformat:2 }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="unlinkPO({{ po.workguru_id }})" title="Unlink">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="inv-empty" id="no-linked-pos-msg" style="padding: 30px;">
+        <p>No purchase orders linked to this invoice.</p>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let poSearchTimer = null;
+
+function togglePOSearch() {
+    const form = document.getElementById('po-search-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    if (form.style.display === 'block') {
+        document.getElementById('po-search-input').focus();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('po-search-input');
+    if (input) {
+        input.addEventListener('input', function() {
+            clearTimeout(poSearchTimer);
+            const q = this.value.trim();
+            const resultsDiv = document.getElementById('po-search-results');
+            if (q.length < 2) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+            poSearchTimer = setTimeout(() => {
+                fetch(`/api/purchase-order-search/?q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.results || data.results.length === 0) {
+                        resultsDiv.innerHTML = '<div style="padding:10px;color:var(--text-secondary);font-size:0.85rem;">No purchase orders found</div>';
+                        resultsDiv.style.display = 'block';
+                        return;
+                    }
+                    let html = '';
+                    data.results.forEach(po => {
+                        html += `<div onclick="linkPO(${po.id})"
+                                      style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);
+                                             display:flex;justify-content:space-between;align-items:center;"
+                                      onmouseover="this.style.background='var(--bg-secondary)'"
+                                      onmouseout="this.style.background='transparent'">
+                                    <div>
+                                        <strong>${po.display_number}</strong>
+                                        <span style="color:var(--text-secondary);margin-left:8px;">${po.supplier_name}</span>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <span style="font-size:0.85rem;color:var(--text-secondary);">${po.project_number}</span>
+                                        <span style="margin-left:8px;font-size:0.8rem;" class="inv-status ${po.status.toLowerCase()}">${po.status}</span>
+                                    </div>
+                                 </div>`;
+                    });
+                    resultsDiv.innerHTML = html;
+                    resultsDiv.style.display = 'block';
+                })
+                .catch(() => { resultsDiv.style.display = 'none'; });
+            }, 300);
+        });
+
+        document.addEventListener('click', function(e) {
+            const resultsDiv = document.getElementById('po-search-results');
+            if (resultsDiv && !e.target.closest('#po-search-form')) {
+                resultsDiv.style.display = 'none';
+            }
+        });
+    }
+});
+
+function linkPO(poId) {
+    fetch(`/invoices/{{ invoice.id }}/link-po/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ po_id: poId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to link PO');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function unlinkPO(poId) {
+    if (!confirm('Remove this purchase order link?')) return;
+
+    fetch(`/invoices/{{ invoice.id }}/unlink-po/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ po_id: poId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById(`linked-po-row-${poId}`);
+            if (row) row.remove();
+            const tbody = document.getElementById('linked-pos-tbody');
+            if (tbody && tbody.children.length === 0) {
+                document.getElementById('linked-pos-tbody').closest('.inv-table-container').outerHTML =
+                    '<div class="inv-empty" id="no-linked-pos-msg" style="padding: 30px;"><p>No purchase orders linked to this invoice.</p></div>';
+            }
+        } else {
+            alert(data.error || 'Unlink failed');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+</script>
 {% endblock %}

@@ -22,6 +22,10 @@
         {% endif %}
     </div>
     <div class="inv-sync-actions">
+        <button class="inv-sync-btn" id="add-invoice-btn" onclick="toggleAddInvoiceModal()">
+            <i class="bi bi-plus-lg"></i>
+            <span>Add Invoice</span>
+        </button>
         <button class="inv-sync-btn secondary" id="full-sync-btn" onclick="syncInvoices(true)" title="Re-sync all invoices including payment data">
             <i class="bi bi-arrow-clockwise"></i>
             <span>Full Resync</span>
@@ -185,10 +189,118 @@
     {% endif %}
 </div>
 
+<!-- Add Invoice Modal -->
+<div class="modal-overlay" id="add-invoice-modal" style="display:none;" onclick="closeAddInvoiceModal(event)">
+    <div class="modal-dialog" style="max-width: 520px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-plus-lg"></i> Add Invoice</h3>
+            <button class="modal-close" onclick="closeAddInvoiceModal()">&times;</button>
+        </div>
+        <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div>
+                    <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Invoice Number *</label>
+                    <input type="text" id="new-inv-number" placeholder="e.g. INV-001"
+                           style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+                </div>
+                <div>
+                    <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Client Name</label>
+                    <input type="text" id="new-inv-client" placeholder="Client name"
+                           style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+                </div>
+                <div>
+                    <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Date</label>
+                    <input type="date" id="new-inv-date"
+                           style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+                </div>
+                <div>
+                    <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Due Date</label>
+                    <input type="date" id="new-inv-due-date"
+                           style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+                </div>
+                <div>
+                    <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Total (£)</label>
+                    <input type="number" id="new-inv-total" step="0.01" min="0" placeholder="0.00"
+                           style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+                </div>
+                <div>
+                    <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Status</label>
+                    <select id="new-inv-status"
+                            style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+                        <option value="Draft">Draft</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Sent">Sent</option>
+                        <option value="Paid">Paid</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label style="font-size:0.82rem;font-weight:600;margin-bottom:4px;display:block;">Description</label>
+                <input type="text" id="new-inv-desc" placeholder="Optional description"
+                       style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.9rem;">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeAddInvoiceModal()">Cancel</button>
+            <button type="button" class="btn-save" onclick="submitNewInvoice()">
+                <i class="bi bi-check-lg"></i> Create Invoice
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
+
+// ── Add Invoice Modal ─────────────────────────────────────────
+function toggleAddInvoiceModal() {
+    const modal = document.getElementById('add-invoice-modal');
+    modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
+}
+
+function closeAddInvoiceModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('add-invoice-modal').style.display = 'none';
+}
+
+function submitNewInvoice() {
+    const invoiceNumber = document.getElementById('new-inv-number').value.trim();
+    if (!invoiceNumber) {
+        alert('Invoice number is required');
+        return;
+    }
+
+    const payload = {
+        invoice_number: invoiceNumber,
+        client_name: document.getElementById('new-inv-client').value,
+        date: document.getElementById('new-inv-date').value,
+        due_date: document.getElementById('new-inv-due-date').value,
+        total: document.getElementById('new-inv-total').value,
+        status: document.getElementById('new-inv-status').value,
+        description: document.getElementById('new-inv-desc').value,
+    };
+
+    fetch('{% url "create_invoice" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.invoice_url;
+        } else {
+            alert(data.error || 'Failed to create invoice');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
 // ── Sync via SSE ──────────────────────────────────────────────
 function syncInvoices(full) {
     const btn = document.getElementById('sync-btn');

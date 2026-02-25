@@ -653,103 +653,123 @@
 
     <!-- Invoices Section -->
     <div class="po-products-section">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div class="po-products-section-container">
             <h3><i class="bi bi-receipt"></i> Invoices</h3>
-            <button class="btn btn-sm btn-primary" onclick="toggleInvoiceForm()">
-                <i class="bi bi-plus-lg"></i> Add Invoice
-            </button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm btn-primary" onclick="toggleLinkedInvoiceSearch()">
+                    <i class="bi bi-search"></i> Link Invoice
+                </button>
+                <button class="btn btn-sm btn-success" onclick="toggleAddInvoiceForm()">
+                    <i class="bi bi-plus-lg"></i> Add Invoice
+                </button>
+            </div>
         </div>
 
         <!-- Add Invoice Form (hidden by default) -->
-        <div id="invoice-add-form" class="po-invoice-form" style="display: none;">
-            <form id="invoice-upload-form" enctype="multipart/form-data">
-                {% csrf_token %}
+        <div id="add-invoice-form" style="display: none; margin-bottom: 16px;">
+            <div class="po-invoice-form">
                 <div class="po-invoice-form-grid">
                     <div class="po-invoice-field">
-                        <label>Invoice Number</label>
-                        <input type="text" id="inv-number" placeholder="e.g. INV-001" class="po-invoice-input">
+                        <label>Invoice Number *</label>
+                        <input type="text" id="new-inv-number" placeholder="e.g. INV-001" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Client Name</label>
+                        <input type="text" id="new-inv-client" placeholder="Client name" class="po-invoice-input">
                     </div>
                     <div class="po-invoice-field">
                         <label>Date</label>
-                        <input type="date" id="inv-date" class="po-invoice-input">
+                        <input type="date" id="new-inv-date" class="po-invoice-input">
                     </div>
                     <div class="po-invoice-field">
                         <label>Due Date</label>
-                        <input type="date" id="inv-due-date" class="po-invoice-input">
+                        <input type="date" id="new-inv-due-date" class="po-invoice-input">
                     </div>
                     <div class="po-invoice-field">
-                        <label>Amount (£)</label>
-                        <input type="number" id="inv-amount" step="0.01" min="0" placeholder="0.00" class="po-invoice-input">
+                        <label>Total (£)</label>
+                        <input type="number" id="new-inv-total" step="0.01" min="0" placeholder="0.00" class="po-invoice-input">
                     </div>
                     <div class="po-invoice-field">
                         <label>Status</label>
-                        <select id="inv-status" class="po-invoice-input">
-                            <option value="pending">Pending</option>
-                            <option value="approved">Approved</option>
-                            <option value="paid">Paid</option>
+                        <select id="new-inv-status" class="po-invoice-input">
+                            <option value="Draft">Draft</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Sent">Sent</option>
+                            <option value="Paid">Paid</option>
                         </select>
                     </div>
-                    <div class="po-invoice-field">
-                        <label>File (optional)</label>
-                        <input type="file" id="inv-file" class="po-invoice-input">
-                    </div>
                     <div class="po-invoice-field po-invoice-field-wide">
-                        <label>Notes</label>
-                        <input type="text" id="inv-notes" placeholder="Optional notes" class="po-invoice-input">
+                        <label>Description</label>
+                        <input type="text" id="new-inv-description" placeholder="Optional description" class="po-invoice-input">
                     </div>
                 </div>
                 <div class="po-invoice-form-actions">
-                    <button type="button" class="btn btn-sm btn-success" onclick="submitInvoice()">
+                    <button type="button" class="btn btn-sm btn-success" onclick="submitNewInvoice()">
                         <i class="bi bi-check-lg"></i> Save Invoice
                     </button>
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleInvoiceForm()">
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleAddInvoiceForm()">
                         Cancel
                     </button>
                 </div>
-            </form>
+            </div>
         </div>
 
-        <div id="invoices-list">
-            {% if po_invoices %}
+        <!-- Search / attach form (hidden by default) -->
+        <div id="linked-invoice-search-form" style="display: none; margin-bottom: 16px;">
+            <div style="position: relative;">
+                <input type="text" id="linked-invoice-search-input"
+                       class="po-invoice-input"
+                       placeholder="Search by invoice number, client name, or project..."
+                       autocomplete="off"
+                       style="width: 100%; padding: 8px 12px;">
+                <div id="linked-invoice-search-results"
+                     style="display:none; position:absolute; top:100%; left:0; right:0; z-index:100;
+                            background:var(--bg-primary); border:1px solid var(--border-color);
+                            border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15);
+                            max-height:250px; overflow-y:auto; margin-top:2px;">
+                </div>
+            </div>
+        </div>
+
+        <div id="linked-invoices-list">
+            {% if linked_invoices %}
             <div class="po-table-container">
                 <table class="po-products-table">
                     <thead>
                         <tr>
                             <th>Invoice #</th>
+                            <th>Client</th>
                             <th>Date</th>
-                            <th>Due Date</th>
-                            <th style="text-align: right;">Amount</th>
+                            <th style="text-align: right;">Total</th>
                             <th>Status</th>
-                            <th>File</th>
-                            <th>Notes</th>
+                            <th>Payment</th>
                             <th style="width: 80px;"></th>
                         </tr>
                     </thead>
-                    <tbody id="invoices-tbody">
-                        {% for inv in po_invoices %}
-                        <tr id="invoice-row-{{ inv.id }}">
-                            <td>{{ inv.invoice_number|default:"—" }}</td>
-                            <td>{{ inv.date|date:"d-m-Y"|default:"—" }}</td>
-                            <td>{{ inv.due_date|date:"d-m-Y"|default:"—" }}</td>
-                            <td style="text-align: right;">£{{ inv.amount|floatformat:2 }}</td>
+                    <tbody id="linked-invoices-tbody">
+                        {% for inv in linked_invoices %}
+                        <tr id="linked-invoice-row-{{ inv.id }}">
                             <td>
-                                <span class="po-invoice-status po-invoice-status-{{ inv.status }}">
-                                    {{ inv.get_status_display }}
+                                <a href="{% url 'invoice_detail' inv.id %}" class="po-boards-file-link">
+                                    {{ inv.invoice_number }}
+                                </a>
+                            </td>
+                            <td>{{ inv.client_name|default:"—" }}</td>
+                            <td>{{ inv.date|date:"d/m/Y"|default:"—" }}</td>
+                            <td style="text-align: right;">£{{ inv.total|floatformat:2 }}</td>
+                            <td>
+                                <span class="po-invoice-status po-invoice-status-{{ inv.status|lower }}">
+                                    {{ inv.status }}
                                 </span>
                             </td>
                             <td>
-                                {% if inv.file %}
-                                <a href="{{ inv.file.url }}" download class="po-boards-file-link">
-                                    <i class="bi bi-file-earmark-arrow-down"></i> {{ inv.filename }}
-                                </a>
-                                {% else %}
-                                <span class="text-muted">—</span>
-                                {% endif %}
+                                <span class="po-invoice-status po-invoice-status-{{ inv.payment_status }}">
+                                    {{ inv.get_payment_status_display }}
+                                </span>
                             </td>
-                            <td>{{ inv.notes|default:"" }}</td>
                             <td>
-                                <button class="btn btn-sm btn-danger" onclick="deleteInvoice({{ inv.id }})" title="Delete">
-                                    <i class="bi bi-trash"></i>
+                                <button class="btn btn-sm btn-danger" onclick="unlinkInvoice({{ inv.id }})" title="Unlink">
+                                    <i class="bi bi-x-lg"></i>
                                 </button>
                             </td>
                         </tr>
@@ -758,7 +778,7 @@
                 </table>
             </div>
             {% else %}
-            <p class="text-muted" id="no-invoices-msg">No invoices attached yet.</p>
+            <p class="text-muted" id="no-linked-invoices-msg">No invoices linked yet.</p>
             {% endif %}
         </div>
     </div>
@@ -1590,61 +1610,163 @@ function attachBoardsFiles() {
     .catch(err => showNotification('Error: ' + err.message, 'error'));
 }
 
-// ---- Invoices ----
-function toggleInvoiceForm() {
-    const form = document.getElementById('invoice-add-form');
+// ---- Linked Invoices (M2M) ----
+let linkedInvoiceSearchTimer = null;
+
+function toggleLinkedInvoiceSearch() {
+    const form = document.getElementById('linked-invoice-search-form');
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    if (form.style.display === 'block') {
+        document.getElementById('linked-invoice-search-input').focus();
+    }
 }
 
-function submitInvoice() {
-    const formData = new FormData();
-    formData.append('invoice_number', document.getElementById('inv-number').value);
-    formData.append('date', document.getElementById('inv-date').value);
-    formData.append('due_date', document.getElementById('inv-due-date').value);
-    formData.append('amount', document.getElementById('inv-amount').value);
-    formData.append('status', document.getElementById('inv-status').value);
-    formData.append('notes', document.getElementById('inv-notes').value);
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('linked-invoice-search-input');
+    if (input) {
+        input.addEventListener('input', function() {
+            clearTimeout(linkedInvoiceSearchTimer);
+            const q = this.value.trim();
+            const resultsDiv = document.getElementById('linked-invoice-search-results');
+            if (q.length < 2) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+            linkedInvoiceSearchTimer = setTimeout(() => {
+                fetch(`/api/invoice-search/?q=${encodeURIComponent(q)}&exclude_po={{ purchase_order.workguru_id }}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.results || data.results.length === 0) {
+                        resultsDiv.innerHTML = '<div style="padding:10px;color:var(--text-secondary);font-size:0.85rem;">No invoices found</div>';
+                        resultsDiv.style.display = 'block';
+                        return;
+                    }
+                    let html = '';
+                    data.results.forEach(inv => {
+                        html += `<div class="linked-invoice-result" onclick="linkInvoice(${inv.id})"
+                                      style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);
+                                             display:flex;justify-content:space-between;align-items:center;"
+                                      onmouseover="this.style.background='var(--bg-secondary)'"
+                                      onmouseout="this.style.background='transparent'">
+                                    <div>
+                                        <strong>${inv.invoice_number}</strong>
+                                        <span style="color:var(--text-secondary);margin-left:8px;">${inv.client_name}</span>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <span style="font-weight:600;">£${parseFloat(inv.total).toFixed(2)}</span>
+                                        <span style="margin-left:8px;font-size:0.8rem;color:var(--text-secondary);">${inv.date}</span>
+                                    </div>
+                                 </div>`;
+                    });
+                    resultsDiv.innerHTML = html;
+                    resultsDiv.style.display = 'block';
+                })
+                .catch(() => { resultsDiv.style.display = 'none'; });
+            }, 300);
+        });
 
-    const fileInput = document.getElementById('inv-file');
-    if (fileInput.files.length) {
-        formData.append('file', fileInput.files[0]);
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            const resultsDiv = document.getElementById('linked-invoice-search-results');
+            if (resultsDiv && !e.target.closest('#linked-invoice-search-form')) {
+                resultsDiv.style.display = 'none';
+            }
+        });
+    }
+});
+
+function toggleAddInvoiceForm() {
+    const form = document.getElementById('add-invoice-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    // Hide search form if open
+    if (form.style.display === 'block') {
+        document.getElementById('linked-invoice-search-form').style.display = 'none';
+    }
+}
+
+function submitNewInvoice() {
+    const invoiceNumber = document.getElementById('new-inv-number').value.trim();
+    if (!invoiceNumber) {
+        showNotification('Invoice number is required', 'error');
+        return;
     }
 
-    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/upload-invoice/`, {
+    const payload = {
+        invoice_number: invoiceNumber,
+        client_name: document.getElementById('new-inv-client').value,
+        date: document.getElementById('new-inv-date').value,
+        due_date: document.getElementById('new-inv-due-date').value,
+        total: document.getElementById('new-inv-total').value,
+        status: document.getElementById('new-inv-status').value,
+        description: document.getElementById('new-inv-description').value,
+    };
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/create-invoice/`, {
         method: 'POST',
-        headers: { 'X-CSRFToken': '{{ csrf_token }}' },
-        body: formData
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            showNotification('Invoice added successfully', 'success');
+            showNotification('Invoice created and linked', 'success');
             setTimeout(() => location.reload(), 800);
         } else {
-            showNotification(data.error || 'Failed to add invoice', 'error');
+            showNotification(data.error || 'Failed to create invoice', 'error');
         }
     })
     .catch(err => showNotification('Error: ' + err.message, 'error'));
 }
 
-function deleteInvoice(invoiceId) {
-    if (!confirm('Delete this invoice?')) return;
-
-    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-invoice/${invoiceId}/`, {
+function linkInvoice(invoiceId) {
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/link-invoice/`, {
         method: 'POST',
         headers: {
             'X-CSRFToken': '{{ csrf_token }}',
             'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({ invoice_id: invoiceId })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            const row = document.getElementById(`invoice-row-${invoiceId}`);
-            if (row) row.remove();
-            showNotification('Invoice deleted', 'success');
+            showNotification('Invoice linked successfully', 'success');
+            setTimeout(() => location.reload(), 800);
         } else {
-            showNotification(data.error || 'Delete failed', 'error');
+            showNotification(data.error || 'Failed to link invoice', 'error');
+        }
+    })
+    .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+function unlinkInvoice(invoiceId) {
+    if (!confirm('Remove this invoice link?')) return;
+
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/unlink-invoice/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ invoice_id: invoiceId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById(`linked-invoice-row-${invoiceId}`);
+            if (row) row.remove();
+            // Show empty message if no more linked invoices
+            const tbody = document.getElementById('linked-invoices-tbody');
+            if (tbody && tbody.children.length === 0) {
+                document.getElementById('linked-invoices-list').innerHTML =
+                    '<p class="text-muted" id="no-linked-invoices-msg">No invoices linked yet.</p>';
+            }
+            showNotification('Invoice unlinked', 'success');
+        } else {
+            showNotification(data.error || 'Unlink failed', 'error');
         }
     })
     .catch(err => showNotification('Error: ' + err.message, 'error'));
