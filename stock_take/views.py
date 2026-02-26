@@ -3081,14 +3081,15 @@ def add_additional_boards_po(request, order_id):
                 if m:
                     max_num = max(max_num, int(m.group(1)))
             for field in ['display_number', 'number']:
-                for pn in PurchaseOrder.objects.filter(**{f'{field}__regex': r'^PO\\d+$'}).values_list(field, flat=True):
+                for pn in PurchaseOrder.objects.filter(**{f'{field}__regex': r'^PO\d+$'}).values_list(field, flat=True):
                     m = re.search(r'(\d+)', pn)
                     if m:
                         max_num = max(max_num, int(m.group(1)))
             next_num = max(max_num + 1, 1000)
             po_number = f'PO{next_num}'
             while (BoardsPO.objects.filter(po_number=po_number).exists() or
-                   PurchaseOrder.objects.filter(display_number=po_number).exists()):
+                   PurchaseOrder.objects.filter(display_number=po_number).exists() or
+                   PurchaseOrder.objects.filter(number=po_number).exists()):
                 next_num += 1
                 po_number = f'PO{next_num}'
         else:
@@ -3100,6 +3101,35 @@ def add_additional_boards_po(request, order_id):
             defaults={'boards_ordered': False},
         )
         order.additional_boards_pos.add(boards_po)
+
+        # Create a full PurchaseOrder record if one doesn't already exist
+        if not PurchaseOrder.objects.filter(display_number=po_number).exists():
+            from .models import Supplier
+            if order.customer:
+                customer_name = f'{order.customer.first_name} {order.customer.last_name}'.strip() or order.customer.name
+            else:
+                customer_name = f'{order.first_name} {order.last_name}'.strip()
+
+            max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+            manual_wg_id = max(max_wg_id + 1, 800000)
+
+            supplier = Supplier.objects.filter(name__icontains='Carnehill').first()
+
+            PurchaseOrder.objects.create(
+                workguru_id=manual_wg_id,
+                number=po_number,
+                display_number=po_number,
+                description=f'Additional boards order for {customer_name} - Sale {order.sale_number}',
+                supplier_id=supplier.workguru_id if supplier else None,
+                supplier_name=supplier.name if supplier else 'Carnehill Joinery Ltd',
+                project_id=int(order.workguru_id) if order.workguru_id else None,
+                project_number=order.sale_number,
+                project_name=customer_name,
+                delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+                status='Draft',
+                currency='GBP',
+                creator_name=request.user.get_full_name() or request.user.username,
+            )
 
         return JsonResponse({
             'success': True,
@@ -3394,7 +3424,7 @@ def order_details(request, order_id):
         os_doors_cost += os_door.cost_price * os_door.quantity
     
     # Get timesheets and expenses for this order
-    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'helper')
+    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order')
     manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
     expenses = order.expenses.all().select_related('fitter')
     
@@ -3402,12 +3432,9 @@ def order_details(request, order_id):
     calculated_installation_cost = order.calculate_installation_cost()
     calculated_manufacturing_cost = order.calculate_manufacturing_cost()
     
-    # Calculate installation cost breakdown (fitters vs helpers vs expenses)
+    # Calculate installation cost breakdown (fitters vs expenses)
     installation_fitter_cost = sum(
         ts.total_cost for ts in installation_timesheets if ts.fitter
-    )
-    installation_helper_cost = sum(
-        ts.total_cost for ts in installation_timesheets if ts.helper
     )
     
     # Calculate expenses breakdown by type
@@ -3490,7 +3517,6 @@ def order_details(request, order_id):
         'calculated_installation_cost': calculated_installation_cost,
         'calculated_manufacturing_cost': calculated_manufacturing_cost,
         'installation_fitter_cost': installation_fitter_cost,
-        'installation_helper_cost': installation_helper_cost,
         'petrol_cost': petrol_cost,
         'materials_expense_cost': materials_expense_cost,
         'other_expense_cost': other_expense_cost,
@@ -6951,8 +6977,8 @@ def remedial_report(request):
 
 @login_required
 @login_required
-def fit_board(request):
-    """Display fit board calendar with appointments and completion tracking"""
+def calendar_view(request):
+    """Display calendar with appointments and completion tracking (monthly view)"""
     from datetime import datetime, timedelta
     from calendar import monthrange
     import calendar
@@ -6975,6 +7001,21 @@ def fit_board(request):
         prev_month = datetime(current_year, current_month - 1, 1).date()
     
     # Get all appointments for this month
+    # Auto-create FitAppointment for orders with fit_date but no appointment
+    orders_without_appt = (
+        Order.objects
+        .filter(fit_date__year=current_year, fit_date__month=current_month, job_finished=False)
+        .exclude(id__in=FitAppointment.objects.filter(
+            fit_date__year=current_year, fit_date__month=current_month
+        ).values_list('order_id', flat=True))
+    )
+    for order in orders_without_appt:
+        FitAppointment.objects.create(
+            order=order,
+            fit_date=order.fit_date,
+            fitter='R',  # Default fitter
+        )
+
     appointments = FitAppointment.objects.filter(
         fit_date__year=current_year,
         fit_date__month=current_month
@@ -7010,7 +7051,28 @@ def fit_board(request):
     
     # Fitter choices
     fitters = [('R', 'Ross'), ('G', 'Gavin'), ('S', 'Stuart'), ('P', 'Paddy')]
-    
+
+    # PO expected deliveries this month (pending only)
+    from stock_take.models import PurchaseOrder
+    _, num_days = monthrange(current_year, current_month)
+    po_date_strings = [
+        f'{current_year}-{current_month:02d}-{d:02d}'
+        for d in range(1, num_days + 1)
+    ]
+    pending_pos = (
+        PurchaseOrder.objects
+        .filter(expected_date__in=po_date_strings)
+        .exclude(status__in=['Received', 'Cancelled'])
+        .order_by('expected_date', 'supplier_name')
+    )
+    pos_by_day = {}
+    for po in pending_pos:
+        try:
+            d = int(po.expected_date.split('-')[2])
+        except (ValueError, IndexError):
+            continue
+        pos_by_day.setdefault(d, []).append(po)
+
     context = {
         'current_year': current_year,
         'current_month': current_month,
@@ -7024,9 +7086,137 @@ def fit_board(request):
         'next_month': next_month,
         'today': today,
         'fitters': fitters,
+        'pos_by_day': pos_by_day,
     }
     
     return render(request, 'stock_take/fit_board.html', context)
+
+
+@login_required
+def calendar_weekly(request):
+    """Display weekly calendar with fit appointments and PO expected deliveries."""
+    from datetime import datetime, timedelta
+
+    today = timezone.now().date()
+
+    # Determine the target date from query params
+    year = int(request.GET.get('year', today.year))
+    month = int(request.GET.get('month', today.month))
+    day = int(request.GET.get('day', today.day))
+
+    try:
+        target = datetime(year, month, day).date()
+    except ValueError:
+        target = today
+
+    # Calculate Monday–Saturday of the week containing target
+    week_start = target - timedelta(days=target.weekday())  # Monday
+    week_end = week_start + timedelta(days=5)               # Saturday
+
+    # Navigation
+    prev_week = week_start - timedelta(days=7)
+    next_week = week_start + timedelta(days=7)
+
+    # Fit appointments this week
+    # Auto-create FitAppointment for orders with fit_date but no appointment
+    orders_without_appt = (
+        Order.objects
+        .filter(fit_date__gte=week_start, fit_date__lte=week_end, job_finished=False)
+        .exclude(id__in=FitAppointment.objects.filter(
+            fit_date__gte=week_start, fit_date__lte=week_end
+        ).values_list('order_id', flat=True))
+    )
+    for order in orders_without_appt:
+        FitAppointment.objects.create(
+            order=order,
+            fit_date=order.fit_date,
+            fitter='R',  # Default fitter
+        )
+
+    appointments = (
+        FitAppointment.objects
+        .filter(fit_date__gte=week_start, fit_date__lte=week_end)
+        .select_related('order', 'remedial')
+        .order_by('fit_date', 'fitter')
+    )
+
+    # Group appointments by date → fitter
+    appts_map = {}
+    for appt in appointments:
+        appts_map.setdefault(appt.fit_date, {}).setdefault(appt.fitter, []).append(appt)
+
+    # PO expected deliveries this week (ordered but not received)
+    week_day_list = [week_start + timedelta(days=i) for i in range(6)]
+    po_date_strings = [d.strftime('%Y-%m-%d') for d in week_day_list]
+    pending_pos = (
+        PurchaseOrder.objects
+        .filter(expected_date__in=po_date_strings)
+        .exclude(status__in=['Received', 'Cancelled'])
+        .order_by('expected_date', 'supplier_name')
+    )
+
+    pos_map = {}
+    for po in pending_pos:
+        try:
+            d = datetime.strptime(po.expected_date, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            continue
+        pos_map.setdefault(d, []).append(po)
+
+    fitter_codes = ['R', 'G', 'S', 'P']
+    fitter_names = {'R': 'Ross', 'G': 'Gavin', 'S': 'Stuart', 'P': 'Paddy'}
+
+    # ── Sales appointments this week ──────────────────────────────
+    from .models import SalesAppointment
+    sales_appointments = (
+        SalesAppointment.objects
+        .filter(appointment_date__gte=week_start, appointment_date__lte=week_end)
+        .order_by('appointment_date', 'appointment_time')
+    )
+    sales_map = {}
+    for sa in sales_appointments:
+        sales_map.setdefault(sa.appointment_date, []).append(sa)
+
+    # Build template-friendly list: one dict per day
+    week_data = []
+    for d in week_day_list:
+        day_appts = appts_map.get(d, {})
+        fitter_rows = []
+        has_appointments = False
+        for code in fitter_codes:
+            appt_list = day_appts.get(code, [])
+            if appt_list:
+                has_appointments = True
+            fitter_rows.append({
+                'code': code,
+                'name': fitter_names[code],
+                'appointments': appt_list,
+            })
+
+        week_data.append({
+            'date': d,
+            'is_today': d == today,
+            'date_str': d.strftime('%Y-%m-%d'),
+            'fitter_rows': fitter_rows,
+            'has_appointments': has_appointments,
+            'pos': pos_map.get(d, []),
+            'sales': sales_map.get(d, []),
+        })
+
+    context = {
+        'week_data': week_data,
+        'week_start': week_start,
+        'week_end': week_end,
+        'prev_week': prev_week,
+        'next_week': next_week,
+        'today': today,
+        'current_year': week_start.year,
+        'current_month': week_start.month,
+        'fitters': list(zip(fitter_codes, [fitter_names[c] for c in fitter_codes])),
+        'designers': Designer.objects.all().order_by('name'),
+    }
+
+    return render(request, 'stock_take/calendar_weekly.html', context)
 
 
 @login_required
@@ -7399,6 +7589,12 @@ def add_fit_appointment(request):
                     fit_date=fit_date,
                     defaults={'fitter': fitter}
                 )
+                # Sync the order's fit_date
+                from datetime import datetime as dt_cls
+                parsed_date = dt_cls.strptime(fit_date, '%Y-%m-%d').date()
+                if order.fit_date != parsed_date:
+                    order.fit_date = parsed_date
+                    order.save(update_fields=['fit_date'])
                 customer_name = f"{order.first_name} {order.last_name}"
             elif entity_type == 'remedial':
                 remedial = Remedial.objects.get(id=entity_id)
@@ -7485,7 +7681,12 @@ def move_fit_appointment(request, appointment_id):
             # Update fit date if provided
             if 'fit_date' in data:
                 from datetime import datetime
-                appointment.fit_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
+                new_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
+                appointment.fit_date = new_date
+                # Also update the linked order's fit_date to stay in sync
+                if appointment.order:
+                    appointment.order.fit_date = new_date
+                    appointment.order.save(update_fields=['fit_date'])
             
             appointment.save()
             
@@ -8374,21 +8575,19 @@ def add_timesheet(request, order_id):
         )
         
         if timesheet_type == 'installation':
-            # Installation uses fixed price (hours optional)
+            # Installation uses a linked PO for cost
             fitter_id = data.get('fitter_id')
-            helper_id = data.get('helper_id')
             installation_factory_worker_id = data.get('installation_factory_worker_id')
-            price = data.get('price')
+            po_id = data.get('purchase_order_id')
             hours = data.get('hours')  # Optional for installation
             if fitter_id:
                 timesheet.fitter = Fitter.objects.get(id=fitter_id)
-            if helper_id:
-                timesheet.helper = Fitter.objects.get(id=helper_id)
             if installation_factory_worker_id:
                 # Factory worker doing installation work
                 timesheet.factory_worker = FactoryWorker.objects.get(id=installation_factory_worker_id)
-            if price:
-                timesheet.price = price
+            if po_id:
+                from .models import PurchaseOrder
+                timesheet.purchase_order = PurchaseOrder.objects.get(workguru_id=po_id)
             if hours:
                 timesheet.hours = hours
         else:
@@ -8802,3 +9001,83 @@ def costing_report(request):
         'partially_costed': partially_costed,
         'stats': stats,
     })
+
+
+# ── Sales Appointment CRUD ──────────────────────────────────────
+@login_required
+@require_http_methods(["POST"])
+def add_sales_appointment(request):
+    """Create a new sales appointment."""
+    import json
+    from .models import SalesAppointment
+    try:
+        data = json.loads(request.body)
+        sa = SalesAppointment.objects.create(
+            event_type=data.get('event_type', 'appointment'),
+            designer=data.get('designer', ''),
+            customer_name=data.get('customer_name', ''),
+            postcode=data.get('postcode', ''),
+            appointment_date=data['appointment_date'],
+            appointment_time=data['appointment_time'],
+            end_time=data.get('end_time') or None,
+            notes=data.get('notes', ''),
+        )
+        return JsonResponse({'success': True, 'id': sa.id})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_sales_appointment(request, appointment_id):
+    """Update an existing sales appointment."""
+    import json
+    from .models import SalesAppointment
+    try:
+        sa = SalesAppointment.objects.get(id=appointment_id)
+        data = json.loads(request.body)
+        for field in ('event_type', 'designer', 'customer_name', 'postcode', 'appointment_date', 'appointment_time', 'notes'):
+            if field in data:
+                setattr(sa, field, data[field])
+        sa.end_time = data.get('end_time') or None
+        sa.save()
+        return JsonResponse({'success': True})
+    except SalesAppointment.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def delete_sales_appointment(request, appointment_id):
+    """Delete a sales appointment."""
+    from .models import SalesAppointment
+    try:
+        SalesAppointment.objects.get(id=appointment_id).delete()
+        return JsonResponse({'success': True})
+    except SalesAppointment.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def move_sales_appointment(request, appointment_id):
+    """Move a sales appointment to a new date (drag-and-drop)."""
+    import json
+    from .models import SalesAppointment
+    try:
+        data = json.loads(request.body)
+        new_date = data.get('appointment_date')
+        if not new_date:
+            return JsonResponse({'success': False, 'error': 'appointment_date required'})
+        sa = SalesAppointment.objects.get(id=appointment_id)
+        sa.appointment_date = new_date
+        sa.save()
+        return JsonResponse({'success': True})
+    except SalesAppointment.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})

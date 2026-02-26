@@ -1,0 +1,798 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Calendar - Week of {{ week_start|date:"d M Y" }}{% endblock %}
+
+{% block nav_fit_board_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/fit_board.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+
+<!-- Appointment Detail Modal -->
+<div id="appointmentDetailModal" class="modal">
+    <div class="modal-content" style="max-width: 560px;">
+        <div class="modal-header">
+            <h3 id="detailCustomerName">Appointment</h3>
+            <span class="close" onclick="closeModal('appointmentDetailModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <label>Sale Number</label>
+                    <span id="detailSaleNumber">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Customer Number</label>
+                    <span id="detailCustomerNumber">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Order Date</label>
+                    <span id="detailOrderDate">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Address</label>
+                    <span id="detailAddress">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Postcode</label>
+                    <span id="detailPostcode">-</span>
+                </div>
+            </div>
+
+            <hr style="border-color: var(--border-color); margin: 14px 0;">
+
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <label>Fitter</label>
+                    <select id="detailFitterSelect" class="modal-select" style="margin-bottom:0;">
+                        {% for code, name in fitters %}
+                        <option value="{{ code }}">{{ name }} ({{ code }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="detail-row">
+                    <label>Fit Date</label>
+                    <input type="date" id="detailFitDate" class="modal-select" style="margin-bottom:0;">
+                </div>
+            </div>
+
+            <hr style="border-color: var(--border-color); margin: 14px 0;">
+
+            <div class="detail-checks">
+                <div class="detail-check-item">
+                    <input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
+                    <label for="detail-interior">Interior</label>
+                </div>
+                <div class="detail-check-item">
+                    <input type="checkbox" id="detail-door" onchange="updateDetailStatus('door', this.checked)">
+                    <label for="detail-door">Doors</label>
+                </div>
+                <div class="detail-check-item">
+                    <input type="checkbox" id="detail-accessories" onchange="updateDetailStatus('accessories', this.checked)">
+                    <label for="detail-accessories">Accessories</label>
+                </div>
+                <div class="detail-check-item">
+                    <input type="checkbox" id="detail-materials" onchange="updateDetailStatus('materials', this.checked)">
+                    <label for="detail-materials">Materials</label>
+                </div>
+                <div class="detail-check-item">
+                    <input type="checkbox" id="detail-paperwork" onchange="updateDetailStatus('paperwork', this.checked)">
+                    <label for="detail-paperwork">Paperwork</label>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-danger" style="margin-right:auto;" onclick="deleteDetailAppointment()">Delete</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
+            <button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Page-level calendar toolbar -->
+<div class="cal-toolbar">
+    <div class="legend" style="margin-bottom:0; flex-wrap:wrap;">
+        <div class="legend-item">
+            <div class="legend-box today"></div>
+            <span>Today</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box completed"></div>
+            <span>Completed</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: #ff9800; background: rgba(255,152,0,0.1);"></div>
+            <span>Remedial</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: var(--info-color); background: rgba(90,180,220,0.1);"></div>
+            <span>PO Delivery</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: #9c74c8; background: rgba(156,116,200,0.1);"></div>
+            <span>Appointment</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: #2196f3; background: rgba(33,150,243,0.1);"></div>
+            <span>Showroom Cover</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: #d9534f; background: rgba(217,83,79,0.1);"></div>
+            <span>Unavailable</span>
+        </div>
+    </div>
+
+    <div class="cal-toolbar-center">
+        <a href="?year={{ prev_week.year }}&month={{ prev_week.month }}&day={{ prev_week.day }}" class="btn btn-secondary btn-sm">&larr;</a>
+        <span class="cal-toolbar-date">{{ week_start|date:"j M" }} &ndash; {{ week_end|date:"j M Y" }}</span>
+        <a href="?year={{ next_week.year }}&month={{ next_week.month }}&day={{ next_week.day }}" class="btn btn-secondary btn-sm">&rarr;</a>
+    </div>
+
+    <div class="cal-toolbar-right">
+        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="btn btn-primary btn-sm">Today</a>
+        <div class="view-toggle">
+            <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn">Monthly</a>
+            <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn active">Weekly</a>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="openModal('fitterManagementModal')"><i class="bi bi-people"></i> Fitters</button>
+    </div>
+</div>
+
+<div class="calendar-container">
+
+    <!-- Weekly Grid — vertical columns, left to right -->
+    <div class="weekly-grid">
+        {% for day in week_data %}
+        <div class="weekly-col {% if day.is_today %}today{% endif %}"
+             data-date="{{ day.date_str }}"
+             ondrop="handleDrop(event)"
+             ondragover="handleDragOver(event)"
+             ondragleave="handleDragLeave(event)">
+
+            <div class="weekly-col-header">
+                <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
+                <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
+            </div>
+
+            <div class="weekly-col-body">
+                {% for fitter in day.fitter_rows %}
+                    {% for appt in fitter.appointments %}
+                        {% if appt.order %}
+                        <div class="wk-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}"
+                             id="appointment-{{ appt.id }}"
+                             draggable="true"
+                             ondragstart="handleDragStart(event)"
+                             ondragend="handleDragEnd(event)"
+                             data-appointment-id="{{ appt.id }}"
+                             data-order-id="{{ appt.order.id }}"
+                             data-customer-name="{{ appt.order.first_name }} {{ appt.order.last_name }}"
+                             data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
+                             data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
+                             data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
+                             data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
+                             data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
+                             data-sale-number="{{ appt.order.sale_number }}"
+                             data-customer-number="{{ appt.order.customer_number }}"
+                             data-fitter="{{ fitter.name }}"
+                             data-fitter-code="{{ fitter.code }}"
+                             data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
+                             data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                             data-address="{{ appt.order.address|default:'-' }}"
+                             data-postcode="{{ appt.order.postcode|default:'-' }}"
+                             onclick="selectAppointmentFromCard(this)">
+                            <div class="wk-card-line1">
+                                <span class="wk-fitter-name">{{ fitter.name }}</span>
+                                <div class="wk-indicators">
+                                    <span class="indicator {% if appt.order.materials_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Materials">M</span>
+                                    <span class="indicator {% if appt.order.paperwork_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Paperwork">P</span>
+                                </div>
+                            </div>
+                            <div class="wk-card-line2">{{ appt.order.first_name }} {{ appt.order.last_name }} &middot; {{ appt.order.sale_number }}</div>
+                        </div>
+                        {% elif appt.remedial %}
+                        <div class="wk-card remedial-card"
+                             id="appointment-{{ appt.id }}"
+                             draggable="true"
+                             ondragstart="handleDragStart(event)"
+                             ondragend="handleDragEnd(event)"
+                             data-appointment-id="{{ appt.id }}"
+                             data-remedial-id="{{ appt.remedial.id }}"
+                             data-customer-name="{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}"
+                             data-sale-number="{{ appt.remedial.remedial_number }}"
+                             data-customer-number="{{ appt.remedial.customer_number }}"
+                             data-fitter="{{ fitter.name }}"
+                             data-fitter-code="{{ fitter.code }}"
+                             data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                             data-address="{{ appt.remedial.address|default:'-' }}"
+                             data-postcode="{{ appt.remedial.postcode|default:'-' }}"
+                             onclick="selectAppointmentFromCard(this)">
+                            <div class="wk-card-line1">
+                                <span class="wk-fitter-name">{{ fitter.name }}</span>
+                            </div>
+                            <div class="wk-card-line2">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }} &middot; {{ appt.remedial.remedial_number }}</div>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                {% endfor %}
+
+                {% for po in day.pos %}
+                <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="wk-po-card" title="{{ po.display_number }} — {{ po.supplier_name|default:'Unknown' }}">
+                    <div>
+                        <i class="bi bi-truck"></i>
+                        <span class="wk-po-num">{{ po.display_number }}</span>
+                        <span class="wk-po-customer">{{ po.project_name|default:"" }}</span>
+                    </div>
+                    <div class="wk-po-line2">
+                        <span class="wk-po-supplier">{{ po.supplier_name|default:"—" }}</span>
+                    </div>
+                </a>
+                {% endfor %}
+
+                {% if not day.has_appointments and not day.pos %}
+                <div class="wk-empty">—</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+<!-- ── Sales Calendar ───────────────────────────────────────── -->
+<div class="calendar-container" style="margin-top: 10px;">
+    <div class="calendar-header" style="margin-bottom: 8px;">
+        <span class="calendar-section-label" style="align-self: center; font-size: 0.78rem;">Sales Appointments</span>
+        <button class="btn btn-primary btn-sm" onclick="openSalesModal()"><i class="bi bi-plus-lg"></i> Add Event</button>
+    </div>
+
+    <div class="weekly-grid sales-grid">
+        {% for day in week_data %}
+        <div class="weekly-col {% if day.is_today %}today{% endif %}"
+             data-date="{{ day.date_str }}"
+             ondrop="handleSalesDrop(event)"
+             ondragover="handleSalesDragOver(event)"
+             ondragleave="handleSalesDragLeave(event)">
+            <div class="weekly-col-header">
+                <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
+                <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
+            </div>
+            <div class="weekly-col-body">
+                {% for sa in day.sales %}
+                <div class="wk-sales-card"
+                     data-sales-id="{{ sa.id }}"
+                     data-event-type="{{ sa.event_type }}"
+                     data-designer="{{ sa.designer }}"
+                     data-customer="{{ sa.customer_name }}"
+                     data-postcode="{{ sa.postcode }}"
+                     data-date="{{ sa.appointment_date|date:'Y-m-d' }}"
+                     data-start-time="{{ sa.appointment_time|time:'H:i' }}"
+                     data-end-time="{{ sa.end_time|time:'H:i' }}"
+                     data-notes="{{ sa.notes }}"
+                     draggable="true"
+                     ondragstart="handleSalesDragStart(event)"
+                     ondragend="handleSalesDragEnd(event)"
+                     onclick="selectSalesCard(this)">
+                    <div class="wk-sales-line1">
+                        {% if sa.event_type != 'appointment' %}
+                        <span class="wk-sales-type wk-sales-type-{{ sa.event_type }}">{{ sa.get_event_type_display }}</span>
+                        {% else %}
+                        <span class="wk-sales-customer">{{ sa.customer_name }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="wk-sales-line2">
+                        <span class="wk-sales-designer">{{ sa.designer }}</span>
+                        <span class="wk-sales-time">{{ sa.appointment_time|time:"H:i" }}{% if sa.end_time %}–{{ sa.end_time|time:"H:i" }}{% endif %}</span>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="wk-empty">—</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Sales Appointment Modal -->
+<div id="salesAppointmentModal" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3 id="salesModalTitle">Add Event</h3>
+            <span class="close" onclick="closeModal('salesAppointmentModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="salesEditId" value="">
+            <label for="salesEventType">Event Type:</label>
+            <select id="salesEventType" class="modal-select" onchange="toggleSalesCustomerFields(this.value)">
+                <option value="appointment">Sales Appointment</option>
+                <option value="showroom_cover">Showroom Cover</option>
+                <option value="unavailable">Unavailable</option>
+            </select>
+            <label for="salesDesigner">Designer:</label>
+            <select id="salesDesigner" class="modal-select">
+                <option value="">— Select designer —</option>
+                {% for d in designers %}
+                <option value="{{ d.name|escapejs }}">{{ d.name }}</option>
+                {% endfor %}
+            </select>
+            <div id="salesCustomerFields">
+                <label for="salesCustomer">Customer Name:</label>
+                <input type="text" id="salesCustomer" class="modal-select" placeholder="Customer name">
+                <label for="salesPostcode">Postcode:</label>
+                <input type="text" id="salesPostcode" class="modal-select" placeholder="BT...">
+            </div>
+            <label for="salesDate">Date:</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input type="date" id="salesDate" class="modal-select" style="flex:1;">
+                <button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;" onclick="setSalesDateToday()">Today</button>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <div style="flex:1;">
+                    <label for="salesStartTime">Start Time:</label>
+                    <input type="time" id="salesStartTime" class="modal-select">
+                </div>
+                <div style="flex:1;">
+                    <label for="salesEndTime">End Time:</label>
+                    <input type="time" id="salesEndTime" class="modal-select">
+                </div>
+            </div>
+            <label for="salesNotes">Notes:</label>
+            <textarea id="salesNotes" class="modal-select" rows="2" placeholder="Optional notes"></textarea>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-danger" id="salesDeleteBtn" style="margin-right:auto;display:none;" onclick="deleteSalesAppointment()">Delete</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('salesAppointmentModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveSalesAppointment()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Fitter Quick-Change Context Menu -->
+<div id="fitterContextMenu" class="fitter-ctx-menu" style="display:none;">
+    {% for code, name in fitters %}
+    <div class="fitter-ctx-option" data-code="{{ code }}" onclick="applyFitterChange('{{ code }}')">
+        <span class="wk-badge">{{ name }}</span>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Fitter Management Modal -->
+<div id="fitterManagementModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>Manage Fitters</h3>
+            <span class="close" onclick="closeModal('fitterManagementModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="fitterList" style="margin-bottom: 16px;">
+                <!-- Populated by JS -->
+            </div>
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="newFitterName" placeholder="New fitter name" class="modal-select" style="flex:1;">
+                <button class="btn btn-primary" onclick="addFitter()">Add Fitter</button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('fitterManagementModal')">Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedAppointmentId = null;
+let draggedAppointmentId = null;
+let draggedSalesId = null;
+let salesDragOccurred = false;
+
+// ── Sales Drag & Drop ──────────────────────────────────────────
+function handleSalesDragStart(event) {
+    const card = event.target.closest('[data-sales-id]');
+    if (!card) return;
+    draggedSalesId = card.dataset.salesId;
+    salesDragOccurred = false;
+    card.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.stopPropagation();
+}
+
+function handleSalesDragEnd(event) {
+    event.target.closest('[data-sales-id]')?.classList.remove('dragging');
+    document.querySelectorAll('.weekly-col').forEach(c => c.classList.remove('drag-over'));
+}
+
+function handleSalesDragOver(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('drag-over');
+}
+
+function handleSalesDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+function handleSalesDrop(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    const target = event.currentTarget;
+    target.classList.remove('drag-over');
+    const newDate = target.dataset.date;
+    if (!draggedSalesId || !newDate) return;
+    const id = draggedSalesId;
+    draggedSalesId = null;
+    salesDragOccurred = true;
+    fetch(`/calendar/sales/${id}/move/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ appointment_date: newDate })
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) location.reload(); else alert(data.error || 'Move failed'); })
+    .catch(() => alert('Error moving appointment'));
+}
+
+// ── Fit Drag & Drop ────────────────────────────────────────────
+function handleDragStart(event) {
+    draggedAppointmentId = event.target.dataset.appointmentId;
+    event.target.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragEnd(event) {
+    event.target.classList.remove('dragging');
+    document.querySelectorAll('.weekly-col').forEach(r => r.classList.remove('drag-over'));
+}
+
+function handleDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('drag-over');
+}
+
+function handleDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+function handleDrop(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    const target = event.currentTarget;
+    target.classList.remove('drag-over');
+    const newDate = target.dataset.date;
+    if (!draggedAppointmentId) return;
+
+    // Keep the same fitter — read from the dragged card
+    const card = document.getElementById(`appointment-${draggedAppointmentId}`);
+    const fitter = card ? card.dataset.fitterCode : null;
+    if (!fitter) return;
+
+    fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ fitter: fitter, fit_date: newDate })
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) location.reload(); else alert(data.error || 'Move failed'); })
+    .catch(() => alert('Error moving appointment'));
+}
+
+// ── Appointment Selection → Detail Modal ───────────────────────
+let _origFitterCode = null;
+let _origFitDate = null;
+
+function selectAppointmentFromCard(el) {
+    const d = el.dataset;
+    selectedAppointmentId = parseInt(d.appointmentId);
+    window.selectedOrderId = parseInt(d.orderId) || null;
+
+    document.getElementById('detailCustomerName').textContent = d.customerName || 'Appointment';
+    document.getElementById('detailSaleNumber').textContent = d.saleNumber || '-';
+    document.getElementById('detailCustomerNumber').textContent = d.customerNumber || '-';
+    document.getElementById('detailOrderDate').textContent = d.orderDate || '-';
+    document.getElementById('detailAddress').textContent = d.address || '-';
+    document.getElementById('detailPostcode').textContent = d.postcode || '-';
+
+    // Fitter dropdown
+    const fitterSelect = document.getElementById('detailFitterSelect');
+    if (fitterSelect && d.fitterCode) fitterSelect.value = d.fitterCode;
+    _origFitterCode = d.fitterCode;
+
+    // Fit date — convert dd/mm/yyyy → yyyy-mm-dd
+    const fitDateInput = document.getElementById('detailFitDate');
+    if (d.fitDate) {
+        const parts = d.fitDate.split('/');
+        if (parts.length === 3) {
+            const iso = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            fitDateInput.value = iso;
+            _origFitDate = iso;
+        }
+    }
+
+    // Checkboxes
+    document.getElementById('detail-interior').checked = d.interior === 'true';
+    document.getElementById('detail-door').checked = d.door === 'true';
+    document.getElementById('detail-accessories').checked = d.accessories === 'true';
+    document.getElementById('detail-materials').checked = d.materials === 'true';
+    document.getElementById('detail-paperwork').checked = d.paperwork === 'true';
+
+    openModal('appointmentDetailModal');
+}
+
+// ── Status Updates (live, no save button needed) ───────────────
+function updateDetailStatus(field, checked) {
+    if (!window.selectedOrderId) return;
+    updateOrderStatus(window.selectedOrderId, field, checked);
+}
+
+function updateOrderStatus(orderId, field, checked) {
+    fetch(`/fit-board/update-order-status/${orderId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `field=${field}&value=${checked}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.querySelectorAll(`[data-order-id="${orderId}"]`).forEach(card => {
+                const indicators = card.querySelectorAll('.indicator');
+                if (indicators.length >= 2) {
+                    if (field === 'materials') { indicators[0].classList.toggle('indicator-complete', checked); indicators[0].classList.toggle('indicator-missing', !checked); }
+                    if (field === 'paperwork') { indicators[1].classList.toggle('indicator-complete', checked); indicators[1].classList.toggle('indicator-missing', !checked); }
+                }
+            });
+            if (window.selectedOrderId === orderId) {
+                const el = document.getElementById(`summary-${field}`);
+                if (el) el.checked = checked;
+            }
+        } else { alert(data.error || 'Update failed'); }
+    })
+    .catch(() => alert('Error updating status'));
+}
+
+// ── Delete / Save (fitter + date change) ───────────────────────
+function deleteDetailAppointment() {
+    if (!selectedAppointmentId) return;
+    if (!confirm('Delete this appointment?')) return;
+    fetch(`/fit-board/delete-appointment/${selectedAppointmentId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) location.reload(); else alert(data.error); })
+    .catch(() => alert('Error deleting'));
+}
+
+function saveDetailMove() {
+    if (!selectedAppointmentId) return;
+    const newFitter = document.getElementById('detailFitterSelect').value;
+    const newDate = document.getElementById('detailFitDate').value;
+    // Only call the move endpoint if fitter or date actually changed
+    if (newFitter !== _origFitterCode || newDate !== _origFitDate) {
+        const payload = { fitter: newFitter };
+        if (newDate) payload.fit_date = newDate;
+        fetch(`/fit-board/move-appointment/${selectedAppointmentId}/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { closeModal('appointmentDetailModal'); location.reload(); }
+            else alert(data.error || 'Save failed');
+        })
+        .catch(() => alert('Error saving changes'));
+    } else {
+        closeModal('appointmentDetailModal');
+    }
+}
+
+// ── Fitter Management ──────────────────────────────────────────
+function loadFitters() {
+    fetch('/api/get-fitters/')
+    .then(r => r.json())
+    .then(data => {
+        const list = document.getElementById('fitterList');
+        if (!data.fitters || data.fitters.length === 0) {
+            list.innerHTML = '<p style="color:var(--text-secondary);font-style:italic;">No fitters found.</p>';
+            return;
+        }
+        list.innerHTML = data.fitters.map(f => `
+            <div class="fitter-mgmt-row">
+                <span class="fitter-mgmt-name">${f.name}</span>
+                <span class="fitter-mgmt-rate">£${parseFloat(f.hourly_rate).toFixed(2)}/hr</span>
+                <button class="btn btn-danger btn-sm" onclick="deleteFitter(${f.id}, '${f.name.replace(/'/g, "\\'")}')">×</button>
+            </div>
+        `).join('');
+    })
+    .catch(() => { document.getElementById('fitterList').innerHTML = '<p>Error loading fitters</p>'; });
+}
+
+function addFitter() {
+    const nameInput = document.getElementById('newFitterName');
+    const name = nameInput.value.trim();
+    if (!name) { alert('Enter a fitter name'); return; }
+    fetch('/api/add-fitter/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ name: name })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { nameInput.value = ''; loadFitters(); }
+        else alert(data.error || 'Failed to add fitter');
+    })
+    .catch(() => alert('Error adding fitter'));
+}
+
+function deleteFitter(id, name) {
+    if (!confirm(`Delete fitter "${name}"?`)) return;
+    fetch(`/api/fitter/${id}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) loadFitters();
+        else alert(data.error || 'Failed to delete');
+    })
+    .catch(() => alert('Error deleting fitter'));
+}
+
+// Open modal helper (loads fitters list when the fitter modal opens)
+function openModal(id) {
+    if (id === 'fitterManagementModal') loadFitters();
+    const m = document.getElementById(id);
+    if (m) m.classList.add('active');
+}
+function closeModal(id) {
+    const m = document.getElementById(id);
+    if (m) m.classList.remove('active');
+}
+
+// ── Sales Appointment CRUD ─────────────────────────────────────
+function toggleSalesCustomerFields(eventType) {
+    document.getElementById('salesCustomerFields').style.display = (eventType === 'appointment') ? '' : 'none';
+}
+
+function openSalesModal(editData) {
+    document.getElementById('salesEditId').value = '';
+    document.getElementById('salesEventType').value = 'appointment';
+    document.getElementById('salesDesigner').value = '';
+    document.getElementById('salesCustomer').value = '';
+    document.getElementById('salesPostcode').value = '';
+    document.getElementById('salesDate').value = '';
+    document.getElementById('salesStartTime').value = '';
+    document.getElementById('salesEndTime').value = '';
+    document.getElementById('salesNotes').value = '';
+    document.getElementById('salesDeleteBtn').style.display = 'none';
+    document.getElementById('salesModalTitle').textContent = 'Add Event';
+    toggleSalesCustomerFields('appointment');
+
+    if (editData) {
+        document.getElementById('salesEditId').value = editData.id;
+        document.getElementById('salesEventType').value = editData.event_type || 'appointment';
+        document.getElementById('salesDesigner').value = editData.designer;
+        document.getElementById('salesCustomer').value = editData.customer;
+        document.getElementById('salesPostcode').value = editData.postcode;
+        document.getElementById('salesDate').value = editData.date;
+        document.getElementById('salesStartTime').value = editData.start_time;
+        document.getElementById('salesEndTime').value = editData.end_time || '';
+        document.getElementById('salesNotes').value = editData.notes;
+        document.getElementById('salesDeleteBtn').style.display = '';
+        document.getElementById('salesModalTitle').textContent = 'Edit Event';
+        toggleSalesCustomerFields(editData.event_type || 'appointment');
+    }
+    openModal('salesAppointmentModal');
+}
+
+function setSalesDateToday() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    document.getElementById('salesDate').value = `${y}-${m}-${day}`;
+}
+
+function selectSalesCard(el) {
+    if (salesDragOccurred) { salesDragOccurred = false; return; }
+    const d = el.dataset;
+    openSalesModal({
+        id: d.salesId,
+        event_type: d.eventType,
+        designer: d.designer,
+        customer: d.customer,
+        postcode: d.postcode,
+        date: d.date,
+        start_time: d.startTime,
+        end_time: d.endTime,
+        notes: d.notes,
+    });
+}
+
+function saveSalesAppointment() {
+    const editId = document.getElementById('salesEditId').value;
+    const eventType = document.getElementById('salesEventType').value;
+    const payload = {
+        event_type: eventType,
+        designer: document.getElementById('salesDesigner').value.trim(),
+        customer_name: document.getElementById('salesCustomer').value.trim(),
+        postcode: document.getElementById('salesPostcode').value.trim(),
+        appointment_date: document.getElementById('salesDate').value,
+        appointment_time: document.getElementById('salesStartTime').value,
+        end_time: document.getElementById('salesEndTime').value,
+        notes: document.getElementById('salesNotes').value.trim(),
+    };
+    if (!payload.appointment_date || !payload.appointment_time) {
+        alert('Please fill in Date and Start Time.');
+        return;
+    }
+    if (eventType === 'appointment' && !payload.customer_name) {
+        alert('Please fill in the Customer Name.');
+        return;
+    }
+    const url = editId ? `/calendar/sales/${editId}/update/` : '/calendar/sales/add/';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { closeModal('salesAppointmentModal'); location.reload(); }
+        else alert(data.error || 'Save failed');
+    })
+    .catch(() => alert('Error saving event'));
+}
+
+function deleteSalesAppointment() {
+    const id = document.getElementById('salesEditId').value;
+    if (!id || !confirm('Delete this sales appointment?')) return;
+    fetch(`/calendar/sales/${id}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { closeModal('salesAppointmentModal'); location.reload(); }
+        else alert(data.error || 'Delete failed');
+    })
+    .catch(() => alert('Error deleting'));
+}
+
+// ── Fitter Quick-Change (right-click on fit card) ──────────────
+let fitterChangeTarget = null;
+
+document.addEventListener('contextmenu', function(e) {
+    const card = e.target.closest('.wk-card');
+    if (!card) return;
+    e.preventDefault();
+    fitterChangeTarget = card.dataset.appointmentId;
+    const menu = document.getElementById('fitterContextMenu');
+    menu.style.display = 'block';
+    menu.style.left = e.pageX + 'px';
+    menu.style.top = e.pageY + 'px';
+});
+
+document.addEventListener('click', function() {
+    document.getElementById('fitterContextMenu').style.display = 'none';
+});
+
+function applyFitterChange(code) {
+    if (!fitterChangeTarget) return;
+    document.getElementById('fitterContextMenu').style.display = 'none';
+    fetch(`/fit-board/move-appointment/${fitterChangeTarget}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ fitter: code })
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) location.reload(); else alert(data.error || 'Failed'); })
+    .catch(() => alert('Error changing fitter'));
+}
+</script>
+{% endblock %}

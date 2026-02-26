@@ -225,14 +225,22 @@ urlpatterns = [
     path('stock-items-manager/', views.stock_items_manager, name='stock_items_manager'),
     path('stock-items/update-batch/', views.update_stock_items_batch, name='update_stock_items_batch'),
     
-    # Fit board
-    path('fit-board/', views.fit_board, name='fit_board'),
+    # Calendar (renamed from Fit Board)
+    path('calendar/', views.calendar_weekly, name='calendar_weekly'),
+    path('calendar/monthly/', views.calendar_view, name='calendar_view'),
+    path('fit-board/', views.calendar_view, name='fit_board'),  # backwards compat
     path('fit-board/add-appointment/', views.add_fit_appointment, name='add_fit_appointment'),
     path('fit-board/update-status/<int:appointment_id>/', views.update_fit_status, name='update_fit_status'),
     path('fit-board/update-order-status/<int:order_id>/', views.update_order_fit_status, name='update_order_fit_status'),
     path('fit-board/delete-appointment/<int:appointment_id>/', views.delete_fit_appointment, name='delete_fit_appointment'),
     path('fit-board/move-appointment/<int:appointment_id>/', views.move_fit_appointment, name='move_fit_appointment'),
     path('fit-board/bulk-import/', views.bulk_import_fit_dates, name='bulk_import_fit_dates'),
+    
+    # Sales Appointments
+    path('calendar/sales/add/', views.add_sales_appointment, name='add_sales_appointment'),
+    path('calendar/sales/<int:appointment_id>/update/', views.update_sales_appointment, name='update_sales_appointment'),
+    path('calendar/sales/<int:appointment_id>/delete/', views.delete_sales_appointment, name='delete_sales_appointment'),
+    path('calendar/sales/<int:appointment_id>/move/', views.move_sales_appointment, name='move_sales_appointment'),
     
     # Search APIs
     path('search-orders-api/', views.search_orders_api, name='search_orders_api'),

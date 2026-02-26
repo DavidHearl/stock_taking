@@ -505,11 +505,6 @@
                                              style="width: {% widthratio installation_fitter_cost order.total_value_exc_vat 100 %}%"
                                              title="Fitter Timesheets: £{{ installation_fitter_cost|floatformat:2 }}"></div>
                                         {% endif %}
-                                        {% if installation_helper_cost > 0 %}
-                                        <div class="financial-progress-bar-segment installation-helper-segment" 
-                                             style="width: {% widthratio installation_helper_cost order.total_value_exc_vat 100 %}%"
-                                             title="Helper Timesheets: £{{ installation_helper_cost|floatformat:2 }}"></div>
-                                        {% endif %}
                                         {% if petrol_cost > 0 %}
                                         <div class="financial-progress-bar-segment petrol-segment" 
                                              style="width: {% widthratio petrol_cost order.total_value_exc_vat 100 %}%"
@@ -533,12 +528,6 @@
                                     <span class="legend-item">
                                         <span class="legend-color installation-fitter-color"></span>
                                         Fitters: £{{ installation_fitter_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if installation_helper_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color installation-helper-color"></span>
-                                        Helpers: £{{ installation_helper_cost|floatformat:2 }}
                                     </span>
                                     {% endif %}
                                     {% if petrol_cost > 0 %}
@@ -1396,7 +1385,7 @@
                             <tr>
                                 <th>Fitter</th>
                                 <th>Date</th>
-                                <th>Price</th>
+                                <th>PO</th>
                                 <th>Total Cost</th>
                                 <th>Description</th>
                                 <th>Actions</th>
@@ -1407,7 +1396,7 @@
                             <tr>
                                 <td>{{ timesheet.worker_name }}</td>
                                 <td>{{ timesheet.date|date:"d/m/Y" }}</td>
-                                <td>£{{ timesheet.price|floatformat:2 }}</td>
+                                <td>{{ timesheet.purchase_order.display_number|default:"-" }}</td>
                                 <td>£{{ timesheet.total_cost|floatformat:2 }}</td>
                                 <td>{{ timesheet.description|default:"-" }}</td>
                                 <td>
@@ -1845,30 +1834,6 @@
                     </div>
                 </div>
                 
-                <div class="form-group form-group-hidden" id="helper-group">
-                    <label for="timesheet_helper">Helper / Additional Party</label>
-                    <div class="flex-row-gap">
-                        <select class="form-input flex-1" id="timesheet_helper" name="helper" onchange="handleInstallationPersonSelect('helper')">
-                            <option value="">Select a helper...</option>
-                            <!-- Will be populated dynamically -->
-                        </select>
-                        <button type="button" class="btn btn-sm btn-success" onclick="toggleAddHelperInline()" title="Add new helper">
-                            <i class="bi bi-plus-lg"></i>
-                        </button>
-                    </div>
-                    <div id="new-helper-inline" class="new-person-inline">
-                        <input type="text" id="new-helper-name" class="form-input new-person-input" placeholder="Helper name">
-                        <div class="flex-row-gap">
-                            <button type="button" class="btn btn-sm btn-success" onclick="saveNewHelper()" title="Save helper">
-                                <i class="bi bi-check-lg"></i> Save
-                            </button>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddHelper()" title="Cancel">
-                                <i class="bi bi-x-lg"></i> Cancel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
                 <div class="form-group form-group-hidden" id="installation-worker-group">
                     <label for="timesheet_installation_worker">Factory Worker (if doing fit)</label>
                     <div class="flex-row-gap">
@@ -1903,10 +1868,14 @@
                     </div>
                 </div>
                 
-                <!-- For installation: fixed price -->
-                <div class="form-group" id="price-group">
-                    <label for="timesheet_price">Price (£)</label>
-                    <input type="number" step="0.01" min="0" class="form-input" id="timesheet_price" name="price" value="220.00" required>
+                <!-- For installation: linked PO -->
+                <div class="form-group" id="po-group">
+                    <label for="timesheet_po_search">Purchase Order</label>
+                    <div style="position: relative;">
+                        <input type="text" class="form-input" id="timesheet_po_search" placeholder="Search PO by number or supplier..." autocomplete="off">
+                        <input type="hidden" id="timesheet_po_id">
+                        <div id="timesheet_po_results" class="autocomplete-dropdown" style="display:none;"></div>
+                    </div>
                 </div>
                 
                 <!-- Hours field (shown for both, optional for installation, required for manufacturing) -->
@@ -5053,15 +5022,13 @@ function updateDeleteButtonVisibility(boardsPoId) {
 
 // Timesheet Functions
 function openTimesheetModal(type) {
-    const modal = document.getElementById('addTimesheetModal');
     const title = document.getElementById('timesheet-modal-title');
     const typeInput = document.getElementById('timesheet_type');
     const fitterGroup = document.getElementById('fitter-group');
-    const helperGroup = document.getElementById('helper-group');
     const installationWorkerGroup = document.getElementById('installation-worker-group');
     const workerGroup = document.getElementById('worker-group');
     const expenseGroup = document.getElementById('add-expense-group');
-    const priceGroup = document.getElementById('price-group');
+    const poGroup = document.getElementById('po-group');
     const hoursGroup = document.getElementById('hours-group');
     
     // Get staging elements
@@ -5072,11 +5039,14 @@ function openTimesheetModal(type) {
     
     typeInput.value = type;
     
-    // Reset all selects and enable them
+    // Reset selects and enable them
     document.getElementById('timesheet_fitter').value = '';
     document.getElementById('timesheet_fitter').disabled = false;
-    document.getElementById('timesheet_helper').value = '';
-    document.getElementById('timesheet_helper').disabled = false;
+    document.getElementById('timesheet_po_search').value = '';
+    document.getElementById('timesheet_po_id').value = '';
+    if (document.getElementById('timesheet_po_results')) {
+        document.getElementById('timesheet_po_results').style.display = 'none';
+    }
     if (document.getElementById('timesheet_installation_worker')) {
         document.getElementById('timesheet_installation_worker').value = '';
         document.getElementById('timesheet_installation_worker').disabled = false;
@@ -5085,15 +5055,12 @@ function openTimesheetModal(type) {
     if (type === 'installation') {
         title.textContent = 'Add Installation Timesheet';
         fitterGroup.style.display = 'block';
-        helperGroup.style.display = 'block';
         installationWorkerGroup.style.display = 'block';
         workerGroup.style.display = 'none';
         expenseGroup.style.display = 'block';
-        priceGroup.style.display = 'block';
+        poGroup.style.display = 'block';
         hoursGroup.style.display = 'block';
         document.getElementById('hours-optional-label').style.display = 'inline';
-        // Set required/optional
-        document.getElementById('timesheet_price').required = true;
         document.getElementById('timesheet_hours').required = false;
         // Show single save button, hide staging
         stagingSection.style.display = 'none';
@@ -5101,20 +5068,16 @@ function openTimesheetModal(type) {
         saveAllBtn.style.display = 'none';
         saveSingleBtn.style.display = 'inline-block';
         loadFitters();
-        loadHelpers();
         loadInstallationWorkers();
     } else {
         title.textContent = 'Add Manufacturing Timesheet';
         fitterGroup.style.display = 'none';
-        helperGroup.style.display = 'none';
         installationWorkerGroup.style.display = 'none';
         workerGroup.style.display = 'block';
         expenseGroup.style.display = 'none';
-        priceGroup.style.display = 'none';
+        poGroup.style.display = 'none';
         hoursGroup.style.display = 'block';
         document.getElementById('hours-optional-label').style.display = 'none';
-        // Set required/optional
-        document.getElementById('timesheet_price').required = false;
         document.getElementById('timesheet_hours').required = true;
         // Show staging section and buttons for manufacturing
         stagingSection.style.display = 'block';
@@ -5131,32 +5094,19 @@ function openTimesheetModal(type) {
 
 function handleInstallationPersonSelect(selectedField) {
     const fitterSelect = document.getElementById('timesheet_fitter');
-    const helperSelect = document.getElementById('timesheet_helper');
     const installationWorkerSelect = document.getElementById('timesheet_installation_worker');
     
     const fitterValue = fitterSelect.value;
-    const helperValue = helperSelect.value;
     const workerValue = installationWorkerSelect ? installationWorkerSelect.value : '';
     
-    // Check if any field has a value
-    const anySelected = fitterValue || helperValue || workerValue;
-    
-    if (anySelected) {
-        // Disable fields that don't have the selection
+    if (fitterValue || workerValue) {
         if (selectedField === 'fitter' && fitterValue) {
-            helperSelect.disabled = true;
-            if (installationWorkerSelect) installationWorkerSelect.disabled = true;
-        } else if (selectedField === 'helper' && helperValue) {
-            fitterSelect.disabled = true;
             if (installationWorkerSelect) installationWorkerSelect.disabled = true;
         } else if (selectedField === 'installation_worker' && workerValue) {
             fitterSelect.disabled = true;
-            helperSelect.disabled = true;
         }
     } else {
-        // All empty - enable all
         fitterSelect.disabled = false;
-        helperSelect.disabled = false;
         if (installationWorkerSelect) installationWorkerSelect.disabled = false;
     }
 }
@@ -5354,22 +5304,7 @@ function loadFitters() {
         .catch(error => console.error('Error loading fitters:', error));
 }
 
-function loadHelpers() {
-    // Helpers use the same fitter list
-    fetch('/api/get-fitters/')
-        .then(response => response.json())
-        .then(data => {
-            const select = document.getElementById('timesheet_helper');
-            select.innerHTML = '<option value="">Select a helper (optional)...</option>';
-            data.fitters.forEach(fitter => {
-                const option = document.createElement('option');
-                option.value = fitter.id;
-                option.textContent = fitter.name;
-                select.appendChild(option);
-            });
-        })
-        .catch(error => console.error('Error loading helpers:', error));
-}
+function loadHelpers() { /* removed — add helpers as separate fitter timesheet entries */ }
 
 function loadFactoryWorkers() {
     fetch('/api/get-factory-workers/')
@@ -5561,63 +5496,8 @@ function clearWorkerForm() {
     document.getElementById('new-worker-name').value = '';
 }
 
-// Inline helper management
-function toggleAddHelperInline() {
-    const form = document.getElementById('new-helper-inline');
-    if (form.style.display === 'none' || form.style.display === '') {
-        form.style.display = 'block';
-        document.getElementById('new-helper-name').focus();
-    } else {
-        form.style.display = 'none';
-        clearHelperForm();
-    }
-}
+// Inline helper management — removed (helpers are now added as separate fitter timesheets)
 
-function cancelAddHelper() {
-    document.getElementById('new-helper-inline').style.display = 'none';
-    clearHelperForm();
-}
-
-function clearHelperForm() {
-    document.getElementById('new-helper-name').value = '';
-}
-
-function saveNewHelper() {
-    const name = document.getElementById('new-helper-name').value.trim();
-    
-    if (!name) {
-        showAlert('Please enter a helper name', 'warning');
-        return;
-    }
-    
-    // Helpers are just fitters, so use the same API
-    fetch('/api/add-fitter/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({ name })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const select = document.getElementById('timesheet_helper');
-            const option = new Option(data.fitter.name, data.fitter.id, true, true);
-            select.add(option);
-            
-            document.getElementById('new-helper-inline').style.display = 'none';
-            clearHelperForm();
-            showAlert('Helper added successfully!', 'success');
-        } else {
-            showAlert('Error: ' + (data.error || 'Failed to add helper'), 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showAlert('Error adding helper', 'danger');
-    });
-}
 
 function saveNewWorker() {
     const name = document.getElementById('new-worker-name').value.trim();
@@ -5655,28 +5535,67 @@ function saveNewWorker() {
     });
 }
 
+// PO search autocomplete for installation timesheet modal
+(function() {
+    let _tsPoTimer = null;
+    document.addEventListener('DOMContentLoaded', function() {
+        const poInput = document.getElementById('timesheet_po_search');
+        if (!poInput) return;
+        poInput.addEventListener('input', function() {
+            clearTimeout(_tsPoTimer);
+            const q = this.value.trim();
+            const resultsDiv = document.getElementById('timesheet_po_results');
+            if (q.length < 2) { resultsDiv.style.display = 'none'; return; }
+            _tsPoTimer = setTimeout(() => {
+                fetch(`/api/purchase-order-search/?q=${encodeURIComponent(q)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        resultsDiv.innerHTML = '';
+                        if (!data.results || !data.results.length) {
+                            resultsDiv.innerHTML = '<div class="autocomplete-item" style="color:#999;">No POs found</div>';
+                        } else {
+                            data.results.forEach(po => {
+                                const div = document.createElement('div');
+                                div.className = 'autocomplete-item';
+                                div.textContent = `${po.display_number} — ${po.supplier_name} (${po.status})`;
+                                div.addEventListener('click', () => {
+                                    poInput.value = po.display_number;
+                                    document.getElementById('timesheet_po_id').value = po.id;
+                                    resultsDiv.style.display = 'none';
+                                });
+                                resultsDiv.appendChild(div);
+                            });
+                        }
+                        resultsDiv.style.display = 'block';
+                    })
+                    .catch(() => { document.getElementById('timesheet_po_results').style.display = 'none'; });
+            }, 250);
+        });
+        document.addEventListener('click', function(e) {
+            const results = document.getElementById('timesheet_po_results');
+            if (results && !poInput.contains(e.target) && !results.contains(e.target)) {
+                results.style.display = 'none';
+            }
+        });
+    });
+})();
+
 function saveTimesheet() {
     const type = document.getElementById('timesheet_type').value;
     const fitterId = document.getElementById('timesheet_fitter').value;
-    const helperId = document.getElementById('timesheet_helper').value;
     const installationWorkerId = document.getElementById('timesheet_installation_worker') ? 
                                   document.getElementById('timesheet_installation_worker').value : '';
     const workerId = document.getElementById('timesheet_worker').value;
-    const price = document.getElementById('timesheet_price').value;
+    const poId = document.getElementById('timesheet_po_id').value;
     const hours = document.getElementById('timesheet_hours').value;
-    const hourlyRate = document.getElementById('timesheet_hourly_rate').value;
     const description = document.getElementById('timesheet_description').value;
     const addPetrol = document.getElementById('add_petrol_expense').checked;
     const petrolAmount = document.getElementById('petrol_amount').value;
     
     // Validation
     if (type === 'installation') {
-        if (!fitterId && !helperId && !installationWorkerId) {
-            showAlert('Please select a fitter, helper, or factory worker', 'danger');
-            return;
-        }
-        if (!price) {
-            showAlert('Please enter a price', 'danger');
+        if (!fitterId && !installationWorkerId) {
+            showAlert('Please select a fitter or factory worker', 'danger');
             return;
         }
     } else {
@@ -5697,9 +5616,8 @@ function saveTimesheet() {
     
     if (type === 'installation') {
         if (fitterId) data.fitter_id = fitterId;
-        if (helperId) data.helper_id = helperId;
         if (installationWorkerId) data.installation_factory_worker_id = installationWorkerId;
-        data.price = price;
+        if (poId) data.purchase_order_id = poId;
         if (hours) data.hours = hours;  // Optional hours for installation
         if (addPetrol) {
             data.petrol_amount = petrolAmount;

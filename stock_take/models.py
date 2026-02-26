@@ -1213,6 +1213,33 @@ class FitAppointment(models.Model):
         return "Unknown"
 
 
+class SalesAppointment(models.Model):
+    """Track sales team appointments for the sales calendar."""
+    EVENT_TYPE_CHOICES = [
+        ('appointment', 'Sales Appointment'),
+        ('showroom_cover', 'Showroom Cover'),
+        ('unavailable', 'Unavailable'),
+    ]
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPE_CHOICES, default='appointment', help_text='Type of event')
+    designer = models.CharField(max_length=100, blank=True, help_text='Designer / salesperson name')
+    customer_name = models.CharField(max_length=200, blank=True, help_text='Customer full name')
+    postcode = models.CharField(max_length=20, blank=True, help_text='Customer postcode')
+    appointment_date = models.DateField(help_text='Date of the appointment')
+    appointment_time = models.TimeField(help_text='Start time of the appointment')
+    end_time = models.TimeField(null=True, blank=True, help_text='End time of the appointment')
+    notes = models.TextField(blank=True, help_text='Additional notes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['appointment_date', 'appointment_time']
+
+    def __str__(self):
+        label = self.get_event_type_display()
+        name = self.customer_name or self.designer or label
+        return f"{label} – {name} @ {self.appointment_date} {self.appointment_time:%H:%M}"
+
+
 class WorkflowStage(models.Model):
     """Defines a stage in the customer workflow process"""
     PHASE_CHOICES = [
@@ -1364,15 +1391,14 @@ class Timesheet(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='timesheets')
     timesheet_type = models.CharField(max_length=20, choices=TIMESHEET_TYPE_CHOICES)
     
-    # Worker - use either fitter, factory_worker, or helper (for installation additional party)
+    # Worker - use either fitter or factory_worker
     fitter = models.ForeignKey(Fitter, on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets')
     factory_worker = models.ForeignKey(FactoryWorker, on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets')
-    helper = models.ForeignKey(Fitter, on_delete=models.SET_NULL, null=True, blank=True, related_name='helper_timesheets', help_text='Additional party for installation')
     
     date = models.DateField()
     
-    # For installation timesheets (fixed price)
-    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Fixed price for installation')
+    # For installation timesheets (linked PO)
+    purchase_order = models.ForeignKey('PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets', help_text='Associated PO for installation cost')
     
     # For manufacturing timesheets (hours × rate)
     hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='Hours worked')
@@ -1390,8 +1416,6 @@ class Timesheet(models.Model):
             return self.fitter.name
         elif self.factory_worker:
             return self.factory_worker.name
-        elif self.helper:
-            return self.helper.name
         return 'Unknown'
     
     @property
@@ -1401,16 +1425,14 @@ class Timesheet(models.Model):
             return 'fitter'
         elif self.factory_worker:
             return 'factory_worker'
-        elif self.helper:
-            return 'helper'
         return 'unknown'
     
     @property
     def total_cost(self):
         """Calculate total cost for this timesheet entry"""
-        if self.timesheet_type == 'installation' and self.price:
-            # Installation uses fixed price
-            return self.price
+        if self.timesheet_type == 'installation' and self.purchase_order:
+            # Installation uses linked PO total
+            return self.purchase_order.total
         elif self.hours and self.hourly_rate:
             # Manufacturing uses hours × hourly_rate
             return self.hours * self.hourly_rate
@@ -1418,7 +1440,8 @@ class Timesheet(models.Model):
     
     def __str__(self):
         if self.timesheet_type == 'installation':
-            return f"{self.worker_name} - {self.date} (£{self.price})"
+            po_ref = self.purchase_order.display_number if self.purchase_order else 'no PO'
+            return f"{self.worker_name} - {self.date} ({po_ref})"
         return f"{self.worker_name} - {self.date} ({self.hours}h)"
     
     class Meta:

@@ -62,7 +62,7 @@
                             </td>
                             <td>
                                 {% if ts.timesheet_type == 'installation' %}
-                                £{{ ts.price|floatformat:2 }}
+                                {{ ts.purchase_order.display_number|default:"-" }}
                                 {% else %}
                                 £{{ ts.hourly_rate|floatformat:2 }}/hr
                                 {% endif %}
@@ -245,14 +245,12 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="ts_helper">Helper (Optional)</label>
-                        <select class="form-input" id="ts_helper">
-                            <option value="">-- None --</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="ts_price">Price (£) *</label>
-                        <input type="number" step="0.01" min="0" class="form-input" id="ts_price" placeholder="0.00">
+                        <label for="ts_po_search">Purchase Order</label>
+                        <div style="position: relative;">
+                            <input type="text" class="form-input" id="ts_po_search" placeholder="Search PO by number or supplier..." autocomplete="off">
+                            <input type="hidden" id="ts_po_id">
+                            <div id="ts_po_results" class="autocomplete-dropdown" style="display:none;"></div>
+                        </div>
                     </div>
                 </div>
                 <!-- Manufacturing fields -->
@@ -560,12 +558,9 @@ function loadFittersAndWorkers() {
         .then(r => r.json())
         .then(data => {
             const fitterSel = document.getElementById('ts_fitter');
-            const helperSel = document.getElementById('ts_helper');
             fitterSel.innerHTML = '<option value="">-- Select Fitter --</option>';
-            helperSel.innerHTML = '<option value="">-- None --</option>';
             (data.fitters || []).forEach(f => {
                 fitterSel.innerHTML += `<option value="${f.id}">${f.name}</option>`;
-                helperSel.innerHTML += `<option value="${f.id}">${f.name}</option>`;
             });
         });
     // Load factory workers
@@ -617,6 +612,47 @@ document.addEventListener('DOMContentLoaded', function() {
             resultsDiv.style.display = 'none';
         }
     });
+
+    // PO search autocomplete for installation modal
+    let _tsPOTimer = null;
+    const tsPoInput = document.getElementById('ts_po_search');
+    const tsPoResults = document.getElementById('ts_po_results');
+    if (tsPoInput) {
+        tsPoInput.addEventListener('input', function() {
+            clearTimeout(_tsPOTimer);
+            const q = this.value.trim();
+            if (q.length < 2) { tsPoResults.style.display = 'none'; return; }
+            _tsPOTimer = setTimeout(() => {
+                fetch('/api/purchase-order-search/?q=' + encodeURIComponent(q))
+                    .then(r => r.json())
+                    .then(data => {
+                        tsPoResults.innerHTML = '';
+                        if (!data.results || !data.results.length) {
+                            tsPoResults.innerHTML = '<div class="autocomplete-item" style="color:#999;">No POs found</div>';
+                        } else {
+                            data.results.forEach(po => {
+                                const div = document.createElement('div');
+                                div.className = 'autocomplete-item';
+                                div.textContent = `${po.display_number} — ${po.supplier_name} (${po.status})`;
+                                div.addEventListener('click', () => {
+                                    tsPoInput.value = po.display_number;
+                                    document.getElementById('ts_po_id').value = po.id;
+                                    tsPoResults.style.display = 'none';
+                                });
+                                tsPoResults.appendChild(div);
+                            });
+                        }
+                        tsPoResults.style.display = 'block';
+                    })
+                    .catch(() => { tsPoResults.style.display = 'none'; });
+            }, 250);
+        });
+        document.addEventListener('click', function(e) {
+            if (!tsPoInput.contains(e.target) && !tsPoResults.contains(e.target)) {
+                tsPoResults.style.display = 'none';
+            }
+        });
+    }
 });
 
 function selectOrder(id, saleNum, customerName) {
@@ -644,12 +680,9 @@ function submitTimesheet() {
 
     if (type === 'installation') {
         const fitterId = document.getElementById('ts_fitter').value;
-        const helperId = document.getElementById('ts_helper').value;
-        const price = document.getElementById('ts_price').value;
-        if (!price) { alert('Please enter a price'); return; }
+        const poId = document.getElementById('ts_po_id').value;
         payload.fitter_id = fitterId || null;
-        payload.helper_id = helperId || null;
-        payload.price = price;
+        payload.purchase_order_id = poId || null;
     } else {
         const workerId = document.getElementById('ts_factory_worker').value;
         const hours = document.getElementById('ts_hours').value;

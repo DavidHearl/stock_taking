@@ -2,7 +2,7 @@
 {% load static %}
 {% load custom_filters %}
 
-{% block title %}Fit Board - {{ month_name }} {{ current_year }}{% endblock %}
+{% block title %}Calendar - {{ month_name }} {{ current_year }}{% endblock %}
 
 {% block nav_fit_board_active %}active{% endblock %}
     
@@ -92,7 +92,11 @@
                 Next →
             </a>
         </div>
-        <div style="display: flex; gap: 10px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <div class="view-toggle">
+                <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn active">Monthly</a>
+                <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn">Weekly</a>
+            </div>
             <button class="btn btn-info" onclick="bulkImportFitDates()">Import All Fit Dates</button>
             <a href="?year={{ today.year }}&month={{ today.month }}" class="btn btn-primary">Today</a>
         </div>
@@ -208,6 +212,17 @@
                             </div>
                             {% endfor %}
                         </div>
+
+                        {% if day in pos_by_day %}
+                        <div class="monthly-po-rows">
+                            {% for po in pos_by_day|get_item:day %}
+                            <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="monthly-po-card" title="{{ po.display_number }} — {{ po.supplier_name|default:'Unknown' }}">
+                                <i class="bi bi-truck"></i>
+                                <span class="monthly-po-text">{{ po.display_number }}</span>
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -224,6 +239,14 @@
         <div class="legend-item">
             <div class="legend-box completed"></div>
             <span>Fully Completed</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: #ff9800; background: rgba(255,152,0,0.1);"></div>
+            <span>Remedial</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-box" style="border-color: var(--info-color); background: rgba(90,180,220,0.1);"></div>
+            <span>PO Delivery</span>
         </div>
     </div>
 </div>

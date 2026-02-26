@@ -95,6 +95,8 @@ URL_TO_PAGE = {
 
     # Calendar
     'fit_board': 'fit_board',
+    'calendar_view': 'fit_board',
+    'calendar_weekly': 'fit_board',
     'add_fit_appointment': 'fit_board',
     'update_fit_status': 'fit_board',
     'delete_fit_appointment': 'fit_board',
