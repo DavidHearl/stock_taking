@@ -8876,6 +8876,7 @@ def generate_and_upload_accessories_csv(request, order_id):
     from material_generator import workguru_logic
     from django.conf import settings
     import os
+    from django.core.files.storage import default_storage
     
     order = get_object_or_404(Order, id=order_id)
     
