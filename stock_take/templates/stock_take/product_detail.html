@@ -385,6 +385,7 @@
                             <th>Status</th>
                             <th>Issue Date</th>
                             <th>Expected Date</th>
+                            <th>Received Date</th>
                             <th class="text-right">Order Price</th>
                             <th class="text-right">Order Qty</th>
                             <th class="text-right">Rec'd Qty</th>
@@ -407,6 +408,7 @@
                             </td>
                             <td>{{ line.purchase_order.issue_date|default:"-" }}</td>
                             <td>{{ line.purchase_order.expected_date|default:"-" }}</td>
+                            <td>{{ line.purchase_order.received_date|default:"-" }}</td>
                             <td class="text-right">£{{ line.order_price|floatformat:2 }}</td>
                             <td class="text-right">{{ line.order_quantity|floatformat:0 }}</td>
                             <td class="text-right">{{ line.received_quantity|floatformat:0 }}</td>
@@ -625,12 +627,25 @@ function initStockHistoryChart() {
     
     // Create datasets
     const poArrivalIndices = new Set(stockHistoryData.po_arrival_indices || []);
+    const adjustmentIndices = new Set(stockHistoryData.adjustment_indices || []);
     
-    // Customize point styles: green triangles for PO arrivals, circles for rest
-    const pointStyles = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? 'triangle' : 'circle');
-    const pointColors = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? '#28a745' : '#17a2b8');
-    const pointSizes = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? 8 : 5);
-    const pointBorderWidths = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? 3 : 2);
+    // Customize point styles: green triangles for PO arrivals, orange diamonds for adjustments, circles for rest
+    const pointStyles = stockHistoryData.quantities.map((_, i) => {
+        if (adjustmentIndices.has(i)) return 'rectRot';
+        if (poArrivalIndices.has(i)) return 'triangle';
+        return 'circle';
+    });
+    const pointColors = stockHistoryData.quantities.map((_, i) => {
+        if (adjustmentIndices.has(i)) return '#f59e0b';
+        if (poArrivalIndices.has(i)) return '#28a745';
+        return '#17a2b8';
+    });
+    const pointSizes = stockHistoryData.quantities.map((_, i) => {
+        if (adjustmentIndices.has(i)) return 8;
+        if (poArrivalIndices.has(i)) return 8;
+        return 5;
+    });
+    const pointBorderWidths = stockHistoryData.quantities.map((_, i) => (adjustmentIndices.has(i) || poArrivalIndices.has(i)) ? 3 : 2);
     
     const datasets = [
         {
@@ -687,6 +702,25 @@ function initStockHistoryChart() {
         };
     });
     
+    // Build adjustment annotations
+    const adjAnnotations = {};
+    adjustmentIndices.forEach(idx => {
+        const change = stockHistoryData.quantities[idx] - (idx > 0 ? stockHistoryData.quantities[idx - 1] : stockHistoryData.quantities[idx]);
+        const sign = change >= 0 ? '+' : '';
+        adjAnnotations['adj_' + idx] = {
+            type: 'label',
+            xValue: idx,
+            yValue: stockHistoryData.quantities[idx],
+            yAdjust: -20,
+            content: sign + change + ' (Adj)',
+            backgroundColor: 'rgba(245, 158, 11, 0.85)',
+            color: '#fff',
+            font: { size: 10, weight: 'bold' },
+            padding: { top: 3, bottom: 3, left: 6, right: 6 },
+            borderRadius: 4,
+        };
+    });
+    
     // Merge with today annotation
     const allAnnotations = {
         todayLine: {
@@ -707,7 +741,8 @@ function initStockHistoryChart() {
                 }
             }
         },
-        ...poAnnotations
+        ...poAnnotations,
+        ...adjAnnotations
     };
     
     new Chart(ctx, {
@@ -755,6 +790,9 @@ function initStockHistoryChart() {
                                 let label = 'Stock: ' + context.parsed.y + ' units';
                                 if (poArrivalIndices.has(idx)) {
                                     label += ' (includes PO delivery)';
+                                }
+                                if (adjustmentIndices.has(idx)) {
+                                    label += ' (historical adjustment)';
                                 }
                                 return label;
                             }

@@ -133,6 +133,7 @@ urlpatterns = [
     
     # Stock take functionality
     path('stock-take/update-count/', views.update_stock_count, name='update_stock_count'),
+    path('stock-take/historical-adjustment/', views.historical_stock_adjustment, name='historical_stock_adjustment'),
     path('stock-take-groups/delete/<int:group_id>/', views.delete_stock_take_group, name='delete_stock_take_group'),
     
     # Ordering page

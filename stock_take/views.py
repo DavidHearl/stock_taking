@@ -456,7 +456,7 @@ def material_report(request):
         materials[key]['source'] = 'PNX'
         # Add all orders that use this BoardsPO
         for order in item.boards_po.orders.all():
-            if not date_range or (date_range[0] <= order.order_date <= date_range[1]):
+            if not date_range or (order.order_date and date_range[0] <= order.order_date <= date_range[1]):
                 materials[key]['orders'].add((order.id, order.sale_number))
     
     # 2. Aggregate from Accessories
@@ -695,10 +695,11 @@ def shortages(request):
                 key = accessory.sku
                 all_time_usage[key]['total_used'] += float(accessory.quantity)
                 all_time_usage[key]['order_count'] += 1
-                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
-                    all_time_usage[key]['first_order'] = order.order_date
-                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
-                    all_time_usage[key]['last_order'] = order.order_date
+                if order.order_date:
+                    if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                        all_time_usage[key]['first_order'] = order.order_date
+                    if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                        all_time_usage[key]['last_order'] = order.order_date
         
         historical_usage = defaultdict(lambda: {
             'name': '', 'sku': '', 'total_used': 0, 'monthly_average': 0,
@@ -1116,10 +1117,11 @@ def shortages(request):
                 key = accessory.sku
                 all_time_usage[key]['total_used'] += float(accessory.quantity)
                 all_time_usage[key]['order_count'] += 1
-                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
-                    all_time_usage[key]['first_order'] = order.order_date
-                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
-                    all_time_usage[key]['last_order'] = order.order_date
+                if order.order_date:
+                    if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                        all_time_usage[key]['first_order'] = order.order_date
+                    if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                        all_time_usage[key]['last_order'] = order.order_date
         
         historical_usage = defaultdict(lambda: {
             'name': '', 'sku': '', 'total_used': 0, 'monthly_average': 0,
@@ -1351,10 +1353,11 @@ def material_shortage(request):
             all_time_usage[key]['order_count'] += 1
             
             # Track date range
-            if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
-                all_time_usage[key]['first_order'] = order.order_date
-            if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
-                all_time_usage[key]['last_order'] = order.order_date
+            if order.order_date:
+                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                    all_time_usage[key]['first_order'] = order.order_date
+                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                    all_time_usage[key]['last_order'] = order.order_date
     
     # Calculate historical usage combining recent and all-time data
     historical_usage = defaultdict(lambda: {
@@ -1567,10 +1570,11 @@ def raumplus_storage(request):
             all_time_usage[key]['order_count'] += 1
             
             # Track date range
-            if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
-                all_time_usage[key]['first_order'] = order.order_date
-            if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
-                all_time_usage[key]['last_order'] = order.order_date
+            if order.order_date:
+                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                    all_time_usage[key]['first_order'] = order.order_date
+                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                    all_time_usage[key]['last_order'] = order.order_date
     
     # Calculate historical usage combining recent and all-time data
     historical_usage = defaultdict(lambda: {
@@ -5562,6 +5566,76 @@ def update_stock_count(request):
     
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
+@login_required
+def historical_stock_adjustment(request):
+    """Apply a backdated stock adjustment — set quantity as of a past date"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'})
+    try:
+        import json
+        data = json.loads(request.body)
+        sku = data.get('sku', '').strip()
+        mode = data.get('mode', 'exact')  # 'exact' or 'adjust'
+        value = int(data.get('value', 0) or data.get('new_quantity', 0))
+        effective_date = data.get('effective_date', '')
+        notes = data.get('notes', '')
+
+        if not sku:
+            return JsonResponse({'success': False, 'error': 'SKU is required'})
+        if not effective_date:
+            return JsonResponse({'success': False, 'error': 'Effective date is required'})
+
+        item = StockItem.objects.filter(sku__iexact=sku).first()
+        if not item:
+            return JsonResponse({'success': False, 'error': f'No stock item found with SKU: {sku}'})
+
+        old_quantity = item.quantity
+
+        if mode == 'adjust':
+            # Relative adjustment: add/subtract from current stock
+            new_quantity = old_quantity + value
+            variance = value
+        else:
+            # Exact: set to specific value
+            new_quantity = value
+            variance = new_quantity - old_quantity
+
+        # Update current stock level
+        item.quantity = new_quantity
+        item.save()
+
+        # Create stock history record
+        history = StockHistory.objects.create(
+            stock_item=item,
+            quantity=new_quantity,
+            change_amount=variance,
+            change_type='adjustment',
+            reference='Historical adjustment',
+            notes=notes if notes else f'Adjusted to {new_quantity} (was {old_quantity})',
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        # Override created_at to the effective date (auto_now_add prevents setting at creation)
+        from datetime import datetime
+        effective_dt = datetime.strptime(effective_date, '%Y-%m-%d')
+        effective_dt = timezone.make_aware(effective_dt) if timezone.is_naive(effective_dt) else effective_dt
+        StockHistory.objects.filter(id=history.id).update(created_at=effective_dt)
+
+        return JsonResponse({
+            'success': True,
+            'sku': item.sku,
+            'name': item.name,
+            'old_quantity': old_quantity,
+            'new_quantity': new_quantity,
+            'variance': variance,
+            'effective_date': effective_date,
+        })
+    except ValueError as e:
+        return JsonResponse({'success': False, 'error': f'Invalid data: {str(e)}'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
 def export_stock_take_csv(request, schedule_id):
     """Export CSV for specific stock take schedule with required columns only"""
     schedule = get_object_or_404(Schedule, id=schedule_id)
@@ -8355,7 +8429,7 @@ def search_orders_api(request):
         'last_name': order.last_name,
         'sale_number': order.sale_number,
         'customer_number': order.customer_number,
-        'fit_date': order.fit_date.strftime('%d/%m/%Y')
+        'fit_date': order.fit_date.strftime('%d/%m/%Y') if order.fit_date else ''
     } for order in orders]
     
     return JsonResponse({'orders': results})

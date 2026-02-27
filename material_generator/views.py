@@ -6,14 +6,20 @@ import io
 import zipfile
 import logging
 from pathlib import Path
+from datetime import datetime
 
 # Configure logging
+from django.core.files.storage import default_storage
+
 logger = logging.getLogger(__name__)
 
 # Database paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATABASE_PATH = BASE_DIR / 'cad_data.db'
 PRODUCTS_DB_PATH = BASE_DIR / 'order_generator_files' / 'src' / 'products.db'
+
+# Storage path for CAD DB in DigitalOcean Spaces (same as cad_views.py)
+CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
 
 # Global variables to cache imports
 _board_logic = None
@@ -61,16 +67,26 @@ def generate_materials(request):
         'products_db_path': str(PRODUCTS_DB_PATH),
     }
     
-    if DATABASE_PATH.exists():
-        db_stats['database_exists'] = True
-        db_stats['database_size'] = f"{DATABASE_PATH.stat().st_size / (1024*1024):.2f} MB"
-        logger.info(f"CAD database found at {DATABASE_PATH}")
+    if default_storage.exists(CAD_DB_STORAGE_PATH):
+        # Always use DigitalOcean Spaces version
+        try:
+            db_stats['database_exists'] = True
+            size = default_storage.size(CAD_DB_STORAGE_PATH)
+            db_stats['database_size'] = f"{size / (1024*1024):.2f} MB"
+            modified = default_storage.get_modified_time(CAD_DB_STORAGE_PATH)
+            if modified:
+                db_stats['database_last_modified'] = modified.strftime('%d %b %Y, %H:%M')
+            logger.info(f"CAD database found in cloud storage")
+        except Exception as e:
+            logger.warning(f"Error reading CAD DB from storage: {e}")
     else:
-        logger.warning(f"CAD database not found at {DATABASE_PATH}")
+        logger.warning(f"CAD database not found in cloud storage")
     
     if PRODUCTS_DB_PATH.exists():
         db_stats['products_db_exists'] = True
         db_stats['products_db_size'] = f"{PRODUCTS_DB_PATH.stat().st_size / (1024*1024):.2f} MB"
+        mtime = datetime.fromtimestamp(PRODUCTS_DB_PATH.stat().st_mtime)
+        db_stats['products_db_last_modified'] = mtime.strftime('%d %b %Y, %H:%M')
         logger.info(f"Products database found at {PRODUCTS_DB_PATH}")
     else:
         logger.warning(f"Products database not found at {PRODUCTS_DB_PATH}")
@@ -80,7 +96,7 @@ def generate_materials(request):
     workguru_logic = get_workguru_logic()
     
     context = {
-        'page_title': 'Generate PNX & CSV',
+        'page_title': 'Order Generator',
         'db_stats': db_stats,
         'modules_loaded': board_logic is not None and workguru_logic is not None,
     }

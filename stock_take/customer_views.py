@@ -284,7 +284,7 @@ def customers_bulk_delete(request):
 
 @login_required
 def customer_merge(request):
-    """Merge two customers: transfer orders/data from remove_id into keep_id, then delete remove_id"""
+    """Merge two customers: transfer orders/data from remove_id into keep_id, then delete remove_id. Identify and display conflicts for user resolution."""
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
@@ -292,6 +292,7 @@ def customer_merge(request):
         data = json.loads(request.body)
         keep_id = data.get('keep_id')
         remove_id = data.get('remove_id')
+        resolve_conflicts = data.get('resolve_conflicts', {})
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
@@ -303,6 +304,38 @@ def customer_merge(request):
         remove_customer = Customer.objects.get(pk=remove_id)
     except Customer.DoesNotExist:
         return JsonResponse({'error': 'Customer not found'}, status=404)
+
+    # Identify sales linked to both customers
+    sales_keep = set(AnthillSale.objects.filter(customer=keep_customer).values_list('anthill_activity_id', flat=True))
+    sales_remove = set(AnthillSale.objects.filter(customer=remove_customer).values_list('anthill_activity_id', flat=True))
+    conflicting_sales = sales_keep.intersection(sales_remove)
+
+    # If conflicts exist and not resolved, return them for user decision
+    if conflicting_sales and not resolve_conflicts:
+        conflicts = list(AnthillSale.objects.filter(anthill_activity_id__in=conflicting_sales))
+        return JsonResponse({
+            'success': False,
+            'conflicts': [
+                {
+                    'id': sale.pk,
+                    'anthill_activity_id': sale.anthill_activity_id,
+                    'activity_type': sale.activity_type,
+                    'status': sale.status,
+                    'customer_name': sale.customer_name,
+                    'keep_customer_id': keep_customer.pk,
+                    'remove_customer_id': remove_customer.pk,
+                }
+                for sale in conflicts
+            ],
+            'message': 'Sales conflict detected. Please resolve before merging.'
+        })
+
+    # Transfer sales from remove to keep (if not conflicting or resolved)
+    for sale_id in sales_remove:
+        if sale_id not in conflicting_sales or (resolve_conflicts and resolve_conflicts.get(str(sale_id)) == 'keep'):
+            AnthillSale.objects.filter(anthill_activity_id=sale_id, customer=remove_customer).update(customer=keep_customer)
+        elif resolve_conflicts and resolve_conflicts.get(str(sale_id)) == 'remove':
+            AnthillSale.objects.filter(anthill_activity_id=sale_id, customer=remove_customer).delete()
 
     # Transfer orders from remove to keep
     orders_moved = Order.objects.filter(customer=remove_customer).update(customer=keep_customer)

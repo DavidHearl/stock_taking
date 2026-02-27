@@ -35,12 +35,37 @@ def product_detail(request, item_id):
     stock_points = {}
     stock_points[today.isoformat()] = current_stock
     
-    # Calculate past stock (add back what was used)
+    # ── Past adjustments from StockHistory (stock_take + adjustment types) ──
+    # These are authoritative snapshots — include them as past data points
+    past_adjustments = StockHistory.objects.filter(
+        stock_item=product,
+        change_type__in=['adjustment', 'stock_take'],
+        created_at__date__lt=today,
+    ).order_by('created_at')
+    
+    adjustment_dates = set()
+    for adj in past_adjustments:
+        adj_date = adj.created_at.date()
+        date_key = adj_date.isoformat()
+        
+        # Add a point for the day BEFORE the adjustment showing pre-adjustment stock
+        pre_adj_date = (adj_date - timedelta(days=1)).isoformat()
+        pre_adj_qty = adj.quantity - adj.change_amount
+        if pre_adj_date not in adjustment_dates:
+            stock_points[pre_adj_date] = pre_adj_qty
+        
+        # The adjustment itself — authoritative value at that date
+        stock_points[date_key] = adj.quantity
+        adjustment_dates.add(date_key)
+    
+    # Calculate past stock (add back what was used) — only for dates without adjustment overrides
     past_accessories = accessories.filter(order__fit_date__lt=today)
     past_stock = current_stock
     for acc in past_accessories.order_by('-order__fit_date'):
         past_stock += int(acc.quantity)
-        stock_points[acc.order.fit_date.isoformat()] = past_stock
+        date_key = acc.order.fit_date.isoformat()
+        if date_key not in adjustment_dates:
+            stock_points[date_key] = past_stock
     
     # Collect all future events (outflows from accessories, inflows from POs)
     future_events = {}  # date_iso -> net change
@@ -91,12 +116,14 @@ def product_detail(request, item_id):
     
     # Build per-point metadata for the chart (is this a PO arrival date?)
     po_arrival_indices = [i for i, d in enumerate(sorted_dates) if d in incoming_po_dates]
+    adjustment_indices = [i for i, d in enumerate(sorted_dates) if d in adjustment_dates]
     
     history_data = {
         'labels': [datetime.fromisoformat(d).strftime('%b %d') for d in sorted_dates],
         'quantities': [stock_points[d] for d in sorted_dates],
         'today_index': sorted_dates.index(today.isoformat()) if today.isoformat() in sorted_dates else 0,
         'po_arrival_indices': po_arrival_indices,
+        'adjustment_indices': adjustment_indices,
     }
     
     # Calculate metrics

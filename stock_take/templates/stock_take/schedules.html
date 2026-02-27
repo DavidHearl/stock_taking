@@ -168,6 +168,202 @@ function clearActivitySearch() {
     input.dispatchEvent(new Event('input'));
     input.focus();
 }
+
+// ── Historical Adjustment ──
+let haSelectedItemId = null;
+let haMode = 'exact'; // 'exact' or 'adjust'
+
+function setHAMode(mode) {
+    haMode = mode;
+    document.querySelectorAll('.ha-mode-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('ha-mode-' + mode).classList.add('active');
+    const label = document.getElementById('ha-qty-label');
+    const input = document.getElementById('ha-new-qty');
+    if (mode === 'exact') {
+        label.textContent = 'New Quantity';
+        input.placeholder = '0';
+        input.min = '0';
+    } else {
+        label.textContent = 'Adjust By (+/-)';
+        input.placeholder = '+24 or -5';
+        input.removeAttribute('min');
+    }
+}
+
+function openHistoricalAdjustment() {
+    const modal = document.getElementById('historical-adjustment-modal');
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    // Default date to today
+    document.getElementById('ha-effective-date').value = new Date().toISOString().split('T')[0];
+    // Clear previous state
+    clearHASelection();
+    document.getElementById('ha-sku-input').value = '';
+    document.getElementById('ha-new-qty').value = '';
+    document.getElementById('ha-notes').value = '';
+    document.getElementById('ha-result-message').style.display = 'none';
+    setTimeout(() => document.getElementById('ha-sku-input').focus(), 100);
+}
+
+function closeHistoricalAdjustment() {
+    const modal = document.getElementById('historical-adjustment-modal');
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+function clearHASelection() {
+    haSelectedItemId = null;
+    document.getElementById('ha-selected-item').style.display = 'none';
+    document.getElementById('ha-sku-input').style.display = '';
+    document.getElementById('ha-sku-input').value = '';
+    document.getElementById('ha-sku-input').focus();
+}
+
+// SKU search with debounce
+let haSearchTimeout = null;
+document.addEventListener('DOMContentLoaded', function() {
+    const skuInput = document.getElementById('ha-sku-input');
+    const resultsDiv = document.getElementById('ha-sku-results');
+
+    if (skuInput) {
+        skuInput.addEventListener('input', function() {
+            clearTimeout(haSearchTimeout);
+            const query = this.value.trim();
+            if (query.length < 2) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+            haSearchTimeout = setTimeout(() => {
+                fetch(`/api/product-search/?q=${encodeURIComponent(query)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.results && data.results.length > 0) {
+                            resultsDiv.innerHTML = data.results.map(item =>
+                                `<div class="ha-result-item" style="padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s;" 
+                                     onmouseover="this.style.background='var(--bg-secondary)'" 
+                                     onmouseout="this.style.background=''"
+                                     onclick="selectHAItem(${item.id}, '${item.sku.replace(/'/g, "\\'")}', '${(item.name || '').replace(/'/g, "\\'")}', ${item.quantity || 0})">
+                                    <strong style="color: var(--primary-color);">${item.sku}</strong>
+                                    <span style="margin-left: 8px; color: var(--text-secondary); font-size: 0.85rem;">${item.name || ''}</span>
+                                    <span style="float: right; font-size: 0.8rem; color: var(--text-secondary);">Qty: ${item.quantity || 0}</span>
+                                </div>`
+                            ).join('');
+                            resultsDiv.style.display = 'block';
+                        } else {
+                            resultsDiv.innerHTML = '<div style="padding: 12px 14px; color: var(--text-secondary);">No items found</div>';
+                            resultsDiv.style.display = 'block';
+                        }
+                    });
+            }, 300);
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!skuInput.contains(e.target) && !resultsDiv.contains(e.target)) {
+                resultsDiv.style.display = 'none';
+            }
+        });
+    }
+
+    // Historical adjustment modal close handlers
+    const haModal = document.getElementById('historical-adjustment-modal');
+    if (haModal) {
+        document.getElementById('close-historical-modal').addEventListener('click', closeHistoricalAdjustment);
+        haModal.addEventListener('click', function(e) {
+            if (e.target === haModal) closeHistoricalAdjustment();
+        });
+    }
+});
+
+function selectHAItem(id, sku, name, quantity) {
+    haSelectedItemId = id;
+    document.getElementById('ha-sku-input').style.display = 'none';
+    document.getElementById('ha-sku-results').style.display = 'none';
+    document.getElementById('ha-selected-sku').textContent = sku;
+    document.getElementById('ha-selected-name').textContent = name;
+    document.getElementById('ha-current-qty').textContent = quantity;
+    document.getElementById('ha-selected-item').style.display = 'block';
+    document.getElementById('ha-new-qty').focus();
+}
+
+function submitHistoricalAdjustment() {
+    const sku = document.getElementById('ha-selected-sku').textContent;
+    const newQty = document.getElementById('ha-new-qty').value;
+    const effectiveDate = document.getElementById('ha-effective-date').value;
+    const notes = document.getElementById('ha-notes').value;
+    const resultMsg = document.getElementById('ha-result-message');
+    const submitBtn = document.getElementById('ha-submit-btn');
+
+    if (!haSelectedItemId || !sku) {
+        resultMsg.style.display = 'block';
+        resultMsg.style.background = 'var(--danger-bg, #fef2f2)';
+        resultMsg.style.color = 'var(--danger-color, #dc2626)';
+        resultMsg.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Please select a stock item first.';
+        return;
+    }
+    if (newQty === '' || newQty === null) {
+        resultMsg.style.display = 'block';
+        resultMsg.style.background = 'var(--danger-bg, #fef2f2)';
+        resultMsg.style.color = 'var(--danger-color, #dc2626)';
+        resultMsg.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Please enter a quantity.';
+        return;
+    }
+    if (!effectiveDate) {
+        resultMsg.style.display = 'block';
+        resultMsg.style.background = 'var(--danger-bg, #fef2f2)';
+        resultMsg.style.color = 'var(--danger-color, #dc2626)';
+        resultMsg.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Please select an effective date.';
+        return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Applying...';
+
+    fetch('{% url "historical_stock_adjustment" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+            sku: sku,
+            mode: haMode,
+            value: parseInt(newQty),
+            effective_date: effectiveDate,
+            notes: notes
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            resultMsg.style.display = 'block';
+            resultMsg.style.background = 'var(--success-bg, #f0fdf4)';
+            resultMsg.style.color = 'var(--success-color, #16a34a)';
+            resultMsg.innerHTML = `<i class="bi bi-check-circle"></i> <strong>${data.sku}</strong> adjusted from ${data.old_quantity} → ${data.new_quantity} (effective ${data.effective_date})`;
+            // Reset for next adjustment
+            setTimeout(() => {
+                clearHASelection();
+                document.getElementById('ha-new-qty').value = '';
+                document.getElementById('ha-notes').value = '';
+            }, 1500);
+        } else {
+            resultMsg.style.display = 'block';
+            resultMsg.style.background = 'var(--danger-bg, #fef2f2)';
+            resultMsg.style.color = 'var(--danger-color, #dc2626)';
+            resultMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${data.error}`;
+        }
+    })
+    .catch(err => {
+        resultMsg.style.display = 'block';
+        resultMsg.style.background = 'var(--danger-bg, #fef2f2)';
+        resultMsg.style.color = 'var(--danger-color, #dc2626)';
+        resultMsg.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error. Please try again.';
+    })
+    .finally(() => {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Apply Adjustment';
+    });
+}
 </script>
 {% endblock %}
 
@@ -206,6 +402,9 @@ function clearActivitySearch() {
 
         <!-- Actions (right-aligned) -->
         <div class="stock-header-actions">
+            <button class="btn btn-secondary btn-sm" onclick="openHistoricalAdjustment()">
+                <i class="bi bi-clock-history"></i> Historical Adjustment
+            </button>
             <a href="{% url 'export_all_stock_pdf' %}" class="btn btn-primary btn-sm" target="_blank">
                 <i class="bi bi-printer"></i> Print Sheet
             </a>
@@ -673,4 +872,71 @@ function clearActivitySearch() {
 </div>
 
 {% endif %}
+
+<!-- Historical Adjustment Modal -->
+<div id="historical-adjustment-modal" class="ha-modal-overlay">
+    <div class="ha-modal">
+        <div class="ha-modal-header">
+            <h3 style="margin: 0; font-size: 1.1rem;"><i class="bi bi-clock-history"></i> Historical Stock Adjustment</h3>
+            <button class="modal-close-btn" id="close-historical-modal"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div style="padding: 24px;">
+            <div id="ha-search-group" style="margin-bottom: 16px; position: relative;">
+                <label style="font-weight: 600; margin-bottom: 6px; display: block;">SKU</label>
+                <input type="text" id="ha-sku-input" class="form-control" placeholder="Search by SKU or product name..." autocomplete="off">
+                <div id="ha-sku-results" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; max-height: 200px; overflow-y: auto; display: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
+            </div>
+
+            <div id="ha-selected-item" style="display: none; margin-bottom: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong id="ha-selected-sku" style="color: var(--primary-color);"></strong>
+                        <span id="ha-selected-name" style="margin-left: 8px; color: var(--text-secondary);"></span>
+                    </div>
+                    <button class="btn btn-sm" onclick="clearHASelection()" style="padding: 2px 8px; font-size: 0.75rem;">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div style="margin-top: 6px; font-size: 0.85rem; color: var(--text-secondary);">
+                    Current stock: <strong id="ha-current-qty">0</strong>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 4px; margin-bottom: 16px; background: var(--bg-primary); border-radius: 8px; padding: 4px; border: 1px solid var(--border-color);">
+                <button type="button" class="btn btn-sm ha-mode-btn active" id="ha-mode-exact" onclick="setHAMode('exact')" style="flex: 1; border-radius: 6px;">
+                    <i class="bi bi-bullseye"></i> Set Exact Qty
+                </button>
+                <button type="button" class="btn btn-sm ha-mode-btn" id="ha-mode-adjust" onclick="setHAMode('adjust')" style="flex: 1; border-radius: 6px;">
+                    <i class="bi bi-plus-slash-minus"></i> Adjust By Amount
+                </button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                    <label style="font-weight: 600; margin-bottom: 6px; display: block;" id="ha-qty-label">New Quantity</label>
+                    <input type="number" id="ha-new-qty" class="form-control" placeholder="0">
+                </div>
+                <div>
+                    <label style="font-weight: 600; margin-bottom: 6px; display: block;">Effective Date</label>
+                    <input type="date" id="ha-effective-date" class="form-control">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label style="font-weight: 600; margin-bottom: 6px; display: block;">Notes <span style="font-weight: 400; color: var(--text-secondary);">(optional)</span></label>
+                <textarea id="ha-notes" class="form-control" rows="2" placeholder="Reason for adjustment..."></textarea>
+            </div>
+
+            <div id="ha-result-message" style="display: none; margin-bottom: 16px; padding: 12px; border-radius: 8px;"></div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="closeHistoricalAdjustment()">Cancel</button>
+                <button class="btn btn-primary" id="ha-submit-btn" onclick="submitHistoricalAdjustment()">
+                    <i class="bi bi-check-lg"></i> Apply Adjustment
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

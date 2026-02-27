@@ -881,7 +881,11 @@
         </div>
         <div class="modal-body">
             <p>Mark <strong>{{ purchase_order.display_number }}</strong> as received?</p>
-            <p style="margin:0;color:var(--text-secondary);font-size:0.85rem;">This will update all linked items (boards/doors) as received.</p>
+            <div style="margin: 16px 0;">
+                <label for="receive-date" style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px;">Received Date</label>
+                <input type="date" id="receive-date" class="form-input" style="width: 100%;">
+            </div>
+            <p style="margin:0;color:var(--text-secondary);font-size:0.85rem;">This will update all linked items and stock levels.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn-cancel" onclick="closeReceiveModal()">Cancel</button>
@@ -1234,6 +1238,9 @@ function showNotification(message, type) {
 }
 
 function receivePO() {
+    // Default the date picker to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('receive-date').value = today;
     document.getElementById('receive-modal').style.display = 'flex';
 }
 
@@ -1248,13 +1255,15 @@ function confirmReceivePO() {
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Receiving...';
     
+    const receivedDate = document.getElementById('receive-date').value;
+    
     fetch('{% url "purchase_order_receive" purchase_order.workguru_id %}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}',
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ received_date: receivedDate }),
     })
     .then(res => res.json())
     .then(result => {

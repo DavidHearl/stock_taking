@@ -228,8 +228,8 @@ class Order(models.Model):
     # Order details
     sale_number = models.CharField(max_length=6)
     customer_number = models.CharField(max_length=6)
-    order_date = models.DateField()
-    fit_date = models.DateField()
+    order_date = models.DateField(null=True, blank=True)
+    fit_date = models.DateField(null=True, blank=True)
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
     additional_boards_pos = models.ManyToManyField(BoardsPO, blank=True, related_name='additional_orders', help_text='Additional boards POs for this order')
     job_finished = models.BooleanField(default=False)
@@ -268,6 +268,8 @@ class Order(models.Model):
     paperwork_completed = models.BooleanField(default=False, help_text='Paperwork completed')
 
     def time_allowance(self):
+        if not self.fit_date or not self.order_date:
+            return None
         return (self.fit_date - self.order_date).days
 
     @property
@@ -1660,7 +1662,7 @@ PAGE_SECTIONS = [
     ]),
     ('Tools', [
         ('map', 'Map'),
-        ('generate_materials', 'Generate PNX & CSV'),
+        ('generate_materials', 'Order Generator'),
         ('database_check', 'Database Check'),
     ]),
     ('Reports', [

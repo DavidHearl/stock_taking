@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, Supplier, SupplierContact
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, StockHistory, Supplier, SupplierContact
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -683,7 +683,23 @@ def purchase_order_save(request, po_id):
                         pass
                 if 'received_quantity' in prod_data:
                     try:
-                        product.received_quantity = float(prod_data['received_quantity']) if prod_data['received_quantity'] else 0
+                        new_received = float(prod_data['received_quantity']) if prod_data['received_quantity'] else 0
+                        old_received = float(product.received_quantity)
+                        delta = new_received - old_received
+                        product.received_quantity = new_received
+                        # Update linked stock item quantity and create stock history
+                        if delta != 0 and product.stock_item:
+                            product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
+                            product.stock_item.save(update_fields=['quantity'])
+                            StockHistory.objects.create(
+                                stock_item=product.stock_item,
+                                quantity=product.stock_item.quantity,
+                                change_amount=int(delta),
+                                change_type='purchase',
+                                reference=po.display_number,
+                                notes=f'Received {int(abs(delta))} via {po.display_number} ({product.sku})',
+                                created_by=request.user,
+                            )
                     except (ValueError, TypeError):
                         pass
                 if 'invoice_price' in prod_data:
@@ -723,7 +739,17 @@ def purchase_order_receive(request, po_id):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
     from django.utils import timezone
-    today = timezone.now().strftime('%d/%m/%Y')
+    
+    # Use provided date or default to today
+    received_date_str = data.get('received_date', '')
+    if received_date_str:
+        try:
+            rd = datetime.strptime(received_date_str, '%Y-%m-%d')
+            today = rd.strftime('%d/%m/%Y')
+        except (ValueError, TypeError):
+            today = timezone.now().strftime('%d/%m/%Y')
+    else:
+        today = timezone.now().strftime('%d/%m/%Y')
     received_items = 0
 
     # Update PO status
@@ -754,10 +780,24 @@ def purchase_order_receive(request, po_id):
 
     # Mark regular product lines as received (skip for Carnehill — boards don't update stock)
     if not is_carnehill:
-        for product in po.products.all():
+        for product in po.products.select_related('stock_item').all():
             if product.received_quantity < product.order_quantity:
+                delta = float(product.order_quantity) - float(product.received_quantity)
                 product.received_quantity = product.order_quantity
                 product.save(update_fields=['received_quantity'])
+                # Update linked stock item quantity and create stock history
+                if delta > 0 and product.stock_item:
+                    product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
+                    product.stock_item.save(update_fields=['quantity'])
+                    StockHistory.objects.create(
+                        stock_item=product.stock_item,
+                        quantity=product.stock_item.quantity,
+                        change_amount=int(delta),
+                        change_type='purchase',
+                        reference=po.display_number,
+                        notes=f'Received {int(delta)} via {po.display_number} ({product.sku})',
+                        created_by=request.user,
+                    )
                 received_items += 1
 
     return JsonResponse({
@@ -1080,6 +1120,7 @@ def product_search(request):
             'name': item.name,
             'cost': str(item.cost),
             'description': item.description or '',
+            'quantity': item.quantity,
         })
 
     return JsonResponse({'results': results})
