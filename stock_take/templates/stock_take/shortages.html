@@ -1,0 +1,414 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Shortages{% endblock %}
+
+{% block nav_shortages_active %}active{% endblock %}
+
+{% block page_title %}Shortages{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/shortage.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<!-- Tab Navigation -->
+<div class="shortage-tabs">
+    <a href="?tab=stock" class="shortage-tab {% if active_tab == 'stock' %}active{% endif %}">
+        <i class="bi bi-box-seam"></i> Stock
+    </a>
+    <a href="?tab=raumplus" class="shortage-tab {% if active_tab == 'raumplus' %}active{% endif %}">
+        <i class="bi bi-gear"></i> Raumplus
+    </a>
+</div>
+
+{% if active_tab == 'stock' %}
+<!-- ============ STOCK TAB ============ -->
+
+<!-- Table 1: Current Shortages -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>Current Shortages</h2>
+        <span class="section-subtitle">Items we are short of for orders currently in the system</span>
+    </div>
+    {% if actual_shortages %}
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Incoming</th>
+                    <th class="text-right">Required</th>
+                    <th class="text-right">Short By</th>
+                    <th class="text-right">Orders</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in actual_shortages %}
+                <tr class="expandable-row" onclick="toggleExpand('actual-{{ forloop.counter }}')">
+                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{% if item.incoming_qty %}<span class="badge-incoming">{{ item.incoming_qty|floatformat:0 }}</span>{% else %}0{% endif %}</td>
+                    <td class="text-right">{{ item.required_qty|floatformat:0 }}</td>
+                    <td class="text-right"><span class="badge-shortage">{{ item.shortage|floatformat:0 }}</span></td>
+                    <td class="text-right">{{ item.order_count }} <i class="bi bi-chevron-down expand-icon"></i></td>
+                </tr>
+                <tr class="expand-row" id="actual-{{ forloop.counter }}">
+                    <td colspan="7">
+                        <table class="shortage-tbl nested">
+                            <thead>
+                                <tr>
+                                    <th>Sale #</th>
+                                    <th>Customer</th>
+                                    <th>Fit Date</th>
+                                    <th class="text-right">Qty</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in item.orders %}
+                                <tr>
+                                    <td>{{ order.sale_number }}</td>
+                                    <td>{{ order.first_name }} {{ order.last_name }}</td>
+                                    <td>{{ order.fit_date }}</td>
+                                    <td class="text-right">{{ order.quantity|floatformat:0 }}</td>
+                                    <td><a href="{% url 'order_details' order.order_id %}" class="sku-link" target="_blank">View</a></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-check-circle"></i> No current shortages — stock covers all orders in the system.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Table 2: Predicted 2-Month Shortage -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>Predicted 2-Month Shortage</h2>
+        <span class="section-subtitle">Weighted average: 70% recent usage (90 days) + 30% all-time baseline</span>
+    </div>
+    {% if predicted_shortages %}
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">Monthly Avg</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">2-Month Need</th>
+                    <th class="text-right">Short By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in predicted_shortages %}
+                <tr>
+                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.monthly_average|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.predicted_2month|floatformat:0 }}</td>
+                    <td class="text-right">
+                        {% if item.predicted_shortage > 100 %}
+                        <span class="badge-shortage high">{{ item.predicted_shortage|floatformat:0 }}</span>
+                        {% elif item.predicted_shortage > 20 %}
+                        <span class="badge-shortage medium">{{ item.predicted_shortage|floatformat:0 }}</span>
+                        {% else %}
+                        <span class="badge-shortage low">{{ item.predicted_shortage|floatformat:0 }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-check-circle"></i> No predicted shortages for the next 2 months.
+    </div>
+    {% endif %}
+</div>
+
+{% else %}
+<!-- ============ RAUMPLUS TAB ============ -->
+
+<!-- Current RAU Shortages -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>Current RAU Shortages</h2>
+        <span class="section-subtitle">Raumplus items we are short of for orders currently in the system</span>
+    </div>
+    {% if actual_shortages %}
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Incoming</th>
+                    <th class="text-right">Required</th>
+                    <th class="text-right">Short By</th>
+                    <th class="text-right">Orders</th>
+                    <th class="text-right">Unit Cost</th>
+                    <th class="text-right">Line Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in actual_shortages %}
+                <tr class="expandable-row" onclick="toggleExpand('rau-actual-{{ forloop.counter }}')">
+                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{% if item.incoming_qty %}<span class="badge-incoming">{{ item.incoming_qty|floatformat:0 }}</span>{% else %}0{% endif %}</td>
+                    <td class="text-right">{{ item.required_qty|floatformat:0 }}</td>
+                    <td class="text-right"><span class="badge-shortage">{{ item.shortage|floatformat:0 }}</span></td>
+                    <td class="text-right">{{ item.order_count }} <i class="bi bi-chevron-down expand-icon"></i></td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right">£{{ item.line_cost|floatformat:2 }}</td>
+                </tr>
+                <tr class="expand-row" id="rau-actual-{{ forloop.counter }}">
+                    <td colspan="9">
+                        <table class="shortage-tbl nested">
+                            <thead>
+                                <tr>
+                                    <th>Sale #</th>
+                                    <th>Customer</th>
+                                    <th>Fit Date</th>
+                                    <th class="text-right">Qty</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in item.orders %}
+                                <tr>
+                                    <td>{{ order.sale_number }}</td>
+                                    <td>{{ order.first_name }} {{ order.last_name }}</td>
+                                    <td>{{ order.fit_date }}</td>
+                                    <td class="text-right">{{ order.quantity|floatformat:0 }}</td>
+                                    <td><a href="{% url 'order_details' order.order_id %}" class="sku-link" target="_blank">View</a></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-check-circle"></i> No current RAU shortages — stock covers all orders in the system.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Critical RAU Items -->
+{% if critical_items %}
+<div class="content-card">
+    <div class="section-header warning">
+        <h2><i class="bi bi-exclamation-triangle-fill"></i> Critical RAU Items</h2>
+        <span class="section-subtitle">Short for both upcoming orders and predicted future demand</span>
+    </div>
+    <div class="section-meta">
+        <span class="meta-badge">Total Cost: £{{ critical_total_cost|floatformat:2 }}</span>
+    </div>
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Upcoming</th>
+                    <th class="text-right">Predicted</th>
+                    <th class="text-right">Total Short</th>
+                    <th class="text-right">Min Ord Qty</th>
+                    <th class="text-right">Order Qty</th>
+                    <th class="text-right">Unit Cost</th>
+                    <th class="text-right">Line Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in critical_items %}
+                <tr>
+                    <td><a href="#" class="sku-link">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right text-danger">{{ item.upcoming_shortage|floatformat:0 }}</td>
+                    <td class="text-right text-warning">{{ item.predicted_shortage|floatformat:0 }}</td>
+                    <td class="text-right"><span class="badge-shortage">{{ item.total_shortage|floatformat:0 }}</span></td>
+                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
+                    <td class="text-right"><strong>{{ item.order_qty|floatformat:0 }}</strong></td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Predicted 4-Month Shortage -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>Predicted 4-Month RAU Shortage</h2>
+        <span class="section-subtitle">Additional items — weighted average: 70% recent usage (90 days) + 30% baseline</span>
+    </div>
+    <div class="section-meta">
+        <span class="meta-badge">Total Cost: £{{ predicted_total_cost|floatformat:2 }}</span>
+    </div>
+    {% if predicted_shortages %}
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">Monthly Avg</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">4-Month Need</th>
+                    <th class="text-right">Short By</th>
+                    <th class="text-right">Min Ord Qty</th>
+                    <th class="text-right">Order Qty</th>
+                    <th class="text-right">Unit Cost</th>
+                    <th class="text-right">Line Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in predicted_shortages %}
+                <tr>
+                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.monthly_average|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.predicted_4month|floatformat:0 }}</td>
+                    <td class="text-right">
+                        {% if item.predicted_shortage > 100 %}
+                        <span class="badge-shortage high">{{ item.predicted_shortage|floatformat:0 }}</span>
+                        {% elif item.predicted_shortage > 20 %}
+                        <span class="badge-shortage medium">{{ item.predicted_shortage|floatformat:0 }}</span>
+                        {% else %}
+                        <span class="badge-shortage low">{{ item.predicted_shortage|floatformat:0 }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
+                    <td class="text-right"><strong>{{ item.order_qty|floatformat:0 }}</strong></td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-check-circle"></i> No predicted RAU shortages for the next 4 months.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Suggested Additional Items -->
+{% if suggested_items %}
+<div class="content-card">
+    <div class="section-header">
+        <h2>Suggested Items to Reach £5,000 Minimum</h2>
+        <span class="section-subtitle">Add these items to qualify for free shipping (£{{ min_order_value|floatformat:0 }} minimum inc VAT)</span>
+    </div>
+    <div class="section-meta">
+        <span class="meta-badge">Order Value (exc VAT): £{{ current_order_value|floatformat:2 }}</span>
+        <span class="meta-badge">Inc VAT: £{{ current_order_value_inc_vat|floatformat:2 }}</span>
+        <span class="meta-badge">Remaining: £{{ remaining_to_min|floatformat:2 }}</span>
+        <span class="meta-badge highlight">With Suggested: £{{ total_order_value_inc_vat|floatformat:2 }}</span>
+    </div>
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Min Ord Qty</th>
+                    <th class="text-right">Suggested Qty</th>
+                    <th class="text-right">Unit Cost</th>
+                    <th class="text-right">Line Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in suggested_items %}
+                <tr>
+                    <td><a href="#" class="sku-link">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.suggested_qty }}</td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Ordering Rules -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>Ordering Rules & Logic</h2>
+    </div>
+    <div class="rules-grid">
+        {% for rule_category in ordering_rules %}
+        <div class="rules-block">
+            <h4>{{ rule_category.category }}</h4>
+            <ul>
+                {% for rule in rule_category.rules %}
+                <li>{{ rule }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function toggleExpand(rowId) {
+        const row = document.getElementById(rowId);
+        if (!row) return;
+        const parentRow = row.previousElementSibling;
+        const isOpen = row.classList.contains('open');
+        
+        // Close all other expanded rows in the same table
+        const table = row.closest('table');
+        table.querySelectorAll('.expand-row.open').forEach(r => {
+            r.classList.remove('open');
+            r.previousElementSibling.classList.remove('expanded');
+        });
+        
+        if (!isOpen) {
+            row.classList.add('open');
+            parentRow.classList.add('expanded');
+        }
+    }
+</script>
+{% endblock %}

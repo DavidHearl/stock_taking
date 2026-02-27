@@ -54,20 +54,21 @@ def dashboard(request):
     if profile and profile.role and profile.role.name == 'franchise':
         return redirect('claim_service')
     
-    # Get fits per week data (max 52 weeks, or less if not enough data)
+    # Get fits per week data (past 52 weeks + future 12 weeks to show scheduled fits)
     today = datetime.now().date()
     start_date = today - timedelta(weeks=52)
+    future_date = today + timedelta(weeks=12)
     
-    # Get all orders with fit dates in the last 52 weeks
+    # Get all orders with fit dates in the range (past 52 weeks + future 12 weeks)
     orders_in_range = Order.objects.filter(
         fit_date__gte=start_date,
-        fit_date__lte=today
+        fit_date__lte=future_date
     )
     
     # Create a dictionary of all weeks with default data
     weeks_data = {}
     current_date = start_date
-    while current_date <= today:
+    while current_date <= future_date:
         # Get Monday of the week
         week_start = current_date - timedelta(days=current_date.weekday())
         weeks_data[week_start] = {'fits': 0, 'sales': Decimal('0.00')}
@@ -98,6 +99,14 @@ def dashboard(request):
     fits_values = [data['fits'] for _, data in sorted_weeks]
     sales_values = [float(data['sales']) for _, data in sorted_weeks]
     
+    # Find the index of the current week for the vertical marker line
+    this_week_monday = today - timedelta(days=today.weekday())
+    current_week_index = None
+    for i, (week, _) in enumerate(sorted_weeks):
+        if week == this_week_monday:
+            current_week_index = i
+            break
+    
     # This week's sale value
     this_week_start = today - timedelta(days=today.weekday())
     this_week_sales = Order.objects.filter(
@@ -117,14 +126,20 @@ def dashboard(request):
     total_stock_value = sum(item.cost * item.quantity for item in stock_items) or Decimal('0.00')
     stock_item_count = stock_items.count()
     
-    # Monthly board costs - aggregate materials_cost by month over last 12 months
+    # Monthly board costs - aggregate materials_cost by month (past 12 months + future 3 months)
     twelve_months_ago = today.replace(day=1) - timedelta(days=365)
     twelve_months_ago = twelve_months_ago.replace(day=1)  # Start of that month
+    three_months_ahead = today.replace(day=1)
+    for _ in range(3):
+        if three_months_ahead.month == 12:
+            three_months_ahead = three_months_ahead.replace(year=three_months_ahead.year + 1, month=1)
+        else:
+            three_months_ahead = three_months_ahead.replace(month=three_months_ahead.month + 1)
     
     monthly_board_data = (
         Order.objects.filter(
             fit_date__gte=twelve_months_ago,
-            fit_date__lte=today,
+            fit_date__lte=three_months_ahead,
             materials_cost__gt=0,
         )
         .annotate(month=TruncMonth('fit_date'))
@@ -136,7 +151,7 @@ def dashboard(request):
     # Build a complete month range (even months with no data)
     board_cost_months = {}
     current_month = twelve_months_ago
-    while current_month <= today.replace(day=1):
+    while current_month <= three_months_ahead:
         board_cost_months[current_month] = Decimal('0.00')
         # Advance to next month
         if current_month.month == 12:
@@ -157,11 +172,20 @@ def dashboard(request):
     board_cost_labels = [m.strftime('%b %Y') for m, _ in sorted_board_months]
     board_cost_values = [float(v) for _, v in sorted_board_months]
 
-    # Monthly sales totals - aggregate total_value_exc_vat by month over last 12 months
+    # Find index of current month for the monthly chart marker
+    current_month_start = today.replace(day=1)
+    sorted_board_month_keys = [m for m, _ in sorted_board_months]
+    current_month_board_index = None
+    for i, m in enumerate(sorted_board_month_keys):
+        if m == current_month_start:
+            current_month_board_index = i
+            break
+
+    # Monthly sales totals - aggregate total_value_exc_vat by month (past 12 months + future 3 months)
     monthly_sales_data = (
         Order.objects.filter(
             fit_date__gte=twelve_months_ago,
-            fit_date__lte=today,
+            fit_date__lte=three_months_ahead,
             total_value_exc_vat__gt=0,
         )
         .annotate(month=TruncMonth('fit_date'))
@@ -172,7 +196,7 @@ def dashboard(request):
 
     monthly_sales_months = {}
     temp_month = twelve_months_ago
-    while temp_month <= today.replace(day=1):
+    while temp_month <= three_months_ahead:
         monthly_sales_months[temp_month] = Decimal('0.00')
         if temp_month.month == 12:
             temp_month = temp_month.replace(year=temp_month.year + 1, month=1)
@@ -190,6 +214,14 @@ def dashboard(request):
     sorted_sales_months = sorted(monthly_sales_months.items())
     monthly_sales_labels = [m.strftime('%b %Y') for m, _ in sorted_sales_months]
     monthly_sales_values = [float(v) for _, v in sorted_sales_months]
+
+    # Find index of current month for the monthly sales chart marker
+    sorted_sales_month_keys = [m for m, _ in sorted_sales_months]
+    current_month_sales_index = None
+    for i, m in enumerate(sorted_sales_month_keys):
+        if m == current_month_start:
+            current_month_sales_index = i
+            break
 
     # Current month sales data
     current_month_sales = _get_monthly_sales_data(today.year, today.month)
@@ -211,6 +243,9 @@ def dashboard(request):
             'labels': monthly_sales_labels,
             'values': monthly_sales_values,
         }),
+        'current_week_index': current_week_index,
+        'current_month_board_index': current_month_board_index,
+        'current_month_sales_index': current_month_sales_index,
         'pending_pos_count': pending_pos,
         'total_stock_value': '{:,.0f}'.format(total_stock_value),
         'stock_item_count': '{:,}'.format(stock_item_count),

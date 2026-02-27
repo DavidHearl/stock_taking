@@ -244,23 +244,33 @@ def create_invoice(request):
 # ── Create invoice and link to PO ─────────────────────────────────
 @login_required
 def po_create_invoice(request, po_id):
-    """Create a new Invoice and automatically link it to a PurchaseOrder (AJAX)."""
+    """Create a new Invoice and automatically link it to a PurchaseOrder.
+    
+    Accepts both JSON (application/json) and multipart form data (for file upload).
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
 
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    from decimal import Decimal, InvalidOperation
+    from datetime import datetime as _dt
+
+    # Support both JSON and multipart/form-data
+    content_type = request.content_type or ''
+    if 'multipart' in content_type:
+        data = request.POST
+        uploaded_file = request.FILES.get('attachment')
+    else:
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+        uploaded_file = None
 
     invoice_number = data.get('invoice_number', '').strip()
     if not invoice_number:
         return JsonResponse({'error': 'Invoice number is required'}, status=400)
-
-    from decimal import Decimal, InvalidOperation
-    from datetime import datetime as _dt
 
     def _parse_date(val):
         if not val:
@@ -272,11 +282,34 @@ def po_create_invoice(request, po_id):
                 continue
         return None
 
-    total_str = data.get('total', '0')
-    try:
-        total_val = Decimal(str(total_str)) if total_str else Decimal('0')
-    except (InvalidOperation, ValueError):
-        total_val = Decimal('0')
+    def _parse_decimal(val, default='0'):
+        try:
+            return Decimal(str(val)) if val else Decimal(default)
+        except (InvalidOperation, ValueError):
+            return Decimal(default)
+
+    total_val = _parse_decimal(data.get('total', '0'))
+    freight_val = _parse_decimal(data.get('freight_cost', '0'))
+    currency = data.get('currency', 'GBP').strip().upper() or 'GBP'
+    is_vat_inclusive = data.get('is_vat_inclusive', 'true')
+    if isinstance(is_vat_inclusive, str):
+        is_vat_inclusive = is_vat_inclusive.lower() in ('true', '1', 'yes', 'on')
+    vat_rate = _parse_decimal(data.get('vat_rate', '20'), '20')
+
+    # Parse line items
+    line_items_raw = []
+    if 'multipart' in content_type:
+        # Line items from form fields: line_name_0, line_qty_0, line_rate_0, etc.
+        idx = 0
+        while data.get(f'line_name_{idx}') is not None:
+            name = data.get(f'line_name_{idx}', '').strip()
+            qty = _parse_decimal(data.get(f'line_qty_{idx}', '1'), '1')
+            rate = _parse_decimal(data.get(f'line_rate_{idx}', '0'))
+            if name:
+                line_items_raw.append({'name': name, 'quantity': qty, 'rate': rate})
+            idx += 1
+    else:
+        line_items_raw = data.get('line_items', [])
 
     invoice = Invoice.objects.create(
         invoice_number=invoice_number,
@@ -286,10 +319,37 @@ def po_create_invoice(request, po_id):
         description=data.get('description', '').strip(),
         status=data.get('status', 'Draft'),
         subtotal=total_val,
-        total=total_val,
-        amount_outstanding=total_val,
+        total=total_val + freight_val,
+        freight_cost=freight_val,
+        currency=currency,
+        is_vat_inclusive=is_vat_inclusive,
+        vat_rate=vat_rate,
+        amount_outstanding=total_val + freight_val,
         payment_status='unpaid',
     )
+
+    # Create line items
+    from .models import InvoiceLineItem
+    for i, item in enumerate(line_items_raw):
+        name = item.get('name', '').strip() if isinstance(item, dict) else str(item)
+        qty = _parse_decimal(item.get('quantity', '1') if isinstance(item, dict) else '1', '1')
+        rate = _parse_decimal(item.get('rate', '0') if isinstance(item, dict) else '0')
+        line_total = qty * rate
+        if name:
+            InvoiceLineItem.objects.create(
+                invoice=invoice,
+                name=name,
+                quantity=qty,
+                rate=rate,
+                line_total=line_total,
+                sort_order=i,
+            )
+
+    # Attach file if provided
+    if uploaded_file:
+        invoice.attachment = uploaded_file
+        invoice.save(update_fields=['attachment'])
+
     invoice.purchase_orders.add(po)
 
     return JsonResponse({
@@ -300,8 +360,11 @@ def po_create_invoice(request, po_id):
             'client_name': invoice.client_name,
             'date': invoice.date.strftime('%d/%m/%Y') if invoice.date else '',
             'total': str(invoice.total),
+            'freight_cost': str(invoice.freight_cost),
+            'currency': invoice.currency,
             'status': invoice.status,
             'payment_status': invoice.payment_status,
+            'has_attachment': bool(invoice.attachment),
         }
     })
 

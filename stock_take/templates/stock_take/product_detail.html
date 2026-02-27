@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="{% static 'css/order_details.css' %}">
 <link rel="stylesheet" href="{% static 'css/product_detail.css' %}">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
 {% endblock %}
 
 {% block content %}
@@ -623,6 +624,14 @@ function initStockHistoryChart() {
     gradient.addColorStop(1, 'rgba(23, 162, 184, 0.05)');   // Nearly transparent at bottom
     
     // Create datasets
+    const poArrivalIndices = new Set(stockHistoryData.po_arrival_indices || []);
+    
+    // Customize point styles: green triangles for PO arrivals, circles for rest
+    const pointStyles = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? 'triangle' : 'circle');
+    const pointColors = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? '#28a745' : '#17a2b8');
+    const pointSizes = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? 8 : 5);
+    const pointBorderWidths = stockHistoryData.quantities.map((_, i) => poArrivalIndices.has(i) ? 3 : 2);
+    
     const datasets = [
         {
             label: 'Stock Level',
@@ -632,12 +641,13 @@ function initStockHistoryChart() {
             borderWidth: 3,
             fill: true,
             tension: 0.4,                      // Smooth curves
-            pointBackgroundColor: '#17a2b8',
+            pointBackgroundColor: pointColors,
             pointBorderColor: '#fff',
-            pointBorderWidth: 2,
-            pointRadius: 5,
-            pointHoverRadius: 7,
-            pointHoverBackgroundColor: '#17a2b8',
+            pointBorderWidth: pointBorderWidths,
+            pointRadius: pointSizes,
+            pointStyle: pointStyles,
+            pointHoverRadius: 9,
+            pointHoverBackgroundColor: pointColors,
             pointHoverBorderColor: '#fff',
             pointHoverBorderWidth: 3,
             order: 1
@@ -660,6 +670,46 @@ function initStockHistoryChart() {
         });
     }
     
+    // Build PO arrival annotations
+    const poAnnotations = {};
+    poArrivalIndices.forEach(idx => {
+        poAnnotations['poArrival_' + idx] = {
+            type: 'label',
+            xValue: idx,
+            yValue: stockHistoryData.quantities[idx],
+            yAdjust: -20,
+            content: '+' + (stockHistoryData.quantities[idx] - stockHistoryData.quantities[idx > 0 ? idx - 1 : idx]) + ' (PO)',
+            backgroundColor: 'rgba(40, 167, 69, 0.85)',
+            color: '#fff',
+            font: { size: 10, weight: 'bold' },
+            padding: { top: 3, bottom: 3, left: 6, right: 6 },
+            borderRadius: 4,
+        };
+    });
+    
+    // Merge with today annotation
+    const allAnnotations = {
+        todayLine: {
+            type: 'line',
+            xMin: stockHistoryData.today_index,
+            xMax: stockHistoryData.today_index,
+            borderColor: '#ffc107',
+            borderWidth: 3,
+            borderDash: [10, 5],
+            label: {
+                display: true,
+                content: 'Today',
+                position: 'start',
+                backgroundColor: '#ffc107',
+                color: '#000',
+                font: {
+                    weight: 'bold'
+                }
+            }
+        },
+        ...poAnnotations
+    };
+    
     new Chart(ctx, {
         type: 'line',
         data: {
@@ -671,7 +721,7 @@ function initStockHistoryChart() {
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    display: parLevel > 0,    // Only show legend if par level exists
+                    display: parLevel > 0 || poArrivalIndices.size > 0,    // Show legend if par level or PO arrivals
                     position: 'top',
                     align: 'end',
                     labels: {
@@ -687,6 +737,9 @@ function initStockHistoryChart() {
                         }
                     }
                 },
+                annotation: {
+                    annotations: allAnnotations
+                },
                 tooltip: {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
                     padding: 12,
@@ -698,7 +751,12 @@ function initStockHistoryChart() {
                     callbacks: {
                         label: function(context) {
                             if (context.dataset.label === 'Stock Level') {
-                                return 'Stock: ' + context.parsed.y + ' units';
+                                const idx = context.dataIndex;
+                                let label = 'Stock: ' + context.parsed.y + ' units';
+                                if (poArrivalIndices.has(idx)) {
+                                    label += ' (includes PO delivery)';
+                                }
+                                return label;
                             }
                             return null;  // Don't show tooltip for par level line
                         }
@@ -763,30 +821,6 @@ function initStockHistoryChart() {
             interaction: {
                 intersect: false,
                 mode: 'index'
-            },
-            plugins: {
-                annotation: {
-                    annotations: {
-                        todayLine: {
-                            type: 'line',
-                            xMin: stockHistoryData.today_index,
-                            xMax: stockHistoryData.today_index,
-                            borderColor: '#ffc107',
-                            borderWidth: 3,
-                            borderDash: [10, 5],
-                            label: {
-                                display: true,
-                                content: 'Today',
-                                position: 'start',
-                                backgroundColor: '#ffc107',
-                                color: '#000',
-                                font: {
-                                    weight: 'bold'
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     });

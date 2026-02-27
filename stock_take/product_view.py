@@ -42,19 +42,61 @@ def product_detail(request, item_id):
         past_stock += int(acc.quantity)
         stock_points[acc.order.fit_date.isoformat()] = past_stock
     
-    # Calculate future stock (subtract what will be used)
+    # Collect all future events (outflows from accessories, inflows from POs)
+    future_events = {}  # date_iso -> net change
+    
+    # Outflows from future accessories
     future_accessories = accessories.filter(order__fit_date__gt=today)
-    future_stock = current_stock
     for acc in future_accessories.order_by('order__fit_date'):
-        future_stock -= int(acc.quantity)
-        stock_points[acc.order.fit_date.isoformat()] = future_stock
+        date_key = acc.order.fit_date.isoformat()
+        future_events[date_key] = future_events.get(date_key, 0) - int(acc.quantity)
+    
+    # Inflows from pending POs with expected dates in the future
+    incoming_po_dates = set()  # Track which dates have PO arrivals for chart markers
+    incoming_po_lines = PurchaseOrderProduct.objects.filter(
+        stock_item=product,
+        purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Draft'],
+    ).exclude(
+        purchase_order__expected_date__isnull=True
+    ).exclude(
+        purchase_order__expected_date=''
+    ).select_related('purchase_order')
+    
+    for po_line in incoming_po_lines:
+        try:
+            exp_str = po_line.purchase_order.expected_date.strip()
+            # Parse various date formats (ISO with/without time, etc.)
+            if 'T' in exp_str:
+                expected = datetime.fromisoformat(exp_str.replace('Z', '+00:00')).date()
+            else:
+                expected = datetime.strptime(exp_str[:10], '%Y-%m-%d').date()
+            
+            if expected >= today:
+                incoming_qty = int(po_line.order_quantity) - int(po_line.received_quantity)
+                if incoming_qty > 0:
+                    date_key = expected.isoformat()
+                    future_events[date_key] = future_events.get(date_key, 0) + incoming_qty
+                    incoming_po_dates.add(date_key)
+        except (ValueError, TypeError, AttributeError):
+            pass
+    
+    # Build future trajectory from sorted events
+    running_stock = current_stock
+    for date_key in sorted(future_events.keys()):
+        running_stock += future_events[date_key]
+        stock_points[date_key] = running_stock
     
     # Sort by date and prepare for chart
     sorted_dates = sorted(stock_points.keys())
+    
+    # Build per-point metadata for the chart (is this a PO arrival date?)
+    po_arrival_indices = [i for i, d in enumerate(sorted_dates) if d in incoming_po_dates]
+    
     history_data = {
         'labels': [datetime.fromisoformat(d).strftime('%b %d') for d in sorted_dates],
         'quantities': [stock_points[d] for d in sorted_dates],
-        'today_index': sorted_dates.index(today.isoformat()) if today.isoformat() in sorted_dates else 0
+        'today_index': sorted_dates.index(today.isoformat()) if today.isoformat() in sorted_dates else 0,
+        'po_arrival_indices': po_arrival_indices,
     }
     
     # Calculate metrics

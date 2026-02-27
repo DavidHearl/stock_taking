@@ -1534,10 +1534,14 @@ class Invoice(models.Model):
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_tax = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    freight_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text='Freight / shipping cost')
     amount_outstanding = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
     is_overdue = models.BooleanField(default=False)
+    currency = models.CharField(max_length=3, default='GBP', help_text='ISO currency code')
+    is_vat_inclusive = models.BooleanField(default=True, help_text='Whether the total entered includes VAT')
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=20.00, help_text='VAT percentage rate')
 
     # Xero / accounting integration
     xero_id = models.CharField(max_length=100, blank=True, null=True)

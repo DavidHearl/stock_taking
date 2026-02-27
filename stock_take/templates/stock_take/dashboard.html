@@ -10,6 +10,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
 {% endblock %}
 
 {% block content %}
@@ -159,6 +160,10 @@ document.addEventListener('DOMContentLoaded', function() {
     fitsGradient.addColorStop(0, 'rgba(23, 162, 184, 0.4)');
     fitsGradient.addColorStop(1, 'rgba(23, 162, 184, 0.05)');
     
+    const fitsCurrentWeekIndex = {{ current_week_index|default_if_none:"null" }};
+    const fitsNonZero = fitsChartData.values.filter(v => v > 0);
+    const fitsAvg = fitsNonZero.length ? fitsNonZero.reduce((a, b) => a + b, 0) / fitsNonZero.length : 0;
+    
     new Chart(fitsCtx, {
         type: 'line',
         data: {
@@ -179,6 +184,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 pointHoverBackgroundColor: '#17a2b8',
                 pointHoverBorderColor: '#fff',
                 pointHoverBorderWidth: 3,
+                segment: fitsCurrentWeekIndex !== null ? {
+                    borderDash: function(ctx) {
+                        return ctx.p0DataIndex >= fitsCurrentWeekIndex ? [6, 3] : undefined;
+                    },
+                    borderColor: function(ctx) {
+                        return ctx.p0DataIndex >= fitsCurrentWeekIndex ? 'rgba(23, 162, 184, 0.5)' : undefined;
+                    }
+                } : {},
             }]
         },
         options: {
@@ -187,6 +200,48 @@ document.addEventListener('DOMContentLoaded', function() {
             plugins: {
                 legend: {
                     display: false
+                },
+                annotation: {
+                    annotations: {
+                        ...(fitsCurrentWeekIndex !== null ? {
+                            currentWeekLine: {
+                                type: 'line',
+                                xMin: fitsCurrentWeekIndex,
+                                xMax: fitsCurrentWeekIndex,
+                                borderColor: 'rgba(255, 99, 132, 0.8)',
+                                borderWidth: 2,
+                                borderDash: [6, 3],
+                                label: {
+                                    display: true,
+                                    content: 'This Week',
+                                    position: 'start',
+                                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                                    color: '#fff',
+                                    font: { size: 10, weight: 'bold' },
+                                    padding: 4,
+                                    borderRadius: 3,
+                                }
+                            }
+                        } : {}),
+                        avgLine: {
+                            type: 'line',
+                            yMin: fitsAvg,
+                            yMax: fitsAvg,
+                            borderColor: 'rgba(23, 162, 184, 0.25)',
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            label: {
+                                display: true,
+                                content: 'Avg: ' + fitsAvg.toFixed(1),
+                                position: 'start',
+                                backgroundColor: 'rgba(23, 162, 184, 0.2)',
+                                color: 'rgba(23, 162, 184, 0.6)',
+                                font: { size: 9 },
+                                padding: 3,
+                                borderRadius: 3,
+                            }
+                        }
+                    }
                 },
                 tooltip: {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -249,6 +304,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sales Per Week Chart
     const salesCtx = document.getElementById('salesPerWeekChart').getContext('2d');
     const salesChartData = {{ sales_chart_data|safe }};
+    const salesCurrentWeekIndex = {{ current_week_index|default_if_none:"null" }};
+    const salesNonZero = salesChartData.values.filter(v => v > 0);
+    const salesAvg = salesNonZero.length ? salesNonZero.reduce((a, b) => a + b, 0) / salesNonZero.length : 0;
     
     // Create gradient for sales
     const salesGradient = salesCtx.createLinearGradient(0, 0, 0, 400);
@@ -275,6 +333,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 pointHoverBackgroundColor: '#28a745',
                 pointHoverBorderColor: '#fff',
                 pointHoverBorderWidth: 3,
+                segment: salesCurrentWeekIndex !== null ? {
+                    borderDash: function(ctx) {
+                        return ctx.p0DataIndex >= salesCurrentWeekIndex ? [6, 3] : undefined;
+                    },
+                    borderColor: function(ctx) {
+                        return ctx.p0DataIndex >= salesCurrentWeekIndex ? 'rgba(40, 167, 69, 0.5)' : undefined;
+                    }
+                } : {},
             }]
         },
         options: {
@@ -283,6 +349,48 @@ document.addEventListener('DOMContentLoaded', function() {
             plugins: {
                 legend: {
                     display: false
+                },
+                annotation: {
+                    annotations: {
+                        ...(salesCurrentWeekIndex !== null ? {
+                            currentWeekLine: {
+                                type: 'line',
+                                xMin: salesCurrentWeekIndex,
+                                xMax: salesCurrentWeekIndex,
+                                borderColor: 'rgba(255, 99, 132, 0.8)',
+                                borderWidth: 2,
+                                borderDash: [6, 3],
+                                label: {
+                                    display: true,
+                                    content: 'This Week',
+                                    position: 'start',
+                                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                                    color: '#fff',
+                                    font: { size: 10, weight: 'bold' },
+                                    padding: 4,
+                                    borderRadius: 3,
+                                }
+                            }
+                        } : {}),
+                        avgLine: {
+                            type: 'line',
+                            yMin: salesAvg,
+                            yMax: salesAvg,
+                            borderColor: 'rgba(40, 167, 69, 0.25)',
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            label: {
+                                display: true,
+                                content: 'Avg: £' + Math.round(salesAvg).toLocaleString(),
+                                position: 'start',
+                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                                color: 'rgba(40, 167, 69, 0.6)',
+                                font: { size: 9 },
+                                padding: 3,
+                                borderRadius: 3,
+                            }
+                        }
+                    }
                 },
                 tooltip: {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -347,10 +455,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // Monthly Sales Chart
     const monthlySalesCtx = document.getElementById('monthlySalesChart').getContext('2d');
     const monthlySalesChartData = {{ monthly_sales_chart_data|safe }};
+    const monthlySalesCurrentIndex = {{ current_month_sales_index|default_if_none:"null" }};
+    const monthlySalesNonZero = monthlySalesChartData.values.filter(v => v > 0);
+    const monthlySalesAvg = monthlySalesNonZero.length ? monthlySalesNonZero.reduce((a, b) => a + b, 0) / monthlySalesNonZero.length : 0;
 
     const monthlySalesGradient = monthlySalesCtx.createLinearGradient(0, 0, 0, 400);
     monthlySalesGradient.addColorStop(0, 'rgba(40, 167, 69, 0.4)');
     monthlySalesGradient.addColorStop(1, 'rgba(40, 167, 69, 0.05)');
+
+    // Color future months differently
+    const monthlySalesBgColors = monthlySalesChartData.values.map((v, i) => {
+        if (monthlySalesCurrentIndex !== null && i > monthlySalesCurrentIndex) return 'rgba(40, 167, 69, 0.25)';
+        return 'rgba(40, 167, 69, 0.6)';
+    });
+    const monthlySalesBorderColors = monthlySalesChartData.values.map((v, i) => {
+        if (monthlySalesCurrentIndex !== null && i > monthlySalesCurrentIndex) return 'rgba(40, 167, 69, 0.4)';
+        return '#28a745';
+    });
 
     new Chart(monthlySalesCtx, {
         type: 'bar',
@@ -359,8 +480,8 @@ document.addEventListener('DOMContentLoaded', function() {
             datasets: [{
                 label: 'Monthly Sales',
                 data: monthlySalesChartData.values,
-                backgroundColor: 'rgba(40, 167, 69, 0.6)',
-                borderColor: '#28a745',
+                backgroundColor: monthlySalesBgColors,
+                borderColor: monthlySalesBorderColors,
                 borderWidth: 2,
                 borderRadius: 6,
                 hoverBackgroundColor: 'rgba(40, 167, 69, 0.8)',
@@ -372,6 +493,48 @@ document.addEventListener('DOMContentLoaded', function() {
             plugins: {
                 legend: {
                     display: false
+                },
+                annotation: {
+                    annotations: {
+                        ...(monthlySalesCurrentIndex !== null ? {
+                            currentMonthLine: {
+                                type: 'line',
+                                xMin: monthlySalesCurrentIndex + 0.5,
+                                xMax: monthlySalesCurrentIndex + 0.5,
+                                borderColor: 'rgba(255, 99, 132, 0.8)',
+                                borderWidth: 2,
+                                borderDash: [6, 3],
+                                label: {
+                                    display: true,
+                                    content: 'Now',
+                                    position: 'start',
+                                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                                    color: '#fff',
+                                    font: { size: 10, weight: 'bold' },
+                                    padding: 4,
+                                    borderRadius: 3,
+                                }
+                            }
+                        } : {}),
+                        avgLine: {
+                            type: 'line',
+                            yMin: monthlySalesAvg,
+                            yMax: monthlySalesAvg,
+                            borderColor: 'rgba(40, 167, 69, 0.25)',
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            label: {
+                                display: true,
+                                content: 'Avg: £' + Math.round(monthlySalesAvg).toLocaleString(),
+                                position: 'start',
+                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                                color: 'rgba(40, 167, 69, 0.6)',
+                                font: { size: 9 },
+                                padding: 3,
+                                borderRadius: 3,
+                            }
+                        }
+                    }
                 },
                 tooltip: {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -432,11 +595,24 @@ document.addEventListener('DOMContentLoaded', function() {
     // Monthly Board Costs Chart
     const boardCtx = document.getElementById('boardCostsChart').getContext('2d');
     const boardChartData = {{ board_cost_chart_data|safe }};
+    const boardCurrentMonthIndex = {{ current_month_board_index|default_if_none:"null" }};
+    const boardNonZero = boardChartData.values.filter(v => v > 0);
+    const boardAvg = boardNonZero.length ? boardNonZero.reduce((a, b) => a + b, 0) / boardNonZero.length : 0;
     
     // Create gradient for board costs
     const boardGradient = boardCtx.createLinearGradient(0, 0, 0, 400);
     boardGradient.addColorStop(0, 'rgba(255, 159, 64, 0.4)');
     boardGradient.addColorStop(1, 'rgba(255, 159, 64, 0.05)');
+
+    // Color future months differently
+    const boardBgColors = boardChartData.values.map((v, i) => {
+        if (boardCurrentMonthIndex !== null && i > boardCurrentMonthIndex) return 'rgba(255, 159, 64, 0.25)';
+        return 'rgba(255, 159, 64, 0.6)';
+    });
+    const boardBorderColors = boardChartData.values.map((v, i) => {
+        if (boardCurrentMonthIndex !== null && i > boardCurrentMonthIndex) return 'rgba(255, 159, 64, 0.4)';
+        return '#ff9f40';
+    });
     
     new Chart(boardCtx, {
         type: 'bar',
@@ -445,8 +621,8 @@ document.addEventListener('DOMContentLoaded', function() {
             datasets: [{
                 label: 'Board Costs',
                 data: boardChartData.values,
-                backgroundColor: 'rgba(255, 159, 64, 0.6)',
-                borderColor: '#ff9f40',
+                backgroundColor: boardBgColors,
+                borderColor: boardBorderColors,
                 borderWidth: 2,
                 borderRadius: 6,
                 hoverBackgroundColor: 'rgba(255, 159, 64, 0.8)',
@@ -458,6 +634,48 @@ document.addEventListener('DOMContentLoaded', function() {
             plugins: {
                 legend: {
                     display: false
+                },
+                annotation: {
+                    annotations: {
+                        ...(boardCurrentMonthIndex !== null ? {
+                            currentMonthLine: {
+                                type: 'line',
+                                xMin: boardCurrentMonthIndex + 0.5,
+                                xMax: boardCurrentMonthIndex + 0.5,
+                                borderColor: 'rgba(255, 99, 132, 0.8)',
+                                borderWidth: 2,
+                                borderDash: [6, 3],
+                                label: {
+                                    display: true,
+                                    content: 'Now',
+                                    position: 'start',
+                                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                                    color: '#fff',
+                                    font: { size: 10, weight: 'bold' },
+                                    padding: 4,
+                                    borderRadius: 3,
+                                }
+                            }
+                        } : {}),
+                        avgLine: {
+                            type: 'line',
+                            yMin: boardAvg,
+                            yMax: boardAvg,
+                            borderColor: 'rgba(255, 159, 64, 0.25)',
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            label: {
+                                display: true,
+                                content: 'Avg: £' + Math.round(boardAvg).toLocaleString(),
+                                position: 'start',
+                                backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                                color: 'rgba(255, 159, 64, 0.6)',
+                                font: { size: 9 },
+                                padding: 3,
+                                borderRadius: 3,
+                            }
+                        }
+                    }
                 },
                 tooltip: {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',

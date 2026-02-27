@@ -686,8 +686,31 @@
                         <input type="date" id="new-inv-due-date" class="po-invoice-input">
                     </div>
                     <div class="po-invoice-field">
-                        <label>Total (£)</label>
+                        <label>Currency</label>
+                        <select id="new-inv-currency" class="po-invoice-input">
+                            <option value="GBP" {% if purchase_order.currency == 'GBP' or not purchase_order.currency %}selected{% endif %}>£ GBP</option>
+                            <option value="EUR" {% if purchase_order.currency == 'EUR' %}selected{% endif %}>€ EUR</option>
+                            <option value="USD" {% if purchase_order.currency == 'USD' %}selected{% endif %}>$ USD</option>
+                        </select>
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>VAT</label>
+                        <select id="new-inv-vat" class="po-invoice-input">
+                            <option value="true">Total includes VAT</option>
+                            <option value="false">Total excludes VAT</option>
+                        </select>
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>VAT Rate (%)</label>
+                        <input type="number" id="new-inv-vat-rate" step="0.01" min="0" max="100" value="20" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Invoice Total</label>
                         <input type="number" id="new-inv-total" step="0.01" min="0" placeholder="0.00" class="po-invoice-input">
+                    </div>
+                    <div class="po-invoice-field">
+                        <label>Freight Cost</label>
+                        <input type="number" id="new-inv-freight" step="0.01" min="0" placeholder="0.00" class="po-invoice-input">
                     </div>
                     <div class="po-invoice-field">
                         <label>Status</label>
@@ -703,6 +726,47 @@
                         <input type="text" id="new-inv-description" placeholder="Optional description" class="po-invoice-input">
                     </div>
                 </div>
+
+                <!-- Line Items -->
+                <div style="margin-bottom: 12px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Line Items</label>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="addInvoiceLineItem()" style="font-size:0.75rem;padding:3px 10px;">
+                            <i class="bi bi-plus"></i> Add Item
+                        </button>
+                    </div>
+                    <div id="invoice-line-items">
+                        <!-- Line items will be added here dynamically -->
+                    </div>
+                    <div id="invoice-line-items-total" style="display:none;text-align:right;margin-top:6px;font-size:0.85rem;color:var(--text-secondary);">
+                        Line Items Total: <strong id="line-items-total-value">0.00</strong>
+                    </div>
+                </div>
+
+                <!-- Drag & Drop Attachment -->
+                <div style="margin-bottom: 12px;">
+                    <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Invoice Attachment</label>
+                    <div id="inv-drop-zone" class="inv-drop-zone" onclick="document.getElementById('inv-file-input').click()">
+                        <input type="file" id="inv-file-input" style="display:none;" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.msg,.eml" onchange="handleInvFileSelect(this)">
+                        <div id="inv-drop-zone-content">
+                            <i class="bi bi-cloud-arrow-up" style="font-size:1.8rem;color:var(--text-secondary);"></i>
+                            <p style="margin:6px 0 0;font-size:0.85rem;color:var(--text-secondary);">
+                                Drag & drop invoice file here, or click to browse
+                            </p>
+                            <p style="margin:2px 0 0;font-size:0.75rem;color:var(--text-secondary);opacity:0.7;">
+                                PDF, images, Word, Excel, or email files
+                            </p>
+                        </div>
+                        <div id="inv-drop-zone-file" style="display:none;">
+                            <i class="bi bi-file-earmark-check" style="font-size:1.4rem;color:#28a745;"></i>
+                            <span id="inv-file-name" style="margin-left:8px;font-size:0.85rem;color:var(--text-primary);"></span>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation();clearInvFile()" style="margin-left:auto;font-size:0.7rem;padding:2px 8px;">
+                                <i class="bi bi-x"></i> Remove
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="po-invoice-form-actions">
                     <button type="button" class="btn btn-sm btn-success" onclick="submitNewInvoice()">
                         <i class="bi bi-check-lg"></i> Save Invoice
@@ -741,8 +805,10 @@
                             <th>Client</th>
                             <th>Date</th>
                             <th style="text-align: right;">Total</th>
+                            <th style="text-align: right;">Freight</th>
                             <th>Status</th>
                             <th>Payment</th>
+                            <th>File</th>
                             <th style="width: 80px;"></th>
                         </tr>
                     </thead>
@@ -756,7 +822,15 @@
                             </td>
                             <td>{{ inv.client_name|default:"—" }}</td>
                             <td>{{ inv.date|date:"d/m/Y"|default:"—" }}</td>
-                            <td style="text-align: right;">£{{ inv.total|floatformat:2 }}</td>
+                            <td style="text-align: right;">
+                                {% if inv.currency == 'EUR' %}€{% elif inv.currency == 'USD' %}${% else %}£{% endif %}{{ inv.total|floatformat:2 }}
+                                {% if inv.is_vat_inclusive %}<span style="font-size:0.7rem;color:var(--text-secondary);"> inc {{ inv.vat_rate|floatformat:0 }}% VAT</span>{% else %}<span style="font-size:0.7rem;color:var(--text-secondary);"> exc VAT ({{ inv.vat_rate|floatformat:0 }}%)</span>{% endif %}
+                            </td>
+                            <td style="text-align: right;">
+                                {% if inv.freight_cost %}
+                                {% if inv.currency == 'EUR' %}€{% elif inv.currency == 'USD' %}${% else %}£{% endif %}{{ inv.freight_cost|floatformat:2 }}
+                                {% else %}—{% endif %}
+                            </td>
                             <td>
                                 <span class="po-invoice-status po-invoice-status-{{ inv.status|lower }}">
                                     {{ inv.status }}
@@ -766,6 +840,15 @@
                                 <span class="po-invoice-status po-invoice-status-{{ inv.payment_status }}">
                                     {{ inv.get_payment_status_display }}
                                 </span>
+                            </td>
+                            <td>
+                                {% if inv.attachment %}
+                                <a href="{{ inv.attachment.url }}" target="_blank" title="View attachment" style="color:#28a745;">
+                                    <i class="bi bi-file-earmark-check"></i>
+                                </a>
+                                {% else %}
+                                <span style="color:var(--text-secondary);opacity:0.4;"><i class="bi bi-file-earmark"></i></span>
+                                {% endif %}
                             </td>
                             <td>
                                 <button class="btn btn-sm btn-danger" onclick="unlinkInvoice({{ inv.id }})" title="Unlink">
@@ -1684,6 +1767,104 @@ function toggleAddInvoiceForm() {
     }
 }
 
+// ── Line Items ──────────────────────────────────────────────────
+let invoiceLineItemCount = 0;
+
+function addInvoiceLineItem() {
+    const container = document.getElementById('invoice-line-items');
+    const idx = invoiceLineItemCount++;
+    const row = document.createElement('div');
+    row.className = 'inv-line-item-row';
+    row.id = `inv-line-item-${idx}`;
+    row.innerHTML = `
+        <input type="text" class="po-invoice-input inv-line-name" placeholder="Item name / description" data-idx="${idx}">
+        <input type="number" class="po-invoice-input inv-line-qty" placeholder="Qty" step="1" min="1" value="1" data-idx="${idx}" style="width:80px;" oninput="updateLineItemsTotal()">
+        <input type="number" class="po-invoice-input inv-line-rate" placeholder="Rate" step="0.01" min="0" data-idx="${idx}" style="width:110px;" oninput="updateLineItemsTotal()">
+        <span class="inv-line-total" id="inv-line-total-${idx}" style="min-width:80px;text-align:right;font-size:0.85rem;color:var(--text-secondary);">0.00</span>
+        <button type="button" class="btn btn-sm btn-danger" onclick="removeInvoiceLineItem(${idx})" style="padding:2px 8px;font-size:0.7rem;">
+            <i class="bi bi-x"></i>
+        </button>
+    `;
+    container.appendChild(row);
+    document.getElementById('invoice-line-items-total').style.display = 'block';
+    row.querySelector('.inv-line-name').focus();
+}
+
+function removeInvoiceLineItem(idx) {
+    const row = document.getElementById(`inv-line-item-${idx}`);
+    if (row) row.remove();
+    updateLineItemsTotal();
+    const container = document.getElementById('invoice-line-items');
+    if (container.children.length === 0) {
+        document.getElementById('invoice-line-items-total').style.display = 'none';
+    }
+}
+
+function updateLineItemsTotal() {
+    let total = 0;
+    document.querySelectorAll('.inv-line-item-row').forEach(row => {
+        const qty = parseFloat(row.querySelector('.inv-line-qty').value) || 0;
+        const rate = parseFloat(row.querySelector('.inv-line-rate').value) || 0;
+        const lineTotal = qty * rate;
+        const idx = row.querySelector('.inv-line-qty').dataset.idx;
+        document.getElementById(`inv-line-total-${idx}`).textContent = lineTotal.toFixed(2);
+        total += lineTotal;
+    });
+    document.getElementById('line-items-total-value').textContent = total.toFixed(2);
+}
+
+// ── Drag & Drop Attachment ──────────────────────────────────────
+let invoiceAttachmentFile = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const dropZone = document.getElementById('inv-drop-zone');
+    if (!dropZone) return;
+
+    ['dragenter', 'dragover'].forEach(ev => {
+        dropZone.addEventListener(ev, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('inv-drop-zone-active');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(ev => {
+        dropZone.addEventListener(ev, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('inv-drop-zone-active');
+        });
+    });
+
+    dropZone.addEventListener('drop', function(e) {
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            setInvFile(files[0]);
+        }
+    });
+});
+
+function handleInvFileSelect(input) {
+    if (input.files.length > 0) {
+        setInvFile(input.files[0]);
+    }
+}
+
+function setInvFile(file) {
+    invoiceAttachmentFile = file;
+    document.getElementById('inv-drop-zone-content').style.display = 'none';
+    const fileDiv = document.getElementById('inv-drop-zone-file');
+    fileDiv.style.display = 'flex';
+    document.getElementById('inv-file-name').textContent = file.name;
+}
+
+function clearInvFile() {
+    invoiceAttachmentFile = null;
+    document.getElementById('inv-file-input').value = '';
+    document.getElementById('inv-drop-zone-content').style.display = 'flex';
+    document.getElementById('inv-drop-zone-file').style.display = 'none';
+}
+
 function submitNewInvoice() {
     const invoiceNumber = document.getElementById('new-inv-number').value.trim();
     if (!invoiceNumber) {
@@ -1691,23 +1872,44 @@ function submitNewInvoice() {
         return;
     }
 
-    const payload = {
-        invoice_number: invoiceNumber,
-        client_name: document.getElementById('new-inv-client').value,
-        date: document.getElementById('new-inv-date').value,
-        due_date: document.getElementById('new-inv-due-date').value,
-        total: document.getElementById('new-inv-total').value,
-        status: document.getElementById('new-inv-status').value,
-        description: document.getElementById('new-inv-description').value,
-    };
+    const formData = new FormData();
+    formData.append('invoice_number', invoiceNumber);
+    formData.append('client_name', document.getElementById('new-inv-client').value);
+    formData.append('date', document.getElementById('new-inv-date').value);
+    formData.append('due_date', document.getElementById('new-inv-due-date').value);
+    formData.append('total', document.getElementById('new-inv-total').value || '0');
+    formData.append('freight_cost', document.getElementById('new-inv-freight').value || '0');
+    formData.append('currency', document.getElementById('new-inv-currency').value);
+    formData.append('is_vat_inclusive', document.getElementById('new-inv-vat').value);
+    formData.append('vat_rate', document.getElementById('new-inv-vat-rate').value || '20');
+    formData.append('status', document.getElementById('new-inv-status').value);
+    formData.append('description', document.getElementById('new-inv-description').value);
+
+    // Collect line items
+    let lineIdx = 0;
+    document.querySelectorAll('.inv-line-item-row').forEach(row => {
+        const name = row.querySelector('.inv-line-name').value.trim();
+        const qty = row.querySelector('.inv-line-qty').value || '1';
+        const rate = row.querySelector('.inv-line-rate').value || '0';
+        if (name) {
+            formData.append(`line_name_${lineIdx}`, name);
+            formData.append(`line_qty_${lineIdx}`, qty);
+            formData.append(`line_rate_${lineIdx}`, rate);
+            lineIdx++;
+        }
+    });
+
+    // Attachment
+    if (invoiceAttachmentFile) {
+        formData.append('attachment', invoiceAttachmentFile);
+    }
 
     fetch(`/purchase-order/{{ purchase_order.workguru_id }}/create-invoice/`, {
         method: 'POST',
         headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
+            'X-CSRFToken': '{{ csrf_token }}'
         },
-        body: JSON.stringify(payload)
+        body: formData
     })
     .then(r => r.json())
     .then(data => {

@@ -146,6 +146,7 @@ urlpatterns = [
     path('material-report/', views.material_report, name='material_report'),
     path('material-shortage/', views.material_shortage, name='material_shortage'),
     path('raumplus-storage/', views.raumplus_storage, name='raumplus_storage'),
+    path('shortages/', views.shortages, name='shortages'),
     path('costing-report/', views.costing_report, name='costing_report'),
     path('substitutions/', views.substitutions, name='substitutions'),
     path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),

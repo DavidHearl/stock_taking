@@ -617,6 +617,602 @@ def material_report(request):
     })
 
 @login_required
+def shortages(request):
+    """Combined shortages page - delegates to material_shortage and raumplus_storage views
+    and combines their context for a single tabbed page."""
+    tab = request.GET.get('tab', 'stock')
+    
+    if tab == 'raumplus':
+        # Reuse the raumplus_storage logic but render the combined template
+        from datetime import timedelta
+        from django.utils import timezone
+        from collections import defaultdict
+        from decimal import Decimal
+        
+        today = timezone.now().date()
+        MIN_ORDER_VALUE = Decimal('5000.00')
+        MIN_LINE_COST = Decimal('100.00')
+        VAT_RATE = Decimal('1.19')
+        
+        upcoming_orders = Order.objects.filter(
+            job_finished=False, fit_date__gte=today
+        ).prefetch_related('accessories__stock_item').order_by('fit_date')
+        
+        upcoming_requirements = defaultdict(lambda: {
+            'name': '', 'sku': '', 'required_qty': 0, 'current_stock': 0,
+            'shortage': 0, 'cost': Decimal('0.00'), 'orders': [], 'stock_item_id': None
+        })
+        
+        for order in upcoming_orders:
+            for accessory in order.accessories.all():
+                if 'RAU' not in accessory.sku.upper():
+                    continue
+                # Skip accessories that have already been allocated (stock deducted)
+                if accessory.is_allocated:
+                    continue
+                key = accessory.sku
+                if not upcoming_requirements[key]['name']:
+                    upcoming_requirements[key]['name'] = accessory.name
+                    upcoming_requirements[key]['sku'] = accessory.sku
+                    if accessory.stock_item:
+                        upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
+                        upcoming_requirements[key]['cost'] = accessory.stock_item.cost
+                        upcoming_requirements[key]['stock_item_id'] = accessory.stock_item.id
+                upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
+                upcoming_requirements[key]['orders'].append({
+                    'sale_number': order.sale_number, 'fit_date': order.fit_date,
+                    'quantity': float(accessory.quantity),
+                    'first_name': order.first_name, 'last_name': order.last_name,
+                    'order_id': order.id
+                })
+        
+        # Get incoming quantities from approved purchase orders
+        from django.db.models import Sum as RauSum
+        rau_incoming_skus = list(upcoming_requirements.keys())
+        rau_incoming_data = PurchaseOrderProduct.objects.filter(
+            sku__in=rau_incoming_skus,
+            purchase_order__status='Approved'
+        ).values('sku').annotate(total=RauSum('order_quantity'))
+        rau_incoming_map = {item['sku']: float(item['total'] or 0) for item in rau_incoming_data}
+        
+        for key, data in upcoming_requirements.items():
+            data['incoming_qty'] = rau_incoming_map.get(key, 0)
+            data['shortage'] = max(0, data['required_qty'] - data['current_stock'] - data['incoming_qty'])
+            data['line_cost'] = Decimal(str(data['shortage'])) * data['cost']
+        
+        three_months_ago = today - timedelta(days=90)
+        recent_orders = Order.objects.filter(
+            order_date__gte=three_months_ago, order_date__lte=today
+        ).prefetch_related('accessories__stock_item')
+        
+        all_time_orders = Order.objects.prefetch_related('accessories__stock_item').all()
+        
+        all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
+        for order in all_time_orders:
+            for accessory in order.accessories.all():
+                if 'RAU' not in accessory.sku.upper():
+                    continue
+                key = accessory.sku
+                all_time_usage[key]['total_used'] += float(accessory.quantity)
+                all_time_usage[key]['order_count'] += 1
+                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                    all_time_usage[key]['first_order'] = order.order_date
+                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                    all_time_usage[key]['last_order'] = order.order_date
+        
+        historical_usage = defaultdict(lambda: {
+            'name': '', 'sku': '', 'total_used': 0, 'monthly_average': 0,
+            'all_time_monthly_avg': 0, 'weighted_monthly_avg': 0, 'predicted_4month': 0,
+            'current_stock': 0, 'predicted_shortage': 0, 'order_count': 0, 'cost': Decimal('0.00'),
+            'stock_item_id': None
+        })
+        
+        for order in recent_orders:
+            for accessory in order.accessories.all():
+                if 'RAU' not in accessory.sku.upper():
+                    continue
+                key = accessory.sku
+                if not historical_usage[key]['name']:
+                    historical_usage[key]['name'] = accessory.name
+                    historical_usage[key]['sku'] = accessory.sku
+                    if accessory.stock_item:
+                        historical_usage[key]['current_stock'] = accessory.stock_item.quantity
+                        historical_usage[key]['cost'] = accessory.stock_item.cost
+                        historical_usage[key]['stock_item_id'] = accessory.stock_item.id
+                historical_usage[key]['total_used'] += float(accessory.quantity)
+                historical_usage[key]['order_count'] += 1
+        
+        for key, data in historical_usage.items():
+            recent_monthly_avg = data['total_used'] / 3
+            data['monthly_average'] = recent_monthly_avg
+            if key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
+                months_span = max(1, ((all_time_usage[key]['last_order'] - all_time_usage[key]['first_order']).days / 30.44))
+                all_time_monthly_avg = all_time_usage[key]['total_used'] / months_span
+                data['all_time_monthly_avg'] = all_time_monthly_avg
+                data['weighted_monthly_avg'] = (recent_monthly_avg * 0.7) + (all_time_monthly_avg * 0.3)
+            else:
+                data['all_time_monthly_avg'] = recent_monthly_avg
+                data['weighted_monthly_avg'] = recent_monthly_avg
+            data['predicted_4month'] = data['weighted_monthly_avg'] * 4 * 1.2
+            if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
+                target_stock = 800
+                data['predicted_shortage'] = max(0, max(data['predicted_4month'], target_stock) - data['current_stock'])
+            else:
+                data['predicted_shortage'] = max(0, data['predicted_4month'] - data['current_stock'])
+            data['line_cost'] = Decimal(str(data['predicted_shortage'])) * data['cost']
+        
+        upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
+        upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
+        predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] > 0]
+        predicted_list.sort(key=lambda x: x['predicted_shortage'], reverse=True)
+        
+        total_upcoming_items = len(upcoming_list)
+        total_predicted_items = len(predicted_list)
+        total_upcoming_shortage = sum(item['shortage'] for item in upcoming_list)
+        total_predicted_shortage = sum(item['predicted_shortage'] for item in predicted_list)
+        
+        def get_style_prefix(sku, name=''):
+            text_to_check = (sku + ' ' + name).upper()
+            for code in ['S150', 'S750', 'S751', 'S753']:
+                if code in text_to_check:
+                    return code
+            return None
+        
+        MIN_STYLE_BUFFER = 8
+        critical_items = []
+        upcoming_skus = {item['sku'] for item in upcoming_list}
+        
+        critical_skus_list = [item['sku'] for item in predicted_list if item['sku'] in upcoming_skus]
+        stock_items_dict = {si.sku: si for si in StockItem.objects.filter(sku__in=critical_skus_list)}
+        
+        for item in predicted_list:
+            if item['sku'] in upcoming_skus:
+                upcoming_item = next((u for u in upcoming_list if u['sku'] == item['sku']), None)
+                if upcoming_item:
+                    stock_item = stock_items_dict.get(item['sku'])
+                    min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
+                    total_shortage = upcoming_item['shortage'] + item['predicted_shortage']
+                    is_style = get_style_prefix(item['sku'], item['name']) is not None
+                    if is_style:
+                        order_qty = round_to_min_order_qty(total_shortage + MIN_STYLE_BUFFER, min_order_qty)
+                    else:
+                        order_qty = round_to_min_order_qty(total_shortage, min_order_qty)
+                    line_cost = Decimal(str(order_qty)) * item['cost']
+                    if line_cost < MIN_LINE_COST and item['cost'] > 0:
+                        min_qty_for_cost = int((MIN_LINE_COST / item['cost']).to_integral_value() + 1)
+                        order_qty = max(order_qty, min_qty_for_cost)
+                        order_qty = round_to_min_order_qty(order_qty, min_order_qty)
+                        line_cost = Decimal(str(order_qty)) * item['cost']
+                    critical_items.append({
+                        'sku': item['sku'], 'name': item['name'],
+                        'current_stock': item['current_stock'],
+                        'upcoming_shortage': upcoming_item['shortage'],
+                        'predicted_shortage': item['predicted_shortage'],
+                        'total_shortage': total_shortage,
+                        'min_order_qty': min_order_qty, 'order_qty': order_qty,
+                        'cost': item['cost'], 'line_cost': line_cost, 'is_style': is_style
+                    })
+        
+        critical_items = [item for item in critical_items if item['total_shortage'] > 0]
+        critical_items.sort(key=lambda x: x['total_shortage'], reverse=True)
+        critical_total_cost = sum(item['line_cost'] for item in critical_items)
+        predicted_total_cost = sum(item['line_cost'] for item in predicted_list)
+        
+        predicted_skus_list = [item['sku'] for item in predicted_list if item['sku'] not in upcoming_skus]
+        predicted_stock_items_dict = {si.sku: si for si in StockItem.objects.filter(sku__in=predicted_skus_list)}
+        
+        predicted_only_list = []
+        for item in predicted_list:
+            if item['sku'] not in upcoming_skus:
+                stock_item = predicted_stock_items_dict.get(item['sku'])
+                min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
+                is_style = get_style_prefix(item['sku'], item['name']) is not None
+                if is_style:
+                    order_qty = round_to_min_order_qty(item['predicted_shortage'] + MIN_STYLE_BUFFER, min_order_qty)
+                else:
+                    order_qty = round_to_min_order_qty(item['predicted_shortage'], min_order_qty)
+                line_cost = Decimal(str(order_qty)) * item['cost']
+                if line_cost < MIN_LINE_COST and item['cost'] > 0:
+                    min_qty_for_cost = int((MIN_LINE_COST / item['cost']).to_integral_value() + 1)
+                    order_qty = max(order_qty, min_qty_for_cost)
+                    order_qty = round_to_min_order_qty(order_qty, min_order_qty)
+                    line_cost = Decimal(str(order_qty)) * item['cost']
+                predicted_only_list.append({
+                    **item, 'min_order_qty': min_order_qty, 'order_qty': order_qty,
+                    'line_cost': line_cost, 'is_style': is_style
+                })
+        
+        predicted_only_cost = sum(item['line_cost'] for item in predicted_only_list)
+        critical_skus = {item['sku'] for item in critical_items}
+        
+        # Suggest additional items to reach minimum order value
+        suggested_items = []
+        current_order_value = critical_total_cost + predicted_only_cost
+        
+        from django.db.models import Q
+        MIN_STYLES_PER_VARIANT = 8
+        style_prefixes = ['S150', 'S750', 'S751', 'S753']
+        styles_to_order = []
+        style_stock_status = {}
+        
+        for prefix in style_prefixes:
+            all_styles = StockItem.objects.filter(Q(sku__istartswith=prefix) & Q(sku__icontains='RAU'))
+            total_variants = all_styles.count()
+            in_stock_count = all_styles.filter(quantity__gt=0).count()
+            out_of_stock_count = total_variants - in_stock_count
+            style_stock_status[prefix] = {
+                'in_stock': in_stock_count, 'out_of_stock': out_of_stock_count,
+                'total_variants': total_variants
+            }
+            if out_of_stock_count > 0:
+                out_of_stock = all_styles.filter(quantity=0).exclude(
+                    sku__in=[item['sku'] for item in critical_items + predicted_only_list]
+                )
+                for stock_item in out_of_stock:
+                    min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+                    if stock_item.cost > 0:
+                        min_qty_for_cost = int((MIN_LINE_COST / stock_item.cost).to_integral_value() + 1)
+                        suggested_qty = max(min_order_qty, min_qty_for_cost)
+                        suggested_qty = round_to_min_order_qty(suggested_qty, min_order_qty)
+                    else:
+                        suggested_qty = max(min_order_qty, 1)
+                    item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+                    styles_to_order.append({
+                        'sku': stock_item.sku, 'name': stock_item.name,
+                        'current_stock': stock_item.quantity, 'min_order_qty': min_order_qty,
+                        'suggested_qty': suggested_qty, 'cost': stock_item.cost,
+                        'line_cost': item_cost, 'is_style': True, 'variant': prefix,
+                        'reason': f'Stock variant {prefix} below minimum'
+                    })
+        
+        suggested_items.extend(styles_to_order)
+        accumulated_value = sum(item['line_cost'] * VAT_RATE for item in styles_to_order)
+        current_order_value_inc_vat = (critical_total_cost + predicted_only_cost) * VAT_RATE
+        remaining_value = MIN_ORDER_VALUE - (current_order_value_inc_vat + accumulated_value)
+        
+        if remaining_value > 0:
+            PRIORITY_KEYWORDS = {
+                'TOP ROLLER': 3.0, 'BOTTOM ROLLER': 2.5, 'FRAME SCREW': 2.5,
+                'GASKET - 4MM': 2.0, 'GASKET - 6MM': 0.5, 'GASKET - 8MM': 0.5,
+            }
+            EXCLUDE_KEYWORDS = ['DUST BRUSH CLIP', 'DUST EXCLUDING BRUSH']
+            
+            all_rau_items = StockItem.objects.filter(sku__icontains='RAU').exclude(
+                sku__in=[item['sku'] for item in critical_items + predicted_only_list + suggested_items]
+            )
+            filtered_items = []
+            for stock_item in all_rau_items:
+                item_name_upper = stock_item.name.upper()
+                if any(keyword in item_name_upper for keyword in EXCLUDE_KEYWORDS):
+                    continue
+                priority_multiplier = 1.0
+                for keyword, multiplier in PRIORITY_KEYWORDS.items():
+                    if keyword in item_name_upper:
+                        priority_multiplier = multiplier
+                        break
+                score = stock_item.quantity * priority_multiplier
+                filtered_items.append((stock_item, score, priority_multiplier))
+            filtered_items.sort(key=lambda x: x[1], reverse=True)
+            
+            for stock_item, score, priority_multiplier in filtered_items:
+                if accumulated_value >= remaining_value:
+                    break
+                min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+                if priority_multiplier > 1.0:
+                    base_qty = max(min_order_qty, min(10, max(5, int(stock_item.quantity * 0.2))))
+                else:
+                    base_qty = max(min_order_qty, min(5, max(2, int(stock_item.quantity * 0.1))))
+                suggested_qty = round_to_min_order_qty(base_qty, min_order_qty)
+                item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+                if item_cost < MIN_LINE_COST and stock_item.cost > 0:
+                    min_qty_for_cost = int((MIN_LINE_COST / stock_item.cost).to_integral_value() + 1)
+                    suggested_qty = max(suggested_qty, min_qty_for_cost)
+                    suggested_qty = round_to_min_order_qty(suggested_qty, min_order_qty)
+                    item_cost = Decimal(str(suggested_qty)) * stock_item.cost
+                reason = 'High priority item - frequently needed' if priority_multiplier > 1.0 else 'To reach minimum order value'
+                suggested_items.append({
+                    'sku': stock_item.sku, 'name': stock_item.name,
+                    'current_stock': stock_item.quantity, 'min_order_qty': min_order_qty,
+                    'suggested_qty': suggested_qty, 'cost': stock_item.cost,
+                    'line_cost': item_cost,
+                    'is_style': get_style_prefix(stock_item.sku, stock_item.name) is not None,
+                    'reason': reason
+                })
+                accumulated_value += item_cost * VAT_RATE
+        
+        suggested_total_cost = sum(item['line_cost'] for item in suggested_items)
+        total_order_value = critical_total_cost + predicted_only_cost + suggested_total_cost
+        total_order_value_inc_vat = total_order_value * VAT_RATE
+        current_order_value_inc_vat = current_order_value * VAT_RATE
+        suggested_total_cost_inc_vat = suggested_total_cost * VAT_RATE
+        remaining_to_min = max(Decimal('0.00'), MIN_ORDER_VALUE - current_order_value_inc_vat)
+        
+        ordering_rules = [
+            {'category': 'Minimum Order Values', 'rules': [
+                f'Minimum total order value: £{MIN_ORDER_VALUE:,.2f} (inc VAT for free shipping)',
+                f'Minimum line item cost: £{MIN_LINE_COST:,.2f} per SKU (pre-VAT)',
+                'All prices shown are pre-VAT; 20% VAT applied when calculating order totals',
+            ]},
+            {'category': 'Style Variants', 'rules': [
+                'Maintain all style color variants in stock for each type (S150, S750, S751, S753)',
+                f'Add buffer of {MIN_STYLE_BUFFER} units when ordering styles to ensure stock after orders',
+                'Any out-of-stock color variant will be suggested for reordering',
+            ]},
+            {'category': 'Priority Items (Higher Weighting)', 'rules': [
+                'Top Rollers: 3.0x priority (frequently needed)',
+                'Bottom Rollers: 2.5x priority (frequently needed)',
+                'Frame Screws: 2.5x priority (frequently needed)',
+                'Gasket - 4mm: 2.0x priority (high usage)',
+            ]},
+            {'category': 'Low Priority Items (Lower Weighting)', 'rules': [
+                'Gasket - 6mm: 0.5x priority (hardly used)',
+                'Gasket - 8mm: 0.5x priority (very rarely used)',
+            ]},
+            {'category': 'Excluded Items', 'rules': [
+                'Dust Brush Clip: Excluded from suggestions (not used)',
+                'Dust Excluding Brush: Excluded from suggestions (sufficient stock)',
+            ]},
+            {'category': 'Rounding Rules', 'rules': [
+                'Items with minimum order quantity of 1: Rounded to nearest 10 (e.g., 257 → 260)',
+                'Items with other minimum order quantities: Rounded to nearest multiple of min qty',
+            ]},
+            {'category': 'Prediction Model', 'rules': [
+                'Historical period: Last 90 days of orders',
+                'Prediction window: Next 4 months + 20% buffer',
+                'Weighted average: 70% recent trend + 30% historical baseline',
+            ]},
+            {'category': 'Target Stock Levels', 'rules': [
+                'Gasket - 4mm: Minimum target stock of 800 units (high usage item)',
+                'All other items: Predicted 4-month usage with 20% safety buffer',
+            ]},
+        ]
+        
+        # Build actual shortages list - items we are short of RIGHT NOW for orders in the system
+        actual_shortages = []
+        for data in upcoming_requirements.values():
+            if data['shortage'] > 0:
+                actual_shortages.append({
+                    'sku': data['sku'],
+                    'name': data['name'],
+                    'current_stock': data['current_stock'],
+                    'required_qty': data['required_qty'],
+                    'incoming_qty': data.get('incoming_qty', 0),
+                    'shortage': data['shortage'],
+                    'order_count': len(data['orders']),
+                    'orders': data['orders'],
+                    'stock_item_id': data.get('stock_item_id'),
+                    'cost': data['cost'],
+                    'line_cost': data['line_cost'],
+                })
+        actual_shortages.sort(key=lambda x: x['shortage'], reverse=True)
+        
+        context = {
+            'active_tab': 'raumplus',
+            'actual_shortages': actual_shortages,
+            'upcoming_shortages': upcoming_list,
+            'predicted_shortages': predicted_only_list,
+            'critical_items': critical_items,
+            'suggested_items': suggested_items,
+            'critical_skus': critical_skus,
+            'total_upcoming_items': total_upcoming_items,
+            'total_predicted_items': len(predicted_only_list),
+            'total_upcoming_shortage': total_upcoming_shortage,
+            'total_predicted_shortage': total_predicted_shortage,
+            'upcoming_orders_count': upcoming_orders.count(),
+            'historical_period_days': 90,
+            'critical_total_cost': critical_total_cost,
+            'predicted_total_cost': predicted_only_cost,
+            'suggested_total_cost': suggested_total_cost,
+            'total_order_value': total_order_value,
+            'total_order_value_inc_vat': total_order_value_inc_vat,
+            'current_order_value': current_order_value,
+            'current_order_value_inc_vat': current_order_value_inc_vat,
+            'suggested_total_cost_inc_vat': suggested_total_cost_inc_vat,
+            'remaining_to_min': remaining_to_min,
+            'min_order_value': MIN_ORDER_VALUE,
+            'min_line_cost': MIN_LINE_COST,
+            'vat_rate': VAT_RATE,
+            'style_stock_status': style_stock_status,
+            'ordering_rules': ordering_rules,
+        }
+    else:
+        # Stock tab - reuse material_shortage logic
+        from datetime import timedelta
+        from django.utils import timezone
+        from collections import defaultdict
+        
+        today = timezone.now().date()
+        search_query = request.GET.get('search', '').strip()
+        search_result = None
+        
+        if search_query:
+            matching_accessories = Accessory.objects.filter(
+                order__job_finished=False, sku__icontains=search_query
+            ).select_related('stock_item', 'order') | Accessory.objects.filter(
+                order__job_finished=False, name__icontains=search_query
+            ).select_related('stock_item', 'order')
+            
+            if matching_accessories.exists():
+                search_data = defaultdict(lambda: {
+                    'sku': '', 'name': '', 'current_stock': 0, 'required_qty': 0,
+                    'shortage': 0, 'orders': []
+                })
+                for accessory in matching_accessories:
+                    key = accessory.sku
+                    if not search_data[key]['sku']:
+                        search_data[key]['sku'] = accessory.sku
+                        search_data[key]['name'] = accessory.name
+                        if accessory.stock_item:
+                            search_data[key]['current_stock'] = accessory.stock_item.quantity
+                    search_data[key]['required_qty'] += float(accessory.quantity)
+                    search_data[key]['orders'].append({
+                        'sale_number': accessory.order.sale_number,
+                        'first_name': accessory.order.first_name,
+                        'last_name': accessory.order.last_name,
+                        'fit_date': accessory.order.fit_date,
+                        'quantity': float(accessory.quantity),
+                        'order_id': accessory.order.id
+                    })
+                for key, data in search_data.items():
+                    data['shortage'] = max(0, data['required_qty'] - data['current_stock'])
+                search_result = list(search_data.values())
+        
+        upcoming_orders = Order.objects.filter(
+            job_finished=False, fit_date__gte=today
+        ).prefetch_related('accessories__stock_item').order_by('fit_date')
+        
+        upcoming_requirements = defaultdict(lambda: {
+            'name': '', 'sku': '', 'required_qty': 0, 'current_stock': 0,
+            'shortage': 0, 'orders': [], 'is_stock': True, 'stock_item_id': None
+        })
+        for order in upcoming_orders:
+            for accessory in order.accessories.all():
+                if 'RAU' in accessory.sku.upper():
+                    continue
+                # Skip accessories that have already been allocated (stock deducted)
+                if accessory.is_allocated:
+                    continue
+                key = accessory.sku
+                if not upcoming_requirements[key]['name']:
+                    upcoming_requirements[key]['name'] = accessory.name
+                    upcoming_requirements[key]['sku'] = accessory.sku
+                    if accessory.stock_item:
+                        upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
+                        upcoming_requirements[key]['is_stock'] = accessory.stock_item.tracking_type == 'stock'
+                        upcoming_requirements[key]['stock_item_id'] = accessory.stock_item.id
+                upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
+                upcoming_requirements[key]['orders'].append({
+                    'sale_number': order.sale_number, 'fit_date': order.fit_date,
+                    'quantity': float(accessory.quantity),
+                    'first_name': order.first_name, 'last_name': order.last_name,
+                    'order_id': order.id
+                })
+        
+        # Get incoming quantities from approved purchase orders
+        from django.db.models import Sum
+        incoming_skus = list(upcoming_requirements.keys())
+        incoming_data = PurchaseOrderProduct.objects.filter(
+            sku__in=incoming_skus,
+            purchase_order__status='Approved'
+        ).values('sku').annotate(total=Sum('order_quantity'))
+        incoming_map = {item['sku']: float(item['total'] or 0) for item in incoming_data}
+        
+        for key, data in upcoming_requirements.items():
+            data['incoming_qty'] = incoming_map.get(key, 0)
+            data['shortage'] = max(0, data['required_qty'] - data['current_stock'] - data['incoming_qty'])
+        
+        three_months_ago = today - timedelta(days=90)
+        recent_orders = Order.objects.filter(
+            job_finished=False, order_date__gte=three_months_ago, order_date__lte=today
+        ).prefetch_related('accessories__stock_item')
+        
+        all_time_orders = Order.objects.filter(job_finished=False).prefetch_related('accessories__stock_item').all()
+        
+        all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
+        for order in all_time_orders:
+            for accessory in order.accessories.all():
+                if 'RAU' in accessory.sku.upper():
+                    continue
+                key = accessory.sku
+                all_time_usage[key]['total_used'] += float(accessory.quantity)
+                all_time_usage[key]['order_count'] += 1
+                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                    all_time_usage[key]['first_order'] = order.order_date
+                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                    all_time_usage[key]['last_order'] = order.order_date
+        
+        historical_usage = defaultdict(lambda: {
+            'name': '', 'sku': '', 'total_used': 0, 'monthly_average': 0,
+            'all_time_monthly_avg': 0, 'weighted_monthly_avg': 0, 'predicted_2month': 0,
+            'current_stock': 0, 'predicted_shortage': 0, 'order_count': 0, 'is_stock': True, 'stock_item_id': None
+        })
+        for order in recent_orders:
+            for accessory in order.accessories.all():
+                if 'RAU' in accessory.sku.upper():
+                    continue
+                key = accessory.sku
+                if not historical_usage[key]['name']:
+                    historical_usage[key]['name'] = accessory.name
+                    historical_usage[key]['sku'] = accessory.sku
+                    if accessory.stock_item:
+                        historical_usage[key]['current_stock'] = accessory.stock_item.quantity
+                        historical_usage[key]['is_stock'] = accessory.stock_item.tracking_type == 'stock'
+                        historical_usage[key]['stock_item_id'] = accessory.stock_item.id
+                historical_usage[key]['total_used'] += float(accessory.quantity)
+                historical_usage[key]['order_count'] += 1
+        
+        for key, data in historical_usage.items():
+            recent_monthly_avg = data['total_used'] / 3
+            data['monthly_average'] = recent_monthly_avg
+            if key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
+                months_span = max(1, ((all_time_usage[key]['last_order'] - all_time_usage[key]['first_order']).days / 30.44))
+                all_time_monthly_avg = all_time_usage[key]['total_used'] / months_span
+                data['all_time_monthly_avg'] = all_time_monthly_avg
+                data['weighted_monthly_avg'] = (recent_monthly_avg * 0.7) + (all_time_monthly_avg * 0.3)
+            else:
+                data['all_time_monthly_avg'] = recent_monthly_avg
+                data['weighted_monthly_avg'] = recent_monthly_avg
+            data['predicted_2month'] = data['weighted_monthly_avg'] * 2
+            data['predicted_shortage'] = max(0, data['predicted_2month'] - data['current_stock'])
+        
+        upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
+        upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
+        predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] >= 1 and data['is_stock']]
+        predicted_list.sort(key=lambda x: x['predicted_shortage'], reverse=True)
+        
+        total_upcoming_items = len(upcoming_list)
+        total_predicted_items = len(predicted_list)
+        total_upcoming_shortage = sum(item['shortage'] for item in upcoming_list)
+        total_predicted_shortage = sum(item['predicted_shortage'] for item in predicted_list)
+        
+        critical_items = []
+        upcoming_skus = {item['sku'] for item in upcoming_list}
+        for item in predicted_list:
+            if item['sku'] in upcoming_skus:
+                upcoming_item = next((u for u in upcoming_list if u['sku'] == item['sku']), None)
+                if upcoming_item:
+                    critical_items.append({
+                        'sku': item['sku'], 'name': item['name'],
+                        'current_stock': item['current_stock'],
+                        'upcoming_shortage': upcoming_item['shortage'],
+                        'predicted_shortage': item['predicted_shortage'],
+                        'total_shortage': upcoming_item['shortage'] + item['predicted_shortage']
+                    })
+        critical_items = [item for item in critical_items if item['total_shortage'] > 0]
+        critical_items.sort(key=lambda x: x['total_shortage'], reverse=True)
+        critical_skus = {item['sku'] for item in critical_items}
+        
+        # Build actual shortages list - items we are short of RIGHT NOW for orders in the system
+        actual_shortages = []
+        for data in upcoming_requirements.values():
+            if data['shortage'] > 0:
+                actual_shortages.append({
+                    'sku': data['sku'],
+                    'name': data['name'],
+                    'current_stock': data['current_stock'],
+                    'required_qty': data['required_qty'],
+                    'incoming_qty': data.get('incoming_qty', 0),
+                    'shortage': data['shortage'],
+                    'order_count': len(data['orders']),
+                    'orders': data['orders'],
+                    'stock_item_id': data['stock_item_id'],
+                })
+        actual_shortages.sort(key=lambda x: x['shortage'], reverse=True)
+        
+        context = {
+            'active_tab': 'stock',
+            'actual_shortages': actual_shortages,
+            'predicted_shortages': predicted_list,
+            'upcoming_orders_count': upcoming_orders.count(),
+            'historical_period_days': 90,
+            'search_query': search_query,
+            'search_result': search_result,
+        }
+    
+    return render(request, 'stock_take/shortages.html', context)
+
+
+@login_required
 def material_shortage(request):
     """Analyze material shortages based on upcoming orders and historical usage"""
     from datetime import timedelta
