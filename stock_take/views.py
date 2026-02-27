@@ -8877,6 +8877,7 @@ def generate_and_upload_accessories_csv(request, order_id):
     from django.conf import settings
     import os
     from django.core.files.storage import default_storage
+    CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
     
     order = get_object_or_404(Order, id=order_id)
     
