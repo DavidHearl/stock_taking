@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 # Database paths
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATABASE_PATH = BASE_DIR / 'cad_data.db'
 PRODUCTS_DB_PATH = BASE_DIR / 'order_generator_files' / 'src' / 'products.db'
 
 # Storage path for CAD DB in DigitalOcean Spaces (same as cad_views.py)

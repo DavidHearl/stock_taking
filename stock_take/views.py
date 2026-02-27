@@ -8531,21 +8531,15 @@ def generate_and_attach_pnx(request, order_id):
         
         CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
         
-        # First check local fallback, then try remote storage
-        local_db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
-        
-        if os.path.exists(local_db_path):
-            db_path = local_db_path
-            tmp_file = None
-        elif default_storage.exists(CAD_DB_STORAGE_PATH):
-            # Download from storage to a temp file for sqlite3 access
+        # Always fetch from DigitalOcean Spaces (no local fallback)
+        if default_storage.exists(CAD_DB_STORAGE_PATH):
             tmp_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
             with default_storage.open(CAD_DB_STORAGE_PATH, 'rb') as remote_db:
                 tmp_file.write(remote_db.read())
             tmp_file.close()
             db_path = tmp_file.name
         else:
-            return JsonResponse({'success': False, 'error': 'CAD database not found. Please ensure the CAD sync has been run.'})
+            return JsonResponse({'success': False, 'error': 'CAD database not found in DigitalOcean Spaces. Please ensure the CAD sync has been run.'})
         
         try:
             # Generate PNX content using customer number (CAD number)
@@ -8890,23 +8884,28 @@ def generate_and_upload_accessories_csv(request, order_id):
         return redirect('order_details', order_id=order_id)
     
     try:
-        # Get database paths - look in project root directory (where .env is)
-        cad_db_path = os.path.join(settings.BASE_DIR, 'cad_data.db')
-        products_db_path = os.path.join(settings.BASE_DIR, 'order_generator_files', 'src', 'products.db')
-        
-        if not os.path.exists(cad_db_path):
-            messages.error(request, f'CAD database not found at: {cad_db_path}. Please ensure cad_data.db is in the project root directory.')
+        # Always fetch cad_data.db from DigitalOcean Spaces
+        import tempfile
+        if default_storage.exists(CAD_DB_STORAGE_PATH):
+            tmp_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+            with default_storage.open(CAD_DB_STORAGE_PATH, 'rb') as remote_db:
+                tmp_file.write(remote_db.read())
+            tmp_file.close()
+            cad_db_path = tmp_file.name
+        else:
+            messages.error(request, 'CAD database not found in DigitalOcean Spaces. Please ensure the CAD sync has been run.')
             return redirect('order_details', order_id=order_id)
-        
+
+        products_db_path = os.path.join(settings.BASE_DIR, 'order_generator_files', 'src', 'products.db')
         if not os.path.exists(products_db_path):
             messages.error(request, f'Products database not found at: {products_db_path}.')
             return redirect('order_details', order_id=order_id)
-        
+
         # Generate CSV content using customer number (CAD number)
         logger.info(f"Generating accessories CSV for CAD Number: {order.customer_number}")
         csv_content = workguru_logic.generate_workguru_csv(
-            int(order.customer_number), 
-            cad_db_path, 
+            int(order.customer_number),
+            cad_db_path,
             products_db_path
         )
         
