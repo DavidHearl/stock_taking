@@ -12,7 +12,10 @@
             <i class="bi bi-table"></i> Overview
         </button>
         <button class="ts-tab" id="tab-add-btn" onclick="switchTab('add')">
-            <i class="bi bi-calendar-week"></i> Weekly Schedule
+            <i class="bi bi-calendar-week"></i> Manufacturing
+        </button>
+        <button class="ts-tab" id="tab-fitter-btn" onclick="switchTab('fitter')">
+            <i class="bi bi-people"></i> Fitter Schedule
         </button>
     </div>
 
@@ -173,6 +176,43 @@
         </div>
 
     </div><!-- /#tab-add -->
+
+    <!-- ===================== TAB: FITTER SCHEDULE ===================== -->
+    <div id="tab-fitter" style="display:none;">
+
+        <!-- Week navigation bar -->
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-body" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="prevWeek()"><i class="bi bi-chevron-left"></i></button>
+                <strong id="week-label-fitter" style="font-size:0.95rem;min-width:230px;text-align:center;"></strong>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="nextWeek()"><i class="bi bi-chevron-right"></i></button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="goToCurrentWeek()">Today</button>
+                <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+                    <span id="fitter-legend" style="font-size:0.75rem;color:var(--text-secondary);"></span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllFitterAssignments()"><i class="bi bi-x-circle"></i> Clear</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="save-fitter-btn" onclick="saveFitterWeek()"><i class="bi bi-floppy"></i> Save Week</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fitter Grid -->
+        <div class="card">
+            <div class="card-body" style="padding:0;overflow-x:auto;">
+                <table class="grid-table" id="schedule-grid-fitter">
+                    <thead>
+                        <tr id="grid-header-row-fitter">
+                            <th class="col-date">Date</th>
+                            <th class="col-worker">Fitter</th>
+                            <!-- slot headers injected by JS -->
+                        </tr>
+                    </thead>
+                    <tbody id="grid-body-fitter"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </div><!-- /#tab-fitter -->
+
 </div><!-- /.page-content -->
 
 
@@ -224,10 +264,11 @@
             <button type="button" class="modal-close" onclick="closePopover()" style="font-size:1rem;line-height:1;">&#x2715;</button>
         </div>
         <!-- Task type -->
-        <div style="display:flex;gap:4px;margin-bottom:10px;">
-            <button type="button" class="btn btn-sm task-type-btn active" data-type="order"   onclick="setTaskType('order')">Order</button>
-            <button type="button" class="btn btn-sm task-type-btn"        data-type="delivery" onclick="setTaskType('delivery')">Delivery</button>
-            <button type="button" class="btn btn-sm task-type-btn"        data-type="general"  onclick="setTaskType('general')">General</button>
+        <div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm task-type-btn active" data-type="order"        onclick="setTaskType('order')">Order</button>
+            <button type="button" class="btn btn-sm task-type-btn"        data-type="delivery"     onclick="setTaskType('delivery')">Delivery</button>
+            <button type="button" class="btn btn-sm task-type-btn"        data-type="general"      onclick="setTaskType('general')">General</button>
+            <button type="button" class="btn btn-sm task-type-btn"        data-type="installation" onclick="setTaskType('installation')">Installation</button>
         </div>
         <!-- Order search (hidden for non-order types) -->
         <div class="form-group" id="popover-order-row" style="margin-bottom:8px;position:relative;">
@@ -284,6 +325,31 @@
     --worker-2-bg:     rgba(20,184,166,0.16);   /* teal tint    */
     --worker-2-pill:   #0d9488;                 /* teal-600     */
     --worker-2-border: rgba(20,184,166,0.4);
+
+    /* Fitter grid colour tokens */
+    --fitter-0-bg:     rgba(16,185,129,0.16);   /* emerald tint */
+    --fitter-0-pill:   #059669;                 /* emerald-600  */
+    --fitter-0-border: rgba(16,185,129,0.4);
+
+    --fitter-1-bg:     rgba(244,63,94,0.14);    /* rose tint    */
+    --fitter-1-pill:   #e11d48;                 /* rose-600     */
+    --fitter-1-border: rgba(244,63,94,0.4);
+
+    --fitter-2-bg:     rgba(14,165,233,0.14);   /* sky tint     */
+    --fitter-2-pill:   #0284c7;                 /* sky-600      */
+    --fitter-2-border: rgba(14,165,233,0.4);
+
+    --fitter-3-bg:     rgba(167,139,250,0.16);  /* violet tint  */
+    --fitter-3-pill:   #7c3aed;                 /* violet-600   */
+    --fitter-3-border: rgba(167,139,250,0.4);
+
+    --fitter-4-bg:     rgba(251,146,60,0.14);   /* orange tint  */
+    --fitter-4-pill:   #ea580c;                 /* orange-600   */
+    --fitter-4-border: rgba(251,146,60,0.4);
+
+    --fitter-5-bg:     rgba(232,121,249,0.14);  /* fuchsia tint */
+    --fitter-5-pill:   #c026d3;                 /* fuchsia-600  */
+    --fitter-5-border: rgba(232,121,249,0.4);
 }
 
 /*  Tab nav  */
@@ -397,10 +463,26 @@ tr.text-muted td{ opacity:.6; }
 .grid-slot.worker-row-1 { background: rgba(245,158,11,0.04); }
 .grid-slot.worker-row-2 { background: rgba(20,184,166,0.04); }
 
+/* Fitter row tints */
+.grid-slot.fitter-row-0 { background: rgba(16,185,129,0.04); }
+.grid-slot.fitter-row-1 { background: rgba(244,63,94,0.04); }
+.grid-slot.fitter-row-2 { background: rgba(14,165,233,0.04); }
+.grid-slot.fitter-row-3 { background: rgba(167,139,250,0.04); }
+.grid-slot.fitter-row-4 { background: rgba(251,146,60,0.04); }
+.grid-slot.fitter-row-5 { background: rgba(232,121,249,0.04); }
+
 /* Assigned states */
 .grid-slot.assigned-0     { background: var(--worker-0-bg) !important; border-color: var(--worker-0-border) !important; }
 .grid-slot.assigned-1     { background: var(--worker-1-bg) !important; border-color: var(--worker-1-border) !important; }
 .grid-slot.assigned-2     { background: var(--worker-2-bg) !important; border-color: var(--worker-2-border) !important; }
+
+/* Fitter assigned states */
+.grid-slot.fitter-assigned-0 { background: var(--fitter-0-bg) !important; border-color: var(--fitter-0-border) !important; }
+.grid-slot.fitter-assigned-1 { background: var(--fitter-1-bg) !important; border-color: var(--fitter-1-border) !important; }
+.grid-slot.fitter-assigned-2 { background: var(--fitter-2-bg) !important; border-color: var(--fitter-2-border) !important; }
+.grid-slot.fitter-assigned-3 { background: var(--fitter-3-bg) !important; border-color: var(--fitter-3-border) !important; }
+.grid-slot.fitter-assigned-4 { background: var(--fitter-4-bg) !important; border-color: var(--fitter-4-border) !important; }
+.grid-slot.fitter-assigned-5 { background: var(--fitter-5-bg) !important; border-color: var(--fitter-5-border) !important; }
 
 /* Span: start/middle/end — remove internal borders, allow pill to overflow */
 .grid-slot.span-start { border-right:none !important; border-radius:5px 0 0 5px; overflow:visible !important; position:relative; z-index:2; }
@@ -425,6 +507,12 @@ tr.text-muted td{ opacity:.6; }
 .slot-pill-0 { background:var(--worker-0-pill); color:#fff; }
 .slot-pill-1 { background:var(--worker-1-pill); color:#fff; }
 .slot-pill-2 { background:var(--worker-2-pill); color:#fff; }
+.fitter-pill-0 { background:var(--fitter-0-pill); color:#fff; }
+.fitter-pill-1 { background:var(--fitter-1-pill); color:#fff; }
+.fitter-pill-2 { background:var(--fitter-2-pill); color:#fff; }
+.fitter-pill-3 { background:var(--fitter-3-pill); color:#fff; }
+.fitter-pill-4 { background:var(--fitter-4-pill); color:#fff; }
+.fitter-pill-5 { background:var(--fitter-5-pill); color:#fff; }
 .slot-pill:active { cursor:grabbing; }
 /* Multi-cell pill overrides (applied via inline style in JS) */
 .slot-pill.pill-span { justify-content:flex-start; padding:0 28px 0 10px; font-size:.72rem; }
@@ -452,6 +540,18 @@ tr.text-muted td{ opacity:.6; }
 .grid-slot.assigned-0:not(.span-start):not(.span-mid):hover .resize-handle,
 .grid-slot.assigned-1:not(.span-start):not(.span-mid):hover .resize-handle,
 .grid-slot.assigned-2:not(.span-start):not(.span-mid):hover .resize-handle { opacity:1; }
+.grid-slot.fitter-assigned-0:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.fitter-assigned-1:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.fitter-assigned-2:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.fitter-assigned-3:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.fitter-assigned-4:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.fitter-assigned-5:not(.span-start):not(.span-mid) .resize-handle { opacity:0; }
+.grid-slot.fitter-assigned-0:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.fitter-assigned-1:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.fitter-assigned-2:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.fitter-assigned-3:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.fitter-assigned-4:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.fitter-assigned-5:not(.span-start):not(.span-mid):hover .resize-handle { opacity:1; }
 /* Highlight when actively resizing */
 body.is-resizing .grid-slot:not(.slot-break) { cursor:ew-resize !important; }
 body.is-resizing .grid-slot.resize-preview { outline:2px dashed rgba(255,255,255,0.5) !important; outline-offset:-2px; }
@@ -473,11 +573,18 @@ body.is-resizing .grid-slot.resize-preview { outline:2px dashed rgba(255,255,255
 // 
 // Tabs
 // 
+let _fitterGridBuilt = false;
 function switchTab(tab) {
     document.getElementById('tab-overview').style.display = tab === 'overview' ? 'block' : 'none';
     document.getElementById('tab-add').style.display      = tab === 'add'      ? 'block' : 'none';
+    document.getElementById('tab-fitter').style.display   = tab === 'fitter'   ? 'block' : 'none';
     document.getElementById('tab-overview-btn').classList.toggle('active', tab === 'overview');
     document.getElementById('tab-add-btn').classList.toggle('active', tab === 'add');
+    document.getElementById('tab-fitter-btn').classList.toggle('active', tab === 'fitter');
+    if(tab === 'fitter'){
+        if(!_fitterGridBuilt){ buildFitterGrid(); buildFitterLegend(); _fitterGridBuilt = true; }
+        else loadFitterTimesheets();
+    }
 }
 
 // 
@@ -557,9 +664,9 @@ let _searchTimer     = null;
 
 //  Week nav 
 function getMondayOf(d){ const dt=new Date(d); dt.setHours(0,0,0,0); const dow=dt.getDay(); dt.setDate(dt.getDate()-(dow===0?6:dow-1)); return dt; }
-function prevWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekStart.setDate(currentWeekStart.getDate()-7); updateWeekDisplay(); loadWeekTimesheets(); }
-function nextWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekStart.setDate(currentWeekStart.getDate()+7); updateWeekDisplay(); loadWeekTimesheets(); }
-function goToCurrentWeek(){ currentWeekStart=getMondayOf(new Date()); updateWeekDisplay(); loadWeekTimesheets(); }
+function prevWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekStart.setDate(currentWeekStart.getDate()-7); updateWeekDisplay(); loadWeekTimesheets(); if(_fitterGridBuilt)loadFitterTimesheets(); }
+function nextWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekStart.setDate(currentWeekStart.getDate()+7); updateWeekDisplay(); loadWeekTimesheets(); if(_fitterGridBuilt)loadFitterTimesheets(); }
+function goToCurrentWeek(){ currentWeekStart=getMondayOf(new Date()); updateWeekDisplay(); loadWeekTimesheets(); if(_fitterGridBuilt)loadFitterTimesheets(); }
 
 function updateWeekDisplay(){
     const fri=new Date(currentWeekStart); fri.setDate(fri.getDate()+4);
@@ -567,13 +674,18 @@ function updateWeekDisplay(){
     document.getElementById('week-label').textContent=
         currentWeekStart.toLocaleDateString('en-GB',fmt)+' \u2013 '+fri.toLocaleDateString('en-GB',{...fmt,year:'numeric'});
 
-    // Update day header cells
+    // Update day header cells (both grids)
     for(let i=0;i<5;i++){
         const d=new Date(currentWeekStart); d.setDate(d.getDate()+i);
         const dateStr=d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+        const inner=`<span class="day-name">${DAY_SHORT[i]}</span><span class="day-date">${dateStr}</span>`;
         const el=document.getElementById('day-header-'+i);
-        if(el) el.innerHTML=`<span class="day-name">${DAY_SHORT[i]}</span><span class="day-date">${dateStr}</span>`;
+        if(el) el.innerHTML=inner;
+        const elF=document.getElementById('day-header-fit-'+i);
+        if(elF) elF.innerHTML=inner;
     }
+    const labelF=document.getElementById('week-label-fitter');
+    if(labelF) labelF.textContent=document.getElementById('week-label').textContent;
 }
 
 //  Build grid 
@@ -655,7 +767,7 @@ function clearSlotCells(wid, di, slots){
 }
 
 function getCellEl(wid,di,slot){
-    return document.querySelector(`.grid-slot[data-worker-id="${wid}"][data-day-idx="${di}"][data-slot="${slot}"]`);
+    return document.querySelector(`#grid-body .grid-slot[data-worker-id="${wid}"][data-day-idx="${di}"][data-slot="${slot}"]`);
 }
 
 function renderSpan(wid,di,startSlot,data){
@@ -712,6 +824,7 @@ function renderSpan(wid,di,startSlot,data){
             pill.draggable=true;
             pill.addEventListener('dragstart',e=>{
                 _dragSourceKey=slotKey(wid,di,startSlot);
+                _dragSourceIsFitter=false;
                 e.dataTransfer.effectAllowed='move';
                 e.dataTransfer.setData('text/plain',_dragSourceKey);
                 setTimeout(()=>spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.add('dragging');}),0);
@@ -785,8 +898,8 @@ function eraseAssignment(wid,di,slot){
 // ── Resize-by-drag ────────────────────────────────────────────
 let _resizeCtx=null;
 
-function startResize(wid, di, startSlot, originalData){
-    _resizeCtx={ wid, di, startSlot, originalData, currentLen: originalData.span_len };
+function startResize(wid, di, startSlot, originalData, isFitter=false){
+    _resizeCtx={ wid, di, startSlot, originalData, currentLen: originalData.span_len, isFitter };
     document.body.classList.add('is-resizing');
     document.addEventListener('mousemove', onResizeMove);
     document.addEventListener('mouseup',   onResizeEnd);
@@ -794,7 +907,9 @@ function startResize(wid, di, startSlot, originalData){
 
 function onResizeMove(e){
     if(!_resizeCtx) return;
-    const { wid, di, startSlot, originalData } = _resizeCtx;
+    const { wid, di, startSlot, originalData, isFitter } = _resizeCtx;
+    const eraseFn = isFitter ? eraseFitterAssignment : eraseAssignment;
+    const writeFn = isFitter ? writeFitterAssignment : writeAssignment;
 
     // Find the grid slot under the cursor
     const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -816,8 +931,8 @@ function onResizeMove(e){
     _resizeCtx.currentLen=newLen;
 
     // Redraw span at new length
-    eraseAssignment(wid, di, startSlot);
-    writeAssignment(wid, di, startSlot, { ...originalData, span_len:newLen });
+    eraseFn(wid, di, startSlot);
+    writeFn(wid, di, startSlot, { ...originalData, span_len:newLen });
 }
 
 function onResizeEnd(){
@@ -829,7 +944,7 @@ function onResizeEnd(){
 
 function clearAllAssignments(){
     Object.keys(assignments).forEach(k=>delete assignments[k]);
-    document.querySelectorAll('.grid-slot:not(.slot-break)').forEach(td=>{
+    document.querySelectorAll('#grid-body .grid-slot:not(.slot-break)').forEach(td=>{
         td.className='grid-slot worker-row-'+td.dataset.workerIdx;
         td.innerHTML='';
         // re-attach listeners
@@ -842,20 +957,22 @@ function clearAllAssignments(){
 
 // ── Drag & Drop ───────────────────────────────────────────────
 let _dragOverCells=[];
+let _dragSourceIsFitter=false;
 function clearDragHighlight(){ _dragOverCells.forEach(el=>el.classList.remove('drag-over')); _dragOverCells=[]; }
 
 function onDragOver(e){
     if(!_dragSourceKey)return;
     e.preventDefault(); e.dataTransfer.dropEffect='move';
     const td=e.currentTarget;
-    // Avoid recomputing when pointer just moves within same cell
     if(td===_dragOverCells[0])return;
     clearDragHighlight();
-    const srcData=assignments[_dragSourceKey];
+    const asgn    = _dragSourceIsFitter ? fitterAssignments : assignments;
+    const getCell = _dragSourceIsFitter ? getCellElFitter   : getCellEl;
+    const srcData=asgn[_dragSourceKey];
     if(!srcData||srcData.is_cont)return;
     const tgtWid=td.dataset.workerId, tgtDi=parseInt(td.dataset.dayIdx);
     getSpanSlots(td.dataset.slot, srcData.span_len).forEach(s=>{
-        const el=getCellEl(tgtWid,tgtDi,s);
+        const el=getCell(tgtWid,tgtDi,s);
         if(el){ el.classList.add('drag-over'); _dragOverCells.push(el); }
     });
 }
@@ -869,8 +986,14 @@ function onDrop(e){
     const td=e.currentTarget;
     if(!_dragSourceKey)return;
 
+    const isFitter=_dragSourceIsFitter;
+    const asgn    = isFitter ? fitterAssignments : assignments;
+    const getCell = isFitter ? getCellElFitter   : getCellEl;
+    const writeFn = isFitter ? writeFitterAssignment : writeAssignment;
+    const rowCls  = isFitter ? wi=>`fitter-row-${wi}` : wi=>`worker-row-${wi}`;
+
     const [srcW,srcD,srcS]=_dragSourceKey.split('__');
-    const srcData=assignments[_dragSourceKey];
+    const srcData=asgn[_dragSourceKey];
     if(!srcData||srcData.is_cont)return;
 
     const tgtW=td.dataset.workerId, tgtD=td.dataset.dayIdx, tgtS=td.dataset.slot;
@@ -878,16 +1001,17 @@ function onDrop(e){
     // Clear source
     const srcSpanSlots=getSpanSlots(srcS,srcData.span_len);
     srcSpanSlots.forEach(s=>{
-        delete assignments[slotKey(srcW,srcD,s)];
-        const el=getCellEl(srcW,srcD,s);
-        if(el){el.className='grid-slot worker-row-'+el.dataset.workerIdx;el.innerHTML='';}
+        delete asgn[slotKey(srcW,srcD,s)];
+        const el=getCell(srcW,srcD,s);
+        if(el){el.className='grid-slot '+rowCls(parseInt(el.dataset.workerIdx));el.innerHTML='';}
     });
 
     // Build new assignment for target (keep same data, but update workerIdx)
     const newWi=parseInt(td.dataset.workerIdx);
     const newData={ ...srcData, workerIdx:newWi, is_start:true };
-    writeAssignment(tgtW, parseInt(tgtD), tgtS, newData);
+    writeFn(tgtW, parseInt(tgtD), tgtS, newData);
     _dragSourceKey=null;
+    _dragSourceIsFitter=false;
 }
 
 // ── Slot click / popover ──────────────────────────────────────
@@ -905,22 +1029,25 @@ function setTaskType(type){
 function onSlotClick(e){
     if(_dragSourceKey)return;
     const td=e.currentTarget;
+    const isFitter=!!td.closest('#schedule-grid-fitter');
+    const asgn    = isFitter ? fitterAssignments : assignments;
+    const workers = isFitter ? FITTERS : WORKERS;
     const wid=td.dataset.workerId, wi=parseInt(td.dataset.workerIdx),
           di=parseInt(td.dataset.dayIdx);
     let slot=td.dataset.slot;
 
     let key=slotKey(wid,di,slot);
-    let existing=assignments[key];
+    let existing=asgn[key];
     // If cont slot, redirect to start slot
-    if(existing?.is_cont){ key=existing.span_start_key; existing=assignments[key]; slot=key.split('__')[2]; }
+    if(existing?.is_cont){ key=existing.span_start_key; existing=asgn[key]; slot=key.split('__')[2]; }
 
-    _popCtx={ wid, wi, di, slot };
+    _popCtx={ wid, wi, di, slot, isFitter };
 
     // Resolve task type from existing data
     const existType = existing?.task_type || 'order';
     setTaskType(existType);
 
-    const worker=WORKERS.find(w=>String(w.id)===String(wid));
+    const worker=workers.find(w=>String(w.id)===String(wid));
     const dayDate=new Date(currentWeekStart); dayDate.setDate(dayDate.getDate()+di);
     const dateStr=dayDate.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'});
 
@@ -938,16 +1065,16 @@ function onSlotClick(e){
     const dupRow = document.getElementById('popover-dup-row');
     const dupSel = document.getElementById('popover-dup-worker');
     if(existing){
-        dupSel.innerHTML = WORKERS.filter(w=>String(w.id)!==String(wid))
+        dupSel.innerHTML = workers.filter(w=>String(w.id)!==String(wid))
             .map(w=>`<option value="${w.id}">${w.name.split(' ')[0]}</option>`).join('');
-        dupRow.style.display = WORKERS.length > 1 ? '' : 'none';
+        dupRow.style.display = workers.length > 1 ? '' : 'none';
     } else { dupRow.style.display='none'; }
 
     const popover=document.getElementById('slot-popover');
     popover.style.display='block';
     document.getElementById('popover-backdrop').style.display='block';
 
-    const rect=td.getBoundingClientRect(), pW=320, pH=360;
+    const rect=td.getBoundingClientRect(), pW=320, pH=380;
     let left=rect.left+window.scrollX, top=rect.bottom+window.scrollY+6;
     if(left+pW>window.innerWidth-12) left=window.innerWidth-pW-12;
     if(top+pH>window.innerHeight+window.scrollY-12) top=rect.top+window.scrollY-pH-6;
@@ -975,37 +1102,42 @@ function assignSlot(){
         orderLabel = document.getElementById('popover-order-search').value.trim();
         if(!orderId||!orderLabel){ alert('Please select an order'); return; }
     } else {
-        const typeLabel = activeType==='delivery' ? 'Delivery' : 'General';
+        const typeLabels = { delivery:'Delivery', general:'General', installation:'Installation' };
+        const typeLabel  = typeLabels[activeType] || 'General';
         orderId    = activeType.toUpperCase();
         orderLabel = desc ? typeLabel+': '+desc : typeLabel;
-        if(!desc && activeType!=='delivery'){ /* allow nameless delivery */ }
     }
 
-    const {wid,wi,di,slot}=_popCtx;
-    writeAssignment(wid, di, slot, { order_id:orderId, order_label:orderLabel, description:desc, task_type:activeType, workerIdx:wi, span_len:spanLen });
+    const {wid,wi,di,slot,isFitter}=_popCtx;
+    const writeFn = isFitter ? writeFitterAssignment : writeAssignment;
+    writeFn(wid, di, slot, { order_id:orderId, order_label:orderLabel, description:desc, task_type:activeType, workerIdx:wi, span_len:spanLen });
     closePopover();
 }
 
 function duplicateSlot(){
     if(!_popCtx)return;
-    const {wid,di,slot}=_popCtx;
-    let key=slotKey(wid,di,slot), data=assignments[key];
-    if(data?.is_cont){ key=data.span_start_key; data=assignments[key]; }
+    const {wid,di,slot,isFitter}=_popCtx;
+    const asgn    = isFitter ? fitterAssignments : assignments;
+    const writeFn = isFitter ? writeFitterAssignment : writeAssignment;
+    const workers = isFitter ? FITTERS : WORKERS;
+    let key=slotKey(wid,di,slot), data=asgn[key];
+    if(data?.is_cont){ key=data.span_start_key; data=asgn[key]; }
     if(!data)return;
     const targetWid=document.getElementById('popover-dup-worker').value;
     if(!targetWid)return;
-    const targetWorker=WORKERS.find(w=>String(w.id)===String(targetWid));
+    const targetWorker=workers.find(w=>String(w.id)===String(targetWid));
     if(!targetWorker)return;
-    const targetWi=WORKERS.indexOf(targetWorker);
+    const targetWi=workers.indexOf(targetWorker);
     const startSlot=key.split('__')[2];
-    writeAssignment(targetWid, di, startSlot, { ...data, workerIdx:targetWi, is_start:true });
+    writeFn(targetWid, di, startSlot, { ...data, workerIdx:targetWi, is_start:true });
     closePopover();
 }
 
 function clearSlot(){
     if(!_popCtx)return;
-    const {wid,di,slot}=_popCtx;
-    eraseAssignment(wid,di,slot);
+    const {wid,di,slot,isFitter}=_popCtx;
+    if(isFitter) eraseFitterAssignment(wid,di,slot);
+    else eraseAssignment(wid,di,slot);
     closePopover();
 }
 
@@ -1126,9 +1258,263 @@ function getCsrfToken(){
     return v;
 }
 
-// Inject active factory workers from Django (ordered by display_order)
+// ── FITTER GRID ──────────────────────────────────────────────
+const FITTERS = [];
+const fitterAssignments = {};
+
+function getCellElFitter(wid, di, slot){
+    return document.querySelector(`#grid-body-fitter .grid-slot[data-worker-id="${wid}"][data-day-idx="${di}"][data-slot="${slot}"]`);
+}
+
+function buildFitterGrid(){
+    const headerRow = document.getElementById('grid-header-row-fitter');
+    GRID_SLOTS.forEach(slot=>{
+        const th=document.createElement('th');
+        th.className='grid-time-hdr'+(BREAK_SLOTS.has(slot)?' break-hdr':'');
+        th.textContent=slot;
+        headerRow.appendChild(th);
+    });
+
+    const tbody = document.getElementById('grid-body-fitter');
+    const nW = FITTERS.length;
+
+    for(let dayIdx=0;dayIdx<5;dayIdx++){
+        FITTERS.forEach((worker,wi)=>{
+            const tr=document.createElement('tr');
+            if(wi===nW-1) tr.classList.add('day-last-row');
+
+            if(wi===0){
+                const dtd=document.createElement('td');
+                dtd.className='cell-date'; dtd.rowSpan=nW; dtd.id='day-header-fit-'+dayIdx;
+                tr.appendChild(dtd);
+            }
+
+            const wtd=document.createElement('td');
+            wtd.className='cell-worker';
+            wtd.textContent=worker.name.split(' ')[0];
+            wtd.title=worker.name;
+            wtd.style.borderLeft=`4px solid var(--fitter-${wi}-pill, #888)`;
+            tr.appendChild(wtd);
+
+            GRID_SLOTS.forEach(slot=>{
+                const isBreak=BREAK_SLOTS.has(slot);
+                const td=document.createElement('td');
+                td.className='grid-slot'+(isBreak?' slot-break':' fitter-row-'+wi);
+                td.dataset.workerId=worker.id; td.dataset.workerIdx=wi;
+                td.dataset.dayIdx=dayIdx; td.dataset.slot=slot;
+                if(!isBreak){
+                    td.addEventListener('click',    onSlotClick);
+                    td.addEventListener('dragover',  onDragOver);
+                    td.addEventListener('dragleave', onDragLeave);
+                    td.addEventListener('drop',      onDrop);
+                }
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+    updateWeekDisplay();
+    loadFitterTimesheets();
+}
+
+function buildFitterLegend(){
+    const el=document.getElementById('fitter-legend');
+    if(!el) return;
+    el.innerHTML=FITTERS.map((f,i)=>
+        `<span class="legend-swatch" style="background:var(--fitter-${i}-bg);border-color:var(--fitter-${i}-border);"></span> ${f.name.split(' ')[0]}`
+    ).join(' &nbsp; ')+' &nbsp; <span class="legend-break"></span> Break';
+}
+
+function renderFitterSpan(wid, di, startSlot, data){
+    const spanSlots=getSpanSlots(startSlot,data.span_len);
+    spanSlots.forEach((slot,i)=>{
+        const td=getCellElFitter(wid,di,slot);
+        if(!td)return;
+        const wi=data.workerIdx;
+        td.className=`grid-slot fitter-assigned-${wi}`;
+        td.dataset.workerId=wid; td.dataset.workerIdx=wi; td.dataset.dayIdx=di; td.dataset.slot=slot;
+        td.addEventListener('click',    onSlotClick);
+        td.addEventListener('dragover',  onDragOver);
+        td.addEventListener('dragleave', onDragLeave);
+        td.addEventListener('drop',      onDrop);
+
+        const isStart=i===0, isEnd=i===spanSlots.length-1;
+        if(spanSlots.length>1){
+            if(isStart)     td.classList.add('span-start');
+            else if(isEnd)  td.classList.add('span-end');
+            else             td.classList.add('span-mid');
+        }
+
+        td.innerHTML='';
+        if(isStart){
+            const pill=document.createElement('span');
+            const isMulti=spanSlots.length>1;
+            pill.className=`slot-pill fitter-pill-${wi}`+(isMulti?' pill-span':'');
+            const fullLabel=data.order_label+(data.description?' \u2014 '+data.description:'');
+            pill.title=fullLabel;
+            if(isMulti){
+                const roughW=spanSlots.length*57-8;
+                pill.style.cssText=`position:absolute; top:4px; bottom:4px; left:4px; width:${roughW}px; max-width:none; z-index:3; box-sizing:border-box; border-radius:4px;`;
+                pill.textContent=fullLabel;
+                requestAnimationFrame(()=>{
+                    const firstTd=getCellElFitter(wid,di,startSlot);
+                    const lastTd =getCellElFitter(wid,di,spanSlots[spanSlots.length-1]);
+                    if(firstTd&&lastTd&&pill.parentNode){
+                        const fr=firstTd.getBoundingClientRect(), lr=lastTd.getBoundingClientRect();
+                        pill.style.width=(lr.right-fr.left-4-10)+'px';
+                    }
+                });
+            } else { pill.textContent=data.order_label; }
+            pill.draggable=true;
+            pill.addEventListener('dragstart',e=>{
+                _dragSourceKey=slotKey(wid,di,startSlot);
+                _dragSourceIsFitter=true;
+                e.dataTransfer.effectAllowed='move';
+                e.dataTransfer.setData('text/plain',_dragSourceKey);
+                setTimeout(()=>spanSlots.forEach(s=>{const el=getCellElFitter(wid,di,s);if(el)el.classList.add('dragging');}),0);
+            });
+            pill.addEventListener('dragend',()=>{
+                spanSlots.forEach(s=>{const el=getCellElFitter(wid,di,s);if(el)el.classList.remove('dragging');});
+                _dragSourceKey=null; _dragSourceIsFitter=false;
+            });
+            td.appendChild(pill);
+        }
+        if(isEnd){
+            const handle=document.createElement('div');
+            handle.className='resize-handle'; handle.title='Drag to resize';
+            handle.addEventListener('mousedown',e=>{
+                e.preventDefault(); e.stopPropagation();
+                startResize(wid, di, startSlot, { ...data }, true);
+            });
+            td.appendChild(handle);
+        }
+    });
+}
+
+function writeFitterAssignment(wid, di, startSlot, data){
+    const spanSlots=getSpanSlots(startSlot,data.span_len);
+    spanSlots.forEach(slot=>{
+        const key=slotKey(wid,di,slot);
+        if(fitterAssignments[key]){
+            if(fitterAssignments[key].is_start){
+                const old=fitterAssignments[key];
+                getSpanSlots(slot,old.span_len).forEach(s=>{delete fitterAssignments[slotKey(wid,di,s)];});
+            } else if(fitterAssignments[key].is_cont){
+                const startKey=fitterAssignments[key].span_start_key;
+                if(startKey&&fitterAssignments[startKey]){
+                    const [sw,sd,ss]=startKey.split('__');
+                    getSpanSlots(ss,fitterAssignments[startKey].span_len).forEach(s=>{delete fitterAssignments[slotKey(sw,sd,s)];});
+                }
+            }
+        }
+    });
+    data.is_start=true;
+    fitterAssignments[slotKey(wid,di,startSlot)]=data;
+    spanSlots.slice(1).forEach(slot=>{
+        fitterAssignments[slotKey(wid,di,slot)]={ is_cont:true, span_start_key:slotKey(wid,di,startSlot) };
+    });
+    renderFitterSpan(wid,di,startSlot,data);
+}
+
+function eraseFitterAssignment(wid, di, slot){
+    const key=slotKey(wid,di,slot);
+    let startKey=key, startData=fitterAssignments[key];
+    if(!startData)return;
+    if(startData.is_cont){ startKey=startData.span_start_key; startData=fitterAssignments[startKey]; }
+    if(!startData)return;
+    const [sw,sd,ss]=startKey.split('__');
+    const spanSlots=getSpanSlots(ss,startData.span_len);
+    spanSlots.forEach(s=>{
+        delete fitterAssignments[slotKey(sw,sd,s)];
+        const td=getCellElFitter(sw,sd,s);
+        if(td){ td.className='grid-slot fitter-row-'+td.dataset.workerIdx; td.innerHTML=''; }
+    });
+}
+
+function clearAllFitterAssignments(){
+    Object.keys(fitterAssignments).forEach(k=>delete fitterAssignments[k]);
+    document.querySelectorAll('#grid-body-fitter .grid-slot:not(.slot-break)').forEach(td=>{
+        td.className='grid-slot fitter-row-'+td.dataset.workerIdx;
+        td.innerHTML='';
+        td.addEventListener('click',    onSlotClick);
+        td.addEventListener('dragover',  onDragOver);
+        td.addEventListener('dragleave', onDragLeave);
+        td.addEventListener('drop',      onDrop);
+    });
+}
+
+function loadFitterTimesheets(){
+    clearAllFitterAssignments();
+    const weekStart=currentWeekStart.toISOString().split('T')[0];
+    fetch('/api/get-week-fitter-timesheets/?week_start='+weekStart)
+        .then(r=>r.json())
+        .then(data=>{
+            if(!data.success)return;
+            data.entries.forEach(e=>{
+                const fitter=FITTERS.find(f=>String(f.id)===String(e.worker_id));
+                if(!fitter)return;
+                const wi=FITTERS.indexOf(fitter);
+                writeFitterAssignment(
+                    String(e.worker_id), e.day_index, e.start_slot,
+                    { order_id:e.order_id, order_label:e.order_label,
+                      description:e.description, task_type:e.task_type,
+                      workerIdx:wi, span_len:e.span_len, is_start:true }
+                );
+            });
+        })
+        .catch(err=>console.warn('Failed to load fitter timesheets:', err));
+}
+
+function saveFitterWeek(){
+    if(Object.keys(fitterAssignments).length===0){alert('No fitter slots assigned yet');return;}
+    const weekStart=currentWeekStart.toISOString().split('T')[0];
+
+    const grouped={};
+    Object.entries(fitterAssignments).forEach(([key,data])=>{
+        if(!data.is_start)return;
+        const [wid,dayIdx,slot]=key.split('__');
+        const gKey=`${wid}__${dayIdx}__${data.order_id}__${data.description||''}`;
+        if(!grouped[gKey]) grouped[gKey]={
+            worker_id:parseInt(wid), day_index:parseInt(dayIdx),
+            order_id:data.order_id, order_label:data.order_label||'',
+            task_type:data.task_type||'order', description:data.description||'', slots:[]
+        };
+        const spanSlots=getSpanSlots(slot,data.span_len);
+        grouped[gKey].slots.push(...spanSlots);
+    });
+
+    const entries=Object.values(grouped);
+    const btn=document.getElementById('save-fitter-btn');
+    btn.disabled=true; btn.innerHTML='<i class="bi bi-hourglass-split"></i> Saving\u2026';
+
+    fetch('/api/save-fitter-week/',{
+        method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},
+        body:JSON.stringify({week_start:weekStart,entries})
+    }).then(r=>r.json()).then(data=>{
+        btn.disabled=false; btn.innerHTML='<i class="bi bi-floppy"></i> Save Week';
+        if(data.success){
+            const n=data.created;
+            btn.innerHTML=`<i class="bi bi-check-circle-fill"></i> Saved ${n} timesheet${n!==1?'s':''}`;
+            btn.classList.replace('btn-primary','btn-success');
+            setTimeout(()=>{btn.innerHTML='<i class="bi bi-floppy"></i> Save Week';btn.classList.replace('btn-success','btn-primary');},3000);
+            if(data.errors?.length) console.warn('Save errors:',data.errors);
+            loadFitterTimesheets();
+        } else { alert('Error: '+(data.error||'Unknown error')); }
+    }).catch(err=>{
+        btn.disabled=false; btn.innerHTML='<i class="bi bi-floppy"></i> Save Week';
+        console.error(err); alert('Network error saving fitter timesheets');
+    });
+}
+
+// ── Inject active factory workers from Django (ordered by display_order) ──
 {% for worker in factory_workers %}{% if worker.active %}
 WORKERS.push({ id: {{ worker.id }}, name: "{{ worker.name|escapejs }}" });
+{% endif %}{% endfor %}
+
+// ── Inject active fitters from Django ─────────────────────────────────────
+{% for fitter in fitters %}{% if fitter.active %}
+FITTERS.push({ id: {{ fitter.id }}, name: "{{ fitter.name|escapejs }}" });
 {% endif %}{% endfor %}
 </script>
 {% endblock %}

@@ -968,6 +968,24 @@ def shortages(request):
             ]},
         ]
         
+        # Build full requirements list - ALL RAU items needed for upcoming orders
+        all_rau_requirements = []
+        for data in upcoming_requirements.values():
+            if data['required_qty'] > 0:
+                all_rau_requirements.append({
+                    'sku': data['sku'],
+                    'name': data['name'],
+                    'current_stock': data['current_stock'],
+                    'incoming_qty': data.get('incoming_qty', 0),
+                    'required_qty': data['required_qty'],
+                    'shortage': data['shortage'],
+                    'order_count': len(data['orders']),
+                    'orders': sorted(data['orders'], key=lambda o: (o['fit_date'] or '9999-99-99')),
+                    'stock_item_id': data.get('stock_item_id'),
+                    'cost': data['cost'],
+                })
+        all_rau_requirements.sort(key=lambda x: x['required_qty'], reverse=True)
+
         # Build actual shortages list - items we are short of RIGHT NOW for orders in the system
         actual_shortages = []
         for data in upcoming_requirements.values():
@@ -989,6 +1007,7 @@ def shortages(request):
         
         context = {
             'active_tab': 'raumplus',
+            'all_rau_requirements': all_rau_requirements,
             'actual_shortages': actual_shortages,
             'upcoming_shortages': upcoming_list,
             'predicted_shortages': predicted_only_list,
@@ -9601,6 +9620,186 @@ def get_week_timesheets(request):
         })
 
     return JsonResponse({'success': True, 'entries': result})
+
+
+@require_http_methods(["GET"])
+@login_required
+def get_week_fitter_timesheets(request):
+    """Return installation timesheets for fitters for a given week."""
+    import re
+    from datetime import date as date_type, timedelta
+    from .models import Timesheet
+
+    GRID_SLOTS = [
+        '07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
+        '12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30',
+    ]
+
+    week_start_str = request.GET.get('week_start')
+    if not week_start_str:
+        return JsonResponse({'success': False, 'error': 'week_start required'}, status=400)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
+
+    week_end = week_start + timedelta(days=4)
+    timesheets = Timesheet.objects.filter(
+        timesheet_type='installation',
+        fitter__isnull=False,
+        date__gte=week_start,
+        date__lte=week_end,
+    ).select_related('order', 'fitter')
+
+    result = []
+    for ts in timesheets:
+        fitter_id = ts.fitter_id
+        day_index = (ts.date - week_start).days
+        if day_index < 0 or day_index > 4:
+            continue
+
+        desc_raw = ts.description or ''
+        parts = desc_raw.split('||')
+        if len(parts) == 4:
+            start_slot  = parts[0].strip()
+            span_len    = int(parts[1].strip()) if parts[1].strip().isdigit() else 1
+            order_label = parts[2].strip()
+            user_desc   = parts[3].strip()
+        elif len(parts) == 3:
+            start_slot  = parts[0].strip()
+            span_len    = 1
+            order_label = parts[1].strip()
+            user_desc   = parts[2].strip()
+        elif re.match(r'^\d{2}:\d{2}$', desc_raw):
+            start_slot  = desc_raw
+            span_len    = 1
+            order_label = ts.order.sale_number if ts.order else 'Unknown'
+            user_desc   = ''
+        else:
+            start_slot  = GRID_SLOTS[0]
+            span_len    = max(1, round(float(ts.hours or 0.5) * 2))
+            order_label = ts.order.sale_number if ts.order else desc_raw
+            user_desc   = desc_raw
+
+        if start_slot not in GRID_SLOTS:
+            start_slot = GRID_SLOTS[0]
+
+        if ts.order_id:
+            order_id  = str(ts.order_id)
+            task_type = 'order'
+        elif 'Delivery' in order_label:
+            order_id  = 'DELIVERY'
+            task_type = 'delivery'
+        elif 'Installation' in order_label:
+            order_id  = 'INSTALLATION'
+            task_type = 'installation'
+        else:
+            order_id  = 'GENERAL'
+            task_type = 'general'
+
+        result.append({
+            'worker_id':   fitter_id,
+            'day_index':   day_index,
+            'order_id':    order_id,
+            'order_label': order_label,
+            'description': user_desc,
+            'task_type':   task_type,
+            'start_slot':  start_slot,
+            'span_len':    span_len,
+        })
+
+    return JsonResponse({'success': True, 'entries': result})
+
+
+@require_http_methods(["POST"])
+@login_required
+def save_fitter_week(request):
+    """Save a week's fitter/installation schedule from the grid.
+    Same payload shape as save_manufacturing_day but uses Fitter FK
+    and creates timesheet_type='installation' records.
+    """
+    import json
+    from datetime import date as date_type, timedelta
+    from .models import Fitter, Timesheet, Order
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    week_start_str = data.get('week_start')
+    entries = data.get('entries', [])
+
+    if not week_start_str:
+        return JsonResponse({'success': False, 'error': 'week_start is required'}, status=400)
+    if not entries:
+        return JsonResponse({'success': False, 'error': 'No entries provided'}, status=400)
+
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid week_start format'}, status=400)
+
+    week_end = week_start + timedelta(days=4)
+    fitter_ids = [e.get('worker_id') for e in entries if e.get('worker_id')]
+    Timesheet.objects.filter(
+        timesheet_type='installation',
+        date__gte=week_start,
+        date__lte=week_end,
+        fitter_id__in=fitter_ids,
+    ).delete()
+
+    created_count = 0
+    errors = []
+
+    for entry in entries:
+        fitter_id   = entry.get('worker_id')
+        order_id    = entry.get('order_id')
+        order_label = entry.get('order_label', '')
+        day_index   = entry.get('day_index', 0)
+        slots       = entry.get('slots', [])
+        description = entry.get('description', '')
+
+        if not fitter_id or not slots:
+            continue
+
+        work_date = week_start + timedelta(days=int(day_index))
+
+        try:
+            fitter = Fitter.objects.get(id=fitter_id)
+        except Fitter.DoesNotExist:
+            errors.append(f'Fitter {fitter_id} not found')
+            continue
+
+        order = None
+        order_id_str = str(order_id) if order_id else ''
+        if order_id_str not in ('DELIVERY', 'GENERAL', 'INSTALLATION', ''):
+            try:
+                order = Order.objects.get(id=int(order_id_str))
+            except (Order.DoesNotExist, ValueError):
+                errors.append(f'Order {order_id} not found')
+                continue
+
+        slots_sorted = sorted(slots)
+        if not slots_sorted:
+            continue
+        start_slot  = slots_sorted[0]
+        total_hours = round(len(slots_sorted) * 0.5, 2)
+        span_len    = len(slots_sorted)
+        stored_desc = f"{start_slot}||{span_len}||{order_label}||{description}"
+
+        Timesheet.objects.create(
+            order=order,
+            fitter=fitter,
+            timesheet_type='installation',
+            date=work_date,
+            hours=total_hours,
+            hourly_rate=fitter.hourly_rate,
+            description=stored_desc,
+        )
+        created_count += 1
+
+    return JsonResponse({'success': True, 'created': created_count, 'errors': errors})
 
 
 @require_http_methods(["POST"])

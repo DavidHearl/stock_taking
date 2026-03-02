@@ -285,6 +285,8 @@ urlpatterns = [
     path('timesheets/', views.timesheets, name='timesheets'),
     path('api/save-manufacturing-day/', views.save_manufacturing_day, name='save_manufacturing_day'),
     path('api/get-week-timesheets/', views.get_week_timesheets, name='get_week_timesheets'),
+    path('api/save-fitter-week/', views.save_fitter_week, name='save_fitter_week'),
+    path('api/get-week-fitter-timesheets/', views.get_week_fitter_timesheets, name='get_week_fitter_timesheets'),
 
     # Dark mode / location toggles
     path('toggle-dark-mode/', toggle_dark_mode, name='toggle_dark_mode'),

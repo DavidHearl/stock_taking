@@ -145,6 +145,74 @@
 {% else %}
 <!-- ============ RAUMPLUS TAB ============ -->
 
+<!-- All RAU Requirements -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>RAU Requirements for Current Orders</h2>
+        <span class="section-subtitle">All Raumplus items needed across {{ upcoming_orders_count }} upcoming unfinished order{{ upcoming_orders_count|pluralize }}</span>
+    </div>
+    {% if all_rau_requirements %}
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Incoming</th>
+                    <th class="text-right">Required</th>
+                    <th class="text-right">Shortfall</th>
+                    <th class="text-right">Orders</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in all_rau_requirements %}
+                <tr class="expandable-row{% if item.shortage > 0 %} row-shortage{% endif %}" onclick="toggleExpand('rau-req-{{ forloop.counter }}')">
+                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{% if item.incoming_qty %}<span class="badge-incoming">{{ item.incoming_qty|floatformat:0 }}</span>{% else %}0{% endif %}</td>
+                    <td class="text-right"><strong>{{ item.required_qty|floatformat:0 }}</strong></td>
+                    <td class="text-right">{% if item.shortage > 0 %}<span class="badge-shortage">{{ item.shortage|floatformat:0 }}</span>{% else %}<span class="text-success">&#10003;</span>{% endif %}</td>
+                    <td class="text-right">{{ item.order_count }} <i class="bi bi-chevron-down expand-icon"></i></td>
+                </tr>
+                <tr class="expand-row" id="rau-req-{{ forloop.counter }}">
+                    <td colspan="7">
+                        <table class="shortage-tbl nested">
+                            <thead>
+                                <tr>
+                                    <th>Sale #</th>
+                                    <th>Customer</th>
+                                    <th>Fit Date</th>
+                                    <th class="text-right">Qty</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in item.orders %}
+                                <tr>
+                                    <td>{{ order.sale_number }}</td>
+                                    <td>{{ order.first_name }} {{ order.last_name }}</td>
+                                    <td>{{ order.fit_date|default:"-" }}</td>
+                                    <td class="text-right">{{ order.quantity|floatformat:0 }}</td>
+                                    <td><a href="{% url 'order_details' order.order_id %}" class="sku-link" target="_blank">View</a></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-inbox"></i> No Raumplus items required for upcoming orders.
+    </div>
+    {% endif %}
+</div>
+
 <!-- Current RAU Shortages -->
 <div class="content-card">
     <div class="section-header">
