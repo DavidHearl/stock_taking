@@ -1,49 +1,45 @@
-{% extends 'base.html' %}
-
+﻿{% extends 'base.html' %}
 {% block title %}Timesheets{% endblock %}
-
 {% block page_title %}Timesheets{% endblock %}
-
 {% block nav_timesheets_active %}active{% endblock %}
 
 {% block content %}
 <div class="page-content">
-    <!-- All Timesheets Table -->
-    <div class="card" style="margin-bottom: 16px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <h3><i class="bi bi-table"></i> All Timesheets</h3>
-            <button type="button" class="btn btn-primary btn-sm" onclick="openAddTimesheetModal()">
-                <i class="bi bi-plus-lg"></i> Add Timesheet
-            </button>
-        </div>
-        <div class="card-body" style="padding: 0;">
-            {% if timesheets %}
-            <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-                <table class="table ts-table">
-                    <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;">
-                        <tr>
-                            <th>Date</th>
-                            <th>Order</th>
-                            <th>Type</th>
-                            <th>Worker</th>
-                            <th>Hours</th>
-                            <th>Rate/Price</th>
-                            <th>Total</th>
-                            <th>Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+
+    <!-- Tab Navigation -->
+    <div class="ts-tabs">
+        <button class="ts-tab active" id="tab-overview-btn" onclick="switchTab('overview')">
+            <i class="bi bi-table"></i> Overview
+        </button>
+        <button class="ts-tab" id="tab-add-btn" onclick="switchTab('add')">
+            <i class="bi bi-calendar-week"></i> Weekly Schedule
+        </button>
+    </div>
+
+    <!-- ===================== TAB: OVERVIEW ===================== -->
+    <div id="tab-overview">
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3><i class="bi bi-table"></i> All Timesheets</h3>
+            </div>
+            <div class="card-body" style="padding:0;">
+                {% if timesheets %}
+                <div class="table-container" style="max-height:500px;overflow-y:auto;">
+                    <table class="table ts-table">
+                        <thead style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
+                            <tr>
+                                <th>Date</th><th>Order</th><th>Type</th><th>Worker</th>
+                                <th>Hours</th><th>Rate/Price</th><th>Total</th><th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                         {% for ts in timesheets %}
                         <tr>
                             <td>{{ ts.date|date:"d/m/Y" }}</td>
                             <td>
                                 {% if ts.order %}
-                                <a class="job-info-link" href="{% url 'order_details' ts.order.id %}">
-                                    {{ ts.order.sale_number }} - {{ ts.order.last_name }}
-                                </a>
-                                {% else %}
-                                -
-                                {% endif %}
+                                <a class="job-info-link" href="{% url 'order_details' ts.order.id %}">{{ ts.order.sale_number }} - {{ ts.order.last_name }}</a>
+                                {% else %}-{% endif %}
                             </td>
                             <td>
                                 {% if ts.timesheet_type == 'installation' %}
@@ -53,13 +49,7 @@
                                 {% endif %}
                             </td>
                             <td>{{ ts.worker_name }}</td>
-                            <td>
-                                {% if ts.hours %}
-                                {{ ts.hours }}h
-                                {% else %}
-                                -
-                                {% endif %}
-                            </td>
+                            <td>{% if ts.hours %}{{ ts.hours }}h{% else %}-{% endif %}</td>
                             <td>
                                 {% if ts.timesheet_type == 'installation' %}
                                 {{ ts.purchase_order.display_number|default:"-" }}
@@ -71,826 +61,1074 @@
                             <td>{{ ts.description|default:"-"|truncatewords:10 }}</td>
                         </tr>
                         {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            <p class="text-muted" style="margin: 8px 12px; font-size: 0.8rem;">
-                Showing latest 100 timesheets.
-            </p>
-            {% else %}
-            <div class="empty-state">
-                <i class="bi bi-clock" style="font-size: 2.5rem; color: #6c757d;"></i>
-                <p>No timesheets recorded yet.</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
-    <div class="row" style="display: flex; gap: 16px; flex-wrap: wrap;">
-        <!-- Factory Workers Section -->
-        <div class="card" style="flex: 1; min-width: 380px;">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <h3><i class="bi bi-person-gear"></i> Factory Workers</h3>
-                <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">
-                    <i class="bi bi-plus-lg"></i> Add Worker
-                </button>
-            </div>
-            <div class="card-body" style="padding: 0;">
-                {% if factory_workers %}
-                <div class="table-container">
-                    <table class="table ts-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Hourly Rate</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="factory-workers-table">
-                            {% for worker in factory_workers %}
-                            <tr id="worker-row-{{ worker.id }}" class="{% if not worker.active %}text-muted{% endif %}">
-                                <td>
-                                    <input type="text" class="form-input form-input-sm worker-name" 
-                                           data-id="{{ worker.id }}" value="{{ worker.name }}"
-                                           style="max-width: 140px;">
-                                </td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 2px;">
-                                        <span>£</span>
-                                        <input type="number" step="0.01" min="0" 
-                                               class="form-input form-input-sm worker-rate" 
-                                               data-id="{{ worker.id }}" value="{{ worker.hourly_rate }}"
-                                               style="max-width: 70px;">
-                                        <span>/hr</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" class="worker-active" 
-                                               data-id="{{ worker.id }}" {% if worker.active %}checked{% endif %}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </td>
-                                <td>
-                                    <button type="button" class="btn btn-success btn-sm" onclick="saveWorker({{ worker.id }})" title="Save">
-                                        <i class="bi bi-check-lg"></i>
-                                    </button>
-                                    <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteWorker({{ worker.id }}, '{{ worker.name }}')" title="Delete">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                {% else %}
-                <div class="empty-state" id="no-workers-message">
-                    <i class="bi bi-person-x" style="font-size: 2.5rem; color: #6c757d;"></i>
-                    <p>No factory workers added yet.</p>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">
-                        <i class="bi bi-plus-lg"></i> Add First Worker
-                    </button>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Fitters Section -->
-        <div class="card" style="flex: 1; min-width: 380px;">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <h3><i class="bi bi-people"></i> Fitters</h3>
-                <button type="button" class="btn btn-primary btn-sm" onclick="openAddFitterModal()">
-                    <i class="bi bi-plus-lg"></i> Add Fitter
-                </button>
-            </div>
-            <div class="card-body" style="padding: 0;">
-                {% if fitters %}
-                <div class="table-container">
-                    <table class="table ts-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="fitters-table">
-                            {% for fitter in fitters %}
-                            <tr class="{% if not fitter.active %}text-muted{% endif %}">
-                                <td>{{ fitter.name }}</td>
-                                <td>
-                                    {% if fitter.active %}
-                                    <span class="badge badge-success">Active</span>
-                                    {% else %}
-                                    <span class="badge badge-secondary">Inactive</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                <p class="text-muted" style="margin:8px 12px;font-size:0.8rem;">Showing latest 100 timesheets.</p>
                 {% else %}
                 <div class="empty-state">
-                    <i class="bi bi-people" style="font-size: 2.5rem; color: #6c757d;"></i>
-                    <p>No fitters added yet.</p>
+                    <i class="bi bi-clock" style="font-size:2.5rem;color:#6c757d;"></i>
+                    <p>No timesheets recorded yet.</p>
                 </div>
                 {% endif %}
             </div>
         </div>
-    </div>
-    {% endif %}
-</div>
 
-<!-- Add Timesheet Modal -->
-<div class="modal" id="addTimesheetModal">
-    <div class="modal-overlay" onclick="closeModal('addTimesheetModal')"></div>
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Timesheet</h3>
-                <button type="button" class="modal-close" onclick="closeModal('addTimesheetModal')">✕</button>
-            </div>
-            <div class="modal-body">
-                <!-- Order Search -->
-                <div class="form-group">
-                    <label for="ts_order_search">Order *</label>
-                    <div style="position: relative;">
-                        <input type="text" class="form-input" id="ts_order_search" placeholder="Search by sale number or customer name..." autocomplete="off">
-                        <input type="hidden" id="ts_order_id">
-                        <div id="ts_order_results" class="autocomplete-dropdown" style="display:none;"></div>
-                    </div>
+        {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
+        <div class="row" style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div class="card" style="flex:1;min-width:420px;">
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3><i class="bi bi-person-gear"></i> Factory Workers</h3>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()"><i class="bi bi-plus-lg"></i> Add Worker</button>
                 </div>
-                <!-- Type -->
-                <div class="form-group">
-                    <label for="ts_type">Type *</label>
-                    <select class="form-input" id="ts_type" onchange="onTimesheetTypeChange()">
-                        <option value="installation">Installation</option>
-                        <option value="manufacturing">Manufacturing</option>
-                    </select>
-                </div>
-                <!-- Date -->
-                <div class="form-group">
-                    <label for="ts_date">Date *</label>
-                    <input type="date" class="form-input" id="ts_date">
-                </div>
-                <!-- Installation fields -->
-                <div id="ts_installation_fields">
-                    <div class="form-group">
-                        <label for="ts_fitter">Fitter</label>
-                        <select class="form-input" id="ts_fitter">
-                            <option value="">-- Select Fitter --</option>
-                        </select>
+                <div class="card-body" style="padding:0;">
+                    {% if factory_workers %}
+                    <div class="table-container">
+                        <table class="table ts-table">
+                            <thead><tr><th>#</th><th>Name</th><th>Hourly Rate</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="factory-workers-table">
+                            {% for worker in factory_workers %}
+                            <tr id="worker-row-{{ worker.id }}" class="{% if not worker.active %}text-muted{% endif %}">
+                                <td><input type="number" min="1" max="99" class="form-input form-input-sm worker-order" data-id="{{ worker.id }}" value="{{ worker.display_order }}" style="max-width:50px;"></td>
+                                <td><input type="text" class="form-input form-input-sm worker-name" data-id="{{ worker.id }}" value="{{ worker.name }}" style="max-width:150px;"></td>
+                                <td>
+                                    <div style="display:flex;align-items:center;gap:2px;">
+                                        <span>£</span><input type="number" step="0.01" min="0" class="form-input form-input-sm worker-rate" data-id="{{ worker.id }}" value="{{ worker.hourly_rate }}" style="max-width:70px;"><span>/hr</span>
+                                    </div>
+                                </td>
+                                <td><label class="toggle-switch"><input type="checkbox" class="worker-active" data-id="{{ worker.id }}" {% if worker.active %}checked{% endif %}><span class="toggle-slider"></span></label></td>
+                                <td>
+                                    <button type="button" class="btn btn-success btn-sm" onclick="saveWorker({{ worker.id }})"><i class="bi bi-check-lg"></i></button>
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteWorker({{ worker.id }}, '{{ worker.name }}')"><i class="bi bi-trash"></i></button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    <div class="form-group">
-                        <label for="ts_po_search">Purchase Order</label>
-                        <div style="position: relative;">
-                            <input type="text" class="form-input" id="ts_po_search" placeholder="Search PO by number or supplier..." autocomplete="off">
-                            <input type="hidden" id="ts_po_id">
-                            <div id="ts_po_results" class="autocomplete-dropdown" style="display:none;"></div>
-                        </div>
-                    </div>
-                </div>
-                <!-- Manufacturing fields -->
-                <div id="ts_manufacturing_fields" style="display:none;">
-                    <div class="form-group">
-                        <label for="ts_factory_worker">Factory Worker *</label>
-                        <select class="form-input" id="ts_factory_worker">
-                            <option value="">-- Select Worker --</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="ts_hours">Hours *</label>
-                        <input type="number" step="0.25" min="0" class="form-input" id="ts_hours" placeholder="0">
-                    </div>
-                </div>
-                <!-- Description -->
-                <div class="form-group">
-                    <label for="ts_description">Description</label>
-                    <input type="text" class="form-input" id="ts_description" placeholder="Optional description">
+                    {% else %}
+                    <div class="empty-state"><i class="bi bi-person-x" style="font-size:2.5rem;color:#6c757d;"></i><p>No factory workers added yet.</p><button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">Add First Worker</button></div>
+                    {% endif %}
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('addTimesheetModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="submitTimesheet()">Add Timesheet</button>
+            <div class="card" style="flex:1;min-width:380px;">
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3><i class="bi bi-people"></i> Fitters</h3>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddFitterModal()"><i class="bi bi-plus-lg"></i> Add Fitter</button>
+                </div>
+                <div class="card-body" style="padding:0;">
+                    {% if fitters %}
+                    <div class="table-container">
+                        <table class="table ts-table">
+                            <thead><tr><th>Name</th><th>Status</th></tr></thead>
+                            <tbody>{% for fitter in fitters %}<tr class="{% if not fitter.active %}text-muted{% endif %}"><td>{{ fitter.name }}</td><td>{% if fitter.active %}<span class="badge badge-success">Active</span>{% else %}<span class="badge badge-secondary">Inactive</span>{% endif %}</td></tr>{% endfor %}</tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="empty-state"><i class="bi bi-people" style="font-size:2.5rem;color:#6c757d;"></i><p>No fitters added yet.</p></div>
+                    {% endif %}
+                </div>
             </div>
         </div>
-    </div>
-</div>
+        {% endif %}
+    </div><!-- /#tab-overview -->
 
-<!-- Add Fitter Modal -->
-<div class="modal" id="addFitterModal">
-    <div class="modal-overlay" onclick="closeModal('addFitterModal')"></div>
-    <div class="modal-dialog" style="max-width: 400px;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Fitter</h3>
-                <button type="button" class="modal-close" onclick="closeModal('addFitterModal')">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="new_fitter_name">Name *</label>
-                    <input type="text" class="form-input" id="new_fitter_name" placeholder="Fitter name" required>
+    <!-- ===================== TAB: WEEKLY SCHEDULE ===================== -->
+    <div id="tab-add" style="display:none;">
+
+        <!-- Week navigation bar -->
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-body" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="prevWeek()"><i class="bi bi-chevron-left"></i></button>
+                <strong id="week-label" style="font-size:0.95rem;min-width:230px;text-align:center;"></strong>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="nextWeek()"><i class="bi bi-chevron-right"></i></button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="goToCurrentWeek()">Today</button>
+                <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+                    <span style="font-size:0.75rem;color:var(--text-secondary);">
+                        <span class="legend-swatch" style="background:var(--worker-0-bg);border-color:var(--worker-0-border);"></span> Paddy &nbsp;
+                        <span class="legend-swatch" style="background:var(--worker-1-bg);border-color:var(--worker-1-border);"></span> Ryan &nbsp;
+                        <span class="legend-swatch" style="background:var(--worker-2-bg);border-color:var(--worker-2-border);"></span> Mo &nbsp;
+                        <span class="legend-break"></span> Break
+                    </span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllAssignments()"><i class="bi bi-x-circle"></i> Clear</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="save-week-btn" onclick="saveWeek()"><i class="bi bi-floppy"></i> Save Week</button>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('addFitterModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="addFitter()">Add Fitter</button>
+        </div>
+
+        <!-- Grid -->
+        <div class="card">
+            <div class="card-body" style="padding:0;overflow-x:auto;">
+                <table class="grid-table" id="schedule-grid">
+                    <thead>
+                        <tr id="grid-header-row">
+                            <th class="col-date">Date</th>
+                            <th class="col-worker">Worker</th>
+                            <!-- slot headers injected by JS -->
+                        </tr>
+                    </thead>
+                    <tbody id="grid-body"></tbody>
+                </table>
             </div>
+        </div>
+
+    </div><!-- /#tab-add -->
+</div><!-- /.page-content -->
+
+
+<!--  MODALS  -->
+
+<div class="modal" id="addFitterModal">
+    <div class="modal-overlay" onclick="closeModal('addFitterModal')"></div>
+    <div class="modal-dialog" style="max-width:400px;">
+        <div class="modal-content">
+            <div class="modal-header"><h3>Add Fitter</h3><button type="button" class="modal-close" onclick="closeModal('addFitterModal')">&#x2715;</button></div>
+            <div class="modal-body"><div class="form-group"><label for="new_fitter_name">Name *</label><input type="text" class="form-input" id="new_fitter_name" placeholder="Fitter name"></div></div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeModal('addFitterModal')">Cancel</button><button type="button" class="btn btn-primary" onclick="addFitter()">Add Fitter</button></div>
         </div>
     </div>
 </div>
 
 {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
-<!-- Add Worker Modal -->
 <div class="modal" id="addWorkerModal">
     <div class="modal-overlay" onclick="closeModal('addWorkerModal')"></div>
-    <div class="modal-dialog" style="max-width: 400px;">
+    <div class="modal-dialog" style="max-width:400px;">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Factory Worker</h3>
-                <button type="button" class="modal-close" onclick="closeModal('addWorkerModal')">✕</button>
-            </div>
+            <div class="modal-header"><h3>Add Factory Worker</h3><button type="button" class="modal-close" onclick="closeModal('addWorkerModal')">&#x2715;</button></div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="new_worker_name">Name *</label>
-                    <input type="text" class="form-input" id="new_worker_name" placeholder="Worker name" required>
-                </div>
-                <div class="form-group">
-                    <label for="new_worker_rate">Hourly Rate (£) *</label>
-                    <input type="number" step="0.01" min="0" class="form-input" id="new_worker_rate" placeholder="15.00" value="15.00" required>
-                </div>
+                <div class="form-group"><label>Name *</label><input type="text" class="form-input" id="new_worker_name" placeholder="Worker name"></div>
+                <div class="form-group"><label>Hourly Rate (£) *</label><input type="number" step="0.01" min="0" class="form-input" id="new_worker_rate" value="15.00"></div>
+                <div class="form-group"><label>Display Order</label><input type="number" min="1" max="99" class="form-input" id="new_worker_order" value="10"></div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('addWorkerModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="addWorker()">Add Worker</button>
-            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeModal('addWorkerModal')">Cancel</button><button type="button" class="btn btn-primary" onclick="addWorker()">Add Worker</button></div>
         </div>
     </div>
 </div>
-
-<!-- Delete Confirmation Modal -->
 <div class="modal" id="deleteConfirmModal">
     <div class="modal-overlay" onclick="closeModal('deleteConfirmModal')"></div>
-    <div class="modal-dialog" style="max-width: 400px;">
+    <div class="modal-dialog" style="max-width:400px;">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3>Confirm Delete</h3>
-                <button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">✕</button>
-            </div>
-            <div class="modal-body">
-                <p>Are you sure you want to delete <strong id="delete-worker-name"></strong>?</p>
-                <p class="text-muted" style="font-size: 0.85rem;">This action cannot be undone.</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-btn" onclick="deleteWorker()">Delete</button>
-            </div>
+            <div class="modal-header"><h3>Confirm Delete</h3><button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">&#x2715;</button></div>
+            <div class="modal-body"><p>Are you sure you want to delete <strong id="delete-worker-name"></strong>?</p><p class="text-muted" style="font-size:0.85rem;">This action cannot be undone.</p></div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button><button type="button" class="btn btn-danger" onclick="deleteWorker()">Delete</button></div>
         </div>
     </div>
 </div>
 {% endif %}
 
+<!-- Slot assignment popover -->
+<div id="slot-popover" style="display:none;position:fixed;z-index:900;min-width:300px;max-width:340px;">
+    <div class="slot-popover-inner">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <strong style="font-size:0.82rem;line-height:1.3;" id="popover-title">Assign Slot</strong>
+            <button type="button" class="modal-close" onclick="closePopover()" style="font-size:1rem;line-height:1;">&#x2715;</button>
+        </div>
+        <!-- Task type -->
+        <div style="display:flex;gap:4px;margin-bottom:10px;">
+            <button type="button" class="btn btn-sm task-type-btn active" data-type="order"   onclick="setTaskType('order')">Order</button>
+            <button type="button" class="btn btn-sm task-type-btn"        data-type="delivery" onclick="setTaskType('delivery')">Delivery</button>
+            <button type="button" class="btn btn-sm task-type-btn"        data-type="general"  onclick="setTaskType('general')">General</button>
+        </div>
+        <!-- Order search (hidden for non-order types) -->
+        <div class="form-group" id="popover-order-row" style="margin-bottom:8px;position:relative;">
+            <label style="font-size:0.78rem;color:var(--text-secondary);">Order</label>
+            <input type="text" class="form-input" id="popover-order-search" placeholder="Sale number or name&hellip;" autocomplete="off" style="font-size:0.82rem;">
+            <input type="hidden" id="popover-order-id">
+            <div id="popover-order-results" class="autocomplete-dropdown" style="display:none;"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:8px;">
+            <label style="font-size:0.78rem;color:var(--text-secondary);">Duration</label>
+            <select class="form-input" id="popover-duration" style="font-size:0.82rem;">
+                <option value="1">30 min</option>
+                <option value="2">1 hour</option>
+                <option value="3">1.5 hours</option>
+                <option value="4">2 hours</option>
+                <option value="6">3 hours</option>
+                <option value="8">4 hours</option>
+                <option value="10">5 hours</option>
+            </select>
+        </div>
+        <div class="form-group" style="margin-bottom:10px;">
+            <label style="font-size:0.78rem;color:var(--text-secondary);">Description <span id="popover-desc-hint" style="color:var(--text-secondary);">(optional)</span></label>
+            <input type="text" class="form-input" id="popover-description" placeholder="e.g. cabinet build" style="font-size:0.82rem;">
+        </div>
+        <!-- Duplicate row (shown only when editing existing) -->
+        <div id="popover-dup-row" style="display:none;margin-bottom:10px;">
+            <label style="font-size:0.78rem;color:var(--text-secondary);">Duplicate to worker</label>
+            <div style="display:flex;gap:6px;">
+                <select class="form-input" id="popover-dup-worker" style="font-size:0.82rem;flex:1;"></select>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="duplicateSlot()" title="Copy this block to the selected worker"><i class="bi bi-copy"></i></button>
+            </div>
+        </div>
+        <div style="display:flex;gap:6px;justify-content:flex-end;">
+            <button type="button" class="btn btn-danger btn-sm" id="popover-clear-btn" onclick="clearSlot()" style="display:none;"><i class="bi bi-x"></i> Clear</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closePopover()">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="assignSlot()"><i class="bi bi-check2"></i> Assign</button>
+        </div>
+    </div>
+</div>
+<div id="popover-backdrop" style="display:none;position:fixed;inset:0;z-index:899;" onclick="closePopover()"></div>
+
+
 <style>
-/* Compact table styling */
-.ts-table thead th {
-    padding: 6px 10px;
-    text-align: left;
-    font-weight: 600;
+/*  Colour tokens per worker index — muted / dark-mode friendly  */
+:root {
+    --worker-0-bg:     rgba(99,102,241,0.18);   /* indigo tint  */
+    --worker-0-pill:   #6366f1;                 /* indigo-500   */
+    --worker-0-border: rgba(99,102,241,0.45);
+
+    --worker-1-bg:     rgba(245,158,11,0.16);   /* amber tint   */
+    --worker-1-pill:   #d97706;                 /* amber-600    */
+    --worker-1-border: rgba(245,158,11,0.4);
+
+    --worker-2-bg:     rgba(20,184,166,0.16);   /* teal tint    */
+    --worker-2-pill:   #0d9488;                 /* teal-600     */
+    --worker-2-border: rgba(20,184,166,0.4);
+}
+
+/*  Tab nav  */
+.ts-tabs { display:flex; gap:4px; margin-bottom:16px; border-bottom:2px solid var(--border-color); }
+.ts-tab  { padding:8px 20px; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; font-size:.9rem; font-weight:500; color:var(--text-secondary); transition:color .15s,border-color .15s; }
+.ts-tab:hover  { color:var(--text-primary); }
+.ts-tab.active { color:var(--primary-color); border-bottom-color:var(--primary-color); }
+
+/*  Overview table  */
+.ts-table thead th { padding:6px 10px; text-align:left; font-weight:600; color:var(--text-secondary); font-size:.75rem; text-transform:uppercase; letter-spacing:.5px; border-bottom:2px solid var(--border-color); white-space:nowrap; }
+.ts-table tbody td { padding:5px 10px; border-bottom:1px solid var(--border-color); color:var(--text-primary); font-size:.85rem; }
+.ts-table tbody tr:last-child td { border-bottom:none; }
+.toggle-switch { position:relative; display:inline-block; width:42px; height:22px; }
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccc; transition:.3s; border-radius:22px; }
+.toggle-slider:before { position:absolute; content:""; height:16px; width:16px; left:3px; bottom:3px; background:white; transition:.3s; border-radius:50%; }
+.toggle-switch input:checked + .toggle-slider { background:#059669; }
+.toggle-switch input:checked + .toggle-slider:before { transform:translateX(20px); }
+.badge { display:inline-block; padding:3px 8px; font-size:.7rem; font-weight:600; border-radius:4px; white-space:nowrap; }
+.badge-installation { background:rgba(139,92,246,.15); color:#8b5cf6; }
+.badge-manufacturing { background:rgba(240,173,78,.15); color:#d97706; }
+.badge-success  { background:#d1fae5; color:#065f46; }
+.badge-secondary{ background:#e5e7eb; color:#4b5563; }
+.form-input-sm  { padding:3px 6px; font-size:.82rem; }
+.empty-state    { text-align:center; padding:24px 16px; }
+.empty-state p  { margin:8px 0; color:#6c757d; font-size:.85rem; }
+tr.text-muted td{ opacity:.6; }
+
+/*  Autocomplete  */
+.autocomplete-dropdown { position:absolute; top:100%; left:0; right:0; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:4px; max-height:200px; overflow-y:auto; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+.autocomplete-item { padding:8px 12px; cursor:pointer; font-size:.85rem; border-bottom:1px solid var(--border-color); }
+.autocomplete-item:last-child { border-bottom:none; }
+.autocomplete-item:hover { background:var(--bg-secondary); }
+.autocomplete-item .sale-num { font-weight:600; color:var(--primary-color); }
+
+/*  Legend swatches  */
+.legend-swatch { display:inline-block; width:12px; height:12px; border:2px solid; border-radius:3px; vertical-align:middle; }
+.legend-break  { display:inline-block; width:16px; height:12px; background:repeating-linear-gradient(45deg,#888 0,#888 2px,#ddd 2px,#ddd 6px); border-radius:3px; vertical-align:middle; border:1px solid #bbb; }
+
+/*  Grid table  */
+.grid-table { width:100%; border-collapse:collapse; font-size:.78rem; table-layout:fixed; }
+.grid-table th,.grid-table td { border:1px solid var(--border-color); padding:0; }
+
+/* Fixed left columns */
+.col-date   { width:78px !important; min-width:78px; padding:6px 8px !important; font-weight:700; font-size:.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary); background:var(--bg-secondary); position:sticky; left:0; z-index:4; }
+.col-worker { width:76px !important; min-width:76px; padding:4px 6px !important; font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.3px; color:var(--text-secondary); background:var(--bg-secondary); position:sticky; left:78px; z-index:4; border-right:3px solid var(--border-color) !important; }
+
+/* Time slot header */
+.grid-time-hdr { width:58px !important; min-width:58px; padding:4px 2px !important; text-align:center; font-size:.68rem; font-weight:600; color:var(--text-secondary); background:var(--bg-secondary); user-select:none; white-space:nowrap; }
+
+/*  BREAK SLOT HEADER: visually loud  */
+.grid-time-hdr.break-hdr {
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(120,120,120,.18) 0px,
+        rgba(120,120,120,.18) 4px,
+        var(--bg-secondary) 4px,
+        var(--bg-secondary) 10px
+    ) !important;
     color: var(--text-secondary);
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 2px solid var(--border-color);
-    white-space: nowrap;
+    border-left:  3px solid rgba(150,150,150,.5) !important;
+    border-right: 3px solid rgba(150,150,150,.5) !important;
+    opacity:.8;
 }
 
-.ts-table tbody td {
-    padding: 5px 10px;
-    border-bottom: 1px solid var(--border-color);
-    color: var(--text-primary);
-    font-size: 0.85rem;
+/* Day cell  spans all workers for that day */
+.cell-date {
+    padding:4px 8px !important; font-weight:700; font-size:.78rem;
+    background:var(--bg-secondary); position:sticky; left:0; z-index:2;
+    border-right:1px solid var(--border-color); vertical-align:middle;
+    text-align:center; line-height:1.35;
+    border-bottom:3px solid var(--border-color) !important;
+}
+.cell-date .day-name { display:block; font-size:.85rem; color:var(--text-primary); }
+.cell-date .day-date { display:block; font-size:.72rem; color:var(--text-secondary); }
+
+/* Worker name cell */
+.cell-worker {
+    padding:4px 6px !important; font-weight:600; font-size:.78rem;
+    background:var(--bg-secondary); position:sticky; left:78px; z-index:1;
+    border-right:3px solid var(--border-color) !important;
+    vertical-align:middle; white-space:nowrap;
 }
 
-.ts-table tbody tr:last-child td {
-    border-bottom: none;
+/*  Slot cells  */
+.grid-slot {
+    width:58px !important; min-width:58px; height:38px;
+    text-align:center; vertical-align:middle; cursor:pointer;
+    transition:background .08s; position:relative; padding:1px !important;
+    overflow:hidden;
+}
+.grid-slot:hover:not(.slot-break) { filter:brightness(0.93); }
+
+/*  BREAK SLOT CELL: heavy diagonal stripe  */
+.grid-slot.slot-break {
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(100,100,100,.14) 0px,
+        rgba(100,100,100,.14) 5px,
+        var(--bg-secondary) 5px,
+        var(--bg-secondary) 12px
+    ) !important;
+    cursor: not-allowed;
+    pointer-events: none;
+    border-left:  3px solid rgba(130,130,130,.4) !important;
+    border-right: 3px solid rgba(130,130,130,.4) !important;
 }
 
-/* Toggle Switch */
-.toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 42px;
-    height: 22px;
-}
+/* Workers get a barely-visible row tint (works on both light & dark bg) */
+.grid-slot.worker-row-0 { background: rgba(99,102,241,0.04); }
+.grid-slot.worker-row-1 { background: rgba(245,158,11,0.04); }
+.grid-slot.worker-row-2 { background: rgba(20,184,166,0.04); }
 
-.toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
+/* Assigned states */
+.grid-slot.assigned-0     { background: var(--worker-0-bg) !important; border-color: var(--worker-0-border) !important; }
+.grid-slot.assigned-1     { background: var(--worker-1-bg) !important; border-color: var(--worker-1-border) !important; }
+.grid-slot.assigned-2     { background: var(--worker-2-bg) !important; border-color: var(--worker-2-border) !important; }
 
-.toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #ccc;
-    transition: .3s;
-    border-radius: 22px;
-}
+/* Span: start/middle/end — remove internal borders, allow pill to overflow */
+.grid-slot.span-start { border-right:none !important; border-radius:5px 0 0 5px; overflow:visible !important; position:relative; z-index:2; }
+.grid-slot.span-mid   { border-left:none !important; border-right:none !important; overflow:visible !important; }
+.grid-slot.span-end   { border-left:none !important; border-radius:0 5px 5px 0; overflow:visible !important; }
 
-.toggle-slider:before {
-    position: absolute;
-    content: "";
-    height: 16px;
-    width: 16px;
-    left: 3px;
-    bottom: 3px;
-    background-color: white;
-    transition: .3s;
-    border-radius: 50%;
-}
+/* Drag */
+.grid-slot.drag-over { outline:3px dashed rgba(99,102,241,.7) !important; outline-offset:-2px; }
+.grid-slot.dragging  { opacity:.35; }
 
-.toggle-switch input:checked + .toggle-slider {
-    background-color: #059669;
+/* Slot pill — base styles; absolute positioning applied inline for multi-cell spans */
+.slot-pill {
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius:4px; padding:2px 6px; font-size:.67rem; font-weight:700;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    line-height:1.25; cursor:grab; user-select:none;
+    box-shadow:0 1px 3px rgba(0,0,0,.25);
+    letter-spacing:.02em;
+    /* single-cell default */
+    max-width:52px;
 }
+.slot-pill-0 { background:var(--worker-0-pill); color:#fff; }
+.slot-pill-1 { background:var(--worker-1-pill); color:#fff; }
+.slot-pill-2 { background:var(--worker-2-pill); color:#fff; }
+.slot-pill:active { cursor:grabbing; }
+/* Multi-cell pill overrides (applied via inline style in JS) */
+.slot-pill.pill-span { justify-content:flex-start; padding:0 28px 0 10px; font-size:.72rem; }
 
-.toggle-switch input:checked + .toggle-slider:before {
-    transform: translateX(20px);
+/* Resize handle — right edge of the last slot in a span */
+.resize-handle {
+    position:absolute; right:0; top:0; bottom:0; width:9px;
+    cursor:ew-resize; z-index:10;
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(to right, transparent 0%, rgba(255,255,255,0.15) 100%);
+    border-radius: 0 5px 5px 0;
+    opacity:0; transition:opacity .12s;
 }
+.grid-slot:hover .resize-handle,
+.grid-slot.span-end:hover .resize-handle { opacity:1; }
+.resize-handle::after {
+    content:'\2237'; /* ∷ four dots */
+    font-size:.55rem; color:rgba(255,255,255,0.75); pointer-events:none;
+    line-height:1; letter-spacing:-1px;
+}
+/* Also show handle on single assigned cell (no span) */
+.grid-slot.assigned-0:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.assigned-1:not(.span-start):not(.span-mid) .resize-handle,
+.grid-slot.assigned-2:not(.span-start):not(.span-mid) .resize-handle { opacity:0; }
+.grid-slot.assigned-0:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.assigned-1:not(.span-start):not(.span-mid):hover .resize-handle,
+.grid-slot.assigned-2:not(.span-start):not(.span-mid):hover .resize-handle { opacity:1; }
+/* Highlight when actively resizing */
+body.is-resizing .grid-slot:not(.slot-break) { cursor:ew-resize !important; }
+body.is-resizing .grid-slot.resize-preview { outline:2px dashed rgba(255,255,255,0.5) !important; outline-offset:-2px; }
 
-/* Badge styles — matching costing report colours */
-.badge {
-    display: inline-block;
-    padding: 3px 8px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    border-radius: 4px;
-    white-space: nowrap;
-}
+/*  Lines between days  */
+.day-last-row td { border-bottom:3px solid var(--border-color) !important; }
 
-.badge-installation {
-    background-color: rgba(139, 92, 246, 0.15);
-    color: #8b5cf6;
-}
-
-.badge-manufacturing {
-    background-color: rgba(240, 173, 78, 0.15);
-    color: #d97706;
-}
-
-.badge-success {
-    background-color: #d1fae5;
-    color: #065f46;
-}
-
-.badge-secondary {
-    background-color: #e5e7eb;
-    color: #4b5563;
-}
-
-/* Form input small */
-.form-input-sm {
-    padding: 3px 6px;
-    font-size: 0.82rem;
-}
-
-/* Empty state */
-.empty-state {
-    text-align: center;
-    padding: 24px 16px;
-}
-
-.empty-state p {
-    margin: 8px 0;
-    color: #6c757d;
-    font-size: 0.85rem;
-}
-
-/* Muted text for inactive rows */
-tr.text-muted td {
-    opacity: 0.6;
-}
-
-/* Order search autocomplete dropdown */
-.autocomplete-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    max-height: 200px;
-    overflow-y: auto;
-    z-index: 1000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-
-.autocomplete-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.autocomplete-item:last-child {
-    border-bottom: none;
-}
-
-.autocomplete-item:hover {
-    background: var(--bg-secondary);
-}
-
-.autocomplete-item .sale-num {
-    font-weight: 600;
-    color: var(--primary-color);
-}
+/*  Popover  */
+.slot-popover-inner { background:var(--bg-primary); border:1px solid var(--border-color); border-radius:8px; padding:14px; box-shadow:0 8px 28px rgba(0,0,0,.2); }
+/* Task type buttons */
+.task-type-btn { flex:1; padding:4px 6px; font-size:.73rem; font-weight:600;
+    background:var(--bg-secondary); color:var(--text-secondary);
+    border:1px solid var(--border-color); border-radius:4px; cursor:pointer;
+    transition:background .12s,color .12s; }
+.task-type-btn.active { background:var(--primary-color); color:#fff; border-color:var(--primary-color); }
 </style>
 
 <script>
-let deleteWorkerId = null;
-let orderSearchTimeout = null;
-
-// ═══════════════════════════════════════
-// Modal functions
-// ═══════════════════════════════════════
-function openModal(modalId) {
-    document.getElementById(modalId).classList.add('active');
+// 
+// Tabs
+// 
+function switchTab(tab) {
+    document.getElementById('tab-overview').style.display = tab === 'overview' ? 'block' : 'none';
+    document.getElementById('tab-add').style.display      = tab === 'add'      ? 'block' : 'none';
+    document.getElementById('tab-overview-btn').classList.toggle('active', tab === 'overview');
+    document.getElementById('tab-add-btn').classList.toggle('active', tab === 'add');
 }
 
-function closeModal(modalId) {
-    document.getElementById(modalId).classList.remove('active');
-}
+// 
+// Modals
+// 
+function openModal(id)  { document.getElementById(id).classList.add('active');    }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
-// ═══════════════════════════════════════
-// Add Timesheet
-// ═══════════════════════════════════════
-function openAddTimesheetModal() {
-    // Reset form
-    document.getElementById('ts_order_search').value = '';
-    document.getElementById('ts_order_id').value = '';
-    document.getElementById('ts_order_results').style.display = 'none';
-    document.getElementById('ts_type').value = 'installation';
-    document.getElementById('ts_date').value = new Date().toISOString().split('T')[0];
-    document.getElementById('ts_price').value = '';
-    document.getElementById('ts_hours').value = '';
-    document.getElementById('ts_description').value = '';
-    onTimesheetTypeChange();
-    loadFittersAndWorkers();
-    openModal('addTimesheetModal');
-}
-
-function onTimesheetTypeChange() {
-    const type = document.getElementById('ts_type').value;
-    document.getElementById('ts_installation_fields').style.display = type === 'installation' ? 'block' : 'none';
-    document.getElementById('ts_manufacturing_fields').style.display = type === 'manufacturing' ? 'block' : 'none';
-}
-
-function loadFittersAndWorkers() {
-    // Load fitters
-    fetch('/api/get-fitters/')
-        .then(r => r.json())
-        .then(data => {
-            const fitterSel = document.getElementById('ts_fitter');
-            fitterSel.innerHTML = '<option value="">-- Select Fitter --</option>';
-            (data.fitters || []).forEach(f => {
-                fitterSel.innerHTML += `<option value="${f.id}">${f.name}</option>`;
-            });
-        });
-    // Load factory workers
-    fetch('/api/get-factory-workers/')
-        .then(r => r.json())
-        .then(data => {
-            const sel = document.getElementById('ts_factory_worker');
-            sel.innerHTML = '<option value="">-- Select Worker --</option>';
-            (data.workers || []).forEach(w => {
-                sel.innerHTML += `<option value="${w.id}">${w.name} (£${parseFloat(w.hourly_rate).toFixed(2)}/hr)</option>`;
-            });
-        });
-}
-
-// Order search autocomplete
-document.addEventListener('DOMContentLoaded', function() {
-    const input = document.getElementById('ts_order_search');
-    const resultsDiv = document.getElementById('ts_order_results');
-
-    input.addEventListener('input', function() {
-        clearTimeout(orderSearchTimeout);
-        const q = this.value.trim();
-        if (q.length < 2) {
-            resultsDiv.style.display = 'none';
-            return;
-        }
-        orderSearchTimeout = setTimeout(() => {
-            fetch('/api/order-search/?q=' + encodeURIComponent(q))
-                .then(r => r.json())
-                .then(data => {
-                    if (data.results && data.results.length) {
-                        resultsDiv.innerHTML = data.results.map(o =>
-                            `<div class="autocomplete-item" onclick="selectOrder(${o.id}, '${o.sale_number}', '${(o.customer_name || '').replace(/'/g, "\\'")}')">
-                                <span class="sale-num">${o.sale_number}</span> — ${o.customer_name || 'Unknown'}
-                            </div>`
-                        ).join('');
-                        resultsDiv.style.display = 'block';
-                    } else {
-                        resultsDiv.innerHTML = '<div class="autocomplete-item" style="color:#999;">No orders found</div>';
-                        resultsDiv.style.display = 'block';
-                    }
-                });
-        }, 300);
-    });
-
-    // Close dropdown on outside click
-    document.addEventListener('click', function(e) {
-        if (!input.contains(e.target) && !resultsDiv.contains(e.target)) {
-            resultsDiv.style.display = 'none';
-        }
-    });
-
-    // PO search autocomplete for installation modal
-    let _tsPOTimer = null;
-    const tsPoInput = document.getElementById('ts_po_search');
-    const tsPoResults = document.getElementById('ts_po_results');
-    if (tsPoInput) {
-        tsPoInput.addEventListener('input', function() {
-            clearTimeout(_tsPOTimer);
-            const q = this.value.trim();
-            if (q.length < 2) { tsPoResults.style.display = 'none'; return; }
-            _tsPOTimer = setTimeout(() => {
-                fetch('/api/purchase-order-search/?q=' + encodeURIComponent(q))
-                    .then(r => r.json())
-                    .then(data => {
-                        tsPoResults.innerHTML = '';
-                        if (!data.results || !data.results.length) {
-                            tsPoResults.innerHTML = '<div class="autocomplete-item" style="color:#999;">No POs found</div>';
-                        } else {
-                            data.results.forEach(po => {
-                                const div = document.createElement('div');
-                                div.className = 'autocomplete-item';
-                                div.textContent = `${po.display_number} — ${po.supplier_name} (${po.status})`;
-                                div.addEventListener('click', () => {
-                                    tsPoInput.value = po.display_number;
-                                    document.getElementById('ts_po_id').value = po.id;
-                                    tsPoResults.style.display = 'none';
-                                });
-                                tsPoResults.appendChild(div);
-                            });
-                        }
-                        tsPoResults.style.display = 'block';
-                    })
-                    .catch(() => { tsPoResults.style.display = 'none'; });
-            }, 250);
-        });
-        document.addEventListener('click', function(e) {
-            if (!tsPoInput.contains(e.target) && !tsPoResults.contains(e.target)) {
-                tsPoResults.style.display = 'none';
-            }
-        });
-    }
-});
-
-function selectOrder(id, saleNum, customerName) {
-    document.getElementById('ts_order_id').value = id;
-    document.getElementById('ts_order_search').value = saleNum + ' — ' + customerName;
-    document.getElementById('ts_order_results').style.display = 'none';
-}
-
-function submitTimesheet() {
-    const orderId = document.getElementById('ts_order_id').value;
-    if (!orderId) {
-        alert('Please select an order');
-        return;
-    }
-
-    const type = document.getElementById('ts_type').value;
-    const date = document.getElementById('ts_date').value;
-    const description = document.getElementById('ts_description').value;
-
-    const payload = {
-        timesheet_type: type,
-        date: date,
-        description: description,
-    };
-
-    if (type === 'installation') {
-        const fitterId = document.getElementById('ts_fitter').value;
-        const poId = document.getElementById('ts_po_id').value;
-        payload.fitter_id = fitterId || null;
-        payload.purchase_order_id = poId || null;
-    } else {
-        const workerId = document.getElementById('ts_factory_worker').value;
-        const hours = document.getElementById('ts_hours').value;
-        if (!workerId) { alert('Please select a factory worker'); return; }
-        if (!hours) { alert('Please enter hours'); return; }
-        payload.factory_worker_id = workerId;
-        payload.hours = hours;
-    }
-
-    fetch('/order/' + orderId + '/add-timesheet/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfToken()
-        },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            closeModal('addTimesheetModal');
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(err => {
-        console.error(err);
-        alert('Error adding timesheet');
-    });
-}
-
-// ═══════════════════════════════════════
+// 
 // Add Fitter
-// ═══════════════════════════════════════
-function openAddFitterModal() {
-    document.getElementById('new_fitter_name').value = '';
-    openModal('addFitterModal');
-}
-
+// 
+function openAddFitterModal() { document.getElementById('new_fitter_name').value = ''; openModal('addFitterModal'); }
 function addFitter() {
     const name = document.getElementById('new_fitter_name').value.trim();
-    if (!name) {
-        alert('Please enter a fitter name');
-        return;
-    }
-
-    fetch('/api/add-fitter/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfToken()
-        },
-        body: JSON.stringify({ name: name })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            closeModal('addFitterModal');
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(err => {
-        console.error(err);
-        alert('Error adding fitter');
-    });
+    if (!name) { alert('Please enter a fitter name'); return; }
+    fetch('/api/add-fitter/', { method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()}, body:JSON.stringify({name}) })
+        .then(r=>r.json()).then(d=>{ if(d.success){closeModal('addFitterModal');location.reload();}else{alert('Error: '+(d.error||'?'));} });
 }
 
-// ═══════════════════════════════════════
+// 
 // Factory Workers CRUD
-// ═══════════════════════════════════════
+// 
 function openAddWorkerModal() {
-    document.getElementById('new_worker_name').value = '';
-    document.getElementById('new_worker_rate').value = '15.00';
+    document.getElementById('new_worker_name').value=''; document.getElementById('new_worker_rate').value='15.00'; document.getElementById('new_worker_order').value='10';
     openModal('addWorkerModal');
 }
-
 function addWorker() {
-    const name = document.getElementById('new_worker_name').value.trim();
-    const hourlyRate = document.getElementById('new_worker_rate').value;
-    
-    if (!name) {
-        alert('Please enter a worker name');
-        return;
-    }
-    
-    fetch('/api/add-factory-worker/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfToken()
-        },
-        body: JSON.stringify({
-            name: name,
-            hourly_rate: hourlyRate
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closeModal('addWorkerModal');
-            location.reload();
-        } else {
-            alert('Error adding worker: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Error adding worker');
-    });
+    const name=document.getElementById('new_worker_name').value.trim(), rate=document.getElementById('new_worker_rate').value, ord=document.getElementById('new_worker_order').value;
+    if (!name) { alert('Please enter a worker name'); return; }
+    fetch('/api/add-factory-worker/', {method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},body:JSON.stringify({name,hourly_rate:rate,display_order:ord})})
+        .then(r=>r.json()).then(d=>{ if(d.success){closeModal('addWorkerModal');location.reload();}else{alert('Error: '+(d.error||'?'));} });
 }
-
 function saveWorker(workerId) {
-    const row = document.getElementById('worker-row-' + workerId);
-    const name = row.querySelector('.worker-name').value.trim();
-    const hourlyRate = row.querySelector('.worker-rate').value;
-    const active = row.querySelector('.worker-active').checked;
-    
-    if (!name) {
-        alert('Name cannot be empty');
-        return;
+    const row=document.getElementById('worker-row-'+workerId);
+    const name=row.querySelector('.worker-name').value.trim(), rate=row.querySelector('.worker-rate').value,
+          active=row.querySelector('.worker-active').checked, ord=row.querySelector('.worker-order').value;
+    if (!name) { alert('Name cannot be empty'); return; }
+    fetch('/api/factory-worker/'+workerId+'/update/', {method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},body:JSON.stringify({name,hourly_rate:rate,active,display_order:ord})})
+        .then(r=>r.json()).then(d=>{
+            if(d.success){const btn=row.querySelector('.btn-success');btn.innerHTML='<i class="bi bi-check-circle-fill"></i>';setTimeout(()=>{btn.innerHTML='<i class="bi bi-check-lg"></i>';},1500);row.classList.toggle('text-muted',!d.worker.active);}
+            else{alert('Error: '+(d.error||'?'));}
+        });
+}
+let deleteWorkerId=null;
+function confirmDeleteWorker(id,name){deleteWorkerId=id;document.getElementById('delete-worker-name').textContent=name;openModal('deleteConfirmModal');}
+function deleteWorker(){
+    if(!deleteWorkerId)return;
+    fetch('/api/factory-worker/'+deleteWorkerId+'/delete/',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()}})
+        .then(r=>r.json()).then(d=>{if(d.success){closeModal('deleteConfirmModal');document.getElementById('worker-row-'+deleteWorkerId)?.remove();deleteWorkerId=null;}else{alert('Error: '+(d.error||'?'));}});
+}
+
+// 
+// WEEKLY GRID
+// 
+
+// 07:30  16:30 = 19 slots of 30 min each
+const GRID_SLOTS = (function(){
+    const s=[];
+    for(let h=7;h<=16;h++) for(const m of[0,30]){ if(h===7&&m===0)continue; s.push(String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')); }
+    return s;
+})();
+
+const BREAK_SLOTS = new Set(['10:00','13:00','13:30']);
+const DAY_NAMES   = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+const DAY_SHORT   = ['Mon','Tue','Wed','Thu','Fri'];
+
+// Workers injected from Django at bottom of script
+const WORKERS = [];
+
+// assignments[`${workerId}__${dayIdx}__${slot}`] = { order_id, order_label, description, workerIdx, is_start, span_len } | { is_cont, span_start_key }
+const assignments = {};
+
+let currentWeekStart = null;
+let _dragSourceKey   = null;
+let _popCtx          = null;   // { workerId, workerIdx, dayIdx, slot }
+let _searchTimer     = null;
+
+//  Week nav 
+function getMondayOf(d){ const dt=new Date(d); dt.setHours(0,0,0,0); const dow=dt.getDay(); dt.setDate(dt.getDate()-(dow===0?6:dow-1)); return dt; }
+function prevWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekStart.setDate(currentWeekStart.getDate()-7); updateWeekDisplay(); loadWeekTimesheets(); }
+function nextWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekStart.setDate(currentWeekStart.getDate()+7); updateWeekDisplay(); loadWeekTimesheets(); }
+function goToCurrentWeek(){ currentWeekStart=getMondayOf(new Date()); updateWeekDisplay(); loadWeekTimesheets(); }
+
+function updateWeekDisplay(){
+    const fri=new Date(currentWeekStart); fri.setDate(fri.getDate()+4);
+    const fmt={day:'2-digit',month:'short'};
+    document.getElementById('week-label').textContent=
+        currentWeekStart.toLocaleDateString('en-GB',fmt)+' \u2013 '+fri.toLocaleDateString('en-GB',{...fmt,year:'numeric'});
+
+    // Update day header cells
+    for(let i=0;i<5;i++){
+        const d=new Date(currentWeekStart); d.setDate(d.getDate()+i);
+        const dateStr=d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+        const el=document.getElementById('day-header-'+i);
+        if(el) el.innerHTML=`<span class="day-name">${DAY_SHORT[i]}</span><span class="day-date">${dateStr}</span>`;
     }
-    
-    fetch('/api/factory-worker/' + workerId + '/update/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfToken()
-        },
-        body: JSON.stringify({
-            name: name,
-            hourly_rate: hourlyRate,
-            active: active
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const btn = row.querySelector('.btn-success');
-            btn.innerHTML = '<i class="bi bi-check-circle-fill"></i>';
-            setTimeout(() => { btn.innerHTML = '<i class="bi bi-check-lg"></i>'; }, 1500);
-            if (data.worker.active) {
-                row.classList.remove('text-muted');
+}
+
+//  Build grid 
+function buildGrid(){
+    const headerRow=document.getElementById('grid-header-row');
+    GRID_SLOTS.forEach(slot=>{
+        const th=document.createElement('th');
+        th.className='grid-time-hdr'+(BREAK_SLOTS.has(slot)?' break-hdr':'');
+        th.textContent=slot;
+        headerRow.appendChild(th);
+    });
+
+    const tbody=document.getElementById('grid-body');
+    const nW=WORKERS.length;
+
+    for(let dayIdx=0;dayIdx<5;dayIdx++){
+        WORKERS.forEach((worker,wi)=>{
+            const tr=document.createElement('tr');
+            if(wi===nW-1) tr.classList.add('day-last-row');
+
+            // Date cell  only for first worker of this day, rowspan = nW
+            if(wi===0){
+                const dtd=document.createElement('td');
+                dtd.className='cell-date'; dtd.rowSpan=nW; dtd.id='day-header-'+dayIdx;
+                tr.appendChild(dtd);
+            }
+
+            // Worker name cell
+            const wtd=document.createElement('td');
+            wtd.className='cell-worker';
+            wtd.textContent=worker.name.split(' ')[0];
+            wtd.title=worker.name;
+            // colour strip on left border for this worker
+            wtd.style.borderLeft=`4px solid var(--worker-${wi}-pill, #888)`;
+            tr.appendChild(wtd);
+
+            // Slot cells
+            GRID_SLOTS.forEach(slot=>{
+                const isBreak=BREAK_SLOTS.has(slot);
+                const td=document.createElement('td');
+                td.className='grid-slot'+(isBreak?' slot-break':' worker-row-'+wi);
+                td.dataset.workerId=worker.id; td.dataset.workerIdx=wi;
+                td.dataset.dayIdx=dayIdx; td.dataset.slot=slot;
+                if(!isBreak){
+                    td.addEventListener('click',    onSlotClick);
+                    td.addEventListener('dragover',  onDragOver);
+                    td.addEventListener('dragleave', onDragLeave);
+                    td.addEventListener('drop',      onDrop);
+                }
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+}
+
+//  Slot helpers 
+function slotKey(wid,di,slot){ return `${wid}__${di}__${slot}`; }
+
+// Get consecutive non-break slots starting from startSlot (inclusive), up to maxN
+function getSpanSlots(startSlot, maxN){
+    const idx=GRID_SLOTS.indexOf(startSlot);
+    if(idx<0)return[];
+    const result=[];
+    for(let i=idx;i<GRID_SLOTS.length&&result.length<maxN;i++){
+        if(!BREAK_SLOTS.has(GRID_SLOTS[i])) result.push(GRID_SLOTS[i]);
+    }
+    return result;
+}
+
+function clearSlotCells(wid, di, slots){
+    slots.forEach(slot=>{
+        const td=getCellEl(wid,di,slot);
+        if(!td)return;
+        td.className='grid-slot worker-row-'+td.dataset.workerIdx;
+        td.innerHTML='';
+    });
+}
+
+function getCellEl(wid,di,slot){
+    return document.querySelector(`.grid-slot[data-worker-id="${wid}"][data-day-idx="${di}"][data-slot="${slot}"]`);
+}
+
+function renderSpan(wid,di,startSlot,data){
+    const spanSlots=getSpanSlots(startSlot,data.span_len);
+
+    spanSlots.forEach((slot,i)=>{
+        const td=getCellEl(wid,di,slot);
+        if(!td)return;
+        const wi=data.workerIdx;
+        td.className=`grid-slot assigned-${wi}`;
+        td.dataset.workerId=wid; td.dataset.workerIdx=wi; td.dataset.dayIdx=di; td.dataset.slot=slot;
+        // Re-attach events (lost when className was replaced)
+        td.addEventListener('click',    onSlotClick);
+        td.addEventListener('dragover',  onDragOver);
+        td.addEventListener('dragleave', onDragLeave);
+        td.addEventListener('drop',      onDrop);
+
+        const isStart  =i===0;
+        const isEnd    =i===spanSlots.length-1;
+        const isMid    =!isStart&&!isEnd;
+
+        if(spanSlots.length>1){
+            if(isStart)     td.classList.add('span-start');
+            else if(isEnd)  td.classList.add('span-end');
+            else             td.classList.add('span-mid');
+        }
+
+        td.innerHTML='';
+        if(isStart){
+            const pill=document.createElement('span');
+            const isMulti = spanSlots.length > 1;
+            pill.className=`slot-pill slot-pill-${wi}`+(isMulti?' pill-span':'');
+            const fullLabel = data.order_label+(data.description?' \u2014 '+data.description:'');
+            pill.title = fullLabel;
+            if(isMulti){
+                // Initial rough width; corrected in rAF once cells are in the DOM
+                const roughW = spanSlots.length * 57 - 8;
+                pill.style.cssText = `position:absolute; top:4px; bottom:4px; left:4px;
+                    width:${roughW}px; max-width:none; z-index:3;
+                    box-sizing:border-box; border-radius:4px;`;
+                pill.textContent = fullLabel;
+                // Precise width from actual bounding rects
+                requestAnimationFrame(()=>{
+                    const firstTd=getCellEl(wid,di,startSlot);
+                    const lastTd =getCellEl(wid,di,spanSlots[spanSlots.length-1]);
+                    if(firstTd&&lastTd&&pill.parentNode){
+                        const fr=firstTd.getBoundingClientRect(), lr=lastTd.getBoundingClientRect();
+                        pill.style.width=(lr.right - fr.left - 4 - 10)+'px'; // 4px left inset, 10px resize handle
+                    }
+                });
             } else {
-                row.classList.add('text-muted');
+                pill.textContent = data.order_label;
             }
-        } else {
-            alert('Error saving worker: ' + (data.error || 'Unknown error'));
+            pill.draggable=true;
+            pill.addEventListener('dragstart',e=>{
+                _dragSourceKey=slotKey(wid,di,startSlot);
+                e.dataTransfer.effectAllowed='move';
+                e.dataTransfer.setData('text/plain',_dragSourceKey);
+                setTimeout(()=>spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.add('dragging');}),0);
+            });
+            pill.addEventListener('dragend',()=>{
+                spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.remove('dragging');});
+                _dragSourceKey=null;
+            });
+            td.appendChild(pill);
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Error saving worker');
+        // continuation cells: background colour only (pill from start cell covers them)
+        // Resize handle on the last cell of every span (and single-slot assignments)
+        if(isEnd){
+            const handle=document.createElement('div');
+            handle.className='resize-handle';
+            handle.title='Drag to resize';
+            handle.addEventListener('mousedown',e=>{
+                e.preventDefault(); e.stopPropagation();
+                startResize(wid, di, startSlot, { ...data });
+            });
+            td.appendChild(handle);
+        }
     });
 }
 
-function confirmDeleteWorker(workerId, workerName) {
-    deleteWorkerId = workerId;
-    document.getElementById('delete-worker-name').textContent = workerName;
-    openModal('deleteConfirmModal');
+function writeAssignment(wid,di,startSlot,data){
+    const spanSlots=getSpanSlots(startSlot,data.span_len);
+    // Clear any previously assigned slots for this span range first
+    spanSlots.forEach(slot=>{
+        const key=slotKey(wid,di,slot);
+        if(assignments[key]){
+            // If this was a span start, also clear its continuation slots
+            if(assignments[key].is_start){
+                const old=assignments[key];
+                getSpanSlots(slot,old.span_len).forEach(s=>{delete assignments[slotKey(wid,di,s)];});
+            } else if(assignments[key].is_cont){
+                // find the start of this continuation and clear it
+                const startKey=assignments[key].span_start_key;
+                if(startKey&&assignments[startKey]){
+                    const [sw,sd,ss]=startKey.split('__');
+                    getSpanSlots(ss,assignments[startKey].span_len).forEach(s=>{delete assignments[slotKey(sw,sd,s)];});
+                }
+            }
+        }
+    });
+
+    data.is_start=true;
+    assignments[slotKey(wid,di,startSlot)]=data;
+    spanSlots.slice(1).forEach(slot=>{
+        assignments[slotKey(wid,di,slot)]={ is_cont:true, span_start_key:slotKey(wid,di,startSlot) };
+    });
+
+    renderSpan(wid,di,startSlot,data);
 }
 
-function deleteWorker() {
-    if (!deleteWorkerId) return;
-    
-    fetch('/api/factory-worker/' + deleteWorkerId + '/delete/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfToken()
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closeModal('deleteConfirmModal');
-            const row = document.getElementById('worker-row-' + deleteWorkerId);
-            if (row) row.remove();
-            deleteWorkerId = null;
-        } else {
-            alert('Error deleting worker: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Error deleting worker');
+function eraseAssignment(wid,di,slot){
+    const key=slotKey(wid,di,slot);
+    let startKey=key, startData=assignments[key];
+    if(!startData)return;
+    if(startData.is_cont){ startKey=startData.span_start_key; startData=assignments[startKey]; }
+    if(!startData)return;
+    const [sw,sd,ss]=startKey.split('__');
+    const spanSlots=getSpanSlots(ss,startData.span_len);
+    spanSlots.forEach(s=>{
+        delete assignments[slotKey(sw,sd,s)];
+        const td=getCellEl(sw,sd,s);
+        if(td){ td.className='grid-slot worker-row-'+td.dataset.workerIdx; td.innerHTML=''; }
     });
 }
 
-// ═══════════════════════════════════════
-// Utility
-// ═══════════════════════════════════════
-function getCsrfToken() {
-    const name = 'csrftoken';
-    let cookieValue = null;
-    if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                break;
-            }
-        }
+// ── Resize-by-drag ────────────────────────────────────────────
+let _resizeCtx=null;
+
+function startResize(wid, di, startSlot, originalData){
+    _resizeCtx={ wid, di, startSlot, originalData, currentLen: originalData.span_len };
+    document.body.classList.add('is-resizing');
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup',   onResizeEnd);
+}
+
+function onResizeMove(e){
+    if(!_resizeCtx) return;
+    const { wid, di, startSlot, originalData } = _resizeCtx;
+
+    // Find the grid slot under the cursor
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const slot_td = el && el.closest('.grid-slot');
+    if(!slot_td) return;
+    if(String(slot_td.dataset.workerId) !== String(wid)) return;
+    if(parseInt(slot_td.dataset.dayIdx) !== di) return;
+    if(BREAK_SLOTS.has(slot_td.dataset.slot)) return;
+
+    // Count non-break slots from startSlot to hovered slot (inclusive)
+    const startIdx = GRID_SLOTS.indexOf(startSlot);
+    const hoverIdx = GRID_SLOTS.indexOf(slot_td.dataset.slot);
+    if(hoverIdx < startIdx) return;  // can't drag before start
+
+    let newLen=0;
+    for(let i=startIdx;i<=hoverIdx;i++){ if(!BREAK_SLOTS.has(GRID_SLOTS[i])) newLen++; }
+    if(newLen<1) newLen=1;
+    if(newLen===_resizeCtx.currentLen) return;
+    _resizeCtx.currentLen=newLen;
+
+    // Redraw span at new length
+    eraseAssignment(wid, di, startSlot);
+    writeAssignment(wid, di, startSlot, { ...originalData, span_len:newLen });
+}
+
+function onResizeEnd(){
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup',   onResizeEnd);
+    document.body.classList.remove('is-resizing');
+    _resizeCtx=null;
+}
+
+function clearAllAssignments(){
+    Object.keys(assignments).forEach(k=>delete assignments[k]);
+    document.querySelectorAll('.grid-slot:not(.slot-break)').forEach(td=>{
+        td.className='grid-slot worker-row-'+td.dataset.workerIdx;
+        td.innerHTML='';
+        // re-attach listeners
+        td.addEventListener('click',    onSlotClick);
+        td.addEventListener('dragover',  onDragOver);
+        td.addEventListener('dragleave', onDragLeave);
+        td.addEventListener('drop',      onDrop);
+    });
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────
+let _dragOverCells=[];
+function clearDragHighlight(){ _dragOverCells.forEach(el=>el.classList.remove('drag-over')); _dragOverCells=[]; }
+
+function onDragOver(e){
+    if(!_dragSourceKey)return;
+    e.preventDefault(); e.dataTransfer.dropEffect='move';
+    const td=e.currentTarget;
+    // Avoid recomputing when pointer just moves within same cell
+    if(td===_dragOverCells[0])return;
+    clearDragHighlight();
+    const srcData=assignments[_dragSourceKey];
+    if(!srcData||srcData.is_cont)return;
+    const tgtWid=td.dataset.workerId, tgtDi=parseInt(td.dataset.dayIdx);
+    getSpanSlots(td.dataset.slot, srcData.span_len).forEach(s=>{
+        const el=getCellEl(tgtWid,tgtDi,s);
+        if(el){ el.classList.add('drag-over'); _dragOverCells.push(el); }
+    });
+}
+function onDragLeave(e){
+    const to=e.relatedTarget;
+    if(!to||!to.closest('#schedule-grid')) clearDragHighlight();
+}
+function onDrop(e){
+    e.preventDefault();
+    clearDragHighlight();
+    const td=e.currentTarget;
+    if(!_dragSourceKey)return;
+
+    const [srcW,srcD,srcS]=_dragSourceKey.split('__');
+    const srcData=assignments[_dragSourceKey];
+    if(!srcData||srcData.is_cont)return;
+
+    const tgtW=td.dataset.workerId, tgtD=td.dataset.dayIdx, tgtS=td.dataset.slot;
+
+    // Clear source
+    const srcSpanSlots=getSpanSlots(srcS,srcData.span_len);
+    srcSpanSlots.forEach(s=>{
+        delete assignments[slotKey(srcW,srcD,s)];
+        const el=getCellEl(srcW,srcD,s);
+        if(el){el.className='grid-slot worker-row-'+el.dataset.workerIdx;el.innerHTML='';}
+    });
+
+    // Build new assignment for target (keep same data, but update workerIdx)
+    const newWi=parseInt(td.dataset.workerIdx);
+    const newData={ ...srcData, workerIdx:newWi, is_start:true };
+    writeAssignment(tgtW, parseInt(tgtD), tgtS, newData);
+    _dragSourceKey=null;
+}
+
+// ── Slot click / popover ──────────────────────────────────────
+function setTaskType(type){
+    document.querySelectorAll('.task-type-btn').forEach(b=>b.classList.toggle('active', b.dataset.type===type));
+    const isOrder = type==='order';
+    document.getElementById('popover-order-row').style.display = isOrder ? '' : 'none';
+    document.getElementById('popover-desc-hint').textContent   = isOrder ? '(optional)' : '';
+    if(!isOrder){
+        document.getElementById('popover-order-search').value='';
+        document.getElementById('popover-order-id').value=type.toUpperCase(); // synthetic ID
     }
-    return cookieValue;
 }
+
+function onSlotClick(e){
+    if(_dragSourceKey)return;
+    const td=e.currentTarget;
+    const wid=td.dataset.workerId, wi=parseInt(td.dataset.workerIdx),
+          di=parseInt(td.dataset.dayIdx);
+    let slot=td.dataset.slot;
+
+    let key=slotKey(wid,di,slot);
+    let existing=assignments[key];
+    // If cont slot, redirect to start slot
+    if(existing?.is_cont){ key=existing.span_start_key; existing=assignments[key]; slot=key.split('__')[2]; }
+
+    _popCtx={ wid, wi, di, slot };
+
+    // Resolve task type from existing data
+    const existType = existing?.task_type || 'order';
+    setTaskType(existType);
+
+    const worker=WORKERS.find(w=>String(w.id)===String(wid));
+    const dayDate=new Date(currentWeekStart); dayDate.setDate(dayDate.getDate()+di);
+    const dateStr=dayDate.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'});
+
+    document.getElementById('popover-title').textContent=(worker?worker.name.split(' ')[0]:'?')+' \u00b7 '+dateStr+' \u00b7 '+slot;
+    if(existType==='order'){
+        document.getElementById('popover-order-search').value = existing ? existing.order_label : '';
+        document.getElementById('popover-order-id').value     = existing ? existing.order_id    : '';
+    }
+    document.getElementById('popover-description').value = existing ? existing.description : '';
+    document.getElementById('popover-duration').value    = existing ? String(existing.span_len||1) : '1';
+    document.getElementById('popover-order-results').style.display='none';
+    document.getElementById('popover-clear-btn').style.display = existing ? 'inline-block':'none';
+
+    // Duplicate row: populate other workers when editing existing
+    const dupRow = document.getElementById('popover-dup-row');
+    const dupSel = document.getElementById('popover-dup-worker');
+    if(existing){
+        dupSel.innerHTML = WORKERS.filter(w=>String(w.id)!==String(wid))
+            .map(w=>`<option value="${w.id}">${w.name.split(' ')[0]}</option>`).join('');
+        dupRow.style.display = WORKERS.length > 1 ? '' : 'none';
+    } else { dupRow.style.display='none'; }
+
+    const popover=document.getElementById('slot-popover');
+    popover.style.display='block';
+    document.getElementById('popover-backdrop').style.display='block';
+
+    const rect=td.getBoundingClientRect(), pW=320, pH=360;
+    let left=rect.left+window.scrollX, top=rect.bottom+window.scrollY+6;
+    if(left+pW>window.innerWidth-12) left=window.innerWidth-pW-12;
+    if(top+pH>window.innerHeight+window.scrollY-12) top=rect.top+window.scrollY-pH-6;
+    popover.style.left=left+'px'; popover.style.top=top+'px';
+
+    if(existType==='order') document.getElementById('popover-order-search').focus();
+    else document.getElementById('popover-description').focus();
+}
+
+function closePopover(){
+    document.getElementById('slot-popover').style.display='none';
+    document.getElementById('popover-backdrop').style.display='none';
+    document.getElementById('popover-order-results').style.display='none';
+    _popCtx=null;
+}
+
+function assignSlot(){
+    const activeType = document.querySelector('.task-type-btn.active')?.dataset.type || 'order';
+    const spanLen    = parseInt(document.getElementById('popover-duration').value)||1;
+    const desc       = document.getElementById('popover-description').value.trim();
+    let orderId, orderLabel;
+
+    if(activeType==='order'){
+        orderId    = document.getElementById('popover-order-id').value;
+        orderLabel = document.getElementById('popover-order-search').value.trim();
+        if(!orderId||!orderLabel){ alert('Please select an order'); return; }
+    } else {
+        const typeLabel = activeType==='delivery' ? 'Delivery' : 'General';
+        orderId    = activeType.toUpperCase();
+        orderLabel = desc ? typeLabel+': '+desc : typeLabel;
+        if(!desc && activeType!=='delivery'){ /* allow nameless delivery */ }
+    }
+
+    const {wid,wi,di,slot}=_popCtx;
+    writeAssignment(wid, di, slot, { order_id:orderId, order_label:orderLabel, description:desc, task_type:activeType, workerIdx:wi, span_len:spanLen });
+    closePopover();
+}
+
+function duplicateSlot(){
+    if(!_popCtx)return;
+    const {wid,di,slot}=_popCtx;
+    let key=slotKey(wid,di,slot), data=assignments[key];
+    if(data?.is_cont){ key=data.span_start_key; data=assignments[key]; }
+    if(!data)return;
+    const targetWid=document.getElementById('popover-dup-worker').value;
+    if(!targetWid)return;
+    const targetWorker=WORKERS.find(w=>String(w.id)===String(targetWid));
+    if(!targetWorker)return;
+    const targetWi=WORKERS.indexOf(targetWorker);
+    const startSlot=key.split('__')[2];
+    writeAssignment(targetWid, di, startSlot, { ...data, workerIdx:targetWi, is_start:true });
+    closePopover();
+}
+
+function clearSlot(){
+    if(!_popCtx)return;
+    const {wid,di,slot}=_popCtx;
+    eraseAssignment(wid,di,slot);
+    closePopover();
+}
+
+// ── Popover order search ──────────────────────────────────────
+document.addEventListener('DOMContentLoaded',function(){
+    currentWeekStart=getMondayOf(new Date());
+    buildGrid();
+    updateWeekDisplay();
+    loadWeekTimesheets();
+
+    const input=document.getElementById('popover-order-search');
+    const results=document.getElementById('popover-order-results');
+
+    input.addEventListener('input',function(){
+        clearTimeout(_searchTimer);
+        const q=this.value.trim();
+        document.getElementById('popover-order-id').value='';
+        if(q.length<2){results.style.display='none';return;}
+        _searchTimer=setTimeout(()=>{
+            fetch('/api/order-search/?q='+encodeURIComponent(q))
+                .then(r=>r.json()).then(data=>{
+                    results.innerHTML='';
+                    if(data.results?.length){
+                        data.results.forEach(o=>{
+                            const div=document.createElement('div');
+                            div.className='autocomplete-item';
+                            div.innerHTML=`<span class="sale-num">${o.sale_number}</span> &mdash; ${o.customer_name||'Unknown'}`;
+                            div.addEventListener('click',()=>{
+                                input.value=o.sale_number+' \u2014 '+(o.customer_name||'Unknown');
+                                document.getElementById('popover-order-id').value=o.id;
+                                results.style.display='none';
+                            });
+                            results.appendChild(div);
+                        });
+                        results.style.display='block';
+                    } else {
+                        results.innerHTML='<div class="autocomplete-item" style="color:#999;">No orders found</div>';
+                        results.style.display='block';
+                    }
+                }).catch(()=>{results.style.display='none';});
+        },280);
+    });
+});
+
+// ── Load saved timesheets for the current week ─────────────────────
+function loadWeekTimesheets(){
+    clearAllAssignments();
+    const weekStart=currentWeekStart.toISOString().split('T')[0];
+    fetch('/api/get-week-timesheets/?week_start='+weekStart)
+        .then(r=>r.json())
+        .then(data=>{
+            if(!data.success)return;
+            data.entries.forEach(e=>{
+                const worker=WORKERS.find(w=>String(w.id)===String(e.worker_id));
+                if(!worker)return;
+                const wi=WORKERS.indexOf(worker);
+                writeAssignment(
+                    String(e.worker_id), e.day_index, e.start_slot,
+                    { order_id: e.order_id, order_label: e.order_label,
+                      description: e.description, task_type: e.task_type,
+                      workerIdx: wi, span_len: e.span_len, is_start: true }
+                );
+            });
+        })
+        .catch(err=>console.warn('Failed to load week timesheets:', err));
+}
+
+// ── Save Week ─────────────────────────────────────────────────
+function saveWeek(){
+    if(Object.keys(assignments).length===0){alert('No slots assigned yet');return;}
+    const weekStart=currentWeekStart.toISOString().split('T')[0];
+
+    // Collect only is_start entries (not continuations)
+    const grouped={};
+    Object.entries(assignments).forEach(([key,data])=>{
+        if(!data.is_start)return;
+        const [wid,dayIdx,slot]=key.split('__');
+        const gKey=`${wid}__${dayIdx}__${data.order_id}__${data.description||''}`;
+        if(!grouped[gKey]) grouped[gKey]={
+            worker_id:parseInt(wid), day_index:parseInt(dayIdx),
+            order_id: data.order_id,          // keep as string (may be DELIVERY/GENERAL)
+            order_label: data.order_label||'',
+            task_type: data.task_type||'order',
+            description:data.description||'',
+            slots:[]
+        };
+        const spanSlots=getSpanSlots(slot,data.span_len);
+        grouped[gKey].slots.push(...spanSlots);
+    });
+
+    const entries=Object.values(grouped);
+    const btn=document.getElementById('save-week-btn');
+    btn.disabled=true; btn.innerHTML='<i class="bi bi-hourglass-split"></i> Saving\u2026';
+
+    fetch('/api/save-manufacturing-day/',{
+        method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},
+        body:JSON.stringify({week_start:weekStart,entries})
+    }).then(r=>r.json()).then(data=>{
+        btn.disabled=false; btn.innerHTML='<i class="bi bi-floppy"></i> Save Week';
+        if(data.success){
+            const n=data.created;
+            btn.innerHTML=`<i class="bi bi-check-circle-fill"></i> Saved ${n} timesheet${n!==1?'s':''}`;
+            btn.classList.replace('btn-primary','btn-success');
+            setTimeout(()=>{btn.innerHTML='<i class="bi bi-floppy"></i> Save Week';btn.classList.replace('btn-success','btn-primary');},3000);
+            if(data.errors?.length)console.warn('Save errors:',data.errors);
+            loadWeekTimesheets();
+        } else { alert('Error: '+(data.error||'Unknown error')); }
+    }).catch(err=>{
+        btn.disabled=false; btn.innerHTML='<i class="bi bi-floppy"></i> Save Week';
+        console.error(err); alert('Network error saving timesheets');
+    });
+}
+
+// ── Utility ───────────────────────────────────────────────────
+function getCsrfToken(){
+    let v=null;
+    if(document.cookie) document.cookie.split(';').forEach(c=>{const t=c.trim();if(t.startsWith('csrftoken='))v=decodeURIComponent(t.slice(10));});
+    return v;
+}
+
+// Inject active factory workers from Django (ordered by display_order)
+{% for worker in factory_workers %}{% if worker.active %}
+WORKERS.push({ id: {{ worker.id }}, name: "{{ worker.name|escapejs }}" });
+{% endif %}{% endfor %}
 </script>
 {% endblock %}

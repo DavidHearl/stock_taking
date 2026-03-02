@@ -659,7 +659,7 @@
                         </button>
                     {% endif %}
                     <div class="section-actions">
-                        <button type="button" class="btn btn-sm btn-add-board" onclick="openModal('addBoardModal', {{ bpo_data.po.id }})">
+                        <button type="button" class="btn btn-sm btn-add-board" data-boards-po-id="{{ bpo_data.po.id }}" onclick="openAddBoardModal({{ bpo_data.po.id }})">
                             <i class="bi bi-plus-circle"></i> Add Board
                         </button>
                         {% if bpo_data.pnx_items and bpo_data.po.po_number %}
@@ -723,7 +723,20 @@
                             <tbody>
                                 {% for item in bpo_data.pnx_items %}
                                 <tr>
-                                    <td><input type="checkbox" class="pnx-item-checkbox" data-item-id="{{ item.id }}" data-boards-po-id="{{ bpo_data.po.id }}"></td>
+                                    <td><input type="checkbox" class="pnx-item-checkbox"
+                                               data-item-id="{{ item.id }}"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-barcode="{{ item.barcode }}"
+                                               data-matname="{{ item.matname }}"
+                                               data-cleng="{{ item.cleng|floatformat:0 }}"
+                                               data-cwidth="{{ item.cwidth|floatformat:0 }}"
+                                               data-cnt="{{ item.cnt|floatformat:0 }}"
+                                               data-grain="{{ item.grain }}"
+                                               data-partdesc="{{ item.partdesc|default:'' }}"
+                                               data-prfid1="{% if item.prfid1 %}1{% else %}0{% endif %}"
+                                               data-prfid2="{% if item.prfid2 %}1{% else %}0{% endif %}"
+                                               data-prfid3="{% if item.prfid3 %}1{% else %}0{% endif %}"
+                                               data-prfid4="{% if item.prfid4 %}1{% else %}0{% endif %}"></td>
                                     <td>
                                         <input type="text" 
                                                class="quantity-input pnx-text-input" 
@@ -1242,10 +1255,9 @@
                 <div class="card-header">
                     <h3>
                         Accessories
-                        <a href="{% url 'generate_and_upload_accessories_csv' order.id %}" class="btn btn-sm btn-generate-cad"
-                           onclick="return confirm('Generate accessories CSV from CAD data?\n\nThis will create/update accessories from the CAD database.');">
+                        <button type="button" class="btn btn-sm btn-generate-cad" onclick="generateAccessoriesCSV('{% url 'generate_and_upload_accessories_csv' order.id %}')">
                             <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
-                        </a>
+                        </button>
                     </h3>
                     <div class="header-actions">
                         <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('addItemModal')">
@@ -1377,12 +1389,18 @@
         </div>
         <div class="card-body">
             <!-- Installation Timesheets -->
-            <h4 class="section-header-purple">Installation Timesheets</h4>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h4 class="section-header-purple mb-0">Installation Timesheets</h4>
+                <button type="button" class="btn btn-danger btn-sm d-none" id="deleteSelectedInstallationBtn" onclick="deleteSelectedTimesheets('installation')">
+                    <i class="bi bi-trash"></i> Delete Selected
+                </button>
+            </div>
             {% if installation_timesheets %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
                             <tr>
+                                <th style="width:40px"><input type="checkbox" id="selectAllInstallation" onchange="toggleSelectAll('installation', this)"></th>
                                 <th>Fitter</th>
                                 <th>Date</th>
                                 <th>PO</th>
@@ -1394,6 +1412,7 @@
                         <tbody>
                             {% for timesheet in installation_timesheets %}
                             <tr>
+                                <td><input type="checkbox" class="timesheet-check installation-check" value="{{ timesheet.id }}" onchange="updateDeleteBtn('installation')"></td>
                                 <td>{{ timesheet.worker_name }}</td>
                                 <td>{{ timesheet.date|date:"d/m/Y" }}</td>
                                 <td>{{ timesheet.purchase_order.display_number|default:"-" }}</td>
@@ -1407,6 +1426,7 @@
                             </tr>
                             {% endfor %}
                             <tr class="table-subtotal-row-purple">
+                                <td></td>
                                 <td colspan="3" class="text-right">Subtotal:</td>
                                 <td>£{{ calculated_installation_cost|floatformat:2 }}</td>
                                 <td colspan="2"></td>
@@ -1421,12 +1441,18 @@
             <hr>
             
             <!-- Manufacturing Timesheets -->
-            <h4 class="section-header-orange">Manufacturing Timesheets</h4>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h4 class="section-header-orange mb-0">Manufacturing Timesheets</h4>
+                <button type="button" class="btn btn-danger btn-sm d-none" id="deleteSelectedManufacturingBtn" onclick="deleteSelectedTimesheets('manufacturing')">
+                    <i class="bi bi-trash"></i> Delete Selected
+                </button>
+            </div>
             {% if manufacturing_timesheets %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
                             <tr>
+                                <th style="width:40px"><input type="checkbox" id="selectAllManufacturing" onchange="toggleSelectAll('manufacturing', this)"></th>
                                 <th>Worker</th>
                                 <th>Date</th>
                                 <th>Hours</th>
@@ -1439,6 +1465,7 @@
                         <tbody>
                             {% for timesheet in manufacturing_timesheets %}
                             <tr>
+                                <td><input type="checkbox" class="timesheet-check manufacturing-check" value="{{ timesheet.id }}" onchange="updateDeleteBtn('manufacturing')"></td>
                                 <td>{{ timesheet.worker_name }}</td>
                                 <td>{{ timesheet.date|date:"d/m/Y" }}</td>
                                 <td>{{ timesheet.hours }}</td>
@@ -1453,6 +1480,7 @@
                             </tr>
                             {% endfor %}
                             <tr class="table-subtotal-row-orange">
+                                <td></td>
                                 <td colspan="4" class="text-right">Subtotal:</td>
                                 <td>£{{ calculated_manufacturing_cost|floatformat:2 }}</td>
                                 <td colspan="2"></td>
@@ -1703,7 +1731,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Add Board</h3>
+                <h3 id="add-board-modal-title">Add Board</h3>
                 <button type="button" class="modal-close" onclick="closeModal('addBoardModal')">✕</button>
             </div>
             <div class="modal-body">
@@ -1759,10 +1787,19 @@
                         <label class="checkbox-label"><input type="checkbox" id="add-board-prfid2"> PRFID2</label>
                     </div>
                 </div>
+                <!-- Board staging queue -->
+                <div id="board-staging-area" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color, #3a3d45); padding-top: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <strong style="font-size: 0.875rem;">Queued (<span id="board-queue-count">0</span>)</strong>
+                        <button type="button" class="btn btn-sm" style="padding: 2px 8px; font-size: 0.75rem; color: var(--danger, #dc3545); background: none; border: 1px solid var(--danger, #dc3545); border-radius: 4px;" onclick="clearBoardQueue()">Clear All</button>
+                    </div>
+                    <div id="board-staging-list" style="max-height: 160px; overflow-y: auto;"></div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('addBoardModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="addBoardItem()">Add Board</button>
+                <button type="button" class="btn btn-outline-primary" onclick="addBoardToQueue()"><i class="bi bi-plus"></i> Add to Queue</button>
+                <button type="button" class="btn btn-primary" id="save-boards-btn" onclick="submitAllBoards()">Save Board</button>
             </div>
         </div>
     </div>
@@ -2184,29 +2221,94 @@
     </div>
 </div>
 
+<!-- Modal for Accessories CSV Generation (confirm + loading states) -->
+<div class="modal" id="generateAccessoriesCadModal">
+    <div class="modal-overlay" id="gen-acc-overlay" onclick="closeModal('generateAccessoriesCadModal')"></div>
+    <div class="modal-dialog" style="max-width: 420px;">
+        <div class="modal-content">
+            <div class="modal-header" id="gen-acc-modal-header">
+                <h3>Generate Accessories &mdash; CAD</h3>
+                <button type="button" class="modal-close" id="gen-acc-modal-close" onclick="closeModal('generateAccessoriesCadModal')">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <div id="gen-acc-confirm-view">
+                    <p>Generate accessories CSV from CAD data?</p>
+                    <p class="text-muted" style="font-size: 0.875rem; margin-bottom: 0;">This will create/update accessories from the CAD database.</p>
+                </div>
+                <div id="gen-acc-loading-view" style="display: none; text-align: center; padding: 1.25rem 0;">
+                    <div style="margin-bottom: 1rem;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite; color: var(--primary, #4a90d9);">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        </svg>
+                    </div>
+                    <h4 style="margin: 0 0 0.4rem;">Generating Accessories</h4>
+                    <p class="text-muted" style="margin: 0; font-size: 0.875rem;">Fetching CAD data and building accessories&hellip;</p>
+                </div>
+            </div>
+            <div class="modal-footer" id="gen-acc-modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('generateAccessoriesCadModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmGenerateAccessoriesCSV()"><i class="bi bi-file-earmark-spreadsheet"></i> Generate</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for PNX Generation Analysis -->
 <div class="modal" id="pnxAnalysisModal">
-    <div class="modal-overlay" onclick="closePNXAnalysisModal()"></div>
+    <div class="modal-overlay" id="pnx-modal-overlay" onclick="closePNXAnalysisModal()"></div>
     <div class="modal-dialog modal-dialog-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>PNX Generation Analysis</h3>
-                <button type="button" class="modal-close" onclick="closePNXAnalysisModal()">✕</button>
+                <h3>Generate PNX &mdash; CAD</h3>
+                <button type="button" class="modal-close" id="pnx-modal-close" onclick="closePNXAnalysisModal()">&#x2715;</button>
             </div>
             <div class="modal-body">
-                <div id="pnx-analysis-content">
+                <div id="pnx-loading-view" style="text-align: center; padding: 2rem 0;">
+                    <div style="margin-bottom: 1rem;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite; color: var(--primary, #4a90d9);">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        </svg>
+                    </div>
+                    <h4 style="margin: 0 0 0.4rem;">Analysing CAD Data</h4>
+                    <p class="text-muted" style="margin: 0; font-size: 0.875rem;">Fetching board data&hellip;</p>
+                </div>
+                <div id="pnx-analysis-content" style="display: none;">
                     <!-- Content will be populated by JavaScript -->
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closePNXAnalysisModal()">Cancel</button>
-                <button type="button" class="btn btn-success" id="confirm-pnx-btn" onclick="confirmPNXGeneration()">Proceed with Generation</button>
+                <button type="button" class="btn btn-success" id="confirm-pnx-btn" onclick="confirmPNXGeneration()" style="display: none;">Proceed with Generation</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
+// Generate Accessories CSV - open confirm/loading modal
+let _generateAccessoriesUrl = null;
+
+function generateAccessoriesCSV(url) {
+    _generateAccessoriesUrl = url;
+    // Reset to confirm state
+    document.getElementById('gen-acc-confirm-view').style.display = '';
+    document.getElementById('gen-acc-loading-view').style.display = 'none';
+    document.getElementById('gen-acc-modal-footer').style.display = '';
+    document.getElementById('gen-acc-modal-close').style.display = '';
+    document.getElementById('gen-acc-overlay').onclick = function() { closeModal('generateAccessoriesCadModal'); };
+    openModal('generateAccessoriesCadModal');
+}
+
+function confirmGenerateAccessoriesCSV() {
+    // Transition to loading state
+    document.getElementById('gen-acc-confirm-view').style.display = 'none';
+    document.getElementById('gen-acc-loading-view').style.display = '';
+    document.getElementById('gen-acc-modal-footer').style.display = 'none';
+    document.getElementById('gen-acc-modal-close').style.display = 'none';
+    document.getElementById('gen-acc-overlay').onclick = null; // prevent dismiss while loading
+    window.location.href = _generateAccessoriesUrl;
+}
+
 // Open Add PO Modal
 function openAddPOModal() {
     document.getElementById('add-po-form').reset();
@@ -3724,90 +3826,176 @@ function closeModal(modalId) {
     }
 }
 
-// Add Board Item functionality
-function addBoardItem() {
-    const barcode = document.getElementById('add-board-barcode').value.trim();
-    const matname = document.getElementById('add-board-matname').value.trim();
-    const cleng = parseFloat(document.getElementById('add-board-length').value) || 0;
-    const cwidth = parseFloat(document.getElementById('add-board-width').value) || 0;
-    const cnt = parseInt(document.getElementById('add-board-count').value) || 1;
-    const grain = document.getElementById('add-board-grain').value;
+// ── Add / Copy Board (queue-based) ───────────────────────────────────────────
+let boardQueue = [];
+
+function openAddBoardModal(boardsPoId) {
+    activeBoardsPoId = boardsPoId;
+    const poSelect = document.getElementById('add-board-po-select');
+    if (poSelect) poSelect.value = boardsPoId;
+
+    // Reset queue
+    boardQueue = [];
+    renderBoardStagingList();
+
+    const checkedBox = document.querySelector(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]:checked`);
+    const title = document.getElementById('add-board-modal-title');
+
+    if (checkedBox) {
+        title.textContent = 'Copy Board';
+        document.getElementById('add-board-barcode').value  = checkedBox.dataset.barcode  || '';
+        document.getElementById('add-board-matname').value  = checkedBox.dataset.matname  || '';
+        document.getElementById('add-board-length').value   = checkedBox.dataset.cleng    || '';
+        document.getElementById('add-board-width').value    = checkedBox.dataset.cwidth   || '';
+        document.getElementById('add-board-count').value    = checkedBox.dataset.cnt      || '1';
+        document.getElementById('add-board-grain').value    = checkedBox.dataset.grain    || 'N';
+        document.getElementById('add-board-partdesc').value = checkedBox.dataset.partdesc || '';
+        document.getElementById('add-board-prfid1').checked = checkedBox.dataset.prfid1 === '1';
+        document.getElementById('add-board-prfid3').checked = checkedBox.dataset.prfid3 === '1';
+        document.getElementById('add-board-prfid4').checked = checkedBox.dataset.prfid4 === '1';
+        document.getElementById('add-board-prfid2').checked = checkedBox.dataset.prfid2 === '1';
+    } else {
+        title.textContent = 'Add Board';
+        document.getElementById('add-board-barcode').value  = '';
+        document.getElementById('add-board-matname').value  = '';
+        document.getElementById('add-board-length').value   = '';
+        document.getElementById('add-board-width').value    = '';
+        document.getElementById('add-board-count').value    = '1';
+        document.getElementById('add-board-grain').value    = 'N';
+        document.getElementById('add-board-partdesc').value = '';
+        document.getElementById('add-board-prfid1').checked = false;
+        document.getElementById('add-board-prfid3').checked = false;
+        document.getElementById('add-board-prfid4').checked = false;
+        document.getElementById('add-board-prfid2').checked = false;
+    }
+    openModal('addBoardModal');
+}
+
+function updateAddBoardButtonState(boardsPoId) {
+    const btn = document.querySelector(`.btn-add-board[data-boards-po-id="${boardsPoId}"]`);
+    if (!btn) return;
+    const hasChecked = !!document.querySelector(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]:checked`);
+    btn.innerHTML = hasChecked
+        ? '<i class="bi bi-copy"></i> Copy Board'
+        : '<i class="bi bi-plus-circle"></i> Add Board';
+}
+
+function getBoardFormData() {
+    const barcode  = document.getElementById('add-board-barcode').value.trim();
+    const matname  = document.getElementById('add-board-matname').value.trim();
+    const cleng    = parseFloat(document.getElementById('add-board-length').value) || 0;
+    const cwidth   = parseFloat(document.getElementById('add-board-width').value)  || 0;
+    const cnt      = parseInt(document.getElementById('add-board-count').value)    || 1;
+    const grain    = document.getElementById('add-board-grain').value;
     const partdesc = document.getElementById('add-board-partdesc').value.trim();
-    
-    // Get edging checkboxes
-    const prfid1 = document.getElementById('add-board-prfid1').checked ? 'Sliderobe_Edge_08' : '';
-    const prfid3 = document.getElementById('add-board-prfid3').checked ? 'Sliderobe_Edge_08' : '';
-    const prfid4 = document.getElementById('add-board-prfid4').checked ? 'Sliderobe_Edge_08' : '';
-    const prfid2 = document.getElementById('add-board-prfid2').checked ? 'Sliderobe_Edge_08' : '';
-    
-    // Validation
-    if (!barcode) {
-        showAlert('Barcode is required', 'danger');
-        return;
+    const prfid1   = document.getElementById('add-board-prfid1').checked ? 'Sliderobe_Edge_08' : '';
+    const prfid3   = document.getElementById('add-board-prfid3').checked ? 'Sliderobe_Edge_08' : '';
+    const prfid4   = document.getElementById('add-board-prfid4').checked ? 'Sliderobe_Edge_08' : '';
+    const prfid2   = document.getElementById('add-board-prfid2').checked ? 'Sliderobe_Edge_08' : '';
+
+    if (!barcode)    { showAlert('Barcode is required', 'danger');            return null; }
+    if (!matname)    { showAlert('Material Name is required', 'danger');      return null; }
+    if (cleng <= 0)  { showAlert('Length must be greater than 0', 'danger'); return null; }
+    if (cwidth <= 0) { showAlert('Width must be greater than 0', 'danger');  return null; }
+
+    return {
+        boards_po_id: document.getElementById('add-board-po-select')
+            ? document.getElementById('add-board-po-select').value
+            : activeBoardsPoId,
+        order_id: {{ order.id }},
+        barcode, matname, cleng, cwidth, cnt, grain, partdesc,
+        prfid1, prfid2, prfid3, prfid4
+    };
+}
+
+function addBoardToQueue() {
+    const data = getBoardFormData();
+    if (!data) return;
+    boardQueue.push(data);
+    renderBoardStagingList();
+    // Keep matname/grain for quick repeat entry; clear identifying fields
+    document.getElementById('add-board-barcode').value = '';
+    document.getElementById('add-board-length').value  = '';
+    document.getElementById('add-board-width').value   = '';
+    document.getElementById('add-board-count').value   = '1';
+    document.getElementById('add-board-barcode').focus();
+}
+
+function removeFromBoardQueue(index) {
+    boardQueue.splice(index, 1);
+    renderBoardStagingList();
+}
+
+function clearBoardQueue() {
+    boardQueue = [];
+    renderBoardStagingList();
+}
+
+function renderBoardStagingList() {
+    const area     = document.getElementById('board-staging-area');
+    const list     = document.getElementById('board-staging-list');
+    const countEl  = document.getElementById('board-queue-count');
+    const saveBtn  = document.getElementById('save-boards-btn');
+
+    countEl.textContent = boardQueue.length;
+    saveBtn.textContent = boardQueue.length > 0 ? `Save All (${boardQueue.length})` : 'Save Board';
+    area.style.display  = boardQueue.length > 0 ? '' : 'none';
+
+    list.innerHTML = boardQueue.map((b, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg-tertiary,#2a2d35);border-radius:4px;margin-bottom:4px;font-size:0.8rem;">
+            <span><strong>${b.barcode}</strong> &mdash; ${b.matname} &mdash; ${b.cleng}&times;${b.cwidth} &times;&nbsp;${b.cnt}</span>
+            <button type="button" onclick="removeFromBoardQueue(${i})" style="background:none;border:none;color:var(--text-secondary,#6c757d);cursor:pointer;font-size:1rem;padding:0 4px;line-height:1;">&times;</button>
+        </div>
+    `).join('');
+}
+
+async function submitAllBoards() {
+    let toSubmit = [...boardQueue];
+
+    // If queue empty, try submitting the current form directly
+    if (toSubmit.length === 0) {
+        const data = getBoardFormData();
+        if (!data) return;
+        toSubmit = [data];
     }
-    if (!matname) {
-        showAlert('Material Name is required', 'danger');
-        return;
-    }
-    if (cleng <= 0) {
-        showAlert('Length must be greater than 0', 'danger');
-        return;
-    }
-    if (cwidth <= 0) {
-        showAlert('Width must be greater than 0', 'danger');
-        return;
-    }
-    
-    fetch('/stock-take/add-board-item/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({
-            boards_po_id: document.getElementById('add-board-po-select')
-                ? document.getElementById('add-board-po-select').value
-                : activeBoardsPoId,
-            order_id: {{ order.id }},
-            barcode: barcode,
-            matname: matname,
-            cleng: cleng,
-            cwidth: cwidth,
-            cnt: cnt,
-            grain: grain,
-            partdesc: partdesc,
-            prfid1: prfid1,
-            prfid2: prfid2,
-            prfid3: prfid3,
-            prfid4: prfid4
-        })
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            showAlert('Board added successfully! Files regenerated.', 'success');
-            closeModal('addBoardModal');
-            // Clear form
-            document.getElementById('add-board-barcode').value = '';
-            document.getElementById('add-board-matname').value = '';
-            document.getElementById('add-board-length').value = '';
-            document.getElementById('add-board-width').value = '';
-            document.getElementById('add-board-count').value = '1';
-            document.getElementById('add-board-grain').value = '';
-            document.getElementById('add-board-partdesc').value = '';
-            document.getElementById('add-board-prfid1').checked = false;
-            document.getElementById('add-board-prfid3').checked = false;
-            document.getElementById('add-board-prfid4').checked = false;
-            document.getElementById('add-board-prfid2').checked = false;
-            // Reload page to show new item
-            location.reload();
-        } else {
-            showAlert('Error adding board: ' + result.error, 'danger');
+
+    const saveBtn = document.getElementById('save-boards-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+
+    let successCount = 0;
+    let lastError = null;
+
+    for (const boardData of toSubmit) {
+        try {
+            const resp = await fetch('/stock-take/add-board-item/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify(boardData)
+            });
+            const result = await resp.json();
+            if (result.success) { successCount++; } else { lastError = result.error; }
+        } catch (e) {
+            lastError = e.message;
         }
-    })
-    .catch(error => {
-        showAlert('Error adding board', 'danger');
-    });
+    }
+
+    saveBtn.disabled = false;
+
+    if (successCount > 0) {
+        const noun = successCount === 1 ? 'Board added' : `${successCount} boards added`;
+        const warn = lastError ? ` (${toSubmit.length - successCount} failed: ${lastError})` : '';
+        showAlert(noun + ' successfully!' + warn, successCount < toSubmit.length ? 'warning' : 'success');
+        closeModal('addBoardModal');
+        boardQueue = [];
+        location.reload();
+    } else {
+        showAlert('Error adding boards: ' + lastError, 'danger');
+        renderBoardStagingList();
+    }
 }
 
 // Regenerate PNX and CSV files from database items
@@ -4748,17 +4936,27 @@ window.analyzePNXGeneration = function(event, boardsPoId) {
     const orderId = {{ order.id }};
     const queryParam = boardsPoId ? `?boards_po_id=${boardsPoId}` : '';
     
+    // Show modal immediately in loading state
+    document.getElementById('pnx-loading-view').style.display = '';
+    document.getElementById('pnx-analysis-content').style.display = 'none';
+    document.getElementById('confirm-pnx-btn').style.display = 'none';
+    document.getElementById('pnx-modal-close').style.display = '';
+    document.getElementById('pnx-modal-overlay').onclick = closePNXAnalysisModal;
+    openModal('pnxAnalysisModal');
+    
     fetch(`/order/${orderId}/generate-pnx/${queryParam}`)
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             showPNXAnalysisModal(data);
         } else {
+            closePNXAnalysisModal();
             showAlert('Error: ' + data.error, 'danger');
         }
     })
     .catch(error => {
         console.error('Error analyzing PNX:', error);
+        closePNXAnalysisModal();
         showAlert('Error analyzing PNX generation', 'danger');
     });
 };
@@ -4771,8 +4969,6 @@ let pnxStagingData = {
 };
 
 function showPNXAnalysisModal(data) {
-    const content = document.getElementById('pnx-analysis-content');
-    
     // New structure - all_items with status
     const allItems = data.all_items || [];
     
@@ -4781,9 +4977,11 @@ function showPNXAnalysisModal(data) {
     pnxStagingData.updatedItems = allItems.filter(item => item.status === 'updated');
     pnxStagingData.duplicateItems = allItems.filter(item => item.status === 'duplicate');
     
-    // Render the modal
+    // Render content and switch from loading state
     renderPNXAnalysisModal();
-    openModal('pnxAnalysisModal');
+    document.getElementById('pnx-loading-view').style.display = 'none';
+    document.getElementById('pnx-analysis-content').style.display = '';
+    document.getElementById('confirm-pnx-btn').style.display = '';
 }
 
 function renderPNXAnalysisModal() {
@@ -5652,6 +5850,46 @@ function saveTimesheet() {
     });
 }
 
+function toggleSelectAll(type, checkbox) {
+    document.querySelectorAll(`.${type}-check`).forEach(cb => cb.checked = checkbox.checked);
+    updateDeleteBtn(type);
+}
+
+function updateDeleteBtn(type) {
+    const anyChecked = document.querySelectorAll(`.${type}-check:checked`).length > 0;
+    const typeCap = type.charAt(0).toUpperCase() + type.slice(1);
+    const btn = document.getElementById(`deleteSelected${typeCap}Btn`);
+    if (btn) btn.classList.toggle('d-none', !anyChecked);
+}
+
+function deleteSelectedTimesheets(type) {
+    const ids = [...document.querySelectorAll(`.${type}-check:checked`)].map(cb => parseInt(cb.value));
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} timesheet(s)? This cannot be undone.`)) return;
+
+    fetch('/timesheets/bulk-delete/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ ids })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`Deleted ${result.deleted} timesheet(s) successfully.`, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    })
+    .catch(err => {
+        console.error('Error bulk deleting timesheets:', err);
+        showAlert('Error deleting timesheets', 'danger');
+    });
+}
+
 function deleteTimesheet(timesheetId) {
     if (!confirm('Are you sure you want to delete this timesheet?')) {
         return;
@@ -5750,6 +5988,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const checkboxes = document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`);
             checkboxes.forEach(cb => cb.checked = this.checked);
             updateDeleteButtonVisibility(boardsPoId);
+            updateAddBoardButtonState(boardsPoId);
         });
     });
     
@@ -5758,6 +5997,7 @@ document.addEventListener('DOMContentLoaded', function() {
         cb.addEventListener('change', function() {
             const boardsPoId = this.getAttribute('data-boards-po-id');
             updateDeleteButtonVisibility(boardsPoId);
+            updateAddBoardButtonState(boardsPoId);
         });
     });
     

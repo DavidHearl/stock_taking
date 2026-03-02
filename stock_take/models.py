@@ -1374,13 +1374,14 @@ class FactoryWorker(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Hourly rate for this worker')
     active = models.BooleanField(default=True)
+    display_order = models.IntegerField(default=0, help_text='Order workers are displayed (lower = first)')
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
         return self.name
     
     class Meta:
-        ordering = ['name']
+        ordering = ['display_order', 'name']
 
 
 class Timesheet(models.Model):
@@ -1390,7 +1391,7 @@ class Timesheet(models.Model):
         ('manufacturing', 'Manufacturing'),
     ]
     
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='timesheets')
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets')
     timesheet_type = models.CharField(max_length=20, choices=TIMESHEET_TYPE_CHOICES)
     
     # Worker - use either fitter or factory_worker
@@ -1922,3 +1923,30 @@ class XeroToken(models.Model):
     def get_active_token(cls):
         """Return the most recently updated token, or None."""
         return cls.objects.first()
+
+
+class SyncLog(models.Model):
+    """Log entry for API sync scripts (Anthill, Xero, WorkGuru, etc.)"""
+
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('warning', 'Warning'),
+        ('error', 'Error'),
+    ]
+
+    script_name = models.CharField(max_length=100, db_index=True, help_text='Name/identifier of the sync script')
+    ran_at = models.DateTimeField(default=timezone.now, help_text='When this run started')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='success')
+    records_created = models.IntegerField(default=0, help_text='Number of records created this run')
+    records_updated = models.IntegerField(default=0, help_text='Number of records updated this run')
+    errors = models.IntegerField(default=0, help_text='Number of errors encountered')
+    notes = models.TextField(blank=True, help_text='Free-text summary or error details')
+
+    class Meta:
+        ordering = ['-ran_at']
+        indexes = [
+            models.Index(fields=['script_name', '-ran_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.script_name} @ {self.ran_at.strftime('%Y-%m-%d %H:%M')} [{self.get_status_display()}]"

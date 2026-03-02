@@ -2,7 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
-from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice
+from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice, SyncLog
 import logging
 import json
 import time
@@ -148,6 +148,9 @@ def customers_list(request):
         page_obj = None
         paginator = None
 
+    # Last Anthill customer sync log entry
+    last_anthill_sync = SyncLog.objects.filter(script_name='sync_anthill_customers').order_by('-ran_at').first()
+
     context = {
         'customers': page_obj,
         'page_obj': page_obj,
@@ -161,6 +164,7 @@ def customers_list(request):
         'count_historic': count_historic,
         'search_expanded_from': search_expanded_from,
         'search_by_bracket': search_by_bracket,
+        'last_anthill_sync': last_anthill_sync,
     }
 
     return render(request, 'stock_take/customers_list.html', context)

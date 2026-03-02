@@ -9125,10 +9125,7 @@ def generate_and_upload_accessories_csv(request, order_id):
         
         messages.success(request, ' '.join(msg_parts))
         
-        # Return file as download
-        response = HttpResponse(csv_content.encode('utf-8'), content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
+        return redirect('order_details', order_id=order_id)
         
     except Exception as e:
         import traceback
@@ -9361,6 +9358,23 @@ def delete_timesheet(request, timesheet_id):
 
 
 @require_http_methods(["POST"])
+@login_required
+def bulk_delete_timesheets(request):
+    """Delete multiple timesheets by ID list"""
+    import json
+    try:
+        from .models import Timesheet
+        data = json.loads(request.body)
+        ids = data.get('ids', [])
+        if not ids:
+            return JsonResponse({'success': False, 'error': 'No IDs provided'})
+        deleted, _ = Timesheet.objects.filter(id__in=ids).delete()
+        return JsonResponse({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_http_methods(["POST"])
 def delete_expense(request, expense_id):
     """Delete an expense"""
     try:
@@ -9381,15 +9395,212 @@ def timesheets(request):
     """Page to manage timesheets and factory worker rates"""
     from .models import FactoryWorker, Fitter, Timesheet
     
-    factory_workers = FactoryWorker.objects.all().order_by('name')
+    factory_workers = FactoryWorker.objects.all().order_by('display_order', 'name')
     fitters = Fitter.objects.all().order_by('name')
-    timesheets = Timesheet.objects.all().select_related('order', 'fitter', 'factory_worker', 'helper').order_by('-date', '-created_at')[:100]
+    timesheets = Timesheet.objects.all().select_related('order', 'fitter', 'factory_worker').order_by('-date', '-created_at')[:100]
     
     return render(request, 'stock_take/timesheets.html', {
         'factory_workers': factory_workers,
         'fitters': fitters,
         'timesheets': timesheets,
     })
+
+
+@require_http_methods(["POST"])
+@login_required
+def save_manufacturing_day(request):
+    """Save a week's manufacturing schedule from the grid.
+    Expects JSON: {
+        week_start: 'YYYY-MM-DD',
+        entries: [
+            {worker_id, day_index, order_id, order_label, task_type, slots: [...], description}
+        ]
+    }
+    order_id may be a numeric Order PK, 'DELIVERY', or 'GENERAL'.
+    Description stored as '{slot}||{order_label}||{user_description}' for lossless reconstruction.
+    """
+    import json
+    from datetime import date as date_type, timedelta
+    from .models import FactoryWorker, Timesheet, Order
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    week_start_str = data.get('week_start')
+    entries = data.get('entries', [])
+
+    if not week_start_str:
+        return JsonResponse({'success': False, 'error': 'week_start is required'}, status=400)
+    if not entries:
+        return JsonResponse({'success': False, 'error': 'No entries provided'}, status=400)
+
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid week_start format'}, status=400)
+
+    # Delete existing manufacturing timesheets for this week before re-saving
+    week_end = week_start + timedelta(days=4)
+    worker_ids = [e.get('worker_id') for e in entries if e.get('worker_id')]
+    Timesheet.objects.filter(
+        timesheet_type='manufacturing',
+        date__gte=week_start,
+        date__lte=week_end,
+        factory_worker_id__in=worker_ids,
+    ).delete()
+
+    created_count = 0
+    errors = []
+
+    for entry in entries:
+        worker_id   = entry.get('worker_id')
+        order_id    = entry.get('order_id')        # numeric str, 'DELIVERY', or 'GENERAL'
+        order_label = entry.get('order_label', '')
+        day_index   = entry.get('day_index', 0)
+        slots       = entry.get('slots', [])
+        description = entry.get('description', '')
+
+        if not worker_id or not slots:
+            continue
+
+        work_date = week_start + timedelta(days=int(day_index))
+
+        try:
+            worker = FactoryWorker.objects.get(id=worker_id)
+        except FactoryWorker.DoesNotExist:
+            errors.append(f'Worker {worker_id} not found')
+            continue
+
+        # Resolve order — None for non-order task types
+        order = None
+        order_id_str = str(order_id) if order_id else ''
+        if order_id_str not in ('DELIVERY', 'GENERAL', ''):
+            try:
+                order = Order.objects.get(id=int(order_id_str))
+            except (Order.DoesNotExist, ValueError):
+                errors.append(f'Order {order_id} not found')
+                continue
+
+        # Sort slots chronologically then create ONE timesheet covering the whole block
+        slots_sorted = sorted(slots)   # 'HH:MM' strings sort correctly as-is
+        if not slots_sorted:
+            continue
+        start_slot  = slots_sorted[0]
+        total_hours = round(len(slots_sorted) * 0.5, 2)
+        span_len    = len(slots_sorted)
+
+        # Lossless round-trip: "{start_slot}||{span_len}||{order_label}||{user_desc}"
+        stored_desc = f"{start_slot}||{span_len}||{order_label}||{description}"
+        Timesheet.objects.create(
+            order=order,
+            factory_worker=worker,
+            timesheet_type='manufacturing',
+            date=work_date,
+            hours=total_hours,
+            hourly_rate=worker.hourly_rate,
+            description=stored_desc,
+        )
+        created_count += 1
+
+    return JsonResponse({
+        'success': True,
+        'created': created_count,
+        'errors': errors,
+    })
+
+
+@login_required
+def get_week_timesheets(request):
+    """Return manufacturing timesheets for a given week as grid-ready entries.
+    GET ?week_start=YYYY-MM-DD
+    Returns entries grouped by worker+day+block ready for the JS grid.
+    """
+    from datetime import date as date_type, timedelta
+    import re
+    from .models import Timesheet
+
+    week_start_str = request.GET.get('week_start')
+    if not week_start_str:
+        return JsonResponse({'success': False, 'error': 'week_start required'}, status=400)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
+
+    week_end = week_start + timedelta(days=4)
+
+    timesheets = (
+        Timesheet.objects
+        .filter(timesheet_type='manufacturing', date__gte=week_start, date__lte=week_end,
+                factory_worker__isnull=False)
+        .select_related('factory_worker', 'order')
+        .order_by('date', 'factory_worker__display_order', 'description')
+    )
+
+    GRID_SLOTS = [
+        f"{h:02d}:{m:02d}"
+        for h in range(7, 17) for m in (0, 30)
+        if not (h == 7 and m == 0)
+    ]
+
+    # Each Timesheet row is now one complete span — no grouping needed
+    result = []
+    for ts in timesheets:
+        day_index = (ts.date - week_start).days
+        worker_id = ts.factory_worker_id
+        desc_raw  = ts.description or ''
+
+        parts = desc_raw.split('||')
+        if len(parts) == 4:
+            # New format: "{start_slot}||{span_len}||{order_label}||{user_desc}"
+            start_slot  = parts[0].strip()
+            span_len    = int(parts[1].strip()) if parts[1].strip().isdigit() else 1
+            order_label = parts[2].strip()
+            user_desc   = parts[3].strip()
+        elif len(parts) == 3:
+            # Old per-slot format (each record was one 30-min slot)
+            start_slot  = parts[0].strip()
+            span_len    = 1
+            order_label = parts[1].strip()
+            user_desc   = parts[2].strip()
+        elif re.match(r'^\d{2}:\d{2}$', desc_raw):
+            start_slot  = desc_raw
+            span_len    = 1
+            order_label = ts.order.sale_number if ts.order else 'Unknown'
+            user_desc   = ''
+        else:
+            start_slot  = GRID_SLOTS[0]
+            span_len    = max(1, round(float(ts.hours or 0.5) * 2))
+            order_label = ts.order.sale_number if ts.order else desc_raw
+            user_desc   = desc_raw
+
+        if start_slot not in GRID_SLOTS:
+            start_slot = GRID_SLOTS[0]
+
+        if ts.order_id:
+            order_id  = str(ts.order_id)
+            task_type = 'order'
+        elif 'Delivery' in order_label:
+            order_id  = 'DELIVERY'
+            task_type = 'delivery'
+        else:
+            order_id  = 'GENERAL'
+            task_type = 'general'
+
+        result.append({
+            'worker_id':   worker_id,
+            'day_index':   day_index,
+            'order_id':    order_id,
+            'order_label': order_label,
+            'description': user_desc,
+            'task_type':   task_type,
+            'start_slot':  start_slot,
+            'span_len':    span_len,
+        })
+
+    return JsonResponse({'success': True, 'entries': result})
 
 
 @require_http_methods(["POST"])
@@ -9409,6 +9620,8 @@ def update_factory_worker(request, worker_id):
             worker.hourly_rate = data['hourly_rate']
         if 'active' in data:
             worker.active = data['active']
+        if 'display_order' in data:
+            worker.display_order = int(data['display_order'])
         
         worker.save()
         
@@ -9419,6 +9632,7 @@ def update_factory_worker(request, worker_id):
                 'name': worker.name,
                 'hourly_rate': str(worker.hourly_rate),
                 'active': worker.active,
+                'display_order': worker.display_order,
             }
         })
     except Exception as e:

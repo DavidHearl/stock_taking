@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}API Scripts - Admin{% endblock %}
+
+{% block nav_admin_api_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/admin_pages.css' %}" rel="stylesheet">
+<style>
+    /* ── Group header ── */
+    .script-group-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 32px 0 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--border-color, #333);
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--text-primary, #eee);
+    }
+    .script-group-header:first-child { margin-top: 0; }
+    .script-group-header i { color: var(--primary-color, #5a9fd4); font-size: 1.1rem; }
+
+    /* ── Script card ── */
+    .script-card {
+        background: var(--bg-card, #1e1e1e);
+        border: 1px solid var(--border-color, #333);
+        border-radius: 8px;
+        margin-bottom: 16px;
+        overflow: hidden;
+    }
+
+    .script-card-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 18px;
+        background: var(--bg-secondary, #252525);
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.15s;
+    }
+    .script-card-header:hover { background: var(--bg-hover, #2a2a2a); }
+
+    .script-card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .script-card-title-row h3 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+    }
+    .script-file-badge {
+        font-size: 0.72rem;
+        font-family: monospace;
+        color: var(--text-muted, #888);
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 4px;
+        padding: 2px 7px;
+    }
+    .script-card-meta {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 5px;
+        flex-shrink: 0;
+    }
+
+    /* ── Status badges ── */
+    .sync-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .sync-badge.sync-success { background: rgba(40,167,69,.15);  color: #28a745; border: 1px solid rgba(40,167,69,.3); }
+    .sync-badge.sync-warning { background: rgba(255,193,7,.15);  color: #ffc107; border: 1px solid rgba(255,193,7,.3); }
+    .sync-badge.sync-error   { background: rgba(220,53,69,.15);  color: #dc3545; border: 1px solid rgba(220,53,69,.3); }
+    .sync-badge.sync-never   { background: rgba(108,117,125,.1); color: #888;    border: 1px solid rgba(108,117,125,.2); }
+    .script-schedule-text { font-size: 0.72rem; color: var(--text-muted, #888); }
+
+    /* ── Collapse chevron ── */
+    .script-card-chevron {
+        font-size: 0.8rem;
+        color: var(--text-muted, #888);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+        align-self: center;
+    }
+    .script-card.open .script-card-chevron { transform: rotate(180deg); }
+
+    /* ── Collapsible body ── */
+    .script-card-body {
+        display: none;
+        padding: 16px 18px;
+        border-top: 1px solid var(--border-color, #333);
+    }
+    .script-card.open .script-card-body { display: block; }
+
+    .script-description {
+        font-size: 0.84rem;
+        color: var(--text-secondary, #bbb);
+        margin: 0 0 14px;
+        line-height: 1.55;
+    }
+
+    /* ── Commands list ── */
+    .commands-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted, #888);
+        margin-bottom: 8px;
+    }
+    .command-row {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+    }
+    .command-row:last-child { margin-bottom: 0; }
+    .command-snippet {
+        font-family: monospace;
+        font-size: 0.8rem;
+        color: var(--text-accent, #5a9fd4);
+        background: var(--bg-primary, #141414);
+        border: 1px solid var(--border-color, #333);
+        border-radius: 4px;
+        padding: 3px 9px;
+        white-space: nowrap;
+    }
+    .command-note {
+        font-size: 0.78rem;
+        color: var(--text-muted, #888);
+    }
+
+    /* ── Run history ── */
+    .history-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted, #888);
+        margin: 18px 0 8px;
+    }
+    .run-history-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+    }
+    .run-history-table th {
+        text-align: left;
+        padding: 5px 10px;
+        background: var(--bg-secondary, #252525);
+        color: var(--text-muted, #888);
+        font-weight: 500;
+        border-bottom: 1px solid var(--border-color, #333);
+    }
+    .run-history-table td {
+        padding: 6px 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        vertical-align: middle;
+    }
+    .run-history-table tr:last-child td { border-bottom: none; }
+    .no-history-note {
+        font-size: 0.78rem;
+        color: var(--text-muted, #888);
+        padding: 8px 0;
+    }
+    .stats-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        background: rgba(255,255,255,.05);
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 0.72rem;
+        margin-right: 3px;
+    }
+    .stats-chip.created { color: #28a745; }
+    .stats-chip.updated { color: #5a9fd4; }
+    .stats-chip.errors  { color: #dc3545; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="page-header">
+        <h1><i class="bi bi-plug"></i> API Scripts</h1>
+        <p class="page-subtitle">All integration and maintenance scripts — descriptions, usage flags, schedules, and run history.</p>
+    </div>
+
+    {% for group in groups %}
+    <div class="script-group-header">
+        <i class="bi {{ group.icon }}"></i>
+        {{ group.group }}
+    </div>
+
+    {% for script in group.scripts %}
+    <div class="script-card" id="script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
+        <div class="script-card-header" onclick="toggleScript('script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}')">
+            <div>
+                <div class="script-card-title-row">
+                    <h3>{{ script.label }}</h3>
+                    <span class="script-file-badge">{{ script.file }}</span>
+                </div>
+            </div>
+            <div class="script-card-meta">
+                {% if script.last_log %}
+                    <span class="sync-badge sync-{{ script.last_log.status }}">
+                        <i class="bi bi-circle-fill" style="font-size:0.5em;"></i>
+                        {{ script.last_log.get_status_display }}
+                    </span>
+                    <span class="script-schedule-text" title="{{ script.last_log.ran_at|date:'d/m/Y H:i' }}">
+                        Last run {{ script.last_log.ran_at|timesince }} ago
+                    </span>
+                {% elif script.log_name %}
+                    <span class="sync-badge sync-never">Never run</span>
+                {% endif %}
+                <span class="script-schedule-text"><i class="bi bi-calendar3"></i> {{ script.schedule }}</span>
+            </div>
+            <i class="bi bi-chevron-down script-card-chevron"></i>
+        </div>
+        <div class="script-card-body">
+            <p class="script-description">{{ script.description }}</p>
+
+            {% if script.commands %}
+            <div class="commands-label">Commands</div>
+            {% for c in script.commands %}
+            <div class="command-row">
+                <span class="command-snippet">{{ c.cmd }}</span>
+                {% if c.note %}<span class="command-note">— {{ c.note }}</span>{% endif %}
+            </div>
+            {% endfor %}
+            {% endif %}
+
+            {% if script.log_name %}
+            <div class="history-label">Recent Runs</div>
+            {% if script.recent_logs %}
+            <table class="run-history-table">
+                <thead>
+                    <tr>
+                        <th>Run At</th>
+                        <th>Status</th>
+                        <th>Stats</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in script.recent_logs %}
+                    <tr>
+                        <td title="{{ log.ran_at|date:'d/m/Y H:i:s' }}">{{ log.ran_at|date:"d M Y H:i" }}</td>
+                        <td><span class="sync-badge sync-{{ log.status }}">{{ log.get_status_display }}</span></td>
+                        <td>
+                            <span class="stats-chip created"><i class="bi bi-plus-circle"></i> {{ log.records_created }}</span>
+                            <span class="stats-chip updated"><i class="bi bi-arrow-repeat"></i> {{ log.records_updated }}</span>
+                            {% if log.errors %}<span class="stats-chip errors"><i class="bi bi-exclamation-triangle"></i> {{ log.errors }}</span>{% endif %}
+                        </td>
+                        <td style="color:var(--text-muted,#888); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ log.notes }}">
+                            {{ log.notes|truncatechars:80 }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="no-history-note"><i class="bi bi-clock-history"></i> No run history recorded yet.</p>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    {% empty %}
+    <p style="color:var(--text-muted,#888);">No scripts registered.</p>
+    {% endfor %}
+</div>
+
+<script>
+function toggleScript(id) {
+    const card = document.getElementById(id);
+    if (card) card.classList.toggle('open');
+}
+</script>
+{% endblock %}

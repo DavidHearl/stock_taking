@@ -4,7 +4,7 @@ from .models import (
     Customer, BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
     Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
     OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense, UserProfile,
-    StockHistory, Role, PagePermission, XeroToken
+    StockHistory, Role, PagePermission, XeroToken, SyncLog
 )
 
 @admin.register(Customer)
@@ -276,3 +276,11 @@ class PagePermissionAdmin(admin.ModelAdmin):
 class XeroTokenAdmin(admin.ModelAdmin):
     list_display = ['tenant_name', 'tenant_id', 'connected_by', 'is_expired', 'updated_at']
     readonly_fields = ['access_token', 'refresh_token', 'expires_at', 'created_at', 'updated_at']
+
+
+@admin.register(SyncLog)
+class SyncLogAdmin(admin.ModelAdmin):
+    list_display = ['script_name', 'ran_at', 'status', 'records_created', 'records_updated', 'errors']
+    list_filter = ['script_name', 'status']
+    search_fields = ['script_name', 'notes']
+    readonly_fields = ['script_name', 'ran_at', 'status', 'records_created', 'records_updated', 'errors', 'notes']

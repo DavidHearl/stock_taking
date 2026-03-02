@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from django.contrib import messages
-from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES
+from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES, SyncLog
 
 
 def staff_required(view_func):
@@ -261,3 +261,210 @@ def admin_settings(request):
     """Admin settings page."""
     context = {}
     return render(request, 'stock_take/admin_settings.html', context)
+
+
+# ── Registry of all API / sync scripts ────────────────────────────────
+# Each entry may optionally carry a 'log_name' key that matches the
+# SyncLog.script_name written by that script.  If omitted, no run history
+# is shown for that entry.
+SCRIPT_GROUPS = [
+    {
+        'group': 'Anthill CRM',
+        'icon': 'bi-people-fill',
+        'scripts': [
+            {
+                'log_name': 'sync_anthill_customers_management',
+                'label': 'Full Customer Sync',
+                'description': (
+                    'Pulls all customer records from Anthill CRM (~275k), fetches full details for each, '
+                    'and creates/updates local Customer records. '
+                    'Smart-skip: customers already in the database are skipped entirely — '
+                    'no API call, no DB write. Only genuinely new customers trigger detail queries, '
+                    'making repeat runs fast. Use --force to re-fetch every customer.'
+                ),
+                'file': 'stock_take/management/commands/sync_anthill_customers.py',
+                'schedule': 'Manual',
+                'commands': [
+                    {'cmd': 'python manage.py sync_anthill_customers', 'note': 'Sync new customers only (skips already-synced)'},
+                    {'cmd': 'python manage.py sync_anthill_customers --force', 'note': 'Re-sync ALL customers, including already-synced'},
+                    {'cmd': 'python manage.py sync_anthill_customers --dry-run', 'note': 'Preview without saving'},
+                    {'cmd': 'python manage.py sync_anthill_customers --limit 100', 'note': 'Limit to first 100 customers (for testing)'},
+                    {'cmd': 'python manage.py sync_anthill_customers --skip-details', 'note': 'Skip fetching full customer details (faster)'},
+                ],
+            },
+            {
+                'log_name': 'sync_recent_customers',
+                'label': 'Recent Customer Sync',
+                'description': (
+                    'Syncs customers from Anthill CRM created within the last 7 days. '
+                    'Customers with a WorkGuruClientID are saved as Customer; '
+                    'all others are saved as Contact (Lead). '
+                    'Runs automatically via the scheduler Docker service.'
+                ),
+                'file': 'stock_take/management/commands/sync_recent_customers.py',
+                'schedule': 'Automated — daily at 08:00 & 12:00 (Docker scheduler)',
+                'commands': [
+                    {'cmd': 'python manage.py sync_recent_customers', 'note': 'Sync last 7 days (default)'},
+                    {'cmd': 'python manage.py sync_recent_customers --days 14', 'note': 'Sync last 14 days'},
+                    {'cmd': 'python manage.py sync_recent_customers --dry-run', 'note': 'Preview without saving'},
+                ],
+            },
+            {
+                'log_name': 'sync_anthill_customers',
+                'label': 'Standalone: Two-Phase Customer & Sales Import',
+                'description': (
+                    'Legacy standalone script (project root). Phase 1 syncs sale activities for '
+                    'customers already in the database. Phase 2 imports any new customers/leads. '
+                    'Writes a SyncLog entry on completion.'
+                ),
+                'file': 'sync_anthill_customers.py',
+                'schedule': 'Manual',
+                'commands': [
+                    {'cmd': 'python sync_anthill_customers.py', 'note': 'Full sync (both phases)'},
+                    {'cmd': 'python sync_anthill_customers.py --sales-only', 'note': 'Only sync sales for existing customers'},
+                    {'cmd': 'python sync_anthill_customers.py --skip-sales', 'note': 'Only import new customers'},
+                    {'cmd': 'python sync_anthill_customers.py --days 365', 'note': 'Import last 365 days only'},
+                    {'cmd': 'python sync_anthill_customers.py --dry-run', 'note': 'Preview without saving'},
+                ],
+            },
+            {
+                'log_name': 'sync_anthill_workflow',
+                'label': 'Standalone: Workflow Status Refresh',
+                'description': (
+                    'Refreshes the status, category, and activity_type fields on existing AnthillSale '
+                    'records by fetching the latest activity data from Anthill CRM. '
+                    'Groups requests by customer to minimise API calls. '
+                    'Writes a SyncLog entry on completion.'
+                ),
+                'file': 'sync_anthill_workflow.py',
+                'schedule': 'Manual',
+                'commands': [
+                    {'cmd': 'python sync_anthill_workflow.py', 'note': 'Refresh all existing sale records'},
+                    {'cmd': 'python sync_anthill_workflow.py --dry-run', 'note': 'Report changes without writing to DB'},
+                    {'cmd': 'python sync_anthill_workflow.py --days 180', 'note': 'Only refresh sales active within last 180 days'},
+                ],
+            },
+        ],
+    },
+    {
+        'group': 'Xero',
+        'icon': 'bi-receipt-cutoff',
+        'scripts': [
+            {
+                'log_name': 'sync_xero_customers',
+                'label': 'Sync Customers to Xero',
+                'description': (
+                    'Fetches all contacts from Xero and matches them to local Customer records by name. '
+                    'Stores the Xero Contact ID on each matched customer. '
+                    'Prerequisite: connect to Xero via /xero/status/ first.'
+                ),
+                'file': 'stock_take/management/commands/sync_xero_customers.py',
+                'schedule': 'Manual',
+                'commands': [
+                    {'cmd': 'python manage.py sync_xero_customers', 'note': 'Match and store Xero Contact IDs'},
+                    {'cmd': 'python manage.py sync_xero_customers --dry-run', 'note': 'Preview without saving'},
+                ],
+            },
+            {
+                'log_name': 'sync_xero_invoices',
+                'label': 'Sync Invoices from Xero',
+                'description': (
+                    'For every customer with a Xero Contact ID, fetches their invoices and '
+                    'creates/updates local Invoice records with payment status. '
+                    'Prerequisite: connect to Xero via /xero/status/ and run sync_xero_customers first.'
+                ),
+                'file': 'stock_take/management/commands/sync_xero_invoices.py',
+                'schedule': 'Manual',
+                'commands': [
+                    {'cmd': 'python manage.py sync_xero_invoices', 'note': 'Sync invoices for all customers with a Xero ID'},
+                    {'cmd': 'python manage.py sync_xero_invoices --dry-run', 'note': 'Preview without saving'},
+                    {'cmd': 'python manage.py sync_xero_invoices --customer 123', 'note': 'Single customer (by database PK)'},
+                ],
+            },
+        ],
+    },
+    {
+        'group': 'Google Maps',
+        'icon': 'bi-map',
+        'scripts': [
+            {
+                'log_name': 'check_maps_usage',
+                'label': 'Check Maps API Usage',
+                'description': (
+                    'Reports current Google Maps API usage against the free-tier limits '
+                    '(10,000 loads/month for Dynamic Maps; 10,000 requests/month for Geocoding). '
+                    'Alerts when usage exceeds the configured threshold.'
+                ),
+                'file': 'stock_take/management/commands/check_maps_usage.py',
+                'schedule': 'Manual',
+                'commands': [
+                    {'cmd': 'python manage.py check_maps_usage', 'note': 'Check current usage'},
+                    {'cmd': 'python manage.py check_maps_usage --days 60', 'note': 'Check last 60 days'},
+                    {'cmd': 'python manage.py check_maps_usage --alert-threshold 50', 'note': 'Alert at 50% of free tier'},
+                ],
+            },
+        ],
+    },
+    {
+        'group': 'Maintenance',
+        'icon': 'bi-wrench-adjustable',
+        'scripts': [
+            {
+                'log_name': 'cleanup_duplicate_schedules',
+                'label': 'Clean Up Duplicate Schedules',
+                'description': (
+                    'Removes duplicate auto-generated stock take schedules that can accumulate '
+                    'over time. Safe to run at any time.'
+                ),
+                'file': 'stock_take/management/commands/cleanup_duplicate_schedules.py',
+                'schedule': 'Manual / as needed',
+                'commands': [
+                    {'cmd': 'python manage.py cleanup_duplicate_schedules', 'note': 'Remove duplicates'},
+                    {'cmd': 'python manage.py cleanup_duplicate_schedules --dry-run', 'note': 'Preview without deleting'},
+                ],
+            },
+            {
+                'log_name': 'set_legacy_completion_dates',
+                'label': 'Set Legacy Completion Dates',
+                'description': (
+                    'Backfills completion dates on older completed stock take schedule records '
+                    'that pre-date the completion date field. One-off migration helper.'
+                ),
+                'file': 'stock_take/management/commands/set_legacy_completion_dates.py',
+                'schedule': 'One-off',
+                'commands': [
+                    {'cmd': 'python manage.py set_legacy_completion_dates', 'note': 'Set completion dates'},
+                    {'cmd': 'python manage.py set_legacy_completion_dates --days-ago 35 --dry-run', 'note': 'Preview with custom offset'},
+                ],
+            },
+        ],
+    },
+]
+
+
+@staff_required
+def admin_api(request):
+    """Admin API scripts page — shows script registry and recent run logs."""
+    # Enrich each script entry with SyncLog data
+    groups = []
+    for group in SCRIPT_GROUPS:
+        enriched_scripts = []
+        for entry in group['scripts']:
+            log_name = entry.get('log_name')
+            last_log = SyncLog.objects.filter(script_name=log_name).order_by('-ran_at').first() if log_name else None
+            recent_logs = SyncLog.objects.filter(script_name=log_name).order_by('-ran_at')[:5] if log_name else []
+            enriched_scripts.append({
+                **entry,
+                'last_log': last_log,
+                'recent_logs': recent_logs,
+            })
+        groups.append({
+            'group': group['group'],
+            'icon': group['icon'],
+            'scripts': enriched_scripts,
+        })
+
+    context = {
+        'groups': groups,
+    }
+    return render(request, 'stock_take/admin_api.html', context)

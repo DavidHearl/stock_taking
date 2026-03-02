@@ -7,7 +7,7 @@ from .dashboard_view import dashboard, dashboard_monthly_sales
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, sales_list, sale_detail
-from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop
+from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
@@ -278,10 +278,13 @@ urlpatterns = [
     path('order/<int:order_id>/add-timesheet/', views.add_timesheet, name='add_timesheet'),
     path('order/<int:order_id>/add-multiple-timesheets/', views.add_multiple_timesheets, name='add_multiple_timesheets'),
     path('timesheet/<int:timesheet_id>/delete/', views.delete_timesheet, name='delete_timesheet'),
+    path('timesheets/bulk-delete/', views.bulk_delete_timesheets, name='bulk_delete_timesheets'),
     path('expense/<int:expense_id>/delete/', views.delete_expense, name='delete_expense'),
     
     # Timesheets
     path('timesheets/', views.timesheets, name='timesheets'),
+    path('api/save-manufacturing-day/', views.save_manufacturing_day, name='save_manufacturing_day'),
+    path('api/get-week-timesheets/', views.get_week_timesheets, name='get_week_timesheets'),
 
     # Dark mode / location toggles
     path('toggle-dark-mode/', toggle_dark_mode, name='toggle_dark_mode'),
@@ -301,6 +304,7 @@ urlpatterns = [
     path('admin-panel/impersonate/<int:user_id>/', impersonate_start, name='impersonate_start'),
     path('admin-panel/impersonate/stop/', impersonate_stop, name='impersonate_stop'),
     path('admin-panel/settings/', admin_settings, name='admin_settings'),
+    path('admin-panel/api/', admin_api, name='admin_api'),
 
     # Password reset views
     path('password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),

@@ -54,7 +54,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'stock_taking.settings')
 import django
 django.setup()
 
-from stock_take.models import Customer, Lead, AnthillSale  # noqa: E402
+from stock_take.models import Customer, Lead, AnthillSale, SyncLog  # noqa: E402
 
 # ── Anthill config ──────────────────────────────────────────────────────
 load_dotenv(os.path.join(BASE_DIR, '.env'))
@@ -755,6 +755,26 @@ Examples:
         new_count = stats['scanned'] - stats['skipped_existing'] - stats['skipped_date']
         print(f'\n  DRY RUN: {new_count:,} new records would be imported.')
         print('  Run again without --dry-run to save.')
+    else:
+        # Write a SyncLog entry so the admin API page can show last-run information
+        log_status = 'success'
+        if stats['errors'] > 0:
+            log_status = 'warning' if (stats['customers_created'] + stats['leads_created'] + stats['sales_created']) > 0 else 'error'
+        notes_text = (
+            f"Scanned {stats['scanned']}, "
+            f"customers created {stats['customers_created']}, updated {stats['customers_updated']}, "
+            f"leads created {stats['leads_created']}, updated {stats['leads_updated']}, "
+            f"sales created {stats['sales_created']}, errors {stats['errors']}."
+        )
+        SyncLog.objects.create(
+            script_name='sync_anthill_customers',
+            status=log_status,
+            records_created=stats['customers_created'] + stats['leads_created'] + stats['sales_created'],
+            records_updated=stats['customers_updated'] + stats['leads_updated'],
+            errors=stats['errors'],
+            notes=notes_text,
+        )
+        print('\n  ✓ SyncLog entry written.')
 
 
 def _format_time(seconds: float) -> str:
