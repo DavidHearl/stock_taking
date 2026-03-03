@@ -17,35 +17,29 @@
 <div class="dashboard-page">
     <!-- Stats Cards -->
     <div class="dashboard-grid dashboard-grid-5">
-        <div class="dashboard-card">
-            <div class="card-icon">
-                <i class="bi bi-receipt"></i>
+        <div class="dashboard-card accent-danger">
+            <div class="card-label">
+                <i class="bi bi-calendar-check" style="color:#dc3545;"></i>
+                Sales After
+                <input type="date" id="salesAfterDate" class="dash-date-input"
+                       value="{{ today_str }}" onchange="fetchSalesAfter()">
             </div>
-            <div class="card-label">Pending Purchase Orders</div>
-            <div class="card-value">{{ pending_pos_count }}</div>
-            <div class="card-subtext">Approved and awaiting arrival</div>
+            <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
+            <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
         </div>
         <div class="dashboard-card">
-            <div class="card-icon">
-                <i class="bi bi-box-seam"></i>
-            </div>
-            <div class="card-label">Stock Value</div>
+            <div class="card-label"><i class="bi bi-box-seam"></i> Stock Value</div>
             <div class="card-value">&pound;{{ total_stock_value }}</div>
             <div class="card-subtext">{{ stock_item_count }} items in stock</div>
         </div>
         <div class="dashboard-card">
-            <div class="card-icon">
-                <i class="bi bi-cash-stack"></i>
-            </div>
-            <div class="card-label">This Week's Sales</div>
+            <div class="card-label"><i class="bi bi-cash-stack"></i> This Week's Sales</div>
             <div class="card-value">&pound;{{ this_week_sales }}</div>
             <div class="card-subtext">Sales value this week</div>
         </div>
-        <div class="dashboard-card">
-            <div class="card-icon" style="background: rgba(40, 167, 69, 0.12); color: #28a745;">
-                <i class="bi bi-graph-up-arrow"></i>
-            </div>
+        <div class="dashboard-card accent-success">
             <div class="card-label">
+                <i class="bi bi-graph-up-arrow" style="color:#28a745;"></i>
                 <span class="month-switcher-inline">
                     <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
                     <span id="monthLabel"></span>
@@ -56,10 +50,7 @@
             <div class="card-subtext">Total monthly sales</div>
         </div>
         <div class="dashboard-card">
-            <div class="card-icon" style="background: rgba(99, 102, 241, 0.12); color: var(--accent-color);">
-                <i class="bi bi-calculator"></i>
-            </div>
-            <div class="card-label">Average Sale Value</div>
+            <div class="card-label"><i class="bi bi-calculator"></i> Average Sale Value</div>
             <div class="card-value" id="monthlySalesAvg">&pound;{{ monthly_sales_avg }}</div>
             <div class="card-subtext" id="monthlySalesCount">{{ monthly_sales_count }} sales this month</div>
         </div>
@@ -100,6 +91,15 @@
             <div class="chart-wrapper">
                 <canvas id="boardCostsChart"></canvas>
             </div>
+        </div>
+    </div>
+
+    <!-- Pending Purchase Orders (lower priority) -->
+    <div class="dashboard-grid dashboard-grid-1">
+        <div class="dashboard-card accent-warning">
+            <div class="card-label"><i class="bi bi-receipt" style="color:#f0ad4e;"></i> Pending Purchase Orders</div>
+            <div class="card-value">{{ pending_pos_count }}</div>
+            <div class="card-subtext">Approved and awaiting arrival</div>
         </div>
     </div>
 </div>
@@ -146,7 +146,34 @@ function fetchMonthlySales() {
 }
 
 // Initialise label on load
-document.addEventListener('DOMContentLoaded', function() { updateMonthLabel(); });
+document.addEventListener('DOMContentLoaded', function() {
+    updateMonthLabel();
+    fetchSalesAfter();
+});
+
+function fetchSalesAfter() {
+    const dateInput = document.getElementById('salesAfterDate');
+    const date = dateInput ? dateInput.value : '';
+    const totalEl = document.getElementById('salesAfterTotal');
+    const countEl = document.getElementById('salesAfterCount');
+    if (totalEl) totalEl.style.opacity = '0.4';
+    if (countEl) countEl.style.opacity = '0.4';
+
+    fetch(`{% url 'dashboard_sales_after' %}?date=${encodeURIComponent(date)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                if (totalEl) totalEl.textContent = '\u00a3' + Math.round(data.total).toLocaleString();
+                if (countEl) countEl.textContent = data.count.toLocaleString() + ' orders from this date';
+            }
+            if (totalEl) totalEl.style.opacity = '1';
+            if (countEl) countEl.style.opacity = '1';
+        })
+        .catch(() => {
+            if (totalEl) totalEl.style.opacity = '1';
+            if (countEl) countEl.style.opacity = '1';
+        });
+}
 </script>
 
 <script>

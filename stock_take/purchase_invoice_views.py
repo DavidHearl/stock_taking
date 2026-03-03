@@ -13,10 +13,43 @@ from django.db.models import Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, Supplier
+from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, Supplier, Timesheet, log_activity
 
 logger = logging.getLogger(__name__)
 
+
+def _sync_timesheet_for_pi_line(line):
+    """Create or update the installation timesheet linked to a purchase invoice line.
+
+    * If the line is allocated to an order, ensure exactly one timesheet exists.
+    * If the line has no order, delete any linked timesheet.
+    """
+    from django.utils import timezone
+
+    if line.order_id:
+        ts, created = Timesheet.objects.get_or_create(
+            purchase_invoice_line=line,
+            defaults={
+                'order': line.order,
+                'timesheet_type': 'installation',
+                'date': line.invoice.date or timezone.now().date(),
+                'description': line.description,
+            },
+        )
+        if not created:
+            # Keep in sync if order or cost changed
+            changed = False
+            if ts.order_id != line.order_id:
+                ts.order = line.order
+                changed = True
+            if ts.description != line.description:
+                ts.description = line.description
+                changed = True
+            if changed:
+                ts.save()
+    else:
+        # No order – remove any linked timesheet
+        Timesheet.objects.filter(purchase_invoice_line=line).delete()
 
 def _parse_date(val):
     from datetime import datetime as _dt
@@ -188,6 +221,8 @@ def create_purchase_invoice(request):
                     line.save(update_fields=['order'])
                 except (Order.DoesNotExist, ValueError):
                     pass
+            # Auto-create installation timesheet if allocated to an order
+            _sync_timesheet_for_pi_line(line)
 
     # Recalculate total from lines if no total provided
     if total_val == 0 and line_items_raw:
@@ -197,6 +232,12 @@ def create_purchase_invoice(request):
     if uploaded_file:
         invoice.attachment = uploaded_file
         invoice.save(update_fields=['attachment'])
+
+    log_activity(
+        user=request.user,
+        event_type='invoice_created',
+        description=f'{request.user.get_full_name() or request.user.username} created purchase invoice {invoice.invoice_number} (supplier: {invoice.supplier_name or "—"}, total: £{invoice.total}).',
+    )
 
     return JsonResponse({
         'success': True,
@@ -295,6 +336,9 @@ def add_purchase_invoice_line(request, invoice_id):
         except (Order.DoesNotExist, ValueError):
             pass
 
+    # Auto-create installation timesheet if allocated to an order
+    _sync_timesheet_for_pi_line(line)
+
     _recalc_invoice_total(invoice)
 
     return JsonResponse({
@@ -342,6 +386,9 @@ def update_purchase_invoice_line(request, invoice_id, line_id):
     line.save()
     _recalc_invoice_total(invoice)
 
+    # Sync the linked installation timesheet (create/update/delete)
+    _sync_timesheet_for_pi_line(line)
+
     return JsonResponse({
         'success': True,
         'line': _line_to_dict(line),
@@ -358,6 +405,7 @@ def delete_purchase_invoice_line(request, invoice_id, line_id):
 
     invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
     line    = get_object_or_404(PurchaseInvoiceLineItem, id=line_id, invoice=invoice)
+    # CASCADE on the FK will auto-delete any linked timesheet
     line.delete()
     _recalc_invoice_total(invoice)
 
@@ -370,6 +418,34 @@ def delete_purchase_invoice_line(request, invoice_id, line_id):
 
 
 # ── Attachment upload / delete ────────────────────────────────────
+
+# ── Delete entire invoice ─────────────────────────────────────────
+@login_required
+def delete_purchase_invoice(request, invoice_id):
+    """Delete a purchase invoice and all its line items (CASCADE)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    inv_number = invoice.invoice_number
+    inv_supplier = invoice.supplier_name or '—'
+
+    # Delete attachment file from storage if present
+    if invoice.attachment:
+        invoice.attachment.delete(save=False)
+
+    invoice.delete()  # CASCADE deletes line items → CASCADE deletes linked timesheets
+
+    log_activity(
+        user=request.user,
+        event_type='invoice_deleted',
+        description=f'{request.user.get_full_name() or request.user.username} deleted purchase invoice {inv_number} (supplier: {inv_supplier}).',
+    )
+
+    return JsonResponse({'success': True})
+
+
 @login_required
 def upload_purchase_invoice_attachment(request, invoice_id):
     if request.method != 'POST':

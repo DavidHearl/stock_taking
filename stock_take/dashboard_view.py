@@ -33,6 +33,30 @@ def _get_monthly_sales_data(year, month):
 
 
 @login_required
+def dashboard_sales_after(request):
+    """AJAX endpoint – return total value and count of orders whose fit_date >= given date."""
+    date_str = request.GET.get('date', '')
+    try:
+        cutoff = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        cutoff = datetime.now().date()
+
+    orders = Order.objects.filter(
+        fit_date__gte=cutoff,
+        total_value_exc_vat__gt=0,
+    )
+    agg = orders.aggregate(
+        total=Sum('total_value_exc_vat'),
+        count=Count('id'),
+    )
+    return JsonResponse({
+        'success': True,
+        'total': float(agg['total'] or 0),
+        'count': agg['count'] or 0,
+    })
+
+
+@login_required
 def dashboard_monthly_sales(request):
     """AJAX endpoint to get monthly sales data for a given year/month."""
     try:
@@ -114,6 +138,15 @@ def dashboard(request):
         fit_date__lte=today
     ).aggregate(total=Sum('total_value_exc_vat'))['total'] or Decimal('0.00')
     
+    # Sales after today (future pipeline)
+    sales_after = Order.objects.filter(
+        fit_date__gte=today,
+        total_value_exc_vat__gt=0,
+    ).aggregate(
+        total=Sum('total_value_exc_vat'),
+        count=Count('id'),
+    )
+
     # Get count of approved POs waiting to arrive
     pending_pos = PurchaseOrder.objects.filter(
         status__in=['Approved', 'Ordered', 'Sent']
@@ -255,5 +288,8 @@ def dashboard(request):
         'monthly_sales_count': current_month_sales['count'],
         'current_year': today.year,
         'current_month': today.month,
+        'today_str': today.strftime('%Y-%m-%d'),
+        'sales_after_total': '{:,.0f}'.format(sales_after['total'] or Decimal('0.00')),
+        'sales_after_count': sales_after['count'] or 0,
     }
     return render(request, 'stock_take/dashboard.html', context)

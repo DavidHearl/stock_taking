@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, log_activity
 
 import csv
 import io
@@ -3952,11 +3952,24 @@ def update_job_checkbox(request, order_id):
         if 'job_finished' in data:
             was_finished = order.job_finished
             order.job_finished = bool(data['job_finished'])
-            
+
             # Auto-mark all accessories as allocated when job is finished
             # Do NOT deduct stock — finished jobs are already excluded from allocation calc
             if order.job_finished and not was_finished:
                 order.accessories.filter(is_allocated=False).update(is_allocated=True)
+                log_activity(
+                    user=request.user,
+                    event_type='job_finished',
+                    description=f'{request.user.get_full_name() or request.user.username} marked job {order.sale_number or order.id} ({order.first_name} {order.last_name}) as Finished.',
+                    order=order,
+                )
+            elif not order.job_finished and was_finished:
+                log_activity(
+                    user=request.user,
+                    event_type='job_unfinished',
+                    description=f'{request.user.get_full_name() or request.user.username} unmarked job {order.sale_number or order.id} ({order.first_name} {order.last_name}) as Finished.',
+                    order=order,
+                )
         
         order.save()
         return JsonResponse({'success': True})
@@ -4198,7 +4211,7 @@ def order_details(request, order_id):
         os_doors_cost += os_door.cost_price * os_door.quantity
     
     # Get timesheets and expenses for this order
-    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order')
+    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order', 'purchase_invoice_line__invoice')
     manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
     expenses = order.expenses.all().select_related('fitter')
     
@@ -4206,9 +4219,12 @@ def order_details(request, order_id):
     calculated_installation_cost = order.calculate_installation_cost()
     calculated_manufacturing_cost = order.calculate_manufacturing_cost()
     
-    # Calculate installation cost breakdown (fitters vs expenses)
+    # Calculate installation cost breakdown (fitters vs expenses vs purchase invoices)
     installation_fitter_cost = sum(
         ts.total_cost for ts in installation_timesheets if ts.fitter
+    )
+    purchase_invoice_ts_cost = sum(
+        ts.total_cost for ts in installation_timesheets if ts.purchase_invoice_line_id
     )
     
     # Calculate expenses breakdown by type
@@ -4312,6 +4328,7 @@ def order_details(request, order_id):
         'available_purchase_orders': available_purchase_orders,
         'purchase_invoice_lines': purchase_invoice_lines,
         'purchase_invoice_cost': purchase_invoice_cost,
+        'purchase_invoice_ts_cost': purchase_invoice_ts_cost,
         'anthill_sales': anthill_sales,
     })
 

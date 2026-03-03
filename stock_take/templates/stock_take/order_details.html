@@ -371,7 +371,7 @@
                                     <div class="job-checkbox-container">
                                         <input class="job-checkbox" type="checkbox" id="jobFinished" 
                                                {% if order.job_finished %}checked{% endif %}
-                                               onchange="updateJobCheckbox({{ order.id }}, 'job_finished', this.checked)">
+                                               onchange="onJobFinishedChange(this, {{ order.id }})">
                                         <label class="job-checkbox-label" for="jobFinished">
                                             <i class="bi bi-check2-circle"></i> Job Finished
                                         </label>
@@ -520,6 +520,11 @@
                                              style="width: {% widthratio other_expense_cost order.total_value_exc_vat 100 %}%"
                                              title="Other Expenses: £{{ other_expense_cost|floatformat:2 }}"></div>
                                         {% endif %}
+                                        {% if purchase_invoice_ts_cost > 0 %}
+                                        <div class="financial-progress-bar-segment purchase-invoice-segment" 
+                                             style="width: {% widthratio purchase_invoice_ts_cost order.total_value_exc_vat 100 %}%"
+                                             title="Purchase Invoices: £{{ purchase_invoice_ts_cost|floatformat:2 }}"></div>
+                                        {% endif %}
                                     </div>
                                     <span class="financial-percentage">{% widthratio calculated_installation_cost order.total_value_exc_vat 100 %}%</span>
                                 </div>
@@ -546,6 +551,12 @@
                                     <span class="legend-item">
                                         <span class="legend-color other-expense-color"></span>
                                         Other: £{{ other_expense_cost|floatformat:2 }}
+                                    </span>
+                                    {% endif %}
+                                    {% if purchase_invoice_ts_cost > 0 %}
+                                    <span class="legend-item">
+                                        <span class="legend-color purchase-invoice-color"></span>
+                                        Invoices: £{{ purchase_invoice_ts_cost|floatformat:2 }}
                                     </span>
                                     {% endif %}
                                 </div>
@@ -1452,13 +1463,23 @@
                                 <td><input type="checkbox" class="timesheet-check installation-check" value="{{ timesheet.id }}" onchange="updateDeleteBtn('installation')"></td>
                                 <td>{{ timesheet.worker_name }}</td>
                                 <td>{{ timesheet.date|date:"d/m/Y" }}</td>
-                                <td>{{ timesheet.purchase_order.display_number|default:"-" }}</td>
+                                <td>
+                                    {% if timesheet.purchase_invoice_line_id %}
+                                        <a href="{% url 'purchase_invoice_detail' timesheet.purchase_invoice_line.invoice.id %}">
+                                            {{ timesheet.purchase_invoice_line.invoice.invoice_number }}
+                                        </a>
+                                    {% else %}
+                                        {{ timesheet.purchase_order.display_number|default:"-" }}
+                                    {% endif %}
+                                </td>
                                 <td>£{{ timesheet.total_cost|floatformat:2 }}</td>
                                 <td>{{ timesheet.description|default:"-" }}</td>
                                 <td>
+                                    {% if not timesheet.purchase_invoice_line_id %}
                                     <button type="button" class="btn btn-danger btn-sm" onclick="deleteTimesheet({{ timesheet.id }})">
                                         <i class="bi bi-trash"></i>
                                     </button>
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
@@ -2756,6 +2777,31 @@ function updateJobCheckbox(orderId, field, value) {
         const fieldName = field.replace(/_/g, ' ');
         showAlert(`Error updating ${fieldName}`, 'danger');
     });
+}
+
+// Job Finished confirmation helpers
+function onJobFinishedChange(checkbox, orderId) {
+    if (!checkbox.checked) {
+        // Unchecking — no confirmation needed
+        updateJobCheckbox(orderId, 'job_finished', false);
+        return;
+    }
+    // Intercept checking — revert visually until user confirms
+    checkbox.checked = false;
+    document.getElementById('jobFinishedModal')._orderId = orderId;
+    openModal('jobFinishedModal');
+}
+
+function confirmJobFinished() {
+    const orderId = document.getElementById('jobFinishedModal')._orderId;
+    document.getElementById('jobFinished').checked = true;
+    updateJobCheckbox(orderId, 'job_finished', true);
+    closeModal('jobFinishedModal');
+}
+
+function cancelJobFinished() {
+    document.getElementById('jobFinished').checked = false;
+    closeModal('jobFinishedModal');
 }
 
 // Update Boards Ordered Checkbox
@@ -6225,6 +6271,29 @@ function closeDeleteModal() {
                 {% csrf_token %}
                 <button type="submit" style="padding:6px 16px;border:none;background:var(--danger,#dc3545);color:#fff;border-radius:4px;cursor:pointer;font-size:0.85rem;">Delete Order</button>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- Job Finished Confirmation Modal -->
+<div class="modal" id="jobFinishedModal">
+    <div class="modal-overlay" onclick="cancelJobFinished()"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-check2-circle" style="color: #28a745; margin-right: 8px;"></i>Mark Job as Finished?</h3>
+                <button class="modal-close" onclick="cancelJobFinished()">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin: 0 0 10px;">This will mark the job as complete and allocate any outstanding accessories.</p>
+                <p style="margin: 0; color: var(--text-secondary); font-size: 0.88rem;">Are you sure you want to mark this job as finished?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="cancelJobFinished()">Cancel</button>
+                <button class="btn btn-success" onclick="confirmJobFinished()">
+                    <i class="bi bi-check2-circle"></i> Yes, Mark as Finished
+                </button>
+            </div>
         </div>
     </div>
 </div>

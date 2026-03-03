@@ -393,7 +393,7 @@ class Order(models.Model):
     
     def calculate_installation_cost(self):
         """Calculate installation cost from timesheets and expenses"""
-        # Sum all installation timesheets
+        # Sum all installation timesheets (includes PI-sourced timesheets)
         timesheet_cost = sum(
             ts.total_cost for ts in self.timesheets.filter(timesheet_type='installation')
         )
@@ -1425,6 +1425,12 @@ class Timesheet(models.Model):
     # For installation timesheets (linked PO)
     purchase_order = models.ForeignKey('PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='timesheets', help_text='Associated PO for installation cost')
     
+    # For installation timesheets sourced from a purchase invoice line
+    purchase_invoice_line = models.ForeignKey(
+        'PurchaseInvoiceLineItem', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='timesheets', help_text='Purchase invoice line that generated this timesheet',
+    )
+    
     # For manufacturing timesheets (hours × rate)
     hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='Hours worked')
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Rate at time of entry')
@@ -1441,6 +1447,8 @@ class Timesheet(models.Model):
             return self.fitter.name
         elif self.factory_worker:
             return self.factory_worker.name
+        elif self.purchase_invoice_line_id:
+            return self.purchase_invoice_line.invoice.supplier_name or 'Invoice'
         return 'Unknown'
     
     @property
@@ -1455,7 +1463,10 @@ class Timesheet(models.Model):
     @property
     def total_cost(self):
         """Calculate total cost for this timesheet entry"""
-        if self.timesheet_type == 'installation' and self.purchase_order:
+        if self.timesheet_type == 'installation' and self.purchase_invoice_line_id:
+            # Installation sourced from a purchase invoice line
+            return self.purchase_invoice_line.line_total
+        elif self.timesheet_type == 'installation' and self.purchase_order:
             # Installation uses linked PO total
             return self.purchase_order.total
         elif self.hours and self.hourly_rate:
@@ -1465,6 +1476,8 @@ class Timesheet(models.Model):
     
     def __str__(self):
         if self.timesheet_type == 'installation':
+            if self.purchase_invoice_line_id:
+                return f"{self.worker_name} - {self.date} (Invoice)"
             po_ref = self.purchase_order.display_number if self.purchase_order else 'no PO'
             return f"{self.worker_name} - {self.date} ({po_ref})"
         return f"{self.worker_name} - {self.date} ({self.hours}h)"
@@ -2041,6 +2054,58 @@ class XeroToken(models.Model):
     def get_active_token(cls):
         """Return the most recently updated token, or None."""
         return cls.objects.first()
+
+
+class ActivityLog(models.Model):
+    """Audit trail of user actions across the application."""
+
+    EVENT_CHOICES = [
+        ('job_finished',       'Job Marked as Finished'),
+        ('job_unfinished',     'Job Marked as Unfinished'),
+        ('order_created',      'Order Created'),
+        ('order_deleted',      'Order Deleted'),
+        ('po_created',         'Purchase Order Created'),
+        ('po_deleted',         'Purchase Order Deleted'),
+        ('invoice_created',    'Purchase Invoice Created'),
+        ('invoice_deleted',    'Purchase Invoice Deleted'),
+        ('timesheet_added',    'Timesheet Added'),
+        ('timesheet_deleted',  'Timesheet Deleted'),
+        ('other',              'Other'),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='activity_logs',
+    )
+    event_type  = models.CharField(max_length=50, choices=EVENT_CHOICES, db_index=True)
+    description = models.TextField()
+    timestamp   = models.DateTimeField(default=timezone.now, db_index=True)
+    order       = models.ForeignKey(
+        'Order', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='activity_logs',
+    )
+    extra_data  = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        actor = self.user.get_full_name() or self.user.username if self.user else 'System'
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M')}] {actor}: {self.get_event_type_display()}"
+
+
+def log_activity(user, event_type, description, order=None, extra_data=None):
+    """Helper – create an ActivityLog entry. Safe to call from any view."""
+    try:
+        ActivityLog.objects.create(
+            user=user,
+            event_type=event_type,
+            description=description,
+            order=order,
+            extra_data=extra_data or {},
+        )
+    except Exception:
+        pass  # Never let logging break the main request
 
 
 class SyncLog(models.Model):

@@ -3,11 +3,11 @@ from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
-from .dashboard_view import dashboard, dashboard_monthly_sales
+from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail
-from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status
+from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
@@ -17,14 +17,16 @@ from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_statu
 from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
 from .purchase_invoice_views import (
     purchase_invoices_list, purchase_invoice_detail, create_purchase_invoice,
-    update_purchase_invoice, add_purchase_invoice_line, update_purchase_invoice_line,
-    delete_purchase_invoice_line, upload_purchase_invoice_attachment,
-    delete_purchase_invoice_attachment, order_purchase_invoice_lines,
+    update_purchase_invoice, delete_purchase_invoice, add_purchase_invoice_line,
+    update_purchase_invoice_line, delete_purchase_invoice_line,
+    upload_purchase_invoice_attachment, delete_purchase_invoice_attachment,
+    order_purchase_invoice_lines,
 )
 
 urlpatterns = [
     path('', dashboard, name='dashboard'),
     path('dashboard/monthly-sales/', dashboard_monthly_sales, name='dashboard_monthly_sales'),
+    path('dashboard/sales-after/', dashboard_sales_after, name='dashboard_sales_after'),
 
     # User Profile
     path('profile/', user_profile, name='user_profile'),
@@ -41,6 +43,7 @@ urlpatterns = [
     path('purchase-invoices/create/', create_purchase_invoice, name='create_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/', purchase_invoice_detail, name='purchase_invoice_detail'),
     path('purchase-invoices/<int:invoice_id>/update/', update_purchase_invoice, name='update_purchase_invoice'),
+    path('purchase-invoices/<int:invoice_id>/delete/', delete_purchase_invoice, name='delete_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/lines/add/', add_purchase_invoice_line, name='add_purchase_invoice_line'),
     path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/update/', update_purchase_invoice_line, name='update_purchase_invoice_line'),
     path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/delete/', delete_purchase_invoice_line, name='delete_purchase_invoice_line'),
@@ -332,6 +335,7 @@ urlpatterns = [
     path('admin-panel/api/output/<str:run_id>/', script_output, name='script_output'),
     path('admin-panel/api/cancel/<str:run_id>/', cancel_script, name='cancel_script'),
     path('admin-panel/api/status/', running_scripts_status, name='running_scripts_status'),
+    path('admin-panel/activity-log/', admin_activity_log, name='admin_activity_log'),
 
     # Password reset views
     path('password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),

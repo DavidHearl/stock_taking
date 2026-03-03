@@ -361,11 +361,63 @@ function handleModalAttachment(input) {
     const nameSpan = document.getElementById('modal-attachment-name');
     const icon = document.getElementById('modal-attachment-icon');
     if (input.files.length) {
-        nameSpan.textContent = input.files[0].name;
+        const file = input.files[0];
+        nameSpan.textContent = file.name;
         icon.className = 'bi bi-file-earmark-check';
+        autoPopulateFromFilename(file.name);
     } else {
         nameSpan.textContent = 'Click or drag & drop to attach a file';
         icon.className = 'bi bi-cloud-upload';
+    }
+}
+
+function autoPopulateFromFilename(filename) {
+    // Strip extension
+    const nameNoExt = filename.replace(/\.[^/.]+$/, '');
+
+    // Only populate fields that are currently empty
+    const numberInput   = document.getElementById('new-pinv-number');
+    const supplierInput = document.getElementById('new-pinv-supplier');
+    const dateInput     = document.getElementById('new-pinv-date');
+
+    // Set invoice number to filename (without extension) if empty
+    if (!numberInput.value.trim()) {
+        // Clean up: replace underscores/hyphens with spaces for readability
+        numberInput.value = nameNoExt.replace(/_/g, ' ');
+    }
+
+    // Try to extract a date from the filename (common formats)
+    if (!dateInput.value) {
+        // Match YYYY-MM-DD, YYYY_MM_DD, YYYYMMDD
+        let dateMatch = nameNoExt.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
+        if (dateMatch) {
+            const y = parseInt(dateMatch[1]), m = parseInt(dateMatch[2]), d = parseInt(dateMatch[3]);
+            if (y >= 2000 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+                dateInput.value = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+            }
+        }
+        // Match DD-MM-YYYY or DD_MM_YYYY
+        if (!dateInput.value) {
+            dateMatch = nameNoExt.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+            if (dateMatch) {
+                const d = parseInt(dateMatch[1]), m = parseInt(dateMatch[2]), y = parseInt(dateMatch[3]);
+                if (y >= 2000 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+                    dateInput.value = `${dateMatch[3]}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                }
+            }
+        }
+    }
+
+    // Try to match supplier from the datalist options
+    if (!supplierInput.value.trim()) {
+        const suppliers = Array.from(document.querySelectorAll('#supplier-list option')).map(o => o.value);
+        const lowerName = nameNoExt.toLowerCase().replace(/[_-]/g, ' ');
+        for (const s of suppliers) {
+            if (s && lowerName.includes(s.toLowerCase())) {
+                supplierInput.value = s;
+                break;
+            }
+        }
     }
 }
 

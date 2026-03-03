@@ -5,7 +5,7 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
-from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES, SyncLog
+from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES, SyncLog, ActivityLog
 import subprocess
 import threading
 import time
@@ -656,3 +656,42 @@ def running_scripts_status(request):
                 'output_line_count': len(entry['output_lines']),
             }
     return JsonResponse(result)
+
+
+@staff_required
+def admin_activity_log(request):
+    """Admin page showing the user activity log."""
+    from django.contrib.auth.models import User as DjangoUser
+
+    # Filters
+    event_type   = request.GET.get('event_type', '')
+    user_id      = request.GET.get('user_id', '')
+    search       = request.GET.get('q', '').strip()
+
+    logs = ActivityLog.objects.select_related('user', 'order')
+
+    if event_type:
+        logs = logs.filter(event_type=event_type)
+    if user_id:
+        logs = logs.filter(user_id=user_id)
+    if search:
+        logs = logs.filter(description__icontains=search)
+
+    # Paginate – 50 per page
+    from django.core.paginator import Paginator
+    paginator  = Paginator(logs, 50)
+    page_num   = request.GET.get('page', 1)
+    page_obj   = paginator.get_page(page_num)
+
+    users          = DjangoUser.objects.filter(activity_logs__isnull=False).distinct().order_by('first_name', 'last_name')
+    event_choices  = ActivityLog.EVENT_CHOICES
+
+    return render(request, 'stock_take/admin_activity_log.html', {
+        'page_obj':      page_obj,
+        'users':         users,
+        'event_choices': event_choices,
+        'filter_event':  event_type,
+        'filter_user':   user_id,
+        'filter_q':      search,
+        'total_count':   logs.count(),
+    })
