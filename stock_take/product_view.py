@@ -127,8 +127,17 @@ def product_detail(request, item_id):
     }
     
     # Calculate metrics
-    allocated = int(future_accessories.aggregate(total=Sum('quantity'))['total'] or 0)
-    remaining = current_stock - allocated
+    # Count ALL unallocated accessories (both past-dated and future-dated orders).
+    # Using only future_accessories here caused a bug: when overdue-but-unallocated
+    # materials were finally allocated the stock dropped but allocated count didn't
+    # (those items were never in future_accessories), making remaining go more negative.
+    allocated = int(accessories.aggregate(total=Sum('quantity'))['total'] or 0)
+
+    # Sum pending incoming PO quantities (positive entries in future_events are PO arrivals)
+    total_incoming = sum(qty for qty in future_events.values() if qty > 0)
+
+    # remaining = what we have + what is arriving - what is still needed
+    remaining = current_stock + total_incoming - allocated
     
     # Purchase orders containing this product
     po_lines = PurchaseOrderProduct.objects.filter(
@@ -153,6 +162,7 @@ def product_detail(request, item_id):
         'tracking_choices': json.dumps(list(StockItem.TRACKING_CHOICES)),
         'stock_history': json.dumps(history_data),
         'allocated': allocated,
+        'incoming': total_incoming,
         'remaining': remaining,
         'po_lines': po_lines,
         'order_accessories': order_accessories,

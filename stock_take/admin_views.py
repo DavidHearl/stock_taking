@@ -1,10 +1,16 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import User
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES, SyncLog
+import subprocess
+import threading
+import time
+import os
+import signal
 
 
 def staff_required(view_func):
@@ -297,7 +303,7 @@ SCRIPT_GROUPS = [
                 'label': 'Recent Customer Sync',
                 'description': (
                     'Syncs customers from Anthill CRM created within the last 7 days. '
-                    'Customers with a WorkGuruClientID are saved as Customer; '
+                    'Customers with a completed sale activity are saved as Customer; '
                     'all others are saved as Contact (Lead). '
                     'Runs automatically via the scheduler Docker service.'
                 ),
@@ -468,3 +474,185 @@ def admin_api(request):
         'groups': groups,
     }
     return render(request, 'stock_take/admin_api.html', context)
+
+
+# ── Script runner ─────────────────────────────────────────────────
+# In-memory registry of running processes.  Keyed by a unique run_id.
+# Each value is a dict: {process, output_lines, started_at, cmd, status, pid}
+# This lives in the Django process so scripts persist across page navigations.
+_running_scripts = {}
+_script_lock = threading.Lock()
+
+# Whitelist of allowed commands (prefixes) to prevent arbitrary execution
+ALLOWED_CMD_PREFIXES = set()
+for _grp in SCRIPT_GROUPS:
+    for _scr in _grp['scripts']:
+        for _c in _scr.get('commands', []):
+            ALLOWED_CMD_PREFIXES.add(_c['cmd'])
+
+
+def _reader_thread(proc, run_id):
+    """Background thread that reads stdout/stderr and appends to output buffer."""
+    try:
+        for line in iter(proc.stdout.readline, ''):
+            with _script_lock:
+                entry = _running_scripts.get(run_id)
+                if entry:
+                    entry['output_lines'].append(line)
+    except Exception:
+        pass
+    finally:
+        proc.stdout.close()
+        proc.wait()
+        with _script_lock:
+            entry = _running_scripts.get(run_id)
+            if entry:
+                entry['status'] = 'finished'
+                entry['exit_code'] = proc.returncode
+
+
+@staff_required
+@require_POST
+def run_script(request):
+    """Start a whitelisted script as a subprocess.  Returns a run_id for
+    streaming output and cancellation."""
+    import json
+    body = json.loads(request.body)
+    cmd = body.get('cmd', '').strip()
+
+    # Validate against whitelist
+    if cmd not in ALLOWED_CMD_PREFIXES:
+        return JsonResponse({'error': 'Command not allowed'}, status=403)
+
+    # Only allow one instance of the same command at a time
+    with _script_lock:
+        for rid, entry in _running_scripts.items():
+            if entry['cmd'] == cmd and entry['status'] == 'running':
+                return JsonResponse({
+                    'error': 'This script is already running',
+                    'run_id': rid,
+                }, status=409)
+
+    # Generate a unique run id
+    import uuid
+    run_id = uuid.uuid4().hex[:12]
+
+    # Replace 'python' with the venv python or sys.executable
+    import sys
+    parts = cmd.split()
+    if parts[0] == 'python':
+        parts[0] = sys.executable
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    try:
+        proc = subprocess.Popen(
+            parts,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=base_dir,
+            env={**os.environ, 'PYTHONUNBUFFERED': '1'},
+        )
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+    with _script_lock:
+        _running_scripts[run_id] = {
+            'process': proc,
+            'output_lines': [],
+            'started_at': time.time(),
+            'cmd': cmd,
+            'status': 'running',
+            'exit_code': None,
+            'pid': proc.pid,
+        }
+
+    # Start reader thread
+    t = threading.Thread(target=_reader_thread, args=(proc, run_id), daemon=True)
+    t.start()
+
+    return JsonResponse({'run_id': run_id, 'pid': proc.pid})
+
+
+@staff_required
+def script_output(request, run_id):
+    """SSE endpoint that streams script output lines.  Stays open until the
+    script finishes or the client disconnects."""
+    import json as _json
+
+    def event_stream():
+        cursor = 0
+        while True:
+            with _script_lock:
+                entry = _running_scripts.get(run_id)
+                if not entry:
+                    yield f"data: {_json.dumps({'type': 'error', 'message': 'Unknown run_id'})}\n\n"
+                    return
+
+                new_lines = entry['output_lines'][cursor:]
+                cursor += len(new_lines)
+                status = entry['status']
+                exit_code = entry['exit_code']
+
+            for line in new_lines:
+                yield f"data: {_json.dumps({'type': 'output', 'line': line})}\n\n"
+
+            if status == 'finished':
+                yield f"data: {_json.dumps({'type': 'finished', 'exit_code': exit_code})}\n\n"
+                return
+
+            time.sleep(0.3)
+
+    response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@staff_required
+@require_POST
+def cancel_script(request, run_id):
+    """Kill a running script."""
+    with _script_lock:
+        entry = _running_scripts.get(run_id)
+        if not entry:
+            return JsonResponse({'error': 'Unknown run_id'}, status=404)
+        if entry['status'] != 'running':
+            return JsonResponse({'status': entry['status']})
+
+    proc = entry['process']
+    try:
+        proc.terminate()
+        # Give it a moment, then force-kill
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+    with _script_lock:
+        entry['status'] = 'cancelled'
+        entry['exit_code'] = -1
+
+    return JsonResponse({'status': 'cancelled'})
+
+
+@staff_required
+def running_scripts_status(request):
+    """Return status of all running/recent scripts so the page can reconnect
+    after navigation."""
+    with _script_lock:
+        result = {}
+        for rid, entry in _running_scripts.items():
+            result[rid] = {
+                'cmd': entry['cmd'],
+                'status': entry['status'],
+                'exit_code': entry['exit_code'],
+                'started_at': entry['started_at'],
+                'pid': entry['pid'],
+                'output_line_count': len(entry['output_lines']),
+            }
+    return JsonResponse(result)

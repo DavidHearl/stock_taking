@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block title %}API Scripts - Admin{% endblock %}
-
+{% block page_title %}API Scripts{% endblock %}
 {% block nav_admin_api_active %}active{% endblock %}
 
 {% block extra_css %}
@@ -34,27 +34,36 @@
 
     .script-card-header {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
         gap: 16px;
-        padding: 14px 18px;
+        padding: 10px 18px;
         background: var(--bg-secondary, #252525);
         cursor: pointer;
         user-select: none;
         transition: background 0.15s;
+        min-height: 44px;
     }
     .script-card-header:hover { background: var(--bg-hover, #2a2a2a); }
 
+    .script-card-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        flex: 1;
+    }
     .script-card-title-row {
         display: flex;
         align-items: center;
         gap: 10px;
-        flex-wrap: wrap;
+        white-space: nowrap;
     }
     .script-card-title-row h3 {
         margin: 0;
         font-size: 0.95rem;
         font-weight: 600;
+        white-space: nowrap;
     }
     .script-file-badge {
         font-size: 0.72rem;
@@ -64,13 +73,14 @@
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 4px;
         padding: 2px 7px;
+        white-space: nowrap;
     }
     .script-card-meta {
         display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 5px;
+        align-items: center;
+        gap: 14px;
         flex-shrink: 0;
+        white-space: nowrap;
     }
 
     /* ── Status badges ── */
@@ -193,15 +203,91 @@
     .stats-chip.created { color: #28a745; }
     .stats-chip.updated { color: #5a9fd4; }
     .stats-chip.errors  { color: #dc3545; }
+
+    /* ── Run button ── */
+    .cmd-run-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 10px;
+        border: 1px solid rgba(40,167,69,.4);
+        border-radius: 4px;
+        background: rgba(40,167,69,.1);
+        color: #28a745;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+    }
+    .cmd-run-btn:hover { background: rgba(40,167,69,.25); }
+    .cmd-run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .cmd-run-btn.running {
+        border-color: rgba(220,53,69,.4);
+        background: rgba(220,53,69,.1);
+        color: #dc3545;
+    }
+    .cmd-run-btn.running:hover { background: rgba(220,53,69,.25); }
+
+    /* ── Terminal output ── */
+    .script-terminal {
+        margin-top: 14px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    .script-terminal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 12px;
+        background: #161b22;
+        border-bottom: 1px solid #30363d;
+        font-size: 0.72rem;
+        color: #8b949e;
+    }
+    .script-terminal-header .terminal-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .script-terminal-header .terminal-status .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .script-terminal-header .terminal-status .dot.running { background: #28a745; animation: pulse 1.5s infinite; }
+    .script-terminal-header .terminal-status .dot.finished { background: #8b949e; }
+    .script-terminal-header .terminal-status .dot.error { background: #dc3545; }
+    .script-terminal-header .terminal-status .dot.cancelled { background: #ffc107; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .terminal-clear-btn {
+        background: none;
+        border: none;
+        color: #8b949e;
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 2px 6px;
+    }
+    .terminal-clear-btn:hover { color: #c9d1d9; }
+    .script-terminal-body {
+        max-height: 400px;
+        overflow-y: auto;
+        padding: 10px 14px;
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        color: #c9d1d9;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="admin-page">
-    <div class="page-header">
-        <h1><i class="bi bi-plug"></i> API Scripts</h1>
-        <p class="page-subtitle">All integration and maintenance scripts — descriptions, usage flags, schedules, and run history.</p>
-    </div>
 
     {% for group in groups %}
     <div class="script-group-header">
@@ -212,7 +298,7 @@
     {% for script in group.scripts %}
     <div class="script-card" id="script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
         <div class="script-card-header" onclick="toggleScript('script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}')">
-            <div>
+            <div class="script-card-left">
                 <div class="script-card-title-row">
                     <h3>{{ script.label }}</h3>
                     <span class="script-file-badge">{{ script.file }}</span>
@@ -240,11 +326,27 @@
             {% if script.commands %}
             <div class="commands-label">Commands</div>
             {% for c in script.commands %}
-            <div class="command-row">
+            <div class="command-row" data-cmd="{{ c.cmd }}">
+                <button class="cmd-run-btn" onclick="runCommand(this, '{{ c.cmd|escapejs }}')" title="Run this command">
+                    <i class="bi bi-play-fill"></i> Run
+                </button>
                 <span class="command-snippet">{{ c.cmd }}</span>
                 {% if c.note %}<span class="command-note">— {{ c.note }}</span>{% endif %}
             </div>
             {% endfor %}
+            <!-- Terminal output area (hidden until a command is run) -->
+            <div class="script-terminal" id="terminal-{{ forloop.parentloop.counter }}-{{ forloop.counter }}" style="display:none;">
+                <div class="script-terminal-header">
+                    <span class="terminal-status">
+                        <span class="dot running"></span>
+                        <span class="terminal-cmd-label"></span>
+                    </span>
+                    <span>
+                        <button class="terminal-clear-btn" onclick="clearTerminal(this)" title="Clear"><i class="bi bi-x-lg"></i> Close</button>
+                    </span>
+                </div>
+                <div class="script-terminal-body"></div>
+            </div>
             {% endif %}
 
             {% if script.log_name %}
@@ -289,9 +391,202 @@
 </div>
 
 <script>
+const csrfToken = '{{ csrf_token }}';
+// Track active EventSource connections & run IDs per command
+const activeRuns = {};  // cmd -> { runId, eventSource, terminalEl, btnEl }
+
 function toggleScript(id) {
     const card = document.getElementById(id);
     if (card) card.classList.toggle('open');
 }
+
+function getTerminalForBtn(btn) {
+    // Find the terminal element within the same script-card-body
+    const body = btn.closest('.script-card-body');
+    return body ? body.querySelector('.script-terminal') : null;
+}
+
+function runCommand(btn, cmd) {
+    // If already running this command, cancel it
+    if (activeRuns[cmd] && activeRuns[cmd].status === 'running') {
+        cancelCommand(cmd);
+        return;
+    }
+
+    const terminal = getTerminalForBtn(btn);
+    if (!terminal) return;
+
+    const termBody = terminal.querySelector('.script-terminal-body');
+    const termLabel = terminal.querySelector('.terminal-cmd-label');
+    const dot = terminal.querySelector('.dot');
+
+    // Reset terminal
+    termBody.textContent = '';
+    terminal.style.display = '';
+    termLabel.textContent = cmd;
+    dot.className = 'dot running';
+
+    // Update button to Cancel
+    btn.innerHTML = '<i class="bi bi-stop-fill"></i> Cancel';
+    btn.classList.add('running');
+
+    // Disable other run buttons in this card
+    const body = btn.closest('.script-card-body');
+    body.querySelectorAll('.cmd-run-btn').forEach(b => {
+        if (b !== btn) b.disabled = true;
+    });
+
+    // Start the script
+    fetch('{% url "run_script" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({cmd: cmd}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            termBody.textContent += '\n❌ ' + data.error + '\n';
+            resetBtn(btn, body);
+            dot.className = 'dot error';
+            // If already running, reconnect to existing run
+            if (data.run_id) {
+                connectSSE(data.run_id, cmd, btn, terminal);
+            }
+            return;
+        }
+        connectSSE(data.run_id, cmd, btn, terminal);
+    })
+    .catch(err => {
+        termBody.textContent += '\n❌ Failed to start: ' + err + '\n';
+        resetBtn(btn, body);
+        dot.className = 'dot error';
+    });
+}
+
+function connectSSE(runId, cmd, btn, terminal) {
+    const termBody = terminal.querySelector('.script-terminal-body');
+    const dot = terminal.querySelector('.dot');
+    const body = btn.closest('.script-card-body');
+
+    const es = new EventSource(`/admin-panel/api/output/${runId}/`);
+    activeRuns[cmd] = { runId, eventSource: es, terminalEl: terminal, btnEl: btn, status: 'running' };
+
+    es.onmessage = function(e) {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'output') {
+            termBody.textContent += msg.line;
+            termBody.scrollTop = termBody.scrollHeight;
+        } else if (msg.type === 'finished') {
+            es.close();
+            const exitCode = msg.exit_code;
+            if (exitCode === 0) {
+                dot.className = 'dot finished';
+                termBody.textContent += '\n✅ Script finished successfully (exit code 0)\n';
+            } else {
+                dot.className = 'dot error';
+                termBody.textContent += `\n❌ Script exited with code ${exitCode}\n`;
+            }
+            resetBtn(btn, body);
+            activeRuns[cmd].status = 'finished';
+        } else if (msg.type === 'error') {
+            es.close();
+            dot.className = 'dot error';
+            termBody.textContent += '\n❌ ' + msg.message + '\n';
+            resetBtn(btn, body);
+            activeRuns[cmd].status = 'error';
+        }
+    };
+
+    es.onerror = function() {
+        es.close();
+        // Don't show error if already finished/cancelled
+        if (activeRuns[cmd] && activeRuns[cmd].status === 'running') {
+            dot.className = 'dot error';
+            termBody.textContent += '\n⚠️ Connection lost\n';
+            resetBtn(btn, body);
+            activeRuns[cmd].status = 'disconnected';
+        }
+    };
+}
+
+function cancelCommand(cmd) {
+    const run = activeRuns[cmd];
+    if (!run) return;
+
+    fetch(`/admin-panel/api/cancel/${run.runId}/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+    })
+    .then(r => r.json())
+    .then(data => {
+        const termBody = run.terminalEl.querySelector('.script-terminal-body');
+        const dot = run.terminalEl.querySelector('.dot');
+        termBody.textContent += '\n⚠️ Script cancelled by user\n';
+        dot.className = 'dot cancelled';
+        if (run.eventSource) run.eventSource.close();
+        const body = run.btnEl.closest('.script-card-body');
+        resetBtn(run.btnEl, body);
+        run.status = 'cancelled';
+    });
+}
+
+function resetBtn(btn, body) {
+    btn.innerHTML = '<i class="bi bi-play-fill"></i> Run';
+    btn.classList.remove('running');
+    body.querySelectorAll('.cmd-run-btn').forEach(b => b.disabled = false);
+}
+
+function clearTerminal(closeBtn) {
+    const terminal = closeBtn.closest('.script-terminal');
+    terminal.style.display = 'none';
+    terminal.querySelector('.script-terminal-body').textContent = '';
+}
+
+// On page load, check for any running scripts and reconnect
+(function reconnectRunning() {
+    fetch('{% url "running_scripts_status" %}')
+    .then(r => r.json())
+    .then(data => {
+        Object.entries(data).forEach(([runId, info]) => {
+            if (info.status !== 'running') return;
+
+            // Find the matching command button
+            const cmdRows = document.querySelectorAll('.command-row[data-cmd]');
+            cmdRows.forEach(row => {
+                if (row.dataset.cmd === info.cmd) {
+                    const btn = row.querySelector('.cmd-run-btn');
+                    const terminal = getTerminalForBtn(btn);
+                    if (!btn || !terminal) return;
+
+                    const termBody = terminal.querySelector('.script-terminal-body');
+                    const termLabel = terminal.querySelector('.terminal-cmd-label');
+                    const dot = terminal.querySelector('.dot');
+                    const body = btn.closest('.script-card-body');
+
+                    // Open the card
+                    const card = btn.closest('.script-card');
+                    if (card && !card.classList.contains('open')) card.classList.add('open');
+
+                    // Show terminal
+                    terminal.style.display = '';
+                    termLabel.textContent = info.cmd;
+                    dot.className = 'dot running';
+                    termBody.textContent = '(Reconnected to running script...)\n\n';
+
+                    // Set button to cancel mode
+                    btn.innerHTML = '<i class="bi bi-stop-fill"></i> Cancel';
+                    btn.classList.add('running');
+                    body.querySelectorAll('.cmd-run-btn').forEach(b => {
+                        if (b !== btn) b.disabled = true;
+                    });
+
+                    // Connect SSE
+                    connectSSE(runId, info.cmd, btn, terminal);
+                }
+            });
+        });
+    })
+    .catch(() => {});
+})();
 </script>
 {% endblock %}

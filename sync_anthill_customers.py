@@ -12,8 +12,7 @@ Two-phase sync:
             customers/leads not yet in the database.
 
 Classification:
-  • Customers with a WorkGuruClientID or a completed "Sale" activity
-    are saved as Customer (sale).
+  • Customers with a completed "Sale" activity are saved as Customer (sale).
   • All others are saved as Lead.
 
 Usage
@@ -227,12 +226,7 @@ def _text(node, path: str) -> str:
 
 def is_sale(detail: dict) -> bool:
     """Determine if a customer detail represents a sale (vs lead)."""
-    # 1. Has WorkGuruClientID → definitely a sale
-    wg_id = detail.get('custom_fields', {}).get('WorkGuruClientID', '')
-    if wg_id:
-        return True
-
-    # 2. Has an activity whose status indicates a completed sale
+    # Has an activity whose status indicates a completed sale
     for act in detail.get('activities', []):
         status = (act.get('status') or '').lower()
         act_type = (act.get('type') or '').lower()
@@ -280,20 +274,6 @@ def save_as_customer(detail: dict, summary: dict) -> str:
             existing.save(update_fields=['anthill_created_date', 'location'])
             return 'updated'
         return 'exists'
-
-    # Also check if there's a Customer via WorkGuruClientID
-    wg_id = cf.get('WorkGuruClientID', '')
-    if wg_id:
-        try:
-            existing = Customer.objects.get(workguru_id=int(wg_id))
-            # Link the anthill_customer_id
-            existing.anthill_customer_id = anthill_id
-            existing.anthill_created_date = anthill_date
-            existing.location = summary.get('location', '') or existing.location
-            existing.save(update_fields=['anthill_customer_id', 'anthill_created_date', 'location'])
-            return 'updated'
-        except (Customer.DoesNotExist, ValueError):
-            pass
 
     Customer.objects.create(
         anthill_customer_id=anthill_id,

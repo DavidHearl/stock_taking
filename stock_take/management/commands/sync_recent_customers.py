@@ -16,9 +16,14 @@ import logging
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from stock_take.services.anthill_api import AnthillAPI, AnthillAPIError
-from stock_take.models import Customer, Lead
+from stock_take.models import Customer, Lead, AnthillSale, SyncLog
 
 logger = logging.getLogger(__name__)
+
+# Activity types that indicate a sale (any status counts — open, completed, etc.)
+SALE_ACTIVITY_TYPES_KEYWORDS = {'sale'}
+# Statuses that should NOT count (e.g. cancelled/lost sales)
+SALE_EXCLUDE_STATUSES = {'cancelled', 'canceled', 'lost', 'deleted'}
 
 
 class Command(BaseCommand):
@@ -80,6 +85,7 @@ class Command(BaseCommand):
             'customers_updated': 0,
             'leads_created': 0,
             'leads_updated': 0,
+            'sales_created': 0,
             'errors': 0,
         }
 
@@ -127,7 +133,7 @@ class Command(BaseCommand):
 
                 # Fetch full details and save
                 try:
-                    details = api.get_customer_details(int(anthill_id))
+                    details = api.get_customer_details(int(anthill_id), include_activity=True)
                     time.sleep(0.05)  # Rate limiting
 
                     if not details:
@@ -135,11 +141,8 @@ class Command(BaseCommand):
                         continue
 
                     # Classify: customer (sale) or lead
-                    cf = details.get('custom_fields', {})
-                    wg_id = cf.get('WorkGuruClientID', '')
-
-                    if wg_id:
-                        # Has WorkGuru ID — save as Customer
+                    # A customer is a sale if they have a completed sale activity
+                    if self._is_sale(details):
                         result_action = self._save_customer(details, summary)
                         if result_action == 'created':
                             stats['customers_created'] += 1
@@ -148,8 +151,14 @@ class Command(BaseCommand):
                             )
                         elif result_action == 'updated':
                             stats['customers_updated'] += 1
+                        # Save sale activities
+                        customer_obj = Customer.objects.filter(
+                            anthill_customer_id=anthill_id
+                        ).first()
+                        sales_count = self._save_sales(details, summary, customer_obj)
+                        stats['sales_created'] += sales_count
                     else:
-                        # No WorkGuru ID — save as Lead
+                        # No sale indicators — save as Lead
                         result_action = self._save_lead(details, summary)
                         if result_action == 'created':
                             stats['leads_created'] += 1
@@ -191,15 +200,58 @@ class Command(BaseCommand):
         self.stdout.write(f'  Customers updated  : {stats["customers_updated"]:,}')
         self.stdout.write(f'  Leads created      : {stats["leads_created"]:,}')
         self.stdout.write(f'  Leads updated      : {stats["leads_updated"]:,}')
+        self.stdout.write(f'  Sales created      : {stats["sales_created"]:,}')
         if stats['errors']:
             self.stdout.write(self.style.ERROR(f'  Errors             : {stats["errors"]:,}'))
         self.stdout.write(f'{"=" * 60}\n')
+
+        # Write SyncLog entry so the admin API page shows run history
+        if not dry_run:
+            log_status = 'success'
+            if stats['errors'] > 0:
+                total_created = stats['customers_created'] + stats['leads_created'] + stats['sales_created']
+                log_status = 'warning' if total_created > 0 else 'error'
+            notes_text = (
+                f"Scanned {stats['scanned']}, "
+                f"customers created {stats['customers_created']}, updated {stats['customers_updated']}, "
+                f"leads created {stats['leads_created']}, updated {stats['leads_updated']}, "
+                f"sales created {stats['sales_created']}, errors {stats['errors']}. "
+                f"Lookback: {days} days."
+            )
+            SyncLog.objects.create(
+                script_name='sync_recent_customers',
+                status=log_status,
+                records_created=stats['customers_created'] + stats['leads_created'] + stats['sales_created'],
+                records_updated=stats['customers_updated'] + stats['leads_updated'],
+                errors=stats['errors'],
+                notes=notes_text,
+            )
+            self.stdout.write(self.style.SUCCESS('  SyncLog entry written.'))
 
         if dry_run:
             new_count = stats['scanned'] - stats['skipped_existing']
             self.stdout.write(self.style.WARNING(
                 f'  DRY RUN: {new_count:,} new records would be imported.'
             ))
+
+    @staticmethod
+    def _is_sale(details: dict) -> bool:
+        """Determine if a customer detail represents a sale (vs lead).
+
+        A customer is considered a sale if they have ANY sale-type activity,
+        regardless of status (open, completed, etc.).  Only explicitly
+        cancelled/lost sales are excluded.
+        """
+        for act in details.get('activities', []):
+            status = (act.get('status') or '').lower()
+            act_type = (act.get('type') or '').lower()
+            # Skip cancelled/lost sales
+            if status in SALE_EXCLUDE_STATUSES:
+                continue
+            if any(kw in act_type for kw in SALE_ACTIVITY_TYPES_KEYWORDS):
+                return True
+
+        return False
 
     def _save_customer(self, details: dict, summary: dict) -> str:
         """Save Anthill customer as a Customer record. Returns 'created', 'updated', or 'exists'."""
@@ -210,18 +262,6 @@ class Command(BaseCommand):
         existing = Customer.objects.filter(anthill_customer_id=anthill_id).first()
         if existing:
             return 'exists'
-
-        # Check if Customer exists via WorkGuruClientID
-        wg_id = cf.get('WorkGuruClientID', '')
-        if wg_id:
-            try:
-                existing = Customer.objects.get(workguru_id=int(wg_id))
-                existing.anthill_customer_id = anthill_id
-                existing.location = summary.get('location', '') or existing.location
-                existing.save(update_fields=['anthill_customer_id', 'location'])
-                return 'updated'
-            except (Customer.DoesNotExist, ValueError):
-                pass
 
         # Build address string
         address_parts = [addr.get('address1', ''), addr.get('city', ''), addr.get('postcode', '')]
@@ -274,21 +314,105 @@ class Command(BaseCommand):
         )
         return 'created'
 
-    def _update_existing(self, api: AnthillAPI, anthill_id: str, summary: dict):
-        """Update location for existing records if missing."""
+    @staticmethod
+    def _save_sales(details: dict, summary: dict, customer_obj=None) -> int:
+        """Save sale activities from a customer's detail record as AnthillSale objects.
+        Returns the number of sales created."""
+        from datetime import datetime, timezone as _tz
+
+        created_count = 0
+        anthill_customer_id = str(details.get('customer_id') or summary.get('id', ''))
+        customer_name = details.get('name', '') or summary.get('name', '')
         location = summary.get('location', '')
-        if not location:
-            return
 
-        # Update Customer
+        for act in details.get('activities', []):
+            act_id = act.get('id', '')
+            if not act_id:
+                continue
+
+            if AnthillSale.objects.filter(anthill_activity_id=act_id).exists():
+                continue
+
+            # Parse activity date
+            activity_date = None
+            created_str = act.get('created', '')
+            if created_str:
+                for fmt in ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+                    try:
+                        naive = datetime.strptime(created_str, fmt)
+                        activity_date = naive.replace(tzinfo=_tz.utc)
+                        break
+                    except ValueError:
+                        continue
+
+            local_customer = customer_obj
+            if not local_customer and anthill_customer_id:
+                local_customer = Customer.objects.filter(
+                    anthill_customer_id=anthill_customer_id
+                ).first()
+
+            AnthillSale.objects.create(
+                anthill_activity_id=act_id,
+                anthill_customer_id=anthill_customer_id,
+                customer=local_customer,
+                activity_type=act.get('type', ''),
+                status=act.get('status', ''),
+                category=act.get('category', ''),
+                customer_name=customer_name,
+                location=location,
+                activity_date=activity_date,
+            )
+            created_count += 1
+
+        return created_count
+
+    def _update_existing(self, api: AnthillAPI, anthill_id: str, summary: dict):
+        """Update existing records — location, and promote Lead → Customer if
+        the person now has a completed sale activity."""
+        location = summary.get('location', '')
+
+        # Update Customer location if missing
         customer = Customer.objects.filter(anthill_customer_id=anthill_id).first()
-        if customer and not customer.location:
-            customer.location = location
-            customer.save(update_fields=['location'])
+        if customer:
+            if location and not customer.location:
+                customer.location = location
+                customer.save(update_fields=['location'])
+            return  # already a customer — nothing more to do
+
+        # Check if this Lead should be promoted to Customer
+        lead = Lead.objects.filter(anthill_customer_id=anthill_id).first()
+        if not lead:
             return
 
-        # Update Lead
-        lead = Lead.objects.filter(anthill_customer_id=anthill_id).first()
-        if lead and not lead.location:
+        # Update lead location
+        if location and not lead.location:
             lead.location = location
             lead.save(update_fields=['location'])
+
+        # Re-fetch activities to check for sale promotion
+        try:
+            details = api.get_customer_details(int(anthill_id), include_activity=True)
+            time.sleep(0.05)
+        except Exception:
+            return
+
+        if not details:
+            return
+
+        if self._is_sale(details):
+            # Promote: create Customer and migrate the Lead
+            result_action = self._save_customer(details, summary)
+            if result_action == 'created':
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f'  ↑ Promoted Lead → Customer: {lead.name} (#{anthill_id})'
+                    )
+                )
+                new_customer = Customer.objects.filter(
+                    anthill_customer_id=anthill_id
+                ).first()
+                self._save_sales(details, summary, new_customer)
+                # Mark lead as converted
+                lead.status = 'converted'
+                lead.converted_to_customer = new_customer
+                lead.save(update_fields=['status', 'converted_to_customer'])

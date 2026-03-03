@@ -2072,15 +2072,20 @@ def _attach_boards_files_to_po(po, boards_po, user):
 def create_os_doors_purchase_order(request, order_id):
     """Create a local PurchaseOrder for OS Doors and add door items as products.
     Auto-generates the next PO number and links it to the order.
+    Supports both AJAX (returns JSON) and regular requests (returns redirect).
     """
     import re
     from django.contrib import messages
     from django.shortcuts import redirect
     from decimal import Decimal
 
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
     order = get_object_or_404(Order, id=order_id)
 
     if not order.os_doors.exists():
+        if is_ajax:
+            return JsonResponse({'success': False, 'error': 'This order has no OS door items. Add doors first.'})
         messages.error(request, 'This order has no OS door items. Add doors first.')
         return redirect('order_details', order_id=order_id)
 
@@ -2088,6 +2093,8 @@ def create_os_doors_purchase_order(request, order_id):
     if order.os_doors_po:
         existing = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
         if existing:
+            if is_ajax:
+                return JsonResponse({'success': False, 'error': f'OS Doors Purchase Order {existing.display_number} already exists.'})
             messages.info(request, f'OS Doors Purchase Order {existing.display_number} already exists.')
             return redirect('order_details', order_id=order_id)
 
@@ -2172,7 +2179,92 @@ def create_os_doors_purchase_order(request, order_id):
     order.os_doors.update(ordered=True, po_number=po_number)
 
     messages.success(request, f'OS Doors Purchase Order {po_number} created with {order.os_doors.count()} door item(s).')
+    if is_ajax:
+        return JsonResponse({'success': True, 'po_number': po_number, 'workguru_id': po.workguru_id})
     return redirect('order_details', order_id=order_id)
+
+
+@login_required
+def sync_os_doors_po(request, order_id):
+    """Save current cost/qty from the frontend, then re-sync the linked PurchaseOrder's
+    product lines.  Accepts optional ``door_values`` dict in the JSON body so that
+    unsaved form edits are applied before the PO is rebuilt.
+    Returns JSON.
+    """
+    import json
+    from decimal import Decimal, InvalidOperation
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    order = get_object_or_404(Order, id=order_id)
+
+    if not order.os_doors_po:
+        return JsonResponse({'success': False, 'error': 'No PO linked to this order.'})
+
+    po = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+    if not po:
+        return JsonResponse({'success': False, 'error': f'Purchase Order {order.os_doors_po} not found.'})
+
+    if not order.os_doors.exists():
+        return JsonResponse({'success': False, 'error': 'No OS door items on this order.'})
+
+    # Apply any unsaved cost/qty values sent from the frontend
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+
+    door_values = body.get('door_values', {})
+    if door_values:
+        for door_id_str, vals in door_values.items():
+            try:
+                door = order.os_doors.get(id=int(door_id_str))
+                if 'cost_price' in vals:
+                    try:
+                        door.cost_price = Decimal(str(vals['cost_price']))
+                    except (InvalidOperation, TypeError):
+                        pass
+                if 'quantity' in vals:
+                    try:
+                        door.quantity = int(vals['quantity'])
+                    except (ValueError, TypeError):
+                        pass
+                door.save(update_fields=['cost_price', 'quantity'])
+            except Exception:
+                continue
+
+    # Remove existing product lines and rebuild from current door data
+    po.products.all().delete()
+
+    total = Decimal('0')
+    for idx, door in enumerate(order.os_doors.all()):
+        unit_price = door.cost_price if door.cost_price else Decimal('0')
+        qty = Decimal(str(door.quantity))
+        line_total = unit_price * qty
+        total += line_total
+
+        PurchaseOrderProduct.objects.create(
+            purchase_order=po,
+            sku=door.door_style,
+            name=f'{door.door_style} - {door.style_colour} ({float(door.height):.0f}x{float(door.width):.0f}mm) {door.colour}',
+            description=door.item_description or '',
+            order_price=unit_price,
+            order_quantity=qty,
+            quantity=qty,
+            line_total=line_total,
+            sort_order=idx,
+        )
+
+    po.total = total
+    po.save(update_fields=['total'])
+
+    return JsonResponse({
+        'success': True,
+        'po_number': po.display_number,
+        'line_count': order.os_doors.count(),
+        'total': str(total),
+    })
 
 
 @login_required

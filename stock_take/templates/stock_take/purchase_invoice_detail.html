@@ -1,0 +1,581 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}{{ invoice.invoice_number }} – Purchase Invoice{% endblock %}
+{% block page_title %}{{ invoice.invoice_number }}{% endblock %}
+
+{% block nav_purchase_invoices_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<!-- Back link -->
+<div class="pinv-detail-back">
+    <a href="{% url 'purchase_invoices_list' %}" class="pinv-back-link">
+        <i class="bi bi-arrow-left"></i> Back to Purchase Invoices
+    </a>
+</div>
+
+<!-- Header card -->
+<div class="pinv-detail-header">
+    <div class="pinv-detail-title-row">
+        <div>
+            <h2 class="pinv-detail-number" id="detail-number">{{ invoice.invoice_number }}</h2>
+            <span class="pinv-status {{ invoice.status|lower }}" id="detail-status-badge">{{ invoice.status }}</span>
+            {% if invoice.payment_status == 'paid' %}
+            <span class="pinv-payment paid">Paid</span>
+            {% elif invoice.payment_status == 'partial' %}
+            <span class="pinv-payment partial">Partial</span>
+            {% else %}
+            <span class="pinv-payment unpaid">Unpaid</span>
+            {% endif %}
+        </div>
+        <div class="pinv-detail-actions">
+            <button class="pinv-btn-sm" onclick="toggleHeaderEdit()">
+                <i class="bi bi-pencil"></i> Edit
+            </button>
+        </div>
+    </div>
+
+    <!-- View mode meta -->
+    <div class="pinv-detail-meta" id="meta-view">
+        <div class="pinv-meta-group">
+            <div class="pinv-meta-item">
+                <span class="meta-label">Supplier</span>
+                <span class="meta-value" id="view-supplier">{{ invoice.supplier_name|default:"—" }}</span>
+            </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Invoice Date</span>
+                <span class="meta-value" id="view-date">{{ invoice.date|date:"d/m/Y"|default:"—" }}</span>
+            </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Due Date</span>
+                <span class="meta-value" id="view-due-date">{{ invoice.due_date|date:"d/m/Y"|default:"—" }}</span>
+            </div>
+        </div>
+        <div class="pinv-meta-group">
+            <div class="pinv-meta-item">
+                <span class="meta-label">Notes</span>
+                <span class="meta-value" id="view-notes">{{ invoice.notes|default:"—" }}</span>
+            </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Created</span>
+                <span class="meta-value">{{ invoice.created_at|date:"d/m/Y" }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit mode fields (hidden by default) -->
+    <div id="meta-edit" style="display:none;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:12px;">
+            <div>
+                <label class="pinv-label">Invoice Number</label>
+                <input type="text" id="edit-number" class="pinv-input" value="{{ invoice.invoice_number }}">
+            </div>
+            <div>
+                <label class="pinv-label">Supplier</label>
+                <input type="text" id="edit-supplier" class="pinv-input" value="{{ invoice.supplier_name|default:'' }}">
+            </div>
+            <div>
+                <label class="pinv-label">Invoice Date</label>
+                <input type="date" id="edit-date" class="pinv-input" value="{{ invoice.date|date:'Y-m-d'|default:'' }}">
+            </div>
+            <div>
+                <label class="pinv-label">Due Date</label>
+                <input type="date" id="edit-due-date" class="pinv-input" value="{{ invoice.due_date|date:'Y-m-d'|default:'' }}">
+            </div>
+            <div>
+                <label class="pinv-label">Status</label>
+                <select id="edit-status" class="pinv-input">
+                    <option value="Draft" {% if invoice.status == 'Draft' %}selected{% endif %}>Draft</option>
+                    <option value="Approved" {% if invoice.status == 'Approved' %}selected{% endif %}>Approved</option>
+                    <option value="Paid" {% if invoice.status == 'Paid' %}selected{% endif %}>Paid</option>
+                    <option value="Void" {% if invoice.status == 'Void' %}selected{% endif %}>Void</option>
+                </select>
+            </div>
+            <div>
+                <label class="pinv-label">Amount Paid (£)</label>
+                <input type="number" id="edit-amount-paid" class="pinv-input" step="0.01" min="0" value="{{ invoice.amount_paid|floatformat:2 }}">
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <label class="pinv-label">Notes</label>
+            <input type="text" id="edit-notes" class="pinv-input" value="{{ invoice.notes|default:'' }}" placeholder="Optional notes">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn-save" onclick="saveHeader()"><i class="bi bi-check-lg"></i> Save</button>
+            <button class="btn-cancel" onclick="toggleHeaderEdit()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Line Items ─────────────────────────────────────────────── -->
+<div class="pinv-detail-section">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3 class="pinv-section-title" style="margin:0;"><i class="bi bi-list-ul"></i> Line Items</h3>
+        <button class="pinv-btn-sm" onclick="addLine()">
+            <i class="bi bi-plus-lg"></i> Add Line
+        </button>
+    </div>
+
+    <div class="pinv-table-container" style="max-height:none;">
+        <table class="pinv-table" id="lines-table">
+            <thead>
+                <tr>
+                    <th style="min-width:200px;">Description</th>
+                    <th style="width:90px;text-align:right;">Qty</th>
+                    <th style="width:110px;text-align:right;">Rate (£)</th>
+                    <th style="width:110px;text-align:right;">Total</th>
+                    <th style="min-width:200px;">Allocated To Order</th>
+                    <th style="width:40px;"></th>
+                </tr>
+            </thead>
+            <tbody id="lines-tbody">
+                {% for line in lines %}
+                <tr id="line-row-{{ line.id }}" data-line-id="{{ line.id }}">
+                    <td>
+                        <input type="text" class="pinv-cell-input line-desc"
+                               value="{{ line.description }}"
+                               onblur="updateLine({{ line.id }})">
+                    </td>
+                    <td>
+                        <input type="number" class="pinv-cell-input line-qty"
+                               value="{{ line.quantity|floatformat:2 }}" step="0.01" min="0"
+                               style="text-align:right;"
+                               onblur="updateLine({{ line.id }})">
+                    </td>
+                    <td>
+                        <input type="number" class="pinv-cell-input line-rate"
+                               value="{{ line.rate|floatformat:2 }}" step="0.01" min="0"
+                               style="text-align:right;"
+                               onblur="updateLine({{ line.id }})">
+                    </td>
+                    <td class="number-cell line-total-cell" id="line-total-{{ line.id }}">
+                        £{{ line.line_total|floatformat:2 }}
+                    </td>
+                    <td>
+                        <div class="order-search-wrap">
+                            <input type="text"
+                                   class="pinv-cell-input order-search-input"
+                                   id="order-input-{{ line.id }}"
+                                   data-order-id="{{ line.order_id|default:'' }}"
+                                   value="{{ line.order.sale_number|default:'' }}"
+                                   placeholder="Search order…"
+                                   autocomplete="off"
+                                   oninput="searchOrders(this, {{ line.id }})"
+                                   onfocus="searchOrders(this, {{ line.id }})">
+                            <div class="order-search-dropdown" id="order-dd-{{ line.id }}"></div>
+                        </div>
+                        {% if line.order %}
+                        <a href="{% url 'order_details' line.order.id %}" class="pinv-order-link" id="order-link-{{ line.id }}" target="_blank">
+                            <i class="bi bi-box-arrow-up-right"></i> {{ line.order.sale_number }}
+                        </a>
+                        {% else %}
+                        <a href="#" class="pinv-order-link" id="order-link-{{ line.id }}" style="display:none;"></a>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:center;">
+                        <button class="pinv-btn-icon danger" onclick="deleteLine({{ line.id }})" title="Delete line">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+                <!-- New line row (hidden) -->
+                <tr id="new-line-row" style="display:none;">
+                    <td><input type="text" class="pinv-cell-input" id="new-desc" placeholder="Description"></td>
+                    <td><input type="number" class="pinv-cell-input" id="new-qty" value="1" step="0.01" min="0" style="text-align:right;"></td>
+                    <td><input type="number" class="pinv-cell-input" id="new-rate" value="0" step="0.01" min="0" style="text-align:right;"></td>
+                    <td class="number-cell">—</td>
+                    <td></td>
+                    <td style="text-align:center;">
+                        <button class="pinv-btn-icon success" onclick="saveNewLine()" title="Save line">
+                            <i class="bi bi-check-lg"></i>
+                        </button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Totals summary -->
+    <div class="pinv-detail-summary">
+        <div class="pinv-summary-row total">
+            <span class="summary-label">Total</span>
+            <span class="summary-value" id="invoice-total">£{{ invoice.total|floatformat:2 }}</span>
+        </div>
+        <div class="pinv-summary-row">
+            <span class="summary-label">Amount Paid</span>
+            <span class="summary-value paid" id="invoice-paid">£{{ invoice.amount_paid|floatformat:2 }}</span>
+        </div>
+        <div class="pinv-summary-row outstanding">
+            <span class="summary-label">Outstanding</span>
+            <span class="summary-value" id="invoice-outstanding">£{{ invoice.amount_outstanding|floatformat:2 }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Order Allocations Summary ──────────────────────────────── -->
+{% if order_allocations %}
+<div class="pinv-detail-section">
+    <h3 class="pinv-section-title"><i class="bi bi-diagram-3"></i> Order Allocations</h3>
+    <div class="pinv-alloc-grid">
+        {% for alloc in order_allocations %}
+        <div class="pinv-alloc-card">
+            <div class="pinv-alloc-header">
+                <a href="{% url 'order_details' alloc.order.id %}" class="pinv-alloc-order">{{ alloc.order.sale_number }}</a>
+                <span class="pinv-alloc-total">£{{ alloc.total|floatformat:2 }}</span>
+            </div>
+            <div class="pinv-alloc-lines">
+                {% for line in alloc.lines %}
+                <div class="pinv-alloc-line">
+                    <span>{{ line.description }}</span>
+                    <span>£{{ line.line_total|floatformat:2 }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Attachment ──────────────────────────────────────────────── -->
+<div class="pinv-detail-section">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3 class="pinv-section-title" style="margin:0;"><i class="bi bi-paperclip"></i> Attachment</h3>
+    </div>
+    <div id="attachment-area">
+        {% if invoice.attachment %}
+        <div class="pinv-attachment-card">
+            <i class="bi bi-file-earmark-text pinv-attachment-icon"></i>
+            <div class="pinv-attachment-info">
+                <a href="{{ invoice.attachment.url }}" target="_blank" class="pinv-attachment-name">
+                    {{ invoice.attachment.name|cut:"purchase_invoice_attachments/" }}
+                </a>
+                <span class="pinv-attachment-meta">Uploaded</span>
+            </div>
+            <button class="pinv-btn-icon danger" onclick="deleteAttachment()" title="Remove attachment">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+        {% else %}
+        <div id="no-attachment-msg" class="pinv-upload-zone" onclick="document.getElementById('attachment-file-input').click()">
+            <i class="bi bi-cloud-upload"></i>
+            <span>Click to upload an invoice document</span>
+            <input type="file" id="attachment-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadAttachment(this)">
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const INVOICE_ID = {{ invoice.id }};
+const CSRF = '{{ csrf_token }}';
+
+// ── Header edit ────────────────────────────────────────────────
+function toggleHeaderEdit() {
+    const view = document.getElementById('meta-view');
+    const edit = document.getElementById('meta-edit');
+    if (edit.style.display === 'none') {
+        edit.style.display = '';
+        view.style.display = 'none';
+    } else {
+        edit.style.display = 'none';
+        view.style.display = '';
+    }
+}
+
+function saveHeader() {
+    const payload = {
+        invoice_number: document.getElementById('edit-number').value,
+        supplier_name:  document.getElementById('edit-supplier').value,
+        date:           document.getElementById('edit-date').value,
+        due_date:       document.getElementById('edit-due-date').value,
+        status:         document.getElementById('edit-status').value,
+        amount_paid:    document.getElementById('edit-amount-paid').value,
+        notes:          document.getElementById('edit-notes').value,
+    };
+    fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('view-supplier').textContent = data.supplier_name || '—';
+            document.getElementById('view-date').textContent     = data.date         || '—';
+            document.getElementById('view-due-date').textContent = data.due_date     || '—';
+            document.getElementById('view-notes').textContent    = data.notes        || '—';
+            document.getElementById('detail-number').textContent = data.invoice_number;
+            document.getElementById('detail-status-badge').textContent  = data.status;
+            document.getElementById('detail-status-badge').className    = 'pinv-status ' + data.status.toLowerCase();
+            document.getElementById('invoice-paid').textContent = '£' + parseFloat(data.amount_paid).toFixed(2);
+            updatePaymentBadge(data.payment_status);
+            toggleHeaderEdit();
+        } else {
+            alert(data.error || 'Failed to save');
+        }
+    });
+}
+
+function updatePaymentBadge(status) {
+    document.querySelectorAll('.pinv-payment').forEach(el => el.remove());
+    const badge = document.createElement('span');
+    badge.className = 'pinv-payment ' + status;
+    const labels = { paid: 'Paid', partial: 'Partial', unpaid: 'Unpaid' };
+    badge.textContent = labels[status] || status;
+    document.querySelector('.pinv-detail-title-row > div').appendChild(badge);
+}
+
+// ── Add / save new line ────────────────────────────────────────
+function addLine() {
+    document.getElementById('new-line-row').style.display = '';
+    document.getElementById('new-desc').focus();
+}
+
+function saveNewLine() {
+    const desc = document.getElementById('new-desc').value.trim();
+    if (!desc) { alert('Description is required'); return; }
+    const qty  = parseFloat(document.getElementById('new-qty').value) || 1;
+    const rate = parseFloat(document.getElementById('new-rate').value) || 0;
+
+    fetch(`/purchase-invoices/${INVOICE_ID}/lines/add/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: desc, quantity: qty, rate: rate })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            insertLineRow(data.line);
+            refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
+            document.getElementById('new-line-row').style.display = 'none';
+            document.getElementById('new-desc').value = '';
+            document.getElementById('new-qty').value  = '1';
+            document.getElementById('new-rate').value = '0';
+        } else {
+            alert(data.error || 'Failed to add line');
+        }
+    });
+}
+
+function insertLineRow(line) {
+    const tbody = document.getElementById('lines-tbody');
+    const newRow = document.getElementById('new-line-row');
+    const tr = document.createElement('tr');
+    tr.id = 'line-row-' + line.id;
+    tr.dataset.lineId = line.id;
+    tr.innerHTML = buildLineHTML(line);
+    tbody.insertBefore(tr, newRow);
+}
+
+function buildLineHTML(line) {
+    return `
+        <td><input type="text" class="pinv-cell-input line-desc" value="${escHtml(line.description)}" onblur="updateLine(${line.id})"></td>
+        <td><input type="number" class="pinv-cell-input line-qty" value="${line.quantity}" step="0.01" min="0" style="text-align:right;" onblur="updateLine(${line.id})"></td>
+        <td><input type="number" class="pinv-cell-input line-rate" value="${line.rate}" step="0.01" min="0" style="text-align:right;" onblur="updateLine(${line.id})"></td>
+        <td class="number-cell line-total-cell" id="line-total-${line.id}">£${parseFloat(line.line_total).toFixed(2)}</td>
+        <td>
+            <div class="order-search-wrap">
+                <input type="text" class="pinv-cell-input order-search-input" id="order-input-${line.id}"
+                       data-order-id="" value="" placeholder="Search order…" autocomplete="off"
+                       oninput="searchOrders(this,${line.id})" onfocus="searchOrders(this,${line.id})">
+                <div class="order-search-dropdown" id="order-dd-${line.id}"></div>
+            </div>
+            <a href="#" class="pinv-order-link" id="order-link-${line.id}" style="display:none;"></a>
+        </td>
+        <td style="text-align:center;">
+            <button class="pinv-btn-icon danger" onclick="deleteLine(${line.id})" title="Delete line">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    `;
+}
+
+// ── Update line ────────────────────────────────────────────────
+function updateLine(lineId) {
+    const row = document.getElementById('line-row-' + lineId);
+    if (!row) return;
+    const qty  = parseFloat(row.querySelector('.line-qty').value)  || 0;
+    const rate = parseFloat(row.querySelector('.line-rate').value) || 0;
+    const desc = row.querySelector('.line-desc').value;
+    const ordInput = row.querySelector('.order-search-input');
+    const orderId = ordInput ? ordInput.dataset.orderId : null;
+
+    // Optimistic total update
+    row.querySelector('.line-total-cell').textContent = '£' + (qty * rate).toFixed(2);
+
+    fetch(`/purchase-invoices/${INVOICE_ID}/lines/${lineId}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: desc, quantity: qty, rate: rate, order_id: orderId || null })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('line-total-' + lineId).textContent = '£' + parseFloat(data.line.line_total).toFixed(2);
+            refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
+        }
+    });
+}
+
+// ── Delete line ────────────────────────────────────────────────
+function deleteLine(lineId) {
+    if (!confirm('Delete this line?')) return;
+    fetch(`/purchase-invoices/${INVOICE_ID}/lines/${lineId}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('line-row-' + lineId)?.remove();
+            refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
+        }
+    });
+}
+
+// ── Refresh totals ─────────────────────────────────────────────
+function refreshTotals(total, paid, outstanding) {
+    document.getElementById('invoice-total').textContent       = '£' + parseFloat(total).toFixed(2);
+    document.getElementById('invoice-paid').textContent        = '£' + parseFloat(paid).toFixed(2);
+    document.getElementById('invoice-outstanding').textContent = '£' + parseFloat(outstanding).toFixed(2);
+}
+
+// ── Order search ───────────────────────────────────────────────
+let searchDebounce = {};
+
+function searchOrders(input, lineId) {
+    clearTimeout(searchDebounce[lineId]);
+    const q = input.value.trim();
+    const dd = document.getElementById('order-dd-' + lineId);
+
+    if (!q || q.length < 2) {
+        dd.innerHTML = '';
+        dd.style.display = 'none';
+        if (!q) { clearOrderForLine(lineId); }
+        return;
+    }
+
+    searchDebounce[lineId] = setTimeout(() => {
+        fetch(`/api/order-search/?q=${encodeURIComponent(q)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            dd.innerHTML = '';
+            if (data.results && data.results.length) {
+                dd.style.display = 'block';
+                data.results.slice(0, 10).forEach(o => {
+                    const item = document.createElement('div');
+                    item.className = 'order-search-item';
+                    item.textContent = o.sale_number + (o.customer_name ? ' – ' + o.customer_name : '');
+                    item.onclick = () => selectOrder(lineId, o.id, o.sale_number, `/order/${o.id}/`);
+                    dd.appendChild(item);
+                });
+                // Option to clear
+                const clearItem = document.createElement('div');
+                clearItem.className = 'order-search-item order-clear-item';
+                clearItem.innerHTML = '<i class="bi bi-x-circle"></i> Clear allocation';
+                clearItem.onclick = () => clearOrderForLine(lineId);
+                dd.appendChild(clearItem);
+            } else {
+                dd.style.display = 'none';
+            }
+        });
+    }, 250);
+}
+
+function selectOrder(lineId, orderId, orderNumber, orderUrl) {
+    const input = document.getElementById('order-input-' + lineId);
+    input.value = orderNumber;
+    input.dataset.orderId = orderId;
+    const link = document.getElementById('order-link-' + lineId);
+    link.href = orderUrl || '#';
+    link.innerHTML = '<i class="bi bi-box-arrow-up-right"></i> ' + orderNumber;
+    link.style.display = 'inline-flex';
+    document.getElementById('order-dd-' + lineId).style.display = 'none';
+    updateLine(lineId);
+}
+
+function clearOrderForLine(lineId) {
+    const input = document.getElementById('order-input-' + lineId);
+    if (!input) return;
+    input.value = '';
+    input.dataset.orderId = '';
+    const link = document.getElementById('order-link-' + lineId);
+    if (link) link.style.display = 'none';
+    document.getElementById('order-dd-' + lineId).style.display = 'none';
+    updateLine(lineId);
+}
+
+// Close dropdowns on outside click
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.order-search-wrap')) {
+        document.querySelectorAll('.order-search-dropdown').forEach(dd => dd.style.display = 'none');
+    }
+});
+
+// ── Attachment ─────────────────────────────────────────────────
+function uploadAttachment(input) {
+    if (!input.files.length) return;
+    const fd = new FormData();
+    fd.append('attachment', input.files[0]);
+    fd.append('csrfmiddlewaretoken', CSRF);
+
+    fetch(`/purchase-invoices/${INVOICE_ID}/upload-attachment/`, {
+        method: 'POST',
+        body: fd
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('attachment-area').innerHTML = `
+                <div class="pinv-attachment-card">
+                    <i class="bi bi-file-earmark-text pinv-attachment-icon"></i>
+                    <div class="pinv-attachment-info">
+                        <a href="${data.url}" target="_blank" class="pinv-attachment-name">${data.filename}</a>
+                        <span class="pinv-attachment-meta">Uploaded</span>
+                    </div>
+                    <button class="pinv-btn-icon danger" onclick="deleteAttachment()" title="Remove attachment">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>`;
+        } else {
+            alert(data.error || 'Upload failed');
+        }
+    });
+}
+
+function deleteAttachment() {
+    if (!confirm('Remove attachment?')) return;
+    fetch(`/purchase-invoices/${INVOICE_ID}/delete-attachment/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('attachment-area').innerHTML = `
+                <div class="pinv-upload-zone" onclick="document.getElementById('att-input').click()">
+                    <i class="bi bi-cloud-upload"></i>
+                    <span>Click to upload an invoice document</span>
+                    <input type="file" id="att-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadAttachment(this)">
+                </div>`;
+        }
+    });
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,469 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Purchase Invoices{% endblock %}
+{% block page_title %}Purchase Invoices{% endblock %}
+
+{% block nav_purchase_invoices_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<!-- Action Bar -->
+<div class="pinv-action-bar">
+    <div class="pinv-action-info">
+        <span class="pinv-action-label">Inbound invoices from suppliers &amp; fitters</span>
+    </div>
+    <div class="pinv-action-buttons">
+        <button class="pinv-btn" onclick="openCreateModal()">
+            <i class="bi bi-plus-lg"></i>
+            <span>Add Invoice</span>
+        </button>
+    </div>
+</div>
+
+<!-- Stats Bar -->
+<div class="pinv-stats-bar">
+    <div class="pinv-stat-card">
+        <span class="stat-label">Total Invoices</span>
+        <span class="stat-value primary">{{ total_invoices|intcomma }}</span>
+    </div>
+    <div class="pinv-stat-card">
+        <span class="stat-label">Total Value</span>
+        <span class="stat-value">£{{ total_value|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="pinv-stat-card">
+        <span class="stat-label">Outstanding</span>
+        <span class="stat-value {% if total_outstanding > 0 %}danger{% else %}success{% endif %}">£{{ total_outstanding|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="pinv-stat-card">
+        <span class="stat-label">Paid</span>
+        <span class="stat-value success">£{{ total_paid|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="pinv-stat-card">
+        <span class="stat-label">Unpaid</span>
+        <span class="stat-value {% if unpaid_count > 0 %}warning{% endif %}">{{ unpaid_count }}</span>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="pinv-filter-bar">
+    <div class="pinv-search-box">
+        <form method="get" action="">
+            {% if status_filter != 'all' %}
+            <input type="hidden" name="status" value="{{ status_filter }}">
+            {% endif %}
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" value="{{ search_query }}" placeholder="Search by invoice number or supplier…" autocomplete="off">
+        </form>
+    </div>
+</div>
+
+<!-- Status Tabs -->
+<div class="pinv-tabs">
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=all"
+       class="pinv-tab {% if status_filter == 'all' %}active{% endif %}">
+        All ({{ total_invoices }})
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=unpaid"
+       class="pinv-tab {% if status_filter == 'unpaid' %}active{% endif %}">
+        Unpaid ({{ unpaid_count }})
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=draft"
+       class="pinv-tab {% if status_filter == 'draft' %}active{% endif %}">
+        Draft
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=approved"
+       class="pinv-tab {% if status_filter == 'approved' %}active{% endif %}">
+        Approved
+    </a>
+    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=paid"
+       class="pinv-tab {% if status_filter == 'paid' %}active{% endif %}">
+        Paid
+    </a>
+</div>
+
+<!-- Table -->
+<div class="pinv-table-container">
+    {% if invoices %}
+    <table class="pinv-table" id="purchase-invoices-table">
+        <thead>
+            <tr>
+                <th>Invoice #</th>
+                <th>Supplier</th>
+                <th>Date</th>
+                <th>Due Date</th>
+                <th>Status</th>
+                <th style="text-align:right;">Total</th>
+                <th style="text-align:right;">Outstanding</th>
+                <th>Payment</th>
+                <th style="width:30px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr onclick="window.location='{% url 'purchase_invoice_detail' invoice.id %}'" style="cursor:pointer;">
+                <td>
+                    <a href="{% url 'purchase_invoice_detail' invoice.id %}" class="pinv-number">{{ invoice.invoice_number }}</a>
+                </td>
+                <td>
+                    <span class="pinv-supplier" title="{{ invoice.supplier_name }}">{{ invoice.supplier_name|default:"—" }}</span>
+                </td>
+                <td>{{ invoice.date|date:"d M Y"|default:"—" }}</td>
+                <td>{{ invoice.due_date|date:"d M Y"|default:"—" }}</td>
+                <td>
+                    <span class="pinv-status {{ invoice.status|lower }}">{{ invoice.status }}</span>
+                </td>
+                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
+                <td class="number-cell">
+                    {% if invoice.amount_outstanding > 0 %}
+                    <span style="color:#dc3545;">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
+                    {% else %}
+                    <span style="color:#28a745;">£0.00</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if invoice.payment_status == 'paid' %}
+                    <span class="pinv-payment paid">Paid</span>
+                    {% elif invoice.payment_status == 'partial' %}
+                    <span class="pinv-payment partial">Partial</span>
+                    {% else %}
+                    <span class="pinv-payment unpaid">Unpaid</span>
+                    {% endif %}
+                </td>
+                <td style="text-align:center;">
+                    {% if invoice.attachment %}
+                    <i class="bi bi-paperclip" style="color:var(--primary-color);" title="Has attachment"></i>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="pinv-empty">
+        <i class="bi bi-receipt"></i>
+        <p>No purchase invoices yet — click <strong>Add Invoice</strong> to get started.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Supplier datalist (populated from DB) -->
+<datalist id="supplier-list">
+    {% for s in suppliers %}<option value="{{ s }}">{% endfor %}
+</datalist>
+
+<!-- Create Invoice Modal -->
+<div class="pinv-modal-overlay" id="create-invoice-modal" onclick="closeCreateModal(event)">
+    <div class="pinv-modal-box" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 style="margin:0;font-size:1rem;"><i class="bi bi-plus-lg"></i> Add Purchase Invoice</h3>
+            <button class="modal-close" onclick="closeCreateModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;">&times;</button>
+        </div>
+        <div class="pinv-modal-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                    <label class="pinv-label">Invoice Number *</label>
+                    <input type="text" id="new-pinv-number" placeholder="e.g. INVOICE-047"
+                           class="pinv-input">
+                </div>
+                <div>
+                    <label class="pinv-label">Supplier / From</label>
+                    <input type="text" id="new-pinv-supplier" placeholder="Type or select supplier"
+                           class="pinv-input" list="supplier-list" autocomplete="off">
+                </div>
+                <div>
+                    <label class="pinv-label">Invoice Date</label>
+                    <input type="date" id="new-pinv-date" class="pinv-input">
+                </div>
+                <div>
+                    <label class="pinv-label">Due Date</label>
+                    <input type="date" id="new-pinv-due-date" class="pinv-input">
+                </div>
+                <div>
+                    <label class="pinv-label">Status</label>
+                    <select id="new-pinv-status" class="pinv-input">
+                        <option value="Draft">Draft</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Paid">Paid</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="pinv-label">Notes</label>
+                <input type="text" id="new-pinv-notes" placeholder="Optional notes" class="pinv-input">
+            </div>
+            <hr style="margin:4px 0;border-color:var(--border-color);">
+            <!-- Attachment -->
+            <div>
+                <label class="pinv-label">Invoice PDF / Attachment</label>
+                <div id="modal-attachment-zone" class="pinv-upload-zone" style="padding:10px;cursor:pointer;"
+                     onclick="document.getElementById('modal-attachment-input').click()"
+                     ondragover="event.preventDefault(); this.classList.add('drag-over');"
+                     ondragleave="this.classList.remove('drag-over');"
+                     ondrop="event.preventDefault(); this.classList.remove('drag-over'); handleDroppedFile(event);">
+                    <i class="bi bi-cloud-upload" id="modal-attachment-icon" style="font-size:1rem;"></i>
+                    <span id="modal-attachment-name" style="font-size:0.82rem;">Click or drag &amp; drop to attach a file</span>
+                    <input type="file" id="modal-attachment-input" style="display:none;"
+                           accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onchange="handleModalAttachment(this)">
+                </div>
+            </div>
+            <hr style="margin:4px 0;border-color:var(--border-color);">
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <label class="pinv-label" style="margin:0;">Line Items</label>
+                    <button type="button" class="pinv-btn-sm" onclick="addModalLine()">
+                        <i class="bi bi-plus-lg"></i> Add Line
+                    </button>
+                </div>
+                <div id="modal-lines"></div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;">
+                <span style="font-size:0.82rem;color:var(--text-secondary);">Total:</span>
+                <span id="modal-total" style="font-size:0.9rem;font-weight:600;">£0.00</span>
+            </div>
+        </div>
+        <div class="pinv-modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeCreateModal()">Cancel</button>
+            <button type="button" class="btn-save" onclick="submitCreateInvoice()">
+                <i class="bi bi-check-lg"></i> Create Invoice
+            </button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Create modal ───────────────────────────────────────────────
+let modalLineCount = 0;
+
+function openCreateModal() {
+    modalLineCount = 0;
+    document.getElementById('modal-lines').innerHTML = '';
+    document.getElementById('modal-total').textContent = '£0.00';
+    document.getElementById('new-pinv-number').value = '';
+    document.getElementById('new-pinv-supplier').value = '';
+    document.getElementById('new-pinv-date').value = '';
+    document.getElementById('new-pinv-due-date').value = '';
+    document.getElementById('new-pinv-status').value = 'Draft';
+    document.getElementById('new-pinv-notes').value = '';
+    // Reset attachment
+    const attInput = document.getElementById('modal-attachment-input');
+    if (attInput) attInput.value = '';
+    document.getElementById('modal-attachment-name').textContent = 'Click or drag & drop to attach a file';
+    document.getElementById('modal-attachment-icon').className = 'bi bi-cloud-upload';
+    addModalLine();
+    document.getElementById('create-invoice-modal').classList.add('open');
+}
+
+function closeCreateModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('create-invoice-modal').classList.remove('open');
+}
+
+function addModalLine() {
+    const idx = modalLineCount++;
+    const container = document.getElementById('modal-lines');
+    const row = document.createElement('div');
+    row.className = 'pinv-line-row';
+    row.dataset.lineIdx = idx;
+    row.innerHTML = `
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+            <input type="text" placeholder="Description" class="pinv-input pinv-line-desc" style="flex:1;">
+            <button type="button" class="pinv-btn-icon" onclick="this.closest('.pinv-line-row').remove(); recalcModalTotal();" title="Remove line">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;">Order:</span>
+            <div style="position:relative;flex:1;">
+                <input type="text" class="pinv-input pinv-line-order-input"
+                       style="padding:4px 8px;font-size:0.82rem;"
+                       placeholder="Search order…" autocomplete="off" data-order-id=""
+                       oninput="modalSearchOrders(this,${idx})"
+                       onfocus="modalSearchOrders(this,${idx})">
+                <div class="order-search-dropdown modal-order-dd" id="modal-order-dd-${idx}"></div>
+            </div>
+            <a class="pinv-order-link" id="modal-order-link-${idx}" style="display:none;font-size:0.78rem;" target="_blank"></a>
+            <span style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;margin-left:auto;">Amount:</span>
+            <input type="number" placeholder="£" step="0.01" min="0" value="0" class="pinv-input pinv-line-rate" style="width:90px;padding:4px 8px;font-size:0.82rem;" oninput="recalcModalTotal()">
+        </div>
+    `;
+    container.appendChild(row);
+}
+
+function recalcModalTotal() {
+    let total = 0;
+    document.querySelectorAll('.pinv-line-row').forEach(row => {
+        const rate = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        total += rate;
+    });
+    document.getElementById('modal-total').textContent = '£' + total.toFixed(2);
+}
+
+function submitCreateInvoice() {
+    const invoiceNumber = document.getElementById('new-pinv-number').value.trim();
+    if (!invoiceNumber) { alert('Invoice number is required'); return; }
+
+    const lineItems = [];
+    document.querySelectorAll('.pinv-line-row').forEach(row => {
+        const desc    = row.querySelector('.pinv-line-desc').value.trim();
+        const rate    = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        const ordInp  = row.querySelector('.pinv-line-order-input');
+        const orderId = ordInp ? (ordInp.dataset.orderId || null) : null;
+        if (desc) lineItems.push({ description: desc, quantity: 1, rate: rate, order_id: orderId || null });
+    });
+
+    // Use FormData to support file upload
+    const fd = new FormData();
+    fd.append('invoice_number', invoiceNumber);
+    fd.append('supplier_name', document.getElementById('new-pinv-supplier').value.trim());
+    fd.append('date', document.getElementById('new-pinv-date').value);
+    fd.append('due_date', document.getElementById('new-pinv-due-date').value);
+    fd.append('status', document.getElementById('new-pinv-status').value);
+    fd.append('notes', document.getElementById('new-pinv-notes').value.trim());
+
+    lineItems.forEach((li, i) => {
+        fd.append(`line_desc_${i}`, li.description);
+        fd.append(`line_qty_${i}`, '1');
+        fd.append(`line_rate_${i}`, li.rate);
+        fd.append(`line_order_${i}`, li.order_id || '');
+    });
+
+    const fileInput = document.getElementById('modal-attachment-input');
+    if (fileInput && fileInput.files.length) {
+        fd.append('attachment', fileInput.files[0]);
+    }
+
+    fetch('{% url "create_purchase_invoice" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+        body: fd
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.invoice_url;
+        } else {
+            alert(data.error || 'Failed to create invoice');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+// ── Modal attachment handler ──────────────────────────────────────
+function handleModalAttachment(input) {
+    const nameSpan = document.getElementById('modal-attachment-name');
+    const icon = document.getElementById('modal-attachment-icon');
+    if (input.files.length) {
+        nameSpan.textContent = input.files[0].name;
+        icon.className = 'bi bi-file-earmark-check';
+    } else {
+        nameSpan.textContent = 'Click or drag & drop to attach a file';
+        icon.className = 'bi bi-cloud-upload';
+    }
+}
+
+function handleDroppedFile(e) {
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+    const input = document.getElementById('modal-attachment-input');
+    // DataTransfer → file input
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    handleModalAttachment(input);
+}
+
+// ── Modal order search ─────────────────────────────────────────
+let modalOrderDebounce = {};
+
+function modalSearchOrders(input, idx) {
+    clearTimeout(modalOrderDebounce[idx]);
+    const q  = input.value.trim();
+    const dd = document.getElementById('modal-order-dd-' + idx);
+    if (!q || q.length < 2) {
+        if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+        if (!q) {
+            input.dataset.orderId = '';
+            const lnk = document.getElementById('modal-order-link-' + idx);
+            if (lnk) lnk.style.display = 'none';
+        }
+        return;
+    }
+    modalOrderDebounce[idx] = setTimeout(() => {
+        fetch(`/api/order-search/?q=${encodeURIComponent(q)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin'
+        })
+        .then(r => r.json())
+        .then(data => {
+            dd.innerHTML = '';
+            if (data.results && data.results.length) {
+                dd.style.display = 'block';
+                data.results.slice(0, 8).forEach(o => {
+                    const item = document.createElement('div');
+                    item.className = 'order-search-item';
+                    item.textContent = o.sale_number + (o.customer_name ? ' – ' + o.customer_name : '');
+                    item.onclick = () => selectModalOrder(input, idx, o.id, o.sale_number);
+                    dd.appendChild(item);
+                });
+                const clr = document.createElement('div');
+                clr.className = 'order-search-item order-clear-item';
+                clr.innerHTML = '<i class="bi bi-x-circle"></i> Clear';
+                clr.onclick = () => {
+                    input.value = ''; input.dataset.orderId = '';
+                    dd.innerHTML = ''; dd.style.display = 'none';
+                    const lnk = document.getElementById('modal-order-link-' + idx);
+                    if (lnk) lnk.style.display = 'none';
+                };
+                dd.appendChild(clr);
+            } else {
+                dd.style.display = 'none';
+            }
+        });
+    }, 250);
+}
+
+function selectModalOrder(input, idx, orderId, orderNumber) {
+    input.value = orderNumber;
+    input.dataset.orderId = orderId;
+    const dd = document.getElementById('modal-order-dd-' + idx);
+    if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+    const lnk = document.getElementById('modal-order-link-' + idx);
+    if (lnk) {
+        lnk.href = `/order/${orderId}/`;
+        lnk.innerHTML = '<i class="bi bi-box-arrow-up-right"></i> ' + orderNumber;
+        lnk.style.display = 'inline-flex';
+    }
+}
+
+// Close modal order dropdowns when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.pinv-line-order-input') && !e.target.closest('.order-search-dropdown')) {
+        document.querySelectorAll('#modal-lines .order-search-dropdown').forEach(dd => {
+            dd.innerHTML = ''; dd.style.display = 'none';
+        });
+    }
+});
+
+// ── Client-side search ─────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.querySelector('.pinv-search-box input');
+    const table = document.getElementById('purchase-invoices-table');
+    if (searchInput && table) {
+        searchInput.addEventListener('input', function() {
+            const filter = this.value.toLowerCase();
+            table.querySelectorAll('tbody tr').forEach(row => {
+                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

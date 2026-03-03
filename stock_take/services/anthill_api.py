@@ -240,7 +240,19 @@ class AnthillAPI:
             for field in ['Address1', 'Address2', 'City', 'County', 'Country', 'Postcode']:
                 address[field.lower()] = self._get_text(address_el, field)
 
-        return {
+        # Parse activities (only present when include_activity=True)
+        activities = []
+        if include_activity:
+            for act in result.findall(f'.//{{{NAMESPACE}}}RecentActivityModel'):
+                activities.append({
+                    'category': self._get_text(act, 'Category'),
+                    'id': self._get_text(act, 'Id'),
+                    'type': self._get_text(act, 'Type'),
+                    'created': self._get_text(act, 'Created'),
+                    'status': self._get_text(act, 'Status'),
+                })
+
+        data = {
             'customer_id': int(self._get_text(result, 'CustomerId') or customer_id),
             'name': self._get_text(result, 'Name'),
             'location_id': location_id,
@@ -248,6 +260,9 @@ class AnthillAPI:
             'custom_fields': custom_fields,
             'address': address,
         }
+        if include_activity:
+            data['activities'] = activities
+        return data
 
     # ------------------------------------------------------------------
     # Get Sales Modified Since (for finding customers with sales)

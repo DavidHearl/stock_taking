@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Anthill Remedials{% endblock %}
+
+{% block nav_anthill_remedials_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
+{% endblock %}
+
+{% block page_title %}Anthill Remedials{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <!-- Search & Filters -->
+    <div class="customers-controls">
+        <div class="customers-search">
+            <div class="search-input-wrapper">
+                <i class="bi bi-search"></i>
+                <input type="text" id="remedial-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type or assigned to..." autocomplete="off">
+            </div>
+        </div>
+        <div class="customers-filter-tabs">
+            <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">
+                All ({{ count_all }})
+            </a>
+            <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'open' %}active{% endif %}">
+                Open ({{ count_open }})
+            </a>
+            <a href="?status=won{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'won' %}active{% endif %}">
+                Won ({{ count_won }})
+            </a>
+            <a href="?status=dead{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'dead' %}active{% endif %}">
+                Dead ({{ count_dead }})
+            </a>
+        </div>
+        {% if location_filter %}
+        <div class="customers-location-badge">
+            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if remedials %}
+    <div class="customers-result-bar">
+        <span class="result-count">{{ filtered_count }} remedial{{ filtered_count|pluralize }}</span>
+    </div>
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th>Activity ID</th>
+                    <th>Customer</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Date</th>
+                    <th>Location</th>
+                    <th>Order</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for remedial in remedials %}
+                <tr>
+                    <td>
+                        <a href="{% url 'sale_detail' remedial.pk %}" class="customer-name-link">
+                            {{ remedial.anthill_activity_id }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if remedial.customer %}
+                        <a href="{% url 'customer_detail' remedial.customer.pk %}" class="customer-name-link">
+                            {{ remedial.customer.name|default:remedial.customer_name }}
+                        </a>
+                        {% else %}
+                        {{ remedial.customer_name|default:"-" }}
+                        {% endif %}
+                    </td>
+                    <td>{{ remedial.activity_type|default:"-" }}</td>
+                    <td>
+                        <span class="customer-active-badge {% if remedial.status == 'won' %}active{% elif remedial.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                            {{ remedial.status|default:"-" }}
+                        </span>
+                    </td>
+                    <td>{{ remedial.assigned_to_name|default:"-" }}</td>
+                    <td>{{ remedial.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                    <td>{{ remedial.location|default:"-" }}</td>
+                    <td>
+                        {% if remedial.order %}
+                        <a href="{% url 'order_details' remedial.order.id %}" class="customer-order-badge">
+                            {{ remedial.order.sale_number }}
+                        </a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="customers-empty-state">
+        <i class="bi bi-tools"></i>
+        <p>No remedials found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="customers-pagination">
+        <div class="pagination-info">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} remedials
+        </div>
+        <div class="pagination-controls">
+            {% if page_obj.has_previous %}
+            <a href="?page=1&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                    <span class="page-ellipsis">&hellip;</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const searchInput = document.getElementById('remedial-search');
+let searchTimeout;
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('status')) params.set('status', '{{ status_filter }}');
+            window.location.href = '?' + params.toString();
+        }, 500);
+    });
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('status')) params.set('status', '{{ status_filter }}');
+            window.location.href = '?' + params.toString();
+        }
+    });
+    searchInput.focus();
+}
+</script>
+{% endblock %}

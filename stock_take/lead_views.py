@@ -33,14 +33,25 @@ def leads_list(request):
 
     # Apply search
     if search_query:
-        leads = leads.filter(
-            Q(name__icontains=search_query) |
-            Q(email__icontains=search_query) |
-            Q(phone__icontains=search_query) |
-            Q(city__icontains=search_query) |
-            Q(postcode__icontains=search_query) |
-            Q(source__icontains=search_query)
-        )
+        # Split into individual terms so "Alison McCluskey" matches
+        # name containing both terms
+        terms = search_query.split()
+        per_term_qs = []
+        for term in terms:
+            per_term_qs.append(
+                Q(name__icontains=term) |
+                Q(email__icontains=term) |
+                Q(phone__icontains=term) |
+                Q(city__icontains=term) |
+                Q(postcode__icontains=term) |
+                Q(source__icontains=term) |
+                Q(anthill_customer_id__icontains=term)
+            )
+        # All terms must match (AND), but each term can match any field
+        search_q = per_term_qs[0]
+        for extra in per_term_qs[1:]:
+            search_q &= extra
+        leads = leads.filter(search_q)
 
     total_count = Lead.objects.count()
     active_count = Lead.objects.exclude(status__in=['converted', 'lost']).count()

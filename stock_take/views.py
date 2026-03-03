@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem
 
 import csv
 import io
@@ -335,8 +335,8 @@ def search_orders(request):
 
 @login_required
 def global_search(request):
-    """Global search across orders, products, POs, customers"""
-    from .models import PurchaseOrder, Customer, Supplier
+    """Global search across orders, products, POs, customers, leads"""
+    from .models import PurchaseOrder, Customer, Supplier, Lead
     
     query = request.GET.get('q', '').strip()
     results = {
@@ -345,6 +345,7 @@ def global_search(request):
         'purchase_orders': [],
         'customers': [],
         'suppliers': [],
+        'leads': [],
     }
     
     if query:
@@ -378,6 +379,14 @@ def global_search(request):
         results['suppliers'] = Supplier.objects.filter(
             Q(name__icontains=query)
         ).order_by('name')[:5]
+        
+        # Search leads
+        results['leads'] = Lead.objects.filter(
+            Q(name__icontains=query) |
+            Q(email__icontains=query) |
+            Q(phone__icontains=query) |
+            Q(anthill_customer_id__icontains=query)
+        ).order_by('-created_at')[:5]
     
     return render(request, 'stock_take/global_search_results.html', {
         'query': query,
@@ -692,6 +701,10 @@ def shortages(request):
             for accessory in order.accessories.all():
                 if 'RAU' not in accessory.sku.upper():
                     continue
+                # Skip already-allocated accessories — stock was already deducted,
+                # counting them again inflates the prediction model.
+                if accessory.is_allocated:
+                    continue
                 key = accessory.sku
                 all_time_usage[key]['total_used'] += float(accessory.quantity)
                 all_time_usage[key]['order_count'] += 1
@@ -700,10 +713,14 @@ def shortages(request):
                         all_time_usage[key]['first_order'] = order.order_date
                     if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
                         all_time_usage[key]['last_order'] = order.order_date
-        
+
+        prediction_months = int(request.GET.get('months', 4))
+        if prediction_months not in [1, 2, 3, 4, 6]:
+            prediction_months = 4
+
         historical_usage = defaultdict(lambda: {
             'name': '', 'sku': '', 'total_used': 0, 'monthly_average': 0,
-            'all_time_monthly_avg': 0, 'weighted_monthly_avg': 0, 'predicted_4month': 0,
+            'all_time_monthly_avg': 0, 'weighted_monthly_avg': 0, 'predicted_need': 0,
             'current_stock': 0, 'predicted_shortage': 0, 'order_count': 0, 'cost': Decimal('0.00'),
             'stock_item_id': None
         })
@@ -711,6 +728,9 @@ def shortages(request):
         for order in recent_orders:
             for accessory in order.accessories.all():
                 if 'RAU' not in accessory.sku.upper():
+                    continue
+                # Skip already-allocated accessories (stock already deducted)
+                if accessory.is_allocated:
                     continue
                 key = accessory.sku
                 if not historical_usage[key]['name']:
@@ -734,12 +754,12 @@ def shortages(request):
             else:
                 data['all_time_monthly_avg'] = recent_monthly_avg
                 data['weighted_monthly_avg'] = recent_monthly_avg
-            data['predicted_4month'] = data['weighted_monthly_avg'] * 4 * 1.2
+            data['predicted_need'] = data['weighted_monthly_avg'] * prediction_months * 1.2
             if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
                 target_stock = 800
-                data['predicted_shortage'] = max(0, max(data['predicted_4month'], target_stock) - data['current_stock'])
+                data['predicted_shortage'] = max(0, max(data['predicted_need'], target_stock) - data['current_stock'])
             else:
-                data['predicted_shortage'] = max(0, data['predicted_4month'] - data['current_stock'])
+                data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'])
             data['line_cost'] = Decimal(str(data['predicted_shortage'])) * data['cost']
         
         upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
@@ -972,19 +992,21 @@ def shortages(request):
         all_rau_requirements = []
         for data in upcoming_requirements.values():
             if data['required_qty'] > 0:
+                incoming = data.get('incoming_qty', 0)
                 all_rau_requirements.append({
                     'sku': data['sku'],
                     'name': data['name'],
                     'current_stock': data['current_stock'],
-                    'incoming_qty': data.get('incoming_qty', 0),
+                    'incoming_qty': incoming,
                     'required_qty': data['required_qty'],
                     'shortage': data['shortage'],
+                    'surplus': max(0, data['current_stock'] + incoming - data['required_qty']),
                     'order_count': len(data['orders']),
                     'orders': sorted(data['orders'], key=lambda o: (o['fit_date'] or '9999-99-99')),
                     'stock_item_id': data.get('stock_item_id'),
                     'cost': data['cost'],
                 })
-        all_rau_requirements.sort(key=lambda x: x['required_qty'], reverse=True)
+        all_rau_requirements.sort(key=lambda x: x['surplus'] - x['shortage'], reverse=True)
 
         # Build actual shortages list - items we are short of RIGHT NOW for orders in the system
         actual_shortages = []
@@ -1007,6 +1029,7 @@ def shortages(request):
         
         context = {
             'active_tab': 'raumplus',
+            'prediction_months': prediction_months,
             'all_rau_requirements': all_rau_requirements,
             'actual_shortages': actual_shortages,
             'upcoming_shortages': upcoming_list,
@@ -1133,6 +1156,10 @@ def shortages(request):
             for accessory in order.accessories.all():
                 if 'RAU' in accessory.sku.upper():
                     continue
+                # Skip already-allocated accessories — their stock was already deducted,
+                # so counting them as usage would inflate the prediction model.
+                if accessory.is_allocated:
+                    continue
                 key = accessory.sku
                 all_time_usage[key]['total_used'] += float(accessory.quantity)
                 all_time_usage[key]['order_count'] += 1
@@ -1142,14 +1169,21 @@ def shortages(request):
                     if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
                         all_time_usage[key]['last_order'] = order.order_date
         
+        prediction_months = int(request.GET.get('months', 2))
+        if prediction_months not in [1, 2, 3, 4, 6]:
+            prediction_months = 2
+
         historical_usage = defaultdict(lambda: {
             'name': '', 'sku': '', 'total_used': 0, 'monthly_average': 0,
-            'all_time_monthly_avg': 0, 'weighted_monthly_avg': 0, 'predicted_2month': 0,
+            'all_time_monthly_avg': 0, 'weighted_monthly_avg': 0, 'predicted_need': 0,
             'current_stock': 0, 'predicted_shortage': 0, 'order_count': 0, 'is_stock': True, 'stock_item_id': None
         })
         for order in recent_orders:
             for accessory in order.accessories.all():
                 if 'RAU' in accessory.sku.upper():
+                    continue
+                # Skip already-allocated accessories (stock already deducted)
+                if accessory.is_allocated:
                     continue
                 key = accessory.sku
                 if not historical_usage[key]['name']:
@@ -1173,8 +1207,8 @@ def shortages(request):
             else:
                 data['all_time_monthly_avg'] = recent_monthly_avg
                 data['weighted_monthly_avg'] = recent_monthly_avg
-            data['predicted_2month'] = data['weighted_monthly_avg'] * 2
-            data['predicted_shortage'] = max(0, data['predicted_2month'] - data['current_stock'])
+            data['predicted_need'] = data['weighted_monthly_avg'] * prediction_months
+            data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'])
         
         upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
         upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
@@ -1222,6 +1256,7 @@ def shortages(request):
         
         context = {
             'active_tab': 'stock',
+            'prediction_months': prediction_months,
             'actual_shortages': actual_shortages,
             'predicted_shortages': predicted_list,
             'upcoming_orders_count': upcoming_orders.count(),
@@ -1231,6 +1266,126 @@ def shortages(request):
         }
     
     return render(request, 'stock_take/shortages.html', context)
+
+
+@login_required
+def rau_prediction_compare(request):
+    """Return JSON of predicted RAU shortages for a given month window — used by the comparison modal."""
+    from datetime import timedelta
+    from collections import defaultdict
+    import math
+
+    months = int(request.GET.get('months', 4))
+    if months not in [1, 2, 3, 4, 6]:
+        months = 4
+
+    today = timezone.now().date()
+    MIN_STYLE_BUFFER = 8
+    MIN_LINE_COST = Decimal('100.00')
+
+    def _round_qty(quantity, min_order_qty):
+        if not min_order_qty or min_order_qty <= 0:
+            return quantity
+        if min_order_qty == 1:
+            return math.ceil(quantity / 10) * 10
+        return math.ceil(quantity / min_order_qty) * min_order_qty
+
+    def _style_prefix(sku, name=''):
+        text = (sku + ' ' + name).upper()
+        for code in ['S150', 'S750', 'S751', 'S753']:
+            if code in text:
+                return code
+        return None
+
+    three_months_ago = today - timedelta(days=90)
+    recent_orders = Order.objects.filter(
+        order_date__gte=three_months_ago, order_date__lte=today
+    ).prefetch_related('accessories__stock_item')
+    all_time_orders = Order.objects.prefetch_related('accessories__stock_item').all()
+
+    all_time_usage = defaultdict(lambda: {'total_used': 0, 'first_order': None, 'last_order': None})
+    for order in all_time_orders:
+        for accessory in order.accessories.all():
+            if 'RAU' not in accessory.sku.upper():
+                continue
+            # Skip already-allocated accessories (stock already deducted)
+            if accessory.is_allocated:
+                continue
+            key = accessory.sku
+            all_time_usage[key]['total_used'] += float(accessory.quantity)
+            if order.order_date:
+                if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
+                    all_time_usage[key]['first_order'] = order.order_date
+                if all_time_usage[key]['last_order'] is None or order.order_date > all_time_usage[key]['last_order']:
+                    all_time_usage[key]['last_order'] = order.order_date
+
+    raw = defaultdict(lambda: {'name': '', 'sku': '', 'total_used': 0, 'current_stock': 0,
+                                'cost': Decimal('0.00'), 'stock_item_id': None})
+    for order in recent_orders:
+        for accessory in order.accessories.all():
+            if 'RAU' not in accessory.sku.upper():
+                continue
+            # Skip already-allocated accessories (stock already deducted)
+            if accessory.is_allocated:
+                continue
+            key = accessory.sku
+            if not raw[key]['name']:
+                raw[key]['name'] = accessory.name
+                raw[key]['sku'] = accessory.sku
+                if accessory.stock_item:
+                    raw[key]['current_stock'] = accessory.stock_item.quantity
+                    raw[key]['cost'] = accessory.stock_item.cost
+                    raw[key]['stock_item_id'] = accessory.stock_item.id
+            raw[key]['total_used'] += float(accessory.quantity)
+
+    stock_items_map = {si.sku: si for si in StockItem.objects.filter(sku__in=list(raw.keys()))}
+
+    items = []
+    for key, data in raw.items():
+        recent_monthly_avg = data['total_used'] / 3
+        if key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
+            months_span = max(1, (all_time_usage[key]['last_order'] - all_time_usage[key]['first_order']).days / 30.44)
+            all_time_avg = all_time_usage[key]['total_used'] / months_span
+            weighted_avg = (recent_monthly_avg * 0.7) + (all_time_avg * 0.3)
+        else:
+            weighted_avg = recent_monthly_avg
+
+        predicted_need = weighted_avg * months * 1.2
+        if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
+            predicted_shortage = max(0, max(predicted_need, 800) - data['current_stock'])
+        else:
+            predicted_shortage = max(0, predicted_need - data['current_stock'])
+
+        if predicted_shortage <= 0:
+            continue
+
+        si = stock_items_map.get(key)
+        min_order_qty = si.min_order_qty if si and si.min_order_qty else 1
+        is_style = _style_prefix(key, data['name']) is not None
+        if is_style:
+            order_qty = _round_qty(predicted_shortage + MIN_STYLE_BUFFER, min_order_qty)
+        else:
+            order_qty = _round_qty(predicted_shortage, min_order_qty)
+        line_cost = Decimal(str(order_qty)) * data['cost']
+        if line_cost < MIN_LINE_COST and data['cost'] > 0:
+            min_qty_for_cost = int((MIN_LINE_COST / data['cost']).to_integral_value() + 1)
+            order_qty = max(order_qty, min_qty_for_cost)
+            order_qty = _round_qty(order_qty, min_order_qty)
+            line_cost = Decimal(str(order_qty)) * data['cost']
+
+        items.append({
+            'sku': key,
+            'name': data['name'],
+            'current_stock': data['current_stock'],
+            'monthly_average': round(recent_monthly_avg, 1),
+            'predicted_shortage': round(predicted_shortage, 0),
+            'order_qty': order_qty,
+            'line_cost': float(line_cost),
+        })
+
+    items.sort(key=lambda x: x['predicted_shortage'], reverse=True)
+    total_cost = sum(item['line_cost'] for item in items)
+    return JsonResponse({'success': True, 'months': months, 'items': items, 'total_cost': round(total_cost, 2)})
 
 
 @login_required
@@ -4105,6 +4260,17 @@ def order_details(request, order_id):
         status__in=['Draft', 'Approved']
     ).order_by('-workguru_id')[:50]
     
+    # Purchase Invoice lines allocated to this order
+    purchase_invoice_lines = PurchaseInvoiceLineItem.objects.filter(
+        order=order
+    ).select_related('invoice').order_by('invoice__date', 'sort_order')
+    purchase_invoice_cost = purchase_invoice_lines.aggregate(
+        total=Sum('line_total')
+    )['total'] or Decimal('0.00')
+
+    # Linked Anthill sales for this order
+    anthill_sales = order.anthill_sale.all().order_by('-activity_date') if hasattr(order, 'anthill_sale') else []
+
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -4144,6 +4310,9 @@ def order_details(request, order_id):
         'boards_purchase_order': boards_purchase_order,
         'os_doors_purchase_order': os_doors_purchase_order,
         'available_purchase_orders': available_purchase_orders,
+        'purchase_invoice_lines': purchase_invoice_lines,
+        'purchase_invoice_cost': purchase_invoice_cost,
+        'anthill_sales': anthill_sales,
     })
 
 def completed_stock_takes(request):
@@ -7516,7 +7685,7 @@ def update_stock_items_batch(request):
 
 @login_required
 def remedials(request):
-    """View to manage remedial orders - show Anthill remedial events and local remedials"""
+    """View to manage remedial orders - show Anthill remedial events (Category 8) and local remedials"""
     from django.utils import timezone
     from django.core.paginator import Paginator
     from datetime import timedelta
@@ -7528,37 +7697,51 @@ def remedials(request):
     profile = getattr(request.user, 'profile', None)
     location_filter = profile.selected_location if profile else ''
 
-    # --- Anthill remedial events ---
+    # --- Anthill remedial events (Category 8) ---
     anthill_remedials = AnthillSale.objects.select_related('customer', 'order').filter(
-        activity_type__icontains='remedial'
+        category='8'
     ).order_by('-activity_date')
 
-    if location_filter:
+    if location_filter and not search_query:
         anthill_remedials = anthill_remedials.filter(location__iexact=location_filter)
+
+    # Counts (before status/search filtering)
+    base_qs = AnthillSale.objects.filter(category='8')
+    if location_filter and not search_query:
+        base_qs = base_qs.filter(location__iexact=location_filter)
+    count_open = base_qs.filter(status__iexact='open').count()
+    count_won = base_qs.filter(status__iexact='won').count()
+    count_dead = base_qs.filter(status__iexact='dead').count()
+    count_all = base_qs.count()
 
     # Status filter
     if status_filter == 'open':
-        anthill_remedials = anthill_remedials.exclude(status__iexact='closed')
-    elif status_filter == 'closed':
-        anthill_remedials = anthill_remedials.filter(status__iexact='closed')
+        anthill_remedials = anthill_remedials.filter(status__iexact='open')
+    elif status_filter == 'won':
+        anthill_remedials = anthill_remedials.filter(status__iexact='won')
+    elif status_filter == 'dead':
+        anthill_remedials = anthill_remedials.filter(status__iexact='dead')
     # 'all' shows everything
 
-    # Counts
-    base_qs = AnthillSale.objects.filter(activity_type__icontains='remedial')
-    if location_filter:
-        base_qs = base_qs.filter(location__iexact=location_filter)
-    count_open = base_qs.exclude(status__iexact='closed').count()
-    count_closed = base_qs.filter(status__iexact='closed').count()
-    count_all = base_qs.count()
-
-    # Search
+    # Search — multi-term
     if search_query:
-        anthill_remedials = anthill_remedials.filter(
-            models.Q(customer_name__icontains=search_query) |
-            models.Q(anthill_activity_id__icontains=search_query) |
-            models.Q(activity_type__icontains=search_query) |
-            models.Q(customer__name__icontains=search_query)
-        )
+        terms = search_query.split()
+        per_term_qs = []
+        for term in terms:
+            per_term_qs.append(
+                models.Q(customer_name__icontains=term) |
+                models.Q(anthill_activity_id__icontains=term) |
+                models.Q(activity_type__icontains=term) |
+                models.Q(status__icontains=term) |
+                models.Q(assigned_to_name__icontains=term) |
+                models.Q(customer__name__icontains=term) |
+                models.Q(customer__first_name__icontains=term) |
+                models.Q(customer__last_name__icontains=term)
+            )
+        search_q = per_term_qs[0]
+        for extra in per_term_qs[1:]:
+            search_q &= extra
+        anthill_remedials = anthill_remedials.filter(search_q)
 
     # Pagination
     page_number = request.GET.get('page', 1)
@@ -7627,7 +7810,8 @@ def remedials(request):
         'status_filter': status_filter,
         'location_filter': location_filter,
         'count_open': count_open,
-        'count_closed': count_closed,
+        'count_won': count_won,
+        'count_dead': count_dead,
         'count_all': count_all,
         'remedial_orders': remedial_orders,
         'available_orders': available_orders,

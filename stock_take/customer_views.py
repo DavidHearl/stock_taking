@@ -2,7 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
-from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice, SyncLog
+from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice, SyncLog, Lead
 import logging
 import json
 import time
@@ -75,7 +75,8 @@ def customers_list(request):
                 Q(phone__icontains=term) |
                 Q(code__icontains=term) |
                 Q(city__icontains=term) |
-                Q(postcode__icontains=term)
+                Q(postcode__icontains=term) |
+                Q(anthill_customer_id__icontains=term)
             )
         # All terms must match (AND), but each term can match any field
         search_q = per_term_qs[0]
@@ -139,6 +140,26 @@ def customers_list(request):
     else:
         search_by_bracket = None
 
+    # When searching, also look for matching leads so users can find people
+    # who exist only in the Lead table (not yet converted to Customer)
+    matching_leads = None
+    if search_query:
+        lead_terms = search_query.split()
+        lead_per_term = []
+        for term in lead_terms:
+            lead_per_term.append(
+                Q(name__icontains=term) |
+                Q(email__icontains=term) |
+                Q(phone__icontains=term) |
+                Q(city__icontains=term) |
+                Q(postcode__icontains=term) |
+                Q(anthill_customer_id__icontains=term)
+            )
+        lead_q = lead_per_term[0]
+        for extra in lead_per_term[1:]:
+            lead_q &= extra
+        matching_leads = Lead.objects.filter(lead_q).order_by('-created_at')[:20]
+
     # Pagination (only when not showing grouped search results)
     if customers is not None:
         page_number = request.GET.get('page', 1)
@@ -165,6 +186,7 @@ def customers_list(request):
         'search_expanded_from': search_expanded_from,
         'search_by_bracket': search_by_bracket,
         'last_anthill_sync': last_anthill_sync,
+        'matching_leads': matching_leads,
     }
 
     return render(request, 'stock_take/customers_list.html', context)
@@ -437,12 +459,125 @@ def customer_create(request):
 
 
 # ════════════════════════════════════════════════════════════════════════
-# Sales views
+# Events / Sales views
 # ════════════════════════════════════════════════════════════════════════
 
 @login_required
+def events_list(request):
+    """Display list of ALL Anthill events (all categories) with search, category filter, and date-bracket filters."""
+    from django.utils import timezone
+    from django.core.paginator import Paginator
+    from datetime import timedelta
+
+    search_query = request.GET.get('q', '').strip()
+    age_filter = request.GET.get('age', '1y')
+    category_filter = request.GET.get('cat', '').strip()
+
+    # Location from user profile
+    profile = getattr(request.user, 'profile', None)
+    location_filter = profile.selected_location if profile else ''
+
+    now = timezone.now()
+    cutoff_1y = now - timedelta(days=365)
+    cutoff_2y = now - timedelta(days=730)
+
+    # All events
+    events_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
+
+    if location_filter and not search_query:
+        events_base = events_base.filter(location__iexact=location_filter)
+
+    # Category filter
+    if category_filter:
+        events_base = events_base.filter(category=category_filter)
+
+    # Search — split into individual terms so multi-word searches work
+    search_q = None
+    if search_query:
+        terms = search_query.split()
+        per_term_qs = []
+        for term in terms:
+            per_term_qs.append(
+                Q(customer_name__icontains=term) |
+                Q(anthill_activity_id__icontains=term) |
+                Q(activity_type__icontains=term) |
+                Q(status__icontains=term) |
+                Q(assigned_to_name__icontains=term) |
+                Q(contract_number__icontains=term) |
+                Q(source__icontains=term) |
+                Q(customer__name__icontains=term) |
+                Q(customer__first_name__icontains=term) |
+                Q(customer__last_name__icontains=term)
+            )
+        search_q = per_term_qs[0]
+        for extra in per_term_qs[1:]:
+            search_q &= extra
+
+    # Date bracket filters
+    def bracket_filter(qs, bracket):
+        if bracket == '1y':
+            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_1y)
+        elif bracket == '1_2y':
+            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_2y, activity_date__lt=cutoff_1y)
+        elif bracket == '2_10y':
+            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__lt=cutoff_2y).exclude(activity_date__isnull=True)
+        elif bracket == 'historic':
+            return qs.filter(activity_type__istartswith='Historic')
+        return qs
+
+    count_1y = bracket_filter(events_base, '1y').count()
+    count_1_2y = bracket_filter(events_base, '1_2y').count()
+    count_2_10y = bracket_filter(events_base, '2_10y').count()
+    count_historic = bracket_filter(events_base, 'historic').count()
+
+    events = bracket_filter(events_base, age_filter)
+
+    search_expanded_from = None
+    if search_q:
+        filtered = events.filter(search_q)
+        if filtered.exists():
+            events = filtered
+        else:
+            bracket_order = ['1y', '1_2y', '2_10y', 'historic']
+            try:
+                start_idx = bracket_order.index(age_filter) + 1
+            except ValueError:
+                start_idx = 0
+            remaining = bracket_order[start_idx:] + bracket_order[:bracket_order.index(age_filter)]
+            for bracket in remaining:
+                expanded_qs = bracket_filter(events_base, bracket).filter(search_q)
+                if expanded_qs.exists():
+                    events = expanded_qs
+                    search_expanded_from = bracket
+                    break
+            else:
+                events = filtered
+
+    page_number = request.GET.get('page', 1)
+    paginator = Paginator(events, 100)
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        'events': page_obj,
+        'page_obj': page_obj,
+        'filtered_count': paginator.count,
+        'search_query': search_query,
+        'age_filter': age_filter,
+        'category_filter': category_filter,
+        'location_filter': location_filter,
+        'count_1y': count_1y,
+        'count_1_2y': count_1_2y,
+        'count_2_10y': count_2_10y,
+        'count_historic': count_historic,
+        'search_expanded_from': search_expanded_from,
+    }
+
+    return render(request, 'stock_take/events_list.html', context)
+
+
+@login_required
 def sales_list(request):
-    """Display list of all Anthill events with search, date-bracket filters, and location."""
+    """Display list of Anthill sales (Category 3 only) with search, date-bracket filters, and location."""
     from django.utils import timezone
     from django.core.paginator import Paginator
     from datetime import timedelta
@@ -458,7 +593,10 @@ def sales_list(request):
     cutoff_1y = now - timedelta(days=365)
     cutoff_2y = now - timedelta(days=730)
 
-    sales_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
+    # Only Category 3 = actual sales (Room Sale + Historic Sale)
+    sales_base = AnthillSale.objects.select_related('customer', 'order').filter(
+        category='3'
+    ).order_by('-activity_date')
 
     if location_filter and not search_query:
         sales_base = sales_base.filter(location__iexact=location_filter)
@@ -474,6 +612,9 @@ def sales_list(request):
                 Q(anthill_activity_id__icontains=term) |
                 Q(activity_type__icontains=term) |
                 Q(status__icontains=term) |
+                Q(assigned_to_name__icontains=term) |
+                Q(contract_number__icontains=term) |
+                Q(source__icontains=term) |
                 Q(customer__name__icontains=term) |
                 Q(customer__first_name__icontains=term) |
                 Q(customer__last_name__icontains=term)

@@ -612,6 +612,40 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Anthill Sale Card -->
+            {% if anthill_sales %}
+            <div class="card" style="margin-top: 16px;">
+                <div class="card-header">
+                    <h3><i class="bi bi-bag-check"></i> Anthill Sale{{ anthill_sales|length|pluralize }}</h3>
+                </div>
+                <div style="padding: 12px 16px;">
+                    {% for sale in anthill_sales %}
+                    <div {% if not forloop.last %}style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);"{% endif %}>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                            <a href="{% url 'sale_detail' sale.pk %}" style="font-weight: 600; font-size: 0.9rem; color: var(--accent-color); text-decoration: none;">
+                                #{{ sale.anthill_activity_id }}
+                            </a>
+                            <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                                {{ sale.status|default:"-" }}
+                            </span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
+                            <div><strong>Type:</strong> {{ sale.activity_type|default:"-" }}</div>
+                            {% if sale.assigned_to_name %}<div><strong>Assigned:</strong> {{ sale.assigned_to_name }}</div>{% endif %}
+                            {% if sale.sale_value %}<div><strong>Value:</strong> £{{ sale.sale_value|floatformat:2 }}</div>{% endif %}
+                            {% if sale.contract_number %}<div><strong>Contract:</strong> <span style="font-family: monospace; font-size: 0.75rem;">{{ sale.contract_number }}</span></div>{% endif %}
+                            {% if sale.range_name %}<div><strong>Range:</strong> {{ sale.range_name }}</div>{% endif %}
+                            {% if sale.door_type %}<div><strong>Doors:</strong> {{ sale.door_type }}</div>{% endif %}
+                            {% if sale.source %}<div><strong>Source:</strong> {{ sale.source }}</div>{% endif %}
+                            {% if sale.fit_from_date %}<div><strong>Fit Date:</strong> {{ sale.fit_from_date }}</div>{% endif %}
+                            {% if sale.goods_due_in %}<div><strong>Goods Due:</strong> {{ sale.goods_due_in }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 
@@ -883,14 +917,19 @@
                         <a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
                             <i class="bi bi-eye"></i> View PO
                         </a>
+                        <button type="button" class="btn btn-sm btn-save-dims" id="update-os-doors-po-btn"
+                                title="Sync current cost/qty to the linked Purchase Order"
+                                onclick="syncOSDoorsPO({{ order.id }})">
+                            <i class="bi bi-arrow-repeat"></i> Update PO
+                        </button>
                     {% endif %}
-                    {% if order.os_doors.exists and not order.os_doors_po %}
-                    <a href="{% url 'create_os_doors_purchase_order' order.id %}"
-                       class="btn btn-sm btn-create-po"
-                       title="Create a local PO for OS Doors"
-                       onclick="return confirm('Create a Purchase Order for OS Doors on this order?');">
+                    {% if not order.os_doors_po %}
+                    <button type="button"
+                            class="btn btn-sm btn-create-po"
+                            title="Create a local PO for OS Doors"
+                            onclick="createOSDoorsPO({{ order.id }})">
                         <i class="bi bi-file-earmark-plus"></i> Create PO
-                    </a>
+                    </button>
                     {% endif %}
                     <button type="button" class="btn btn-sm btn-save-dims" id="save-os-doors-changes" style="display: none;">
                         <i class="bi bi-save"></i> Save Changes
@@ -922,7 +961,6 @@
                                 <th>Qty</th>
                                 <th>Cost Price</th>
                                 <th>Total Cost</th>
-                                <th>PO Number</th>
                                 <th>Ordered</th>
                                 <th>Received</th>
                             </tr>
@@ -950,7 +988,6 @@
                                 <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
                                     £{{ os_door.cost_price|multiply:os_door.quantity }}
                                 </td>
-                                <td>{{ os_door.po_number|default:"-" }}</td>
                                 <td>
                                     {% if os_door.ordered %}
                                         <span class="status-icon success">✓</span>
@@ -1534,6 +1571,70 @@
                 </div>
             {% else %}
                 <p class="text-muted">No expenses added yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Purchase Invoice Costs -->
+<div style="margin-top:16px;margin-bottom:16px;">
+    <div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-color);background:var(--bg-secondary);">
+            <h4 style="margin:0;font-size:0.95rem;font-weight:600;display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-receipt" style="color:#6f42c1;"></i>
+                Purchase Invoice Costs
+            </h4>
+            {% if purchase_invoice_cost > 0 %}
+            <span style="font-size:0.85rem;font-weight:600;color:#6f42c1;">Total: £{{ purchase_invoice_cost|floatformat:2 }}</span>
+            {% endif %}
+        </div>
+        <div style="padding:16px 20px;">
+            {% if purchase_invoice_lines %}
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Supplier</th>
+                            <th>Description</th>
+                            <th style="text-align:right;">Qty</th>
+                            <th style="text-align:right;">Rate</th>
+                            <th style="text-align:right;">Total</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in purchase_invoice_lines %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'purchase_invoice_detail' line.invoice.id %}" style="color:var(--primary-color);font-weight:600;">
+                                    {{ line.invoice.invoice_number }}
+                                </a>
+                            </td>
+                            <td>{{ line.invoice.supplier_name|default:"—" }}</td>
+                            <td>{{ line.description }}</td>
+                            <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
+                            <td style="text-align:right;">£{{ line.rate|floatformat:2 }}</td>
+                            <td style="text-align:right;font-weight:600;">£{{ line.line_total|floatformat:2 }}</td>
+                            <td>
+                                <a href="{% url 'purchase_invoice_detail' line.invoice.id %}" class="btn btn-sm btn-outline-secondary" title="View Invoice">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        <tr style="background:var(--bg-secondary);font-weight:700;">
+                            <td colspan="5" style="text-align:right;">Total Purchase Invoice Cost:</td>
+                            <td style="text-align:right;">£{{ purchase_invoice_cost|floatformat:2 }}</td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted" style="margin:0;font-size:0.875rem;">No purchase invoice costs allocated to this order yet.
+                <a href="{% url 'purchase_invoices_list' %}" style="color:var(--primary-color);">View Purchase Invoices</a>
+            </p>
             {% endif %}
         </div>
     </div>
@@ -5557,6 +5658,78 @@ function createNextBoardsPO(orderId) {
     .catch(error => {
         console.error('Error:', error);
         showAlert('Error creating PO: ' + error.message, 'danger');
+    });
+}
+
+function createOSDoorsPO(orderId) {
+    fetch(`/order/${orderId}/create-os-doors-purchase-order/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`OS Doors PO ${result.po_number} created`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error creating OS Doors PO: ' + error.message, 'danger');
+    });
+}
+
+function syncOSDoorsPO(orderId) {
+    const btn = document.getElementById('update-os-doors-po-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass"></i> Updating...'; }
+
+    // Collect current cost/qty from the live form inputs
+    const doorValues = {};
+    document.querySelectorAll('#os-doors-table tbody tr[data-os-door-id]').forEach(row => {
+        const id = row.getAttribute('data-os-door-id');
+        const costInput = row.querySelector('.os-door-cost-input');
+        const qtyInput  = row.querySelector('.os-door-qty-input');
+        if (id && costInput && qtyInput) {
+            doorValues[id] = {
+                cost_price: parseFloat(costInput.value) || 0,
+                quantity:   parseInt(qtyInput.value)   || 1
+            };
+        }
+    });
+
+    fetch(`/order/${orderId}/sync-os-doors-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ door_values: doorValues })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`PO ${result.po_number} updated — ${result.line_count} line(s), total £${parseFloat(result.total).toFixed(2)}`, 'success');
+            osDoorsChanges = {}; // clear pending saves
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update PO'; }
+            const saveBtn = document.getElementById('save-os-doors-changes');
+            if (saveBtn) saveBtn.style.display = 'none';
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update PO'; }
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error syncing PO: ' + error.message, 'danger');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update PO'; }
     });
 }
 

@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Events{% endblock %}
+
+{% block nav_events_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
+{% endblock %}
+
+{% block page_title %}Events{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <!-- Search & Filters -->
+    <div class="customers-controls">
+        <div class="customers-search">
+            <div class="search-input-wrapper">
+                <i class="bi bi-search"></i>
+                <input type="text" id="event-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type, status..." autocomplete="off">
+            </div>
+        </div>
+        <div class="customers-filter-tabs">
+            <a href="?age=1y{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1y' %}active{% endif %}">
+                &lt; 1 Year ({{ count_1y }})
+            </a>
+            <a href="?age=1_2y{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1_2y' %}active{% endif %}">
+                1-2 Years ({{ count_1_2y }})
+            </a>
+            <a href="?age=2_10y{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '2_10y' %}active{% endif %}">
+                2+ Years ({{ count_2_10y }})
+            </a>
+            <a href="?age=historic{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == 'historic' %}active{% endif %}">
+                Historic ({{ count_historic }})
+            </a>
+        </div>
+        {% if location_filter %}
+        <div class="customers-location-badge">
+            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if search_expanded_from %}
+    <div class="search-expanded-notice">
+        <i class="bi bi-info-circle"></i>
+        No results in current bracket — showing results found in 
+        <strong>
+            {% if search_expanded_from == '1y' %}&lt; 1 Year
+            {% elif search_expanded_from == '1_2y' %}1-2 Years
+            {% elif search_expanded_from == '2_10y' %}2+ Years
+            {% elif search_expanded_from == 'historic' %}Historic
+            {% endif %}
+        </strong>
+    </div>
+    {% endif %}
+
+    {% if events %}
+    <div class="customers-result-bar">
+        <span class="result-count">{{ filtered_count }} event{{ filtered_count|pluralize }}</span>
+        <div class="customers-filter-tabs" style="margin-left: auto;">
+            <a href="?age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if not category_filter %}active{% endif %}">
+                All
+            </a>
+            <a href="?age={{ age_filter }}&cat=3{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '3' %}active{% endif %}">
+                Sales
+            </a>
+            <a href="?age={{ age_filter }}&cat=1{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '1' %}active{% endif %}">
+                Enquiries
+            </a>
+            <a href="?age={{ age_filter }}&cat=2{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '2' %}active{% endif %}">
+                Leads
+            </a>
+            <a href="?age={{ age_filter }}&cat=8{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '8' %}active{% endif %}">
+                Remedials
+            </a>
+        </div>
+    </div>
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th>Activity ID</th>
+                    <th>Customer</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Value</th>
+                    <th>Contract</th>
+                    <th>Date</th>
+                    <th>Location</th>
+                    <th>Order</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in events %}
+                <tr>
+                    <td>
+                        <a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">
+                            {{ event.anthill_activity_id }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if event.customer %}
+                        <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">
+                            {{ event.customer.name|default:event.customer_name }}
+                        </a>
+                        {% else %}
+                        {{ event.customer_name|default:"-" }}
+                        {% endif %}
+                    </td>
+                    <td>{{ event.activity_type|default:"-" }}</td>
+                    <td>
+                        <span class="customer-active-badge {% if event.status == 'won' %}active{% elif event.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                            {{ event.status|default:"-" }}
+                        </span>
+                    </td>
+                    <td>{{ event.assigned_to_name|default:"-" }}</td>
+                    <td class="text-right">
+                        {% if event.sale_value %}
+                        £{{ event.sale_value|floatformat:0 }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td><span class="customer-mono" style="font-size: 0.75rem;">{{ event.contract_number|default:"-" }}</span></td>
+                    <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                    <td>{{ event.location|default:"-" }}</td>
+                    <td>
+                        {% if event.order %}
+                        <a href="{% url 'order_details' event.order.id %}" class="customer-order-badge">
+                            {{ event.order.sale_number }}
+                        </a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="customers-empty-state">
+        <i class="bi bi-calendar-event"></i>
+        <p>No events found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="customers-pagination">
+        <div class="pagination-info">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} events
+        </div>
+        <div class="pagination-controls">
+            {% if page_obj.has_previous %}
+            <a href="?page=1&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                    <a href="?page={{ num }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                    <a href="?page={{ num }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                    <span class="page-ellipsis">&hellip;</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const searchInput = document.getElementById('event-search');
+let searchTimeout;
+if (searchInput) {
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('age')) params.set('age', '{{ age_filter }}');
+            window.location.href = '?' + params.toString();
+        }, 500);
+    });
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query);
+            else params.delete('q');
+            params.delete('page');
+            if (!params.has('age')) params.set('age', '{{ age_filter }}');
+            window.location.href = '?' + params.toString();
+        }
+    });
+    searchInput.focus();
+}
+</script>
+{% endblock %}

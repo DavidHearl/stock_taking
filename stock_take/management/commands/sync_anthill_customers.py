@@ -280,11 +280,6 @@ class Command(BaseCommand):
             address_parts = [addr.get('address1', ''), addr.get('city', ''), addr.get('postcode', '')]
             data['address'] = ', '.join(p for p in address_parts if p)
 
-            # Link to WorkGuru if available
-            workguru_id = cf.get('WorkGuruClientID', '')
-            if workguru_id and workguru_id.isdigit():
-                data['workguru_id'] = int(workguru_id)
-
             # Store raw data
             data['raw_data'] = {
                 'anthill_custom_fields': cf,

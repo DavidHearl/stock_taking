@@ -233,6 +233,59 @@ Customers
     </div>
     {% endif %}
 
+    {% if matching_leads %}
+    <div class="bracket-separator" style="margin-top: 1.5rem;">
+        <span class="bracket-label"><i class="bi bi-person-plus"></i> Matching Leads</span>
+        <span class="bracket-count">{{ matching_leads|length }} result{{ matching_leads|length|pluralize }}</span>
+    </div>
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Postcode</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for lead in matching_leads %}
+                <tr>
+                    <td>
+                        <a href="{% url 'lead_detail' lead.pk %}" class="customer-name-link">
+                            {{ lead.name|default:"-" }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if lead.email %}
+                        <a href="mailto:{{ lead.email }}" class="customer-email">{{ lead.email }}</a>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ lead.phone|default:"-" }}</td>
+                    <td>{{ lead.city|default:"-" }}</td>
+                    <td>{{ lead.postcode|default:"-" }}</td>
+                    <td>{{ lead.get_source_display|default:"-" }}</td>
+                    <td>
+                        <span class="customer-active-badge {% if lead.status == 'converted' %}active{% elif lead.status == 'lost' %}inactive{% else %}active{% endif %}">
+                            {{ lead.get_status_display }}
+                        </span>
+                    </td>
+                    <td class="text-right">
+                        <a href="{% url 'lead_detail' lead.pk %}" class="btn btn-sm btn-outline-primary" title="View Lead">
+                            <i class="bi bi-eye"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
     <!-- Pagination -->
     {% if page_obj and page_obj.paginator.num_pages > 1 %}
     <div class="customers-pagination">

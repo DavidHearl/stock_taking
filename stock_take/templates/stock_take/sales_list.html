@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Events{% endblock %}
+{% block title %}Sales{% endblock %}
 
 {% block nav_sales_active %}active{% endblock %}
 
@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
 {% endblock %}
 
-{% block page_title %}Events{% endblock %}
+{% block page_title %}Sales{% endblock %}
 
 {% block content %}
 <div class="content-card">
@@ -18,7 +18,7 @@
         <div class="customers-search">
             <div class="search-input-wrapper">
                 <i class="bi bi-search"></i>
-                <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type or status..." autocomplete="off">
+                <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, contract, assigned to..." autocomplete="off">
             </div>
         </div>
         <div class="customers-filter-tabs">
@@ -58,7 +58,7 @@
 
     {% if sales %}
     <div class="customers-result-bar">
-        <span class="result-count">{{ filtered_count }} event{{ filtered_count|pluralize }}</span>
+        <span class="result-count">{{ filtered_count }} sale{{ filtered_count|pluralize }}</span>
     </div>
     <div class="customers-table-container">
         <table class="customers-table">
@@ -68,9 +68,12 @@
                     <th>Customer</th>
                     <th>Type</th>
                     <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Value</th>
+                    <th>Contract</th>
                     <th>Date</th>
                     <th>Location</th>
-                    <th>Linked Order</th>
+                    <th>Order</th>
                 </tr>
             </thead>
             <tbody>
@@ -92,10 +95,17 @@
                     </td>
                     <td>{{ sale.activity_type|default:"-" }}</td>
                     <td>
-                        <span class="customer-active-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}active{% else %}inactive{% endif %}">
+                        <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
                             {{ sale.status|default:"-" }}
                         </span>
                     </td>
+                    <td>{{ sale.assigned_to_name|default:"-" }}</td>
+                    <td class="text-right">
+                        {% if sale.sale_value %}
+                        £{{ sale.sale_value|floatformat:0 }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td><span class="customer-mono" style="font-size: 0.75rem;">{{ sale.contract_number|default:"-" }}</span></td>
                     <td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
                     <td>{{ sale.location|default:"-" }}</td>
                     <td>
@@ -115,7 +125,7 @@
     {% else %}
     <div class="customers-empty-state">
         <i class="bi bi-bag"></i>
-        <p>No events found.</p>
+        <p>No sales found.</p>
     </div>
     {% endif %}
 
@@ -123,7 +133,7 @@
     {% if page_obj.paginator.num_pages > 1 %}
     <div class="customers-pagination">
         <div class="pagination-info">
-            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} events
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} sales
         </div>
         <div class="pagination-controls">
             {% if page_obj.has_previous %}

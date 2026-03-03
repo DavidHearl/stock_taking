@@ -164,14 +164,36 @@ class AnthillSale(models.Model):
     )
 
     # Sale info from Anthill
-    activity_type = models.CharField(max_length=100, blank=True, help_text='Activity type e.g. "Sale"')
-    status = models.CharField(max_length=50, blank=True, help_text='Activity status e.g. "Complete"')
+    activity_type = models.CharField(max_length=100, blank=True, help_text='Activity type e.g. "Room Sale"')
+    status = models.CharField(max_length=50, blank=True, help_text='Sale status: open / won / dead')
     category = models.CharField(max_length=100, blank=True)
     customer_name = models.CharField(max_length=255, blank=True, help_text='Customer name from Anthill')
     location = models.CharField(max_length=100, blank=True, null=True)
 
+    # Assigned user from Anthill
+    assigned_to_id = models.CharField(max_length=20, blank=True, help_text='Anthill user ID of the assigned person')
+    assigned_to_name = models.CharField(max_length=150, blank=True, help_text='Name of the assigned person e.g. "Karen.Wild"')
+
+    # Financial data (from GetSaleDetails custom fields)
+    sale_value = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text='Total Value Inc VAT')
+    profit = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    deposit_required = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    balance_payable = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    # Contract & reference
+    contract_number = models.CharField(max_length=100, blank=True, help_text='Anthill contract number e.g. "NTG-KW-420968"')
+    source = models.CharField(max_length=100, blank=True, help_text='Lead source e.g. "Website", "Repeat Customer"')
+
+    # Product info
+    sale_type_id = models.CharField(max_length=20, blank=True, help_text='Anthill sale type ID (1=Room, etc.)')
+    range_name = models.CharField(max_length=100, blank=True, help_text='Product range e.g. "Core"')
+    door_type = models.CharField(max_length=100, blank=True, help_text='e.g. "Sliding", "Hinged"')
+    products_included = models.CharField(max_length=255, blank=True, help_text='e.g. "Sliding"')
+
     # Dates
     activity_date = models.DateTimeField(null=True, blank=True, help_text='When this activity was created in Anthill')
+    fit_from_date = models.CharField(max_length=50, blank=True, help_text='Fit From Date from Anthill (text field)')
+    goods_due_in = models.CharField(max_length=50, blank=True, help_text='Goods Due In date from Anthill (text field)')
 
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1620,6 +1642,101 @@ class InvoicePayment(models.Model):
 
 
 # =============================================
+# Purchase Invoices (Supplier / Fitter Invoices)
+# =============================================
+
+class PurchaseInvoice(models.Model):
+    """An inbound invoice received from a supplier or fitter.
+
+    Line items on this invoice can each be allocated to a specific Order (job)
+    so that the cost flows through into job costing.
+    """
+
+    STATUS_CHOICES = [
+        ('Draft', 'Draft'),
+        ('Approved', 'Approved'),
+        ('Paid', 'Paid'),
+        ('Void', 'Void'),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        ('unpaid', 'Unpaid'),
+        ('partial', 'Partial'),
+        ('paid', 'Paid'),
+    ]
+
+    invoice_number   = models.CharField(max_length=100, db_index=True)
+    supplier_name    = models.CharField(max_length=255, blank=True, help_text='Who sent this invoice')
+    date             = models.DateField(null=True, blank=True)
+    due_date         = models.DateField(null=True, blank=True)
+    status           = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
+    payment_status   = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
+    total            = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_paid      = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    notes            = models.TextField(blank=True)
+    attachment       = models.FileField(
+        upload_to='purchase_invoice_attachments/', blank=True, null=True,
+        help_text='PDF or scanned invoice document',
+    )
+    created_at       = models.DateTimeField(auto_now_add=True)
+    updated_at       = models.DateTimeField(auto_now=True)
+    created_by       = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ['-date', '-created_at']
+
+    def __str__(self):
+        return f"{self.invoice_number} – {self.supplier_name}"
+
+    @property
+    def amount_outstanding(self):
+        return max(self.total - self.amount_paid, 0)
+
+    @property
+    def allocated_total(self):
+        """Sum of all line items that have been allocated to an order."""
+        from django.db.models import Sum
+        result = self.line_items.exclude(order=None).aggregate(t=Sum('line_total'))['t']
+        return result or 0
+
+    @property
+    def unallocated_total(self):
+        """Sum of line items not yet assigned to any order."""
+        from django.db.models import Sum
+        result = self.line_items.filter(order=None).aggregate(t=Sum('line_total'))['t']
+        return result or 0
+
+
+class PurchaseInvoiceLineItem(models.Model):
+    """A single line on a PurchaseInvoice.
+
+    Setting ``order`` allocates this cost to that job so it appears in the
+    job-level costing breakdown.
+    """
+    invoice      = models.ForeignKey(PurchaseInvoice, on_delete=models.CASCADE, related_name='line_items')
+    description  = models.CharField(max_length=500)
+    quantity     = models.DecimalField(max_digits=12, decimal_places=4, default=1)
+    rate         = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    line_total   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    order        = models.ForeignKey(
+        'Order', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='purchase_invoice_lines',
+        help_text='Which job/order this line cost is allocated to',
+    )
+    sort_order   = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return f"{self.description} ({self.invoice.invoice_number})"
+
+    def save(self, *args, **kwargs):
+        self.line_total = self.quantity * self.rate
+        super().save(*args, **kwargs)
+
+
+# =============================================
 # Role-Based Access Control
 # =============================================
 
@@ -1637,6 +1754,7 @@ PAGE_SECTIONS = [
     ]),
     ('Accounting', [
         ('invoices', 'Invoices'),
+        ('purchase_invoices', 'Purchase Invoices'),
     ]),
     ('Purchase', [
         ('purchase_orders', 'Purchase Orders'),
