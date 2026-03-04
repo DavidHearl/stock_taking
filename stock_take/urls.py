@@ -5,7 +5,7 @@ from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
@@ -20,7 +20,8 @@ from .purchase_invoice_views import (
     update_purchase_invoice, delete_purchase_invoice, add_purchase_invoice_line,
     update_purchase_invoice_line, delete_purchase_invoice_line,
     upload_purchase_invoice_attachment, delete_purchase_invoice_attachment,
-    order_purchase_invoice_lines,
+    order_purchase_invoice_lines, parse_purchase_invoice_pdf,
+    link_purchase_invoice_po, unlink_purchase_invoice_po, search_purchase_invoices,
 )
 
 urlpatterns = [
@@ -41,6 +42,7 @@ urlpatterns = [
     # Purchase Invoices (inbound / supplier invoices)
     path('purchase-invoices/', purchase_invoices_list, name='purchase_invoices_list'),
     path('purchase-invoices/create/', create_purchase_invoice, name='create_purchase_invoice'),
+    path('purchase-invoices/parse-pdf/', parse_purchase_invoice_pdf, name='parse_purchase_invoice_pdf'),
     path('purchase-invoices/<int:invoice_id>/', purchase_invoice_detail, name='purchase_invoice_detail'),
     path('purchase-invoices/<int:invoice_id>/update/', update_purchase_invoice, name='update_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/delete/', delete_purchase_invoice, name='delete_purchase_invoice'),
@@ -49,7 +51,10 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/delete/', delete_purchase_invoice_line, name='delete_purchase_invoice_line'),
     path('purchase-invoices/<int:invoice_id>/upload-attachment/', upload_purchase_invoice_attachment, name='upload_purchase_invoice_attachment'),
     path('purchase-invoices/<int:invoice_id>/delete-attachment/', delete_purchase_invoice_attachment, name='delete_purchase_invoice_attachment'),
+    path('purchase-invoices/<int:invoice_id>/link-po/', link_purchase_invoice_po, name='link_purchase_invoice_po'),
+    path('purchase-invoices/<int:invoice_id>/unlink-po/<int:po_id>/', unlink_purchase_invoice_po, name='unlink_purchase_invoice_po'),
     path('api/order/<int:order_id>/purchase-invoice-lines/', order_purchase_invoice_lines, name='order_purchase_invoice_lines'),
+    path('api/purchase-invoice-search/', search_purchase_invoices, name='search_purchase_invoices'),
 
     # Sales Invoices
     path('invoices/', invoices_list, name='invoices_list'),
@@ -97,6 +102,8 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/update-invoice/<int:invoice_id>/', po_update_invoice, name='po_update_invoice'),
     path('purchase-order/<int:po_id>/delete-invoice/<int:invoice_id>/', po_delete_invoice, name='po_delete_invoice'),
     path('purchase-order/<int:po_id>/create-invoice/', po_create_invoice, name='po_create_invoice'),
+    path('purchase-order/<int:po_id>/link-purchase-invoice/', po_link_purchase_invoice, name='po_link_purchase_invoice'),
+    path('purchase-order/<int:po_id>/unlink-purchase-invoice/<int:invoice_id>/', po_unlink_purchase_invoice, name='po_unlink_purchase_invoice'),
     path('purchase-order/<int:po_id>/link-invoice/', po_link_invoice, name='po_link_invoice'),
     path('purchase-order/<int:po_id>/unlink-invoice/', po_unlink_invoice, name='po_unlink_invoice'),
     

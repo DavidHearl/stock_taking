@@ -746,6 +746,7 @@ class Supplier(models.Model):
     # Financial
     currency = models.CharField(max_length=10, blank=True, null=True)
     abn = models.CharField(max_length=50, blank=True, null=True, help_text='Tax / ABN / VAT number')
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='VAT rate percentage (e.g. 20.00 for 20%)')
     credit_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     credit_days = models.CharField(max_length=20, blank=True, null=True)
     number_of_credit_days = models.IntegerField(null=True, blank=True)
@@ -1690,6 +1691,10 @@ class PurchaseInvoice(models.Model):
     attachment       = models.FileField(
         upload_to='purchase_invoice_attachments/', blank=True, null=True,
         help_text='PDF or scanned invoice document',
+    )
+    purchase_orders  = models.ManyToManyField(
+        'PurchaseOrder', blank=True, related_name='linked_purchase_invoices',
+        help_text='Purchase orders this supplier invoice is associated with',
     )
     created_at       = models.DateTimeField(auto_now_add=True)
     updated_at       = models.DateTimeField(auto_now=True)

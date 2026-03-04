@@ -31,7 +31,7 @@
             </button>
             <h1>{{ purchase_order.display_number }}</h1>
             <div class="po-detail-meta">
-                <span class="po-status {% if purchase_order.status == 'Draft' %}draft{% elif purchase_order.status == 'Approved' %}approved{% elif purchase_order.status == 'Received' %}received{% elif purchase_order.status == 'Cancelled' %}cancelled{% endif %}">
+                <span class="po-status {% if purchase_order.status == 'Draft' %}draft{% elif purchase_order.status == 'Approved' %}approved{% elif purchase_order.status == 'Received' %}received{% elif purchase_order.status == 'Partially Received' %}partially-received{% elif purchase_order.status == 'Cancelled' %}cancelled{% endif %}">
                     {{ purchase_order.status }}
                 </span>
                 {% if purchase_order.email_sent %}
@@ -62,7 +62,7 @@
                 <i class="bi bi-arrow-counterclockwise"></i> Revert to Draft
             </button>
             {% endif %}
-            {% if purchase_order.status != 'Received' %}
+            {% if purchase_order.status == 'Approved' or purchase_order.status == 'Partially Received' %}
             <button class="btn btn-sm btn-receive" id="receive-btn" onclick="receivePO()">
                 <i class="bi bi-box-arrow-in-down"></i> Receive
             </button>
@@ -354,7 +354,7 @@
                         </td>
                     </tr>
                     {% for product in products %}
-                    <tr data-product-id="{{ product.id }}">
+                    <tr data-product-id="{{ product.id }}" data-order-qty="{{ product.order_quantity }}" data-received-qty="{{ product.received_quantity }}" data-sku="{{ product.sku|default:'' }}" data-name="{{ product.name|default:'' }}" {% if product.order_quantity > 0 and product.received_quantity >= product.order_quantity %}class="product-line-received"{% endif %}>
                         <td>
                             <span class="po-product-sku po-view-val">{% if product.stock_item %}<a href="{% url 'product_detail' product.stock_item.id %}" class="po-sku-link">{{ product.sku|default:"-" }}</a>{% else %}{{ product.sku|default:"-" }}{% endif %}</span>
                             <input class="po-edit-input po-edit-val po-edit-narrow" data-field="sku" value="{{ product.sku|default:'' }}" style="display:none;">
@@ -477,6 +477,22 @@
         <!-- Totals -->
         <div class="po-totals">
             <div class="po-totals-table">
+                {% if po_vat_rate %}
+                {# ── VAT-aware breakdown ── #}
+                <div class="po-totals-row">
+                    <div class="po-totals-label">Net (ex-VAT)</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ po_net_total|floatformat:2 }}</div>
+                </div>
+                <div class="po-totals-row">
+                    <div class="po-totals-label">VAT ({{ po_vat_rate|floatformat:2 }}%)</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ po_vat_amount|floatformat:2 }}</div>
+                </div>
+                <div class="po-totals-row total">
+                    <div class="po-totals-label">Gross (inc-VAT)</div>
+                    <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ po_gross_total|floatformat:2 }}</div>
+                </div>
+                {% else %}
+                {# ── No VAT rate set — original display ── #}
                 <div class="po-totals-row">
                     <div class="po-totals-label">Sub Total</div>
                     <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2 }}</div>
@@ -487,10 +503,21 @@
                     <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.tax_total|floatformat:2 }}</div>
                 </div>
                 {% endif %}
+                <div class="po-totals-row">
+                    <div class="po-totals-label">VAT Rate</div>
+                    <div class="po-totals-value" style="opacity:.6;font-size:.85em;">
+                        {% if supplier_obj %}
+                        Not configured &mdash; <a href="{% url 'supplier_detail' supplier_obj.workguru_id %}" style="color:var(--accent-color);">set on supplier &rarr;</a>
+                        {% else %}
+                        No supplier linked
+                        {% endif %}
+                    </div>
+                </div>
                 <div class="po-totals-row total">
                     <div class="po-totals-label">Total</div>
                     <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2 }}</div>
                 </div>
+                {% endif %}
                 {% if purchase_order.currency and purchase_order.currency != 'GBP' and purchase_order.base_currency_total %}
                 <div class="po-totals-row">
                     <div class="po-totals-label">GBP Equivalent</div>
@@ -580,7 +607,7 @@
                         <td><a href="{% url 'purchase_order_detail' rpo.workguru_id %}" class="po-project-link">{{ rpo.display_number }}</a></td>
                         <td>{{ rpo.supplier_name|default:"-" }}</td>
                         <td>
-                            <span class="po-status {% if rpo.status == 'Draft' %}draft{% elif rpo.status == 'Approved' %}approved{% elif rpo.status == 'Received' %}received{% elif rpo.status == 'Cancelled' %}cancelled{% endif %}">
+                            <span class="po-status {% if rpo.status == 'Draft' %}draft{% elif rpo.status == 'Approved' %}approved{% elif rpo.status == 'Received' %}received{% elif rpo.status == 'Partially Received' %}partially-received{% elif rpo.status == 'Cancelled' %}cancelled{% endif %}">
                                 {{ rpo.status }}
                             </span>
                         </td>
@@ -866,26 +893,116 @@
         </div>
     </div>
 
+    <!-- Supplier Purchase Invoices Section -->
+    <div class="po-products-section">
+        <div class="po-products-section-container">
+            <h3><i class="bi bi-file-earmark-text"></i> Supplier Purchase Invoices</h3>
+            <button class="btn btn-sm btn-primary" onclick="togglePurchaseInvoiceSearch()">
+                <i class="bi bi-link-45deg"></i> Link Purchase Invoice
+            </button>
+        </div>
+
+        <!-- Search box -->
+        <div id="pi-search-form" style="display:none;margin-bottom:16px;">
+            <div style="position:relative;">
+                <input type="text" id="pi-search-input"
+                       class="po-invoice-input"
+                       placeholder="Search by invoice number or supplier…"
+                       autocomplete="off"
+                       oninput="searchPurchaseInvoices(this)"
+                       style="width:100%;padding:8px 12px;">
+                <div id="pi-search-dd"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;
+                            background:var(--bg-primary);border:1px solid var(--border-color);
+                            border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
+                            max-height:250px;overflow-y:auto;margin-top:2px;">
+                </div>
+            </div>
+            <button class="btn btn-sm btn-secondary" onclick="togglePurchaseInvoiceSearch()" style="margin-top:6px;">Cancel</button>
+        </div>
+
+        <!-- Table of linked purchase invoices -->
+        <div id="linked-purchase-invoices-list">
+            {% if linked_purchase_invoices %}
+            <div class="po-table-container">
+                <table class="po-products-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Supplier</th>
+                            <th>Date</th>
+                            <th style="text-align:right;">Total</th>
+                            <th style="text-align:right;">Outstanding</th>
+                            <th>Status</th>
+                            <th>Payment</th>
+                            <th style="width:60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="linked-purchase-invoices-tbody">
+                        {% for pinv in linked_purchase_invoices %}
+                        <tr id="linked-pinv-row-{{ pinv.id }}">
+                            <td>
+                                <a href="{% url 'purchase_invoice_detail' pinv.id %}" style="color:var(--accent-color);text-decoration:none;">
+                                    <i class="bi bi-box-arrow-up-right" style="font-size:.75rem;"></i> {{ pinv.invoice_number }}
+                                </a>
+                            </td>
+                            <td>{{ pinv.supplier_name|default:"—" }}</td>
+                            <td>{{ pinv.date|date:"d/m/Y"|default:"—" }}</td>
+                            <td style="text-align:right;">£{{ pinv.total|floatformat:2 }}</td>
+                            <td style="text-align:right;">£{{ pinv.amount_outstanding|floatformat:2 }}</td>
+                            <td><span class="pinv-status {{ pinv.status|lower }}">{{ pinv.status }}</span></td>
+                            <td><span class="pinv-payment {{ pinv.payment_status }}">{{ pinv.get_payment_status_display }}</span></td>
+                            <td style="text-align:center;">
+                                <button class="btn btn-sm btn-danger" onclick="unlinkPurchaseInvoice({{ pinv.id }})" title="Unlink">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot id="linked-pinv-tfoot">
+                        <tr style="border-top:2px solid var(--border-color);font-weight:600;">
+                            <td colspan="3" style="text-align:right;padding:8px 12px;">Total</td>
+                            <td id="linked-pinv-total" style="text-align:right;padding:8px 12px;">£{{ linked_pi_total|floatformat:2 }}</td>
+                            <td id="linked-pinv-outstanding" style="text-align:right;padding:8px 12px;">£{{ linked_pi_outstanding|floatformat:2 }}</td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted" id="no-linked-pinv-msg">No purchase invoices linked yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
     {% endif %}
 </div>
 
 <!-- Product search dropdown (outside table container to avoid overflow clipping) -->
 <div class="product-search-results" id="product-search-results" style="display:none;"></div>
 
-<!-- Receive PO Confirmation Modal -->
+<!-- Receive PO Modal (Partial / Full) -->
 <div class="modal-overlay" id="receive-modal" style="display:none;" onclick="closeReceiveModal(event)">
-    <div class="modal-dialog" style="max-width: 480px;" onclick="event.stopPropagation()">
+    <div class="modal-dialog receive-modal-dialog" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-box-arrow-in-down"></i> Receive Purchase Order</h3>
             <button class="modal-close" onclick="closeReceiveModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <p>Mark <strong>{{ purchase_order.display_number }}</strong> as received?</p>
-            <div style="margin: 16px 0;">
+            <p>Select items that have arrived for <strong>{{ purchase_order.display_number }}</strong>:</p>
+            <div style="margin: 8px 0;">
                 <label for="receive-date" style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px;">Received Date</label>
                 <input type="date" id="receive-date" class="form-input" style="width: 100%;">
             </div>
-            <p style="margin:0;color:var(--text-secondary);font-size:0.85rem;">This will update all linked items and stock levels.</p>
+            <div class="receive-item-controls">
+                <button type="button" class="btn btn-sm btn-success" onclick="receiveSelectAll(true)"><i class="bi bi-check-all"></i> Receive All</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="receiveSelectAll(false)"><i class="bi bi-square"></i> Clear</button>
+            </div>
+            <div id="receive-product-list" class="receive-product-list">
+                <!-- Populated by receivePO() -->
+            </div>
+            <p class="receive-modal-hint">Untick items that have <em>not</em> arrived. The PO will be marked <strong>Partially Received</strong> if some items are skipped.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn-cancel" onclick="closeReceiveModal()">Cancel</button>
@@ -1238,10 +1355,45 @@ function showNotification(message, type) {
 }
 
 function receivePO() {
-    // Default the date picker to today
+    // Default date to today
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('receive-date').value = today;
+
+    // Build the product checklist from table rows
+    const productRows = document.querySelectorAll('#products-table tbody tr[data-product-id]:not(.alloc-sub-row):not(.alloc-sub-add-row)');
+    const listEl = document.getElementById('receive-product-list');
+    listEl.innerHTML = '';
+
+    if (productRows.length === 0) {
+        listEl.innerHTML = '<p class="receive-no-products">No regular product lines — all linked items will be marked as received.</p>';
+    } else {
+        productRows.forEach(row => {
+            const productId = row.dataset.productId;
+            const orderQty = parseFloat(row.dataset.orderQty || 0);
+            const receivedQty = parseFloat(row.dataset.receivedQty || 0);
+            const sku = row.dataset.sku || '';
+            const name = row.dataset.name || '(no name)';
+            const isFullyReceived = orderQty > 0 && receivedQty >= orderQty;
+
+            const item = document.createElement('label');
+            item.className = 'receive-product-item' + (isFullyReceived ? ' already-received' : '');
+            item.innerHTML =
+                `<input type="checkbox" class="receive-product-cb" value="${productId}" ${!isFullyReceived ? 'checked' : 'disabled checked'}>` +
+                `<span class="receive-product-sku">${sku || '—'}</span>` +
+                `<span class="receive-product-name">${name}</span>` +
+                `<span class="receive-product-qty">${receivedQty} / ${orderQty}</span>` +
+                (isFullyReceived ? '<span class="receive-already-badge"><i class="bi bi-check-circle-fill"></i> Already received</span>' : '');
+            listEl.appendChild(item);
+        });
+    }
+
     document.getElementById('receive-modal').style.display = 'flex';
+}
+
+function receiveSelectAll(checked) {
+    document.querySelectorAll('.receive-product-cb:not(:disabled)').forEach(cb => {
+        cb.checked = checked;
+    });
 }
 
 function closeReceiveModal(event) {
@@ -1250,25 +1402,41 @@ function closeReceiveModal(event) {
 }
 
 function confirmReceivePO() {
+    const receivedDate = document.getElementById('receive-date').value;
+
+    // Collect selected (and not-yet-fully-received) product IDs
+    const activeCheckboxes = document.querySelectorAll('.receive-product-cb:not(:disabled)');
+    const checkedIds = Array.from(document.querySelectorAll('.receive-product-cb:not(:disabled):checked'))
+                           .map(cb => parseInt(cb.value));
+
+    if (activeCheckboxes.length > 0 && checkedIds.length === 0) {
+        showNotification('Please select at least one item to receive.', 'error');
+        return;
+    }
+
     closeReceiveModal();
     const btn = document.getElementById('receive-btn');
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Receiving...';
-    
-    const receivedDate = document.getElementById('receive-date').value;
-    
+
+    // Only send product_ids when there are selectable lines (selective mode)
+    const body = { received_date: receivedDate };
+    if (activeCheckboxes.length > 0) {
+        body.product_ids = checkedIds;
+    }
+
     fetch('{% url "purchase_order_receive" purchase_order.workguru_id %}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}',
         },
-        body: JSON.stringify({ received_date: receivedDate }),
+        body: JSON.stringify(body),
     })
     .then(res => res.json())
     .then(result => {
         if (result.success) {
-            showNotification('PO marked as received. ' + result.received_items + ' items updated.', 'success');
+            showNotification(result.received_items + ' item(s) received. Status: ' + result.status, 'success');
             setTimeout(() => location.reload(), 800);
         } else {
             showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
@@ -1981,6 +2149,173 @@ function unlinkInvoice(invoiceId) {
         }
     })
     .catch(err => showNotification('Error: ' + err.message, 'error'));
+}
+
+// ── Supplier Purchase Invoice search / link / unlink ──────────
+function togglePurchaseInvoiceSearch() {
+    const form = document.getElementById('pi-search-form');
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    if (form.style.display !== 'none') {
+        document.getElementById('pi-search-input').focus();
+    }
+}
+
+let _piSearchTimer = null;
+function searchPurchaseInvoices(input) {
+    clearTimeout(_piSearchTimer);
+    const q = input.value.trim();
+    const dd = document.getElementById('pi-search-dd');
+    if (q.length < 2) { dd.style.display = 'none'; dd.innerHTML = ''; return; }
+    _piSearchTimer = setTimeout(() => {
+        fetch(`/api/purchase-invoice-search/?q=${encodeURIComponent(q)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            dd.innerHTML = '';
+            if (data.results && data.results.length) {
+                dd.style.display = 'block';
+                data.results.forEach(inv => {
+                    const item = document.createElement('div');
+                    item.className = 'order-search-item';
+                    item.innerHTML = `<strong>${escHtmlPo(inv.invoice_number)}</strong>`
+                        + (inv.supplier_name ? ` &mdash; ${escHtmlPo(inv.supplier_name)}` : '')
+                        + (inv.date ? ` <span style="opacity:.6;font-size:.78rem;">${escHtmlPo(inv.date)}</span>` : '')
+                        + ` &nbsp;<span style="font-weight:600;">£${parseFloat(inv.total).toFixed(2)}</span>`
+                        + ` <span class="pinv-payment ${inv.payment_status}" style="font-size:.72rem;">${inv.payment_status}</span>`;
+                    item.onclick = () => linkPurchaseInvoice(inv.id, inv);
+                    dd.appendChild(item);
+                });
+            } else {
+                dd.style.display = 'block';
+                dd.innerHTML = '<div style="padding:8px 12px;color:var(--text-secondary);font-size:.85rem;">No results</div>';
+            }
+        });
+    }, 250);
+}
+
+function linkPurchaseInvoice(invoiceId, invData) {
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/link-purchase-invoice/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ invoice_id: invoiceId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            addPurchaseInvoiceRow(data.invoice);
+            document.getElementById('pi-search-input').value = '';
+            document.getElementById('pi-search-dd').style.display = 'none';
+            document.getElementById('pi-search-form').style.display = 'none';
+            showNotification('Purchase invoice linked', 'success');
+        } else {
+            showNotification(data.error || 'Failed to link purchase invoice', 'error');
+        }
+    });
+}
+
+function addPurchaseInvoiceRow(inv) {
+    const noMsg = document.getElementById('no-linked-pinv-msg');
+    if (noMsg) noMsg.remove();
+
+    let tbody = document.getElementById('linked-purchase-invoices-tbody');
+    if (!tbody) {
+        const listDiv = document.getElementById('linked-purchase-invoices-list');
+        listDiv.innerHTML = `
+            <div class="po-table-container">
+                <table class="po-products-table">
+                    <thead><tr>
+                        <th>Invoice #</th><th>Supplier</th><th>Date</th>
+                        <th style="text-align:right;">Total</th>
+                        <th style="text-align:right;">Outstanding</th>
+                        <th>Status</th><th>Payment</th>
+                        <th style="width:60px;"></th>
+                    </tr></thead>
+                    <tbody id="linked-purchase-invoices-tbody"></tbody>
+                    <tfoot id="linked-pinv-tfoot">
+                        <tr style="border-top:2px solid var(--border-color);font-weight:600;">
+                            <td colspan="3" style="text-align:right;padding:8px 12px;">Total</td>
+                            <td id="linked-pinv-total" style="text-align:right;padding:8px 12px;">£0.00</td>
+                            <td id="linked-pinv-outstanding" style="text-align:right;padding:8px 12px;">£0.00</td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>`;
+        tbody = document.getElementById('linked-purchase-invoices-tbody');
+    }
+
+    if (document.getElementById('linked-pinv-row-' + inv.id)) return;
+
+    const paymentLabels = { paid: 'Paid', partial: 'Partial', unpaid: 'Unpaid' };
+    const tr = document.createElement('tr');
+    tr.id = 'linked-pinv-row-' + inv.id;
+    tr.dataset.total = parseFloat(inv.total) || 0;
+    tr.dataset.outstanding = parseFloat(inv.amount_outstanding) || 0;
+    tr.innerHTML = `
+        <td><a href="${escHtmlPo(inv.url)}" style="color:var(--accent-color);text-decoration:none;">
+            <i class="bi bi-box-arrow-up-right" style="font-size:.75rem;"></i> ${escHtmlPo(inv.invoice_number)}</a></td>
+        <td>${escHtmlPo(inv.supplier_name)}</td>
+        <td>${escHtmlPo(inv.date)}</td>
+        <td style="text-align:right;">£${parseFloat(inv.total).toFixed(2)}</td>
+        <td style="text-align:right;">£${parseFloat(inv.amount_outstanding).toFixed(2)}</td>
+        <td><span class="pinv-status ${inv.status.toLowerCase()}">${escHtmlPo(inv.status)}</span></td>
+        <td><span class="pinv-payment ${inv.payment_status}">${escHtmlPo(paymentLabels[inv.payment_status] || inv.payment_status)}</span></td>
+        <td style="text-align:center;">
+            <button class="btn btn-sm btn-danger" onclick="unlinkPurchaseInvoice(${inv.id})" title="Unlink">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </td>`;
+    tbody.appendChild(tr);
+    recalcLinkedPiTotals();
+}
+
+function recalcLinkedPiTotals() {
+    const rows = document.querySelectorAll('#linked-purchase-invoices-tbody tr');
+    let total = 0, outstanding = 0;
+    rows.forEach(r => {
+        // Parse from the 4th and 5th td cells
+        const cells = r.querySelectorAll('td');
+        if (cells.length >= 5) {
+            total += parseFloat(cells[3].textContent.replace(/[^0-9.-]/g,'')) || 0;
+            outstanding += parseFloat(cells[4].textContent.replace(/[^0-9.-]/g,'')) || 0;
+        }
+    });
+    const totalEl = document.getElementById('linked-pinv-total');
+    const outEl = document.getElementById('linked-pinv-outstanding');
+    if (totalEl) totalEl.textContent = '£' + total.toFixed(2);
+    if (outEl) outEl.textContent = '£' + outstanding.toFixed(2);
+}
+
+function unlinkPurchaseInvoice(invoiceId) {
+    if (!confirm('Unlink this purchase invoice?')) return;
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/unlink-purchase-invoice/${invoiceId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('linked-pinv-row-' + invoiceId)?.remove();
+            const remaining = document.querySelectorAll('#linked-purchase-invoices-tbody tr');
+            if (!remaining.length) {
+                document.getElementById('linked-purchase-invoices-list').innerHTML =
+                    '<p class="text-muted" id="no-linked-pinv-msg">No purchase invoices linked yet.</p>';
+            } else {
+                recalcLinkedPiTotals();
+            }
+            showNotification('Purchase invoice unlinked', 'success');
+        } else {
+            showNotification(data.error || 'Unlink failed', 'error');
+        }
+    });
+}
+
+function escHtmlPo(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function deletePO() {

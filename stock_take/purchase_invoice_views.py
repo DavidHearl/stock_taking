@@ -13,7 +13,7 @@ from django.db.models import Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, Supplier, Timesheet, log_activity
+from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, Supplier, Timesheet, log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,250 @@ def _parse_decimal(val, default='0'):
         return Decimal(str(val)) if val not in (None, '') else Decimal(default)
     except (InvalidOperation, ValueError):
         return Decimal(default)
+
+
+def _parse_pdf_text_date(val):
+    """Convert a raw date string extracted from a PDF into YYYY-MM-DD, or None."""
+    import re as _re
+    from datetime import datetime as _dt
+
+    if not val:
+        return None
+    val = val.strip()
+
+    # Strip ordinal suffixes: 1st, 2nd, 3rd, 15th
+    val_clean = _re.sub(r'(\d+)(?:st|nd|rd|th)\b', r'\1', val).strip()
+
+    # Numeric formats: DD/MM/YYYY  DD-MM-YYYY  DD.MM.YYYY  YYYY-MM-DD  DD/MM/YY
+    for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%d.%m.%Y', '%Y-%m-%d',
+                '%d/%m/%y', '%d-%m-%y', '%d.%m.%y'):
+        try:
+            return _dt.strptime(val_clean, fmt).date().isoformat()
+        except ValueError:
+            pass
+
+    # Text months: "15 January 2024", "15 Jan 2024", "January 15, 2024"
+    for fmt in ('%d %B %Y', '%d %b %Y', '%B %d, %Y', '%b %d, %Y',
+                '%d %B, %Y', '%d %b, %Y'):
+        try:
+            return _dt.strptime(val_clean, fmt).date().isoformat()
+        except ValueError:
+            pass
+
+    return None
+
+
+# Date regex fragments — reused across patterns
+_DATE_RE = (
+    r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}'          # DD/MM/YYYY etc.
+    r'|\d{1,2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}'           # 15 January 2024
+    r'|\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}'         # January 15, 2024
+    r'|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})'            # YYYY-MM-DD
+)
+
+
+# ── PDF parsing ───────────────────────────────────────────────────
+@login_required
+def parse_purchase_invoice_pdf(request):
+    """Parse a PDF file upload and return extracted invoice fields as JSON.
+
+    Accepts a multipart POST with a ``file`` field.  Returns::
+
+        {"success": true, "extracted": {
+            "invoice_number": "INV-001",
+            "supplier_name":  "ACME Ltd",
+            "date":           "2024-01-15",
+            "due_date":       "2024-02-15",
+            "total":          "1234.56"
+        }}
+
+    Fields that cannot be found are omitted from ``extracted``.
+    Non-PDF files return ``{"success": true, "extracted": {}}``.
+    """
+    import io
+    import re
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        return JsonResponse({'error': 'No file provided'}, status=400)
+
+    if not uploaded.name.lower().endswith('.pdf'):
+        return JsonResponse({'success': True, 'extracted': {}})
+
+    try:
+        import pdfplumber
+        import warnings
+
+        pdf_bytes = uploaded.read()
+        if not pdf_bytes:
+            return JsonResponse({'success': True, 'extracted': {}})
+
+        text_lines: list[str] = []
+
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                for page in pdf.pages[:4]:
+                    try:
+                        page_text = page.extract_text()
+                    except Exception:
+                        page_text = None
+                    if page_text:
+                        text_lines.extend(page_text.split('\n'))
+
+        full_text = '\n'.join(text_lines)
+        extracted: dict = {}
+
+        # Always return the raw text so the front-end can log it for debugging
+        # (truncated to keep response small)
+        extracted['_raw_text'] = full_text[:2000]
+
+        if not full_text.strip():
+            return JsonResponse({'success': True, 'extracted': extracted})
+
+        # ── Invoice number ────────────────────────────────────────
+        inv_patterns = [
+            # "Invoice Number: INV-001", "Invoice No: 123", "Invoice #123"
+            r'(?:Invoice\s*(?:Number|No\.?|Num\.?|#|Ref(?:erence)?\.?)|Inv\s*(?:No\.?|#))[:\s#]*([A-Za-z0-9][\w\-\/\.]+)',
+            # "Tax Invoice No: 123"
+            r'Tax\s*Invoice\s*(?:No\.?|#)?[:\s#]*([A-Za-z0-9][\w\-\/\.]+)',
+            # "Reference: INV-001" or "Ref: INV-001"
+            r'(?:Ref(?:erence)?)\s*[:\s]\s*([A-Za-z0-9][\w\-\/\.]+)',
+            # "Invoice" followed by what looks like an invoice number on the same line
+            r'Invoice[:\s]+([A-Z]{0,5}\d[\w\-\/\.]+)',
+        ]
+        for pat in inv_patterns:
+            m = re.search(pat, full_text, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip().rstrip('.')
+                # Sanity: must contain at least one digit
+                if re.search(r'\d', candidate):
+                    extracted['invoice_number'] = candidate
+                    break
+
+        # ── Supplier name (DB cross-reference) ───────────────────
+        # Load all known supplier names and try to find one in the PDF text
+        try:
+            db_suppliers = list(
+                Supplier.objects.values_list('name', flat=True)
+                .exclude(name__isnull=True)
+                .exclude(name__exact='')
+            )
+        except Exception:
+            db_suppliers = []
+
+        full_text_lower = full_text.lower()
+        best_supplier = None
+        best_supplier_len = 0
+        for s in db_suppliers:
+            s_lower = s.strip().lower()
+            if s_lower and len(s_lower) >= 2 and s_lower in full_text_lower:
+                # Prefer the longest match (more specific)
+                if len(s_lower) > best_supplier_len:
+                    best_supplier = s.strip()
+                    best_supplier_len = len(s_lower)
+
+        if best_supplier:
+            extracted['supplier_name'] = best_supplier
+        else:
+            # Fallback: look for labelled supplier
+            supplier_m = re.search(
+                r'(?:From|Supplier|Vendor|Billed?\s*(?:From|By)|Issued\s*By|Seller|Company)[:\s]+'
+                r'([^\n]{2,80})',
+                full_text, re.IGNORECASE,
+            )
+            if supplier_m:
+                extracted['supplier_name'] = supplier_m.group(1).strip()
+            else:
+                # Last fallback: first non-trivial line (many invoices put company name first)
+                for line in text_lines[:6]:
+                    line = line.strip()
+                    if (
+                        line and len(line) >= 3
+                        and not re.match(
+                            r'^(Invoice|Tax\s*Invoice|Statement|Receipt|Page\b|Date|No\.|To:)',
+                            line, re.IGNORECASE
+                        )
+                        and not re.match(r'^\d+[\/\-\.]\d', line)  # not a date
+                        and not re.match(r'^\d+$', line)           # not just a number
+                    ):
+                        extracted['supplier_name'] = line
+                        break
+
+        # ── Due date (search before invoice date to avoid cross-match) ──
+        due_patterns = [
+            r'(?:Due\s*Date|Payment\s*Due(?:\s*Date)?|Pay(?:ment)?\s*(?:Due\s*)?By|Terms?\s*(?:Due|Date))[:\s]+' + _DATE_RE,
+            r'Due[:\s]+' + _DATE_RE,
+        ]
+        for pat in due_patterns:
+            due_m = re.search(pat, full_text, re.IGNORECASE)
+            if due_m:
+                parsed = _parse_pdf_text_date(due_m.group(1))
+                if parsed:
+                    extracted['due_date'] = parsed
+                    break
+
+        # ── Invoice date ─────────────────────────────────────────
+        inv_date_patterns = [
+            # "Invoice Date: ..." or "Date of Invoice: ..."
+            r'(?:Invoice\s*Date|Date\s*of\s*Invoice|Tax\s*(?:Point\s*)?Date|Invoice\s*Dated?)[:\s]+' + _DATE_RE,
+            # "Date: ..." (but not "Due Date")
+            r'(?<![Dd]ue\s)Date[:\s]+' + _DATE_RE,
+            # "Dated: ..."
+            r'Dated[:\s]+' + _DATE_RE,
+        ]
+        for pat in inv_date_patterns:
+            date_m = re.search(pat, full_text, re.IGNORECASE)
+            if date_m:
+                parsed = _parse_pdf_text_date(date_m.group(1))
+                if parsed:
+                    extracted['date'] = parsed
+                    break
+
+        # Last resort: find ANY date anywhere in the text for invoice date
+        if 'date' not in extracted:
+            all_dates = re.findall(_DATE_RE, full_text)
+            for raw_date in all_dates:
+                parsed = _parse_pdf_text_date(raw_date)
+                if parsed:
+                    # Skip if this is the due date we already found
+                    if parsed != extracted.get('due_date'):
+                        extracted['date'] = parsed
+                        break
+            # If we still have nothing but found a due date, use any date
+            if 'date' not in extracted and all_dates:
+                for raw_date in all_dates:
+                    parsed = _parse_pdf_text_date(raw_date)
+                    if parsed:
+                        extracted['date'] = parsed
+                        break
+
+        # ── Total amount ──────────────────────────────────────────
+        total_patterns = [
+            r'(?:Total\s*(?:Amount\s*)?(?:Due|Payable)?|Amount\s*(?:Due|Payable)|Grand\s*Total'
+            r'|Invoice\s*Total|Balance\s*Due|Net\s*(?:Total|Amount)|Total\s*(?:to\s*Pay|Inc(?:l?\.?\s*VAT)?))[:\s]+'
+            r'[£\$€]?\s*([\d,]+\.?\d*)',
+            r'\bTotal\b[:\s]+[£\$€]?\s*([\d,]+\.?\d*)',
+        ]
+        for pat in total_patterns:
+            total_m = re.search(pat, full_text, re.IGNORECASE)
+            if total_m:
+                try:
+                    extracted['total'] = str(Decimal(total_m.group(1).replace(',', '')))
+                    break
+                except (InvalidOperation, ValueError):
+                    pass
+
+        return JsonResponse({'success': True, 'extracted': extracted})
+
+    except Exception as exc:
+        # Log the error server-side but return gracefully so the form still works;
+        # the user just won't get auto-populated fields.
+        logger.warning('PDF parse failed (non-fatal): %s', exc)
+        return JsonResponse({'success': True, 'extracted': {}})
 
 
 # ── List ──────────────────────────────────────────────────────────
@@ -141,6 +385,7 @@ def purchase_invoice_detail(request, invoice_id):
         'invoice': invoice,
         'lines': line_items,
         'order_allocations': list(order_allocations.values()),
+        'linked_pos': invoice.purchase_orders.all().order_by('-workguru_id'),
     }
     return render(request, 'stock_take/purchase_invoice_detail.html', context)
 
@@ -271,6 +516,18 @@ def update_purchase_invoice(request, invoice_id):
         invoice.status = data['status']
     if 'payment_status' in data:
         invoice.payment_status = data['payment_status']
+    if 'total' in data:
+        invoice.total = _parse_decimal(data['total'])
+        # Re-derive payment status based on updated total (if amount_paid not being changed)
+        if 'amount_paid' not in data:
+            if invoice.total <= 0:
+                invoice.payment_status = 'unpaid'
+            elif invoice.amount_paid >= invoice.total:
+                invoice.payment_status = 'paid'
+            elif invoice.amount_paid > 0:
+                invoice.payment_status = 'partial'
+            else:
+                invoice.payment_status = 'unpaid'
     if 'amount_paid' in data:
         invoice.amount_paid = _parse_decimal(data['amount_paid'])
         # Auto-update payment status
@@ -285,15 +542,17 @@ def update_purchase_invoice(request, invoice_id):
 
     invoice.save()
     return JsonResponse({
-        'success':        True,
-        'invoice_number': invoice.invoice_number,
-        'supplier_name':  invoice.supplier_name or '',
-        'date':           invoice.date.strftime('%d/%m/%Y') if invoice.date else '',
-        'due_date':       invoice.due_date.strftime('%d/%m/%Y') if invoice.due_date else '',
-        'status':         invoice.status,
-        'amount_paid':    str(invoice.amount_paid),
-        'payment_status': invoice.payment_status,
-        'notes':          invoice.notes or '',
+        'success':           True,
+        'invoice_number':    invoice.invoice_number,
+        'supplier_name':     invoice.supplier_name or '',
+        'date':              invoice.date.strftime('%d/%m/%Y') if invoice.date else '',
+        'due_date':          invoice.due_date.strftime('%d/%m/%Y') if invoice.due_date else '',
+        'status':            invoice.status,
+        'amount_paid':       str(invoice.amount_paid),
+        'total':             str(invoice.total),
+        'amount_outstanding': str(invoice.amount_outstanding),
+        'payment_status':    invoice.payment_status,
+        'notes':             invoice.notes or '',
     })
 
 
@@ -533,4 +792,95 @@ def _line_to_dict(line):
             f"{line.order.sale_number} – {line.order.first_name} {line.order.last_name}".strip(' –')
             if line.order else ''
         ),
+    }
+
+
+# ── PO linking (from Purchase Invoice detail page) ────────────────────
+@login_required
+def link_purchase_invoice_po(request, invoice_id):
+    """Link a PurchaseOrder to this PurchaseInvoice (M2M)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    po_id = data.get('po_id')
+    if not po_id:
+        return JsonResponse({'error': 'po_id is required'}, status=400)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    invoice.purchase_orders.add(po)
+
+    return JsonResponse({
+        'success': True,
+        'po': _po_to_dict(po),
+    })
+
+
+@login_required
+def unlink_purchase_invoice_po(request, invoice_id, po_id):
+    """Remove the link between a PurchaseInvoice and a PurchaseOrder."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    invoice.purchase_orders.remove(po)
+    return JsonResponse({'success': True})
+
+
+@login_required
+def search_purchase_invoices(request):
+    """Search PurchaseInvoice records by invoice number or supplier name.
+    Used from the PO detail page to find invoices to link."""
+    q = request.GET.get('q', '').strip()
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+
+    invoices = PurchaseInvoice.objects.filter(
+        Q(invoice_number__icontains=q) | Q(supplier_name__icontains=q)
+    ).order_by('-date', '-created_at')[:20]
+
+    results = []
+    for inv in invoices:
+        results.append({
+            'id': inv.id,
+            'invoice_number': inv.invoice_number,
+            'supplier_name': inv.supplier_name or '',
+            'date': inv.date.strftime('%d/%m/%Y') if inv.date else '',
+            'total': str(inv.total),
+            'amount_outstanding': str(inv.amount_outstanding),
+            'status': inv.status,
+            'payment_status': inv.payment_status,
+        })
+
+    return JsonResponse({'results': results})
+
+
+def _po_to_dict(po):
+    return {
+        'workguru_id': po.workguru_id,
+        'display_number': po.display_number or po.number or f'#{po.workguru_id}',
+        'supplier_name': po.supplier_name or '—',
+        'total': str(po.total),
+        'status': po.status or '—',
+        'url': f'/purchase-order/{po.workguru_id}/',
+    }
+
+
+def _purchase_invoice_to_dict(inv):
+    return {
+        'id': inv.id,
+        'invoice_number': inv.invoice_number,
+        'supplier_name': inv.supplier_name or '—',
+        'date': inv.date.strftime('%d/%m/%Y') if inv.date else '—',
+        'total': str(inv.total),
+        'amount_outstanding': str(inv.amount_outstanding),
+        'status': inv.status,
+        'payment_status': inv.payment_status,
+        'url': f'/purchase-invoices/{inv.id}/',
     }

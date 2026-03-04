@@ -58,6 +58,10 @@
                 <span class="meta-label">Due Date</span>
                 <span class="meta-value" id="view-due-date">{{ invoice.due_date|date:"d/m/Y"|default:"—" }}</span>
             </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Invoice Total</span>
+                <span class="meta-value" id="view-total">£{{ invoice.total|floatformat:2 }}</span>
+            </div>
         </div>
         <div class="pinv-meta-group">
             <div class="pinv-meta-item">
@@ -102,6 +106,11 @@
             <div>
                 <label class="pinv-label">Amount Paid (£)</label>
                 <input type="number" id="edit-amount-paid" class="pinv-input" step="0.01" min="0" value="{{ invoice.amount_paid|floatformat:2 }}">
+            </div>
+            <div>
+                <label class="pinv-label">Invoice Total (£)</label>
+                <input type="number" id="edit-total" class="pinv-input" step="0.01" min="0" value="{{ invoice.total|floatformat:2 }}" placeholder="0.00">
+                <small style="color:var(--text-secondary);font-size:0.75rem;">Set a flat value when not using line items. Auto-calculated when line items exist.</small>
             </div>
         </div>
         <div style="margin-top:12px;">
@@ -285,6 +294,74 @@
     </div>
 </div>
 
+<!-- ── Linked Purchase Orders ─────────────────────────────────── -->
+<div class="pinv-detail-section">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3 class="pinv-section-title" style="margin:0;"><i class="bi bi-box-seam"></i> Linked Purchase Orders</h3>
+        <button class="pinv-btn-sm" onclick="togglePoSearch()">
+            <i class="bi bi-link-45deg"></i> Link PO
+        </button>
+    </div>
+
+    <!-- PO search box -->
+    <div id="po-search-form" style="display:none;margin-bottom:12px;">
+        <div style="position:relative;">
+            <input type="text" id="po-search-input" class="pinv-input"
+                   placeholder="Search by PO number, supplier…"
+                   autocomplete="off"
+                   oninput="searchPos(this)"
+                   style="width:100%;">
+            <div id="po-search-dd"
+                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;
+                        background:var(--bg-primary);border:1px solid var(--border-color);
+                        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
+                        max-height:250px;overflow-y:auto;margin-top:2px;">
+            </div>
+        </div>
+        <button class="btn-cancel" onclick="togglePoSearch()" style="margin-top:6px;">Cancel</button>
+    </div>
+
+    <!-- Table of linked POs -->
+    <div id="linked-pos-list">
+        {% if linked_pos %}
+        <div class="pinv-table-container" style="max-height:none;">
+            <table class="pinv-table" id="linked-pos-table">
+                <thead>
+                    <tr>
+                        <th>PO Number</th>
+                        <th>Supplier</th>
+                        <th style="text-align:right;">PO Total</th>
+                        <th>Status</th>
+                        <th style="width:40px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="linked-pos-tbody">
+                    {% for po in linked_pos %}
+                    <tr id="linked-po-row-{{ po.workguru_id }}">
+                        <td>
+                            <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="pinv-order-link" style="display:inline-flex;">
+                                <i class="bi bi-box-arrow-up-right"></i>&nbsp;{{ po.display_number|default:po.number|default:po.workguru_id }}
+                            </a>
+                        </td>
+                        <td>{{ po.supplier_name|default:"—" }}</td>
+                        <td style="text-align:right;">£{{ po.total|floatformat:2 }}</td>
+                        <td>{{ po.status|default:"—" }}</td>
+                        <td style="text-align:center;">
+                            <button class="pinv-btn-icon danger" onclick="unlinkPo({{ po.workguru_id }})" title="Unlink">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="pinv-empty-msg" id="no-linked-pos-msg">No purchase orders linked yet.</p>
+        {% endif %}
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -313,6 +390,7 @@ function saveHeader() {
         due_date:       document.getElementById('edit-due-date').value,
         status:         document.getElementById('edit-status').value,
         amount_paid:    document.getElementById('edit-amount-paid').value,
+        total:          document.getElementById('edit-total').value,
         notes:          document.getElementById('edit-notes').value,
     };
     fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
@@ -330,7 +408,10 @@ function saveHeader() {
             document.getElementById('detail-number').textContent = data.invoice_number;
             document.getElementById('detail-status-badge').textContent  = data.status;
             document.getElementById('detail-status-badge').className    = 'pinv-status ' + data.status.toLowerCase();
-            document.getElementById('invoice-paid').textContent = '£' + parseFloat(data.amount_paid).toFixed(2);
+            document.getElementById('invoice-paid').textContent  = '£' + parseFloat(data.amount_paid).toFixed(2);
+            document.getElementById('view-total').textContent    = '£' + parseFloat(data.total).toFixed(2);
+            document.getElementById('invoice-total').textContent = '£' + parseFloat(data.total).toFixed(2);
+            document.getElementById('invoice-outstanding').textContent = '£' + parseFloat(data.amount_outstanding).toFixed(2);
             updatePaymentBadge(data.payment_status);
             toggleHeaderEdit();
         } else {
@@ -607,13 +688,14 @@ document.addEventListener('click', function(e) {
 // ── Attachment ─────────────────────────────────────────────────
 function uploadAttachment(input) {
     if (!input.files.length) return;
+    const file = input.files[0];
     const fd = new FormData();
-    fd.append('file', input.files[0]);
+    fd.append('file', file);
     fd.append('csrfmiddlewaretoken', CSRF);
 
     // Auto-fill the invoice number from filename if it's currently empty or a placeholder
     const currentNumber = document.getElementById('detail-number').textContent.trim();
-    const filenameNoExt = input.files[0].name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
+    const filenameNoExt = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
     if (!currentNumber || currentNumber === '—' || currentNumber === 'New Invoice') {
         // Update via header save
         fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
@@ -646,10 +728,130 @@ function uploadAttachment(input) {
                         <i class="bi bi-trash"></i>
                     </button>
                 </div>`;
+
+            // For PDF files, parse and offer to fill in header fields
+            if (file.name.toLowerCase().endsWith('.pdf')) {
+                parsePdfAndOfferFill(file);
+            }
         } else {
             alert(data.error || 'Upload failed');
         }
     });
+}
+
+// ── PDF suggestion banner (detail page) ───────────────────────
+function parsePdfAndOfferFill(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('csrfmiddlewaretoken', CSRF);
+
+    console.log('[PDF Parse] Uploading PDF for extraction…', file.name);
+
+    fetch('/purchase-invoices/parse-pdf/', {
+        method: 'POST',
+        body: fd,
+    })
+    .then(r => {
+        console.log('[PDF Parse] Response status:', r.status);
+        return r.json();
+    })
+    .then(data => {
+        console.log('[PDF Parse] Extracted data:', JSON.stringify(data, null, 2));
+        if (data.extracted && data.extracted._raw_text) {
+            console.log('[PDF Parse] Raw PDF text:\n', data.extracted._raw_text);
+        }
+        if (!data.success || !data.extracted) return;
+        const ex = data.extracted;
+        // Only show banner if at least one field was found
+        if (!ex.invoice_number && !ex.supplier_name && !ex.date && !ex.due_date) return;
+        showPdfFillBanner(ex);
+    })
+    .catch(err => { console.error('[PDF Parse] Error:', err); });
+}
+
+function showPdfFillBanner(ex) {
+    // Remove any existing banner
+    const old = document.getElementById('pdf-fill-banner');
+    if (old) old.remove();
+
+    const rows = [];
+    if (ex.invoice_number) rows.push({ label: 'Invoice Number', key: 'invoice_number', value: ex.invoice_number, editId: 'edit-number',    viewId: 'detail-number',   textField: true });
+    if (ex.supplier_name)  rows.push({ label: 'Supplier',        key: 'supplier_name',  value: ex.supplier_name,  editId: 'edit-supplier',  viewId: 'view-supplier',   textField: true });
+    if (ex.date)           rows.push({ label: 'Invoice Date',    key: 'date',           value: ex.date,           editId: 'edit-date',       viewId: 'view-date',       dateField: true });
+    if (ex.due_date)       rows.push({ label: 'Due Date',        key: 'due_date',       value: ex.due_date,       editId: 'edit-due-date',   viewId: 'view-due-date',   dateField: true });
+
+    const itemsHtml = rows.map((r, idx) => {
+        const disp = r.dateField ? formatDateDisplay(r.value) : escHtml(r.value);
+        return `<div class="pdf-fill-row" data-key="${r.key}">
+            <span class="pdf-fill-label">${r.label}</span>
+            <span class="pdf-fill-value">${disp}</span>
+            <button type="button" class="pinv-btn-sm" onclick="applyPdfField(${idx})">Apply</button>
+        </div>`;
+    }).join('');
+
+    const banner = document.createElement('div');
+    banner.id = 'pdf-fill-banner';
+    banner.className = 'pdf-fill-banner';
+    banner.dataset.rows = JSON.stringify(rows);
+    banner.innerHTML = `
+        <div class="pdf-fill-header">
+            <i class="bi bi-file-earmark-text"></i>
+            <strong>Values extracted from PDF</strong>
+            <button type="button" class="pinv-btn-icon" onclick="this.closest('#pdf-fill-banner').remove()" title="Dismiss"><i class="bi bi-x"></i></button>
+        </div>
+        <div class="pdf-fill-items">${itemsHtml}</div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+            <button type="button" class="btn-save" onclick="applyAllPdfFields()"><i class="bi bi-check-all"></i> Apply All</button>
+            <button type="button" class="btn-cancel" onclick="this.closest('#pdf-fill-banner').remove()">Dismiss</button>
+        </div>`;
+
+    // Insert after the attachment area
+    const attArea = document.getElementById('attachment-area');
+    if (attArea && attArea.parentNode) {
+        attArea.parentNode.insertBefore(banner, attArea.nextSibling);
+    }
+}
+
+function applyPdfField(idx) {
+    const b = document.getElementById('pdf-fill-banner');
+    if (!b) return;
+    const rows = JSON.parse(b.dataset.rows || '[]');
+    const r = rows[idx];
+    if (!r) return;
+
+    // Open edit mode if not already open
+    const metaEdit = document.getElementById('meta-edit');
+    if (metaEdit && metaEdit.style.display === 'none') toggleHeaderEdit();
+
+    const editEl = document.getElementById(r.editId);
+    if (editEl) editEl.value = r.value;
+
+    // Remove this row from the banner
+    const row = b.querySelector(`.pdf-fill-row[data-key="${r.key}"]`);
+    if (row) row.remove();
+
+    // If no more rows, remove banner
+    if (!b.querySelectorAll('.pdf-fill-row').length) b.remove();
+}
+
+function applyAllPdfFields() {
+    const b = document.getElementById('pdf-fill-banner');
+    if (!b) return;
+    const rows = JSON.parse(b.dataset.rows || '[]');
+    const metaEdit = document.getElementById('meta-edit');
+    if (metaEdit && metaEdit.style.display === 'none') toggleHeaderEdit();
+    rows.forEach(r => {
+        const editEl = document.getElementById(r.editId);
+        if (editEl) editEl.value = r.value;
+    });
+    b.remove();
+}
+
+function formatDateDisplay(isoDate) {
+    if (!isoDate) return '';
+    const parts = isoDate.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return isoDate;
 }
 
 function deleteAttachment() {
@@ -692,5 +894,132 @@ function deleteInvoice() {
     })
     .catch(err => alert('Error: ' + err.message));
 }
+
+// ── Linked PO search / link / unlink ──────────────────────────
+function togglePoSearch() {
+    const form = document.getElementById('po-search-form');
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    if (form.style.display !== 'none') {
+        document.getElementById('po-search-input').focus();
+    }
+}
+
+let _poSearchTimer = null;
+function searchPos(input) {
+    clearTimeout(_poSearchTimer);
+    const q = input.value.trim();
+    const dd = document.getElementById('po-search-dd');
+    if (q.length < 2) { dd.style.display = 'none'; dd.innerHTML = ''; return; }
+    _poSearchTimer = setTimeout(() => {
+        fetch(`/api/purchase-order-search/?q=${encodeURIComponent(q)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            dd.innerHTML = '';
+            if (data.results && data.results.length) {
+                dd.style.display = 'block';
+                data.results.forEach(po => {
+                    const item = document.createElement('div');
+                    item.className = 'order-search-item';
+                    item.innerHTML = `<strong>${escHtml(po.display_number)}</strong>`
+                        + (po.supplier_name ? ` &mdash; ${escHtml(po.supplier_name)}` : '')
+                        + (po.status ? ` <span style="opacity:.6;font-size:.78rem;">(${escHtml(po.status)})</span>` : '');
+                    item.onclick = () => linkPo(po.id, po.display_number, po.supplier_name, po.status);
+                    dd.appendChild(item);
+                });
+            } else {
+                dd.style.display = 'block';
+                dd.innerHTML = '<div style="padding:8px 12px;color:var(--text-secondary);font-size:.85rem;">No results</div>';
+            }
+        });
+    }, 250);
+}
+
+function linkPo(poId, displayNumber, supplierName, status) {
+    fetch(`/purchase-invoices/${INVOICE_ID}/link-po/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ po_id: poId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            addPoRow(data.po);
+            document.getElementById('po-search-input').value = '';
+            document.getElementById('po-search-dd').style.display = 'none';
+            document.getElementById('po-search-form').style.display = 'none';
+        } else {
+            alert(data.error || 'Failed to link PO');
+        }
+    });
+}
+
+function addPoRow(po) {
+    // Remove "no POs" message if present
+    const noMsg = document.getElementById('no-linked-pos-msg');
+    if (noMsg) noMsg.remove();
+
+    let tbody = document.getElementById('linked-pos-tbody');
+    if (!tbody) {
+        // Build the table from scratch
+        const listDiv = document.getElementById('linked-pos-list');
+        listDiv.innerHTML = `
+            <div class="pinv-table-container" style="max-height:none;">
+                <table class="pinv-table" id="linked-pos-table">
+                    <thead><tr>
+                        <th>PO Number</th><th>Supplier</th>
+                        <th style="text-align:right;">PO Total</th>
+                        <th>Status</th><th style="width:40px;"></th>
+                    </tr></thead>
+                    <tbody id="linked-pos-tbody"></tbody>
+                </table>
+            </div>`;
+        tbody = document.getElementById('linked-pos-tbody');
+    }
+
+    // Skip if already in table
+    if (document.getElementById('linked-po-row-' + po.workguru_id)) return;
+
+    const tr = document.createElement('tr');
+    tr.id = 'linked-po-row-' + po.workguru_id;
+    tr.innerHTML = `
+        <td><a href="${po.url}" class="pinv-order-link" style="display:inline-flex;">
+            <i class="bi bi-box-arrow-up-right"></i>&nbsp;${escHtml(po.display_number)}</a></td>
+        <td>${escHtml(po.supplier_name)}</td>
+        <td style="text-align:right;">£${parseFloat(po.total).toFixed(2)}</td>
+        <td>${escHtml(po.status)}</td>
+        <td style="text-align:center;">
+            <button class="pinv-btn-icon danger" onclick="unlinkPo(${po.workguru_id})" title="Unlink">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </td>`;
+    tbody.appendChild(tr);
+}
+
+function unlinkPo(poId) {
+    if (!confirm('Unlink this purchase order?')) return;
+    fetch(`/purchase-invoices/${INVOICE_ID}/unlink-po/${poId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('linked-po-row-' + poId)?.remove();
+            if (!document.querySelector('#linked-pos-tbody tr')) {
+                document.getElementById('linked-pos-list').innerHTML =
+                    '<p class="pinv-empty-msg" id="no-linked-pos-msg">No purchase orders linked yet.</p>';
+            }
+        }
+    });
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('#po-search-form')) {
+        const dd = document.getElementById('po-search-dd');
+        if (dd) dd.style.display = 'none';
+    }
+});
 </script>
 {% endblock %}

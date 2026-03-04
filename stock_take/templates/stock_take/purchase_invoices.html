@@ -191,6 +191,11 @@
                         <option value="Paid">Paid</option>
                     </select>
                 </div>
+                <div>
+                    <label class="pinv-label">Invoice Value (£) <span style="font-weight:400;color:var(--text-secondary);">optional</span></label>
+                    <input type="number" id="new-pinv-total" class="pinv-input" step="0.01" min="0" placeholder="e.g. 1250.00">
+                    <small style="color:var(--text-secondary);font-size:0.75rem;">Set a flat total when not adding line items below.</small>
+                </div>
             </div>
             <div>
                 <label class="pinv-label">Notes</label>
@@ -252,6 +257,7 @@ function openCreateModal() {
     document.getElementById('new-pinv-due-date').value = '';
     document.getElementById('new-pinv-status').value = 'Draft';
     document.getElementById('new-pinv-notes').value = '';
+    document.getElementById('new-pinv-total').value = '';
     // Reset attachment
     const attInput = document.getElementById('modal-attachment-input');
     if (attInput) attInput.value = '';
@@ -327,6 +333,8 @@ function submitCreateInvoice() {
     fd.append('due_date', document.getElementById('new-pinv-due-date').value);
     fd.append('status', document.getElementById('new-pinv-status').value);
     fd.append('notes', document.getElementById('new-pinv-notes').value.trim());
+    const manualTotal = parseFloat(document.getElementById('new-pinv-total').value) || 0;
+    if (manualTotal > 0) fd.append('total', manualTotal);
 
     lineItems.forEach((li, i) => {
         fd.append(`line_desc_${i}`, li.description);
@@ -364,11 +372,90 @@ function handleModalAttachment(input) {
         const file = input.files[0];
         nameSpan.textContent = file.name;
         icon.className = 'bi bi-file-earmark-check';
-        autoPopulateFromFilename(file.name);
+
+        // For PDFs, parse the content server-side (overrides filename guesses)
+        if (file.name.toLowerCase().endsWith('.pdf')) {
+            parsePdfAndFillModal(file);
+        } else {
+            // Non-PDF: fall back to filename-based guessing
+            autoPopulateFromFilename(file.name);
+        }
     } else {
         nameSpan.textContent = 'Click or drag & drop to attach a file';
         icon.className = 'bi bi-cloud-upload';
     }
+}
+
+function parsePdfAndFillModal(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+    // Show a subtle "Extracting…" indicator on the attachment zone
+    const nameSpan = document.getElementById('modal-attachment-name');
+    const originalText = nameSpan.textContent;
+    nameSpan.textContent = originalText + '  — extracting data…';
+
+    console.log('[PDF Parse] Uploading PDF for extraction…', file.name);
+
+    fetch('{% url "parse_purchase_invoice_pdf" %}', {
+        method: 'POST',
+        body: fd,
+    })
+    .then(r => {
+        console.log('[PDF Parse] Response status:', r.status);
+        return r.json();
+    })
+    .then(data => {
+        nameSpan.textContent = originalText;
+        console.log('[PDF Parse] Extracted data:', JSON.stringify(data, null, 2));
+        if (data.extracted && data.extracted._raw_text) {
+            console.log('[PDF Parse] Raw PDF text:\n', data.extracted._raw_text);
+        }
+
+        if (!data.success || !data.extracted) {
+            console.warn('[PDF Parse] No data extracted, falling back to filename');
+            autoPopulateFromFilename(file.name);
+            return;
+        }
+        const ex = data.extracted;
+        const hasAnyField = ex.invoice_number || ex.supplier_name || ex.date || ex.due_date;
+
+        if (!hasAnyField) {
+            console.warn('[PDF Parse] No fields matched, falling back to filename');
+            autoPopulateFromFilename(file.name);
+            return;
+        }
+
+        const numberInput   = document.getElementById('new-pinv-number');
+        const supplierInput = document.getElementById('new-pinv-supplier');
+        const dateInput     = document.getElementById('new-pinv-date');
+        const dueDateInput  = document.getElementById('new-pinv-due-date');
+
+        // PDF-extracted values always override (they're more accurate than filename guesses)
+        if (ex.invoice_number) {
+            numberInput.value = ex.invoice_number;
+            console.log('[PDF Parse] Set invoice number:', ex.invoice_number);
+        }
+        if (ex.supplier_name) {
+            supplierInput.value = ex.supplier_name;
+            console.log('[PDF Parse] Set supplier:', ex.supplier_name);
+        }
+        if (ex.date) {
+            dateInput.value = ex.date;
+            console.log('[PDF Parse] Set date:', ex.date);
+        }
+        if (ex.due_date) {
+            dueDateInput.value = ex.due_date;
+            console.log('[PDF Parse] Set due date:', ex.due_date);
+        }
+    })
+    .catch(err => {
+        console.error('[PDF Parse] Error:', err);
+        nameSpan.textContent = originalText;
+        // Fall back to filename-based guessing
+        autoPopulateFromFilename(file.name);
+    });
 }
 
 function autoPopulateFromFilename(filename) {

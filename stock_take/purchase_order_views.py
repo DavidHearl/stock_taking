@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, StockHistory, Supplier, SupplierContact
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, StockHistory, Supplier, SupplierContact
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -138,8 +138,16 @@ def purchase_orders_list(request):
     total_filtered = queryset.count()
     
     # Filter by status tab
+    STATUS_TAB_MAP = {
+        'draft': 'Draft',
+        'approved': 'Approved',
+        'received': 'Received',
+        'partially received': 'Partially Received',
+        'cancelled': 'Cancelled',
+    }
     if status_filter != 'all':
-        queryset = queryset.filter(status=status_filter.capitalize())
+        db_status = STATUS_TAB_MAP.get(status_filter.lower(), status_filter.capitalize())
+        queryset = queryset.filter(status=db_status)
     
     total_count = PurchaseOrder.objects.count()
     
@@ -238,6 +246,7 @@ def purchase_orders_list(request):
         'draft_count': status_counts.get('Draft', 0),
         'approved_count': status_counts.get('Approved', 0),
         'received_count': status_counts.get('Received', 0),
+        'partial_count': status_counts.get('Partially Received', 0),
         'cancelled_count': status_counts.get('Cancelled', 0),
         'carnehill_pos': carnehill_pos,
     }
@@ -442,6 +451,30 @@ def purchase_order_detail(request, po_id):
     # Determine if any project is stock (for allocation UI visibility)
     has_stock_project = any(p.project_type == 'stock' for p in po_projects)
 
+    # ── VAT breakdown ─────────────────────────────────────────────────────────
+    po_vat_rate = None
+    po_net_total = None
+    po_vat_amount = None
+    po_gross_total = None
+    if supplier_obj and supplier_obj.vat_rate is not None:
+        po_vat_rate = supplier_obj.vat_rate
+    if po_vat_rate is not None:
+        net = purchase_order.total or 0
+        # Use WorkGuru tax_total if available, otherwise calculate
+        if purchase_order.tax_total:
+            vat_amt = purchase_order.tax_total
+        else:
+            vat_amt = round(float(net) * float(po_vat_rate) / 100, 2)
+        po_net_total = net
+        po_vat_amount = vat_amt
+        po_gross_total = round(float(net) + float(vat_amt), 2)
+
+    # ── Linked purchase invoice totals ───────────────────────────────────────
+    _pi_agg = purchase_order.linked_purchase_invoices.aggregate(
+        t=Sum('total'), p=Sum('amount_paid'))
+    _pi_agg_total = _pi_agg['t'] or 0
+    _pi_agg_outstanding = (_pi_agg['t'] or 0) - (_pi_agg['p'] or 0)
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -461,11 +494,18 @@ def purchase_order_detail(request, po_id):
         'attachments': purchase_order.attachments.all(),
         'po_invoices': purchase_order.invoices.all(),
         'linked_invoices': purchase_order.linked_invoices.all().order_by('-date'),
+        'linked_purchase_invoices': purchase_order.linked_purchase_invoices.all().order_by('-date', '-created_at'),
+        'linked_pi_total': _pi_agg_total,
+        'linked_pi_outstanding': _pi_agg_outstanding,
         'original_customer_name': original_customer_name,
         'original_customer_number': original_customer_number,
         'expected_delivery_date': expected_delivery_date,
         'po_projects': po_projects,
         'has_stock_project': has_stock_project,
+        'po_vat_rate': po_vat_rate,
+        'po_net_total': po_net_total,
+        'po_vat_amount': po_vat_amount,
+        'po_gross_total': po_gross_total,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -727,7 +767,14 @@ def purchase_order_save(request, po_id):
 
 @login_required
 def purchase_order_receive(request, po_id):
-    """Receive a purchase order - marks PO as received and updates linked items (AJAX)"""
+    """Receive a purchase order (full or partial).
+
+    Accepts an optional ``product_ids`` list in the JSON body.  When supplied
+    only those regular product lines are marked as received; when omitted all
+    un-received lines are marked (original behaviour).  The PO status is set
+    to ``'Received'`` when every product line is fully received, otherwise to
+    ``'Partially Received'``.
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
@@ -739,8 +786,8 @@ def purchase_order_receive(request, po_id):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
     from django.utils import timezone
-    
-    # Use provided date or default to today
+
+    # Parse the received date (defaults to today)
     received_date_str = data.get('received_date', '')
     if received_date_str:
         try:
@@ -750,15 +797,15 @@ def purchase_order_receive(request, po_id):
             today = timezone.now().strftime('%d/%m/%Y')
     else:
         today = timezone.now().strftime('%d/%m/%Y')
+
+    # Optional selective product list (list of PurchaseOrderProduct.id values)
+    selected_ids = data.get('product_ids', None)  # None = receive all
+    selective = selected_ids is not None
+
     received_items = 0
-
-    # Update PO status
-    po.status = 'Received'
-    po.received_date = today
-    po.save(update_fields=['status', 'received_date'])
-
-    # Handle Carnehill (boards) POs — mark PNX items as received
     is_carnehill = (po.supplier_name or '').lower().find('carnehill') >= 0
+
+    # ── Carnehill (boards) POs ──────────────────────────────────────────────
     boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
     if boards_po:
         for pnx_item in boards_po.pnx_items.all():
@@ -768,7 +815,7 @@ def purchase_order_receive(request, po_id):
                 pnx_item.save(update_fields=['received', 'received_quantity'])
                 received_items += 1
 
-    # Handle OS Doors POs — mark OSDoor items as received
+    # ── OS Doors POs ────────────────────────────────────────────────────────
     linked_orders = Order.objects.filter(os_doors_po=po.display_number)
     for order in linked_orders:
         for door in order.os_doors.all():
@@ -778,14 +825,17 @@ def purchase_order_receive(request, po_id):
                 door.save(update_fields=['received', 'received_quantity'])
                 received_items += 1
 
-    # Mark regular product lines as received (skip for Carnehill — boards don't update stock)
+    # ── Regular product lines ───────────────────────────────────────────────
     if not is_carnehill:
-        for product in po.products.select_related('stock_item').all():
+        all_products = list(po.products.select_related('stock_item').all())
+        for product in all_products:
+            # If selective mode, skip products not in the requested list
+            if selective and product.id not in selected_ids:
+                continue
             if product.received_quantity < product.order_quantity:
                 delta = float(product.order_quantity) - float(product.received_quantity)
                 product.received_quantity = product.order_quantity
                 product.save(update_fields=['received_quantity'])
-                # Update linked stock item quantity and create stock history
                 if delta > 0 and product.stock_item:
                     product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
                     product.stock_item.save(update_fields=['quantity'])
@@ -799,6 +849,24 @@ def purchase_order_receive(request, po_id):
                         created_by=request.user,
                     )
                 received_items += 1
+
+    # ── Determine new status ────────────────────────────────────────────────
+    # Refresh products from DB to get updated received quantities
+    all_products_fresh = list(po.products.all())
+    if all_products_fresh:
+        all_received = all(
+            p.received_quantity >= p.order_quantity
+            for p in all_products_fresh
+            if p.order_quantity > 0
+        )
+        new_status = 'Received' if all_received else 'Partially Received'
+    else:
+        # No regular product lines (boards / OS doors PO) — mark fully received
+        new_status = 'Received'
+
+    po.status = new_status
+    po.received_date = today
+    po.save(update_fields=['status', 'received_date'])
 
     return JsonResponse({
         'success': True,
@@ -1172,7 +1240,7 @@ def supplier_save(request, supplier_id):
         'name', 'email', 'phone', 'fax', 'website', 'abn',
         'address_1', 'address_2', 'city', 'state', 'postcode', 'country',
         'currency', 'credit_limit', 'credit_days', 'credit_terms_type',
-        'price_tier', 'supplier_tax_rate', 'estimate_lead_time',
+        'price_tier', 'supplier_tax_rate', 'estimate_lead_time', 'vat_rate',
     ]
 
     update_fields = []
@@ -1184,6 +1252,11 @@ def supplier_save(request, supplier_id):
                     val = float(val) if val else 0
                 except (ValueError, TypeError):
                     val = 0
+            elif field == 'vat_rate':
+                try:
+                    val = float(val) if val not in (None, '') else None
+                except (ValueError, TypeError):
+                    val = None
             elif field == 'estimate_lead_time':
                 try:
                     val = int(val) if val else None
@@ -1890,6 +1963,53 @@ def po_delete_invoice(request, po_id, invoice_id):
             pass
     invoice.delete()
 
+    return JsonResponse({'success': True})
+
+
+@login_required
+def po_link_purchase_invoice(request, po_id):
+    """Link an existing PurchaseInvoice to this PO (M2M)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    invoice_id = data.get('invoice_id')
+    if not invoice_id:
+        return JsonResponse({'error': 'invoice_id is required'}, status=400)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    invoice.purchase_orders.add(po)
+
+    return JsonResponse({
+        'success': True,
+        'invoice': {
+            'id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'supplier_name': invoice.supplier_name or '—',
+            'date': invoice.date.strftime('%d/%m/%Y') if invoice.date else '—',
+            'total': str(invoice.total),
+            'amount_outstanding': str(invoice.amount_outstanding),
+            'status': invoice.status,
+            'payment_status': invoice.payment_status,
+            'url': f'/purchase-invoices/{invoice.id}/',
+        },
+    })
+
+
+@login_required
+def po_unlink_purchase_invoice(request, po_id, invoice_id):
+    """Remove the M2M link between a PurchaseInvoice and this PO."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    invoice.purchase_orders.remove(po)
     return JsonResponse({'success': True})
 
 

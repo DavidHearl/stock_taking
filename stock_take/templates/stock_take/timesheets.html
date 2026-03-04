@@ -293,12 +293,19 @@
             <label style="font-size:0.78rem;color:var(--text-secondary);">Description <span id="popover-desc-hint" style="color:var(--text-secondary);">(optional)</span></label>
             <input type="text" class="form-input" id="popover-description" placeholder="e.g. cabinet build" style="font-size:0.82rem;">
         </div>
-        <!-- Duplicate row (shown only when editing existing) -->
-        <div id="popover-dup-row" style="display:none;margin-bottom:10px;">
-            <label style="font-size:0.78rem;color:var(--text-secondary);">Duplicate to worker</label>
-            <div style="display:flex;gap:6px;">
-                <select class="form-input" id="popover-dup-worker" style="font-size:0.82rem;flex:1;"></select>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="duplicateSlot()" title="Copy this block to the selected worker"><i class="bi bi-copy"></i></button>
+        <!-- Copy to worker / day (shown only when editing existing) -->
+        <div id="popover-dup-row" style="display:none;margin-bottom:10px;border-top:1px solid var(--border-color,#3a3d45);padding-top:8px;">
+            <label style="font-size:0.78rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:5px;"><i class="bi bi-copy" style="margin-right:4px;"></i>Copy to&hellip;</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:end;">
+                <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);">Worker</label>
+                    <select class="form-input" id="popover-dup-worker" style="font-size:0.82rem;width:100%;"></select>
+                </div>
+                <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);">Day</label>
+                    <select class="form-input" id="popover-dup-day" style="font-size:0.82rem;width:100%;"></select>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="duplicateSlot()" title="Copy this block to the selected worker &amp; day"><i class="bi bi-copy"></i></button>
             </div>
         </div>
         <div style="display:flex;gap:6px;justify-content:flex-end;">
@@ -1061,13 +1068,24 @@ function onSlotClick(e){
     document.getElementById('popover-order-results').style.display='none';
     document.getElementById('popover-clear-btn').style.display = existing ? 'inline-block':'none';
 
-    // Duplicate row: populate other workers when editing existing
-    const dupRow = document.getElementById('popover-dup-row');
-    const dupSel = document.getElementById('popover-dup-worker');
+    // Copy row: populate worker + day selectors when editing an existing entry
+    const dupRow    = document.getElementById('popover-dup-row');
+    const dupSel    = document.getElementById('popover-dup-worker');
+    const dupDaySel = document.getElementById('popover-dup-day');
     if(existing){
-        dupSel.innerHTML = workers.filter(w=>String(w.id)!==String(wid))
-            .map(w=>`<option value="${w.id}">${w.name.split(' ')[0]}</option>`).join('');
-        dupRow.style.display = workers.length > 1 ? '' : 'none';
+        // All workers; current worker shown as "(same)"
+        dupSel.innerHTML = workers.map(w=>{
+            const isSame = String(w.id)===String(wid);
+            return `<option value="${w.id}"${isSame?' selected':''}>${w.name.split(' ')[0]}${isSame?' (same)':''}</option>`;
+        }).join('');
+        // Mon–Fri of the currently displayed week
+        const DAY_SHORT = ['Mon','Tue','Wed','Thu','Fri'];
+        dupDaySel.innerHTML = DAY_SHORT.map((name,idx)=>{
+            const d=new Date(currentWeekStart); d.setDate(d.getDate()+idx);
+            const dd=String(d.getDate()).padStart(2,'0'), mm=String(d.getMonth()+1).padStart(2,'0');
+            return `<option value="${idx}"${idx===di?' selected':''}>${name} ${dd}/${mm}</option>`;
+        }).join('');
+        dupRow.style.display = '';
     } else { dupRow.style.display='none'; }
 
     const popover=document.getElementById('slot-popover');
@@ -1123,13 +1141,19 @@ function duplicateSlot(){
     let key=slotKey(wid,di,slot), data=asgn[key];
     if(data?.is_cont){ key=data.span_start_key; data=asgn[key]; }
     if(!data)return;
-    const targetWid=document.getElementById('popover-dup-worker').value;
+    const targetWid = document.getElementById('popover-dup-worker').value;
+    const targetDi  = parseInt(document.getElementById('popover-dup-day').value);
     if(!targetWid)return;
+    // Guard: copying to the exact same worker + same day is a no-op
+    if(String(targetWid)===String(wid) && targetDi===di){
+        alert('Please choose a different worker or a different day.');
+        return;
+    }
     const targetWorker=workers.find(w=>String(w.id)===String(targetWid));
     if(!targetWorker)return;
     const targetWi=workers.indexOf(targetWorker);
     const startSlot=key.split('__')[2];
-    writeFn(targetWid, di, startSlot, { ...data, workerIdx:targetWi, is_start:true });
+    writeFn(targetWid, targetDi, startSlot, { ...data, workerIdx:targetWi, is_start:true });
     closePopover();
 }
 
