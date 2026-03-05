@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, StockHistory, Supplier, SupplierContact
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, StockHistory, Supplier, SupplierContact, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -929,6 +929,12 @@ def purchase_order_create(request):
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
+    log_activity(
+        user=request.user,
+        event_type='po_created',
+        description=f'{request.user.get_full_name() or request.user.username} created purchase order {display_number} (supplier: {supplier.name}).',
+    )
+
     messages.success(request, f'Purchase order {display_number} created.')
     return redirect('purchase_order_detail', po_id=po.workguru_id)
 
@@ -1571,6 +1577,12 @@ def purchase_order_delete(request, po_id):
             pass
 
     po.delete()
+
+    log_activity(
+        user=request.user,
+        event_type='po_deleted',
+        description=f'{request.user.get_full_name() or request.user.username} deleted purchase order {display_number}.',
+    )
 
     messages.success(request, f'Purchase Order {display_number} deleted.')
     return redirect('purchase_orders_list')
@@ -2305,10 +2317,79 @@ def create_os_doors_purchase_order(request, order_id):
 
 
 @login_required
+def add_additional_os_doors_po(request, order_id):
+    """Create an additional OS Doors PurchaseOrder and add it to order.additional_os_doors_pos."""
+    import re
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    order = get_object_or_404(Order, id=order_id)
+
+    # Auto-generate next PO number (avoid collisions with BoardsPO and PurchaseOrder)
+    max_num = 0
+    for pn in BoardsPO.objects.filter(po_number__regex=r'^PO\d+$').values_list('po_number', flat=True):
+        m = re.search(r'(\d+)', pn)
+        if m:
+            max_num = max(max_num, int(m.group(1)))
+    for field in ['display_number', 'number']:
+        for pn in PurchaseOrder.objects.filter(**{f'{field}__regex': r'^PO\d+$'}).values_list(field, flat=True):
+            m = re.search(r'(\d+)', pn)
+            if m:
+                max_num = max(max_num, int(m.group(1)))
+    next_num = max(max_num + 1, 1000)
+    po_number = f'PO{next_num}'
+    while (BoardsPO.objects.filter(po_number=po_number).exists() or
+           PurchaseOrder.objects.filter(display_number=po_number).exists() or
+           PurchaseOrder.objects.filter(number=po_number).exists()):
+        next_num += 1
+        po_number = f'PO{next_num}'
+
+    if order.customer:
+        customer_name = f'{order.customer.first_name} {order.customer.last_name}'.strip() or getattr(order.customer, 'name', '')
+    else:
+        customer_name = f'{order.first_name} {order.last_name}'.strip()
+
+    max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_wg_id = max(max_wg_id + 1, 800000)
+
+    supplier = Supplier.objects.filter(name__icontains='O & S Doors').first()
+    if not supplier:
+        supplier = Supplier.objects.filter(name__icontains='O S Door').first()
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_wg_id,
+        number=po_number,
+        display_number=po_number,
+        description=f'Additional OS Doors for {customer_name} - Sale {order.sale_number}',
+        supplier_id=supplier.workguru_id if supplier else None,
+        supplier_name=supplier.name if supplier else 'O & S Doors Ltd',
+        project_id=int(order.workguru_id) if order.workguru_id else None,
+        project_number=order.sale_number,
+        project_name=customer_name,
+        delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        status='Draft',
+        currency='GBP',
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
+
+    order.additional_os_doors_pos.add(po)
+
+    return JsonResponse({
+        'success': True,
+        'po_number': po_number,
+        'workguru_id': po.workguru_id,
+        'url': f'/purchase-order/{po.workguru_id}/',
+    })
+
+
+@login_required
 def sync_os_doors_po(request, order_id):
     """Save current cost/qty from the frontend, then re-sync the linked PurchaseOrder's
-    product lines.  Accepts optional ``door_values`` dict in the JSON body so that
-    unsaved form edits are applied before the PO is rebuilt.
+    product lines.  Accepts optional ``door_values`` dict and optional
+    ``po_display_number`` in the JSON body.  When ``po_display_number`` is supplied
+    the named PO is synced and only doors whose ``po_number`` matches are included;
+    otherwise the order's primary ``os_doors_po`` is synced with doors that belong
+    to it (blank or matching po_number).
     Returns JSON.
     """
     import json
@@ -2319,21 +2400,39 @@ def sync_os_doors_po(request, order_id):
 
     order = get_object_or_404(Order, id=order_id)
 
-    if not order.os_doors_po:
-        return JsonResponse({'success': False, 'error': 'No PO linked to this order.'})
-
-    po = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
-    if not po:
-        return JsonResponse({'success': False, 'error': f'Purchase Order {order.os_doors_po} not found.'})
-
-    if not order.os_doors.exists():
-        return JsonResponse({'success': False, 'error': 'No OS door items on this order.'})
-
     # Apply any unsaved cost/qty values sent from the frontend
     try:
         body = json.loads(request.body) if request.body else {}
     except (json.JSONDecodeError, ValueError):
         body = {}
+
+    # Determine which PO we are syncing (primary or an additional one)
+    po_workguru_id = body.get('po_workguru_id')
+    if po_workguru_id:
+        try:
+            po_workguru_id = int(po_workguru_id)
+        except (TypeError, ValueError):
+            po_workguru_id = None
+
+    if po_workguru_id:
+        po = get_object_or_404(PurchaseOrder, workguru_id=po_workguru_id)
+        if not po.display_number:
+            return JsonResponse({'success': False, 'error': 'PO has no display number — cannot match door items.'})
+        # Only doors explicitly assigned to this additional PO
+        doors_qs = order.os_doors.filter(po_number=po.display_number)
+    else:
+        if not order.os_doors_po:
+            return JsonResponse({'success': False, 'error': 'No PO linked to this order.'})
+        po = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+        if not po:
+            return JsonResponse({'success': False, 'error': f'Purchase Order {order.os_doors_po} not found.'})
+        # Doors belonging to the primary PO: blank po_number or explicitly set to the primary PO
+        doors_qs = order.os_doors.filter(
+            Q(po_number='') | Q(po_number__isnull=True) | Q(po_number=order.os_doors_po)
+        )
+
+    if not doors_qs.exists():
+        return JsonResponse({'success': False, 'error': 'No OS door items for this PO.'})
 
     door_values = body.get('door_values', {})
     if door_values:
@@ -2354,11 +2453,11 @@ def sync_os_doors_po(request, order_id):
             except Exception:
                 continue
 
-    # Remove existing product lines and rebuild from current door data
+    # Remove existing product lines and rebuild from the filtered door set
     po.products.all().delete()
 
     total = Decimal('0')
-    for idx, door in enumerate(order.os_doors.all()):
+    for idx, door in enumerate(doors_qs.order_by('door_style', 'colour')):
         unit_price = door.cost_price if door.cost_price else Decimal('0')
         qty = Decimal(str(door.quantity))
         line_total = unit_price * qty
@@ -2382,7 +2481,7 @@ def sync_os_doors_po(request, order_id):
     return JsonResponse({
         'success': True,
         'po_number': po.display_number,
-        'line_count': order.os_doors.count(),
+        'line_count': doors_qs.count(),
         'total': str(total),
     })
 

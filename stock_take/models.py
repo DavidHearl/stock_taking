@@ -196,6 +196,7 @@ class AnthillSale(models.Model):
     goods_due_in = models.CharField(max_length=50, blank=True, help_text='Goods Due In date from Anthill (text field)')
 
     # Metadata
+    paid_in_full = models.BooleanField(default=False, help_text='Manually marked as fully paid — excluded from outstanding balance report and dashboard total')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -206,6 +207,81 @@ class AnthillSale(models.Model):
         ordering = ['-activity_date']
         verbose_name = 'Anthill Sale'
         verbose_name_plural = 'Anthill Sales'
+
+
+class AnthillPayment(models.Model):
+    """
+    A payment record linked to an Anthill CRM sale.
+
+    Source is always 'xero' — individual payments are fetched from Xero invoices
+    matched by the sale's contract_number against the Xero invoice Reference field.
+    """
+
+    sale = models.ForeignKey(
+        AnthillSale, on_delete=models.CASCADE, related_name='payments',
+        help_text='The Anthill sale this payment belongs to',
+    )
+
+    # Source tracking
+    source = models.CharField(
+        max_length=20, default='xero', blank=True,
+        help_text='Data source for this payment record (e.g. "xero")',
+    )
+
+    # Xero invoice context (parent invoice this payment belongs to)
+    xero_invoice_id = models.CharField(
+        max_length=50, blank=True, db_index=True,
+        help_text='Xero InvoiceID (UUID)',
+    )
+    xero_invoice_number = models.CharField(
+        max_length=50, blank=True,
+        help_text='Xero invoice number, e.g. "INV-0001"',
+    )
+    invoice_total = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Total value of the parent Xero invoice',
+    )
+    invoice_amount_due = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Amount still outstanding on the parent Xero invoice',
+    )
+    invoice_status = models.CharField(
+        max_length=20, blank=True,
+        help_text='Xero invoice status: AUTHORISED, PAID, VOIDED, etc.',
+    )
+
+    # Individual payment fields
+    anthill_payment_id = models.CharField(
+        max_length=50, blank=True, db_index=True,
+        help_text='Payment ID from the source system (Xero PaymentID, etc.)',
+    )
+    payment_type = models.CharField(
+        max_length=100, blank=True,
+        help_text='e.g. "Deposit", "Balance Payment" — derived from Xero payment reference',
+    )
+    date = models.DateTimeField(null=True, blank=True, help_text='Date of the payment')
+    location = models.CharField(max_length=100, blank=True, help_text='Location (not available from Xero)')
+    user_name = models.CharField(max_length=150, blank=True, help_text='User who recorded the payment (not available from Xero)')
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Payment amount (GBP)',
+    )
+    status = models.CharField(
+        max_length=50, blank=True,
+        help_text='"Confirmed", "Authorised", etc.',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        date_str = self.date.strftime('%d/%m/%Y') if self.date else '?'
+        return f'{self.payment_type or "Payment"} £{self.amount} ({date_str} — {self.sale.anthill_activity_id})'
+
+    class Meta:
+        ordering = ['date']
+        verbose_name = 'Anthill Payment'
+        verbose_name_plural = 'Anthill Payments'
 
 
 class Designer(models.Model):
@@ -254,6 +330,7 @@ class Order(models.Model):
     fit_date = models.DateField(null=True, blank=True)
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
     additional_boards_pos = models.ManyToManyField(BoardsPO, blank=True, related_name='additional_orders', help_text='Additional boards POs for this order')
+    additional_os_doors_pos = models.ManyToManyField('PurchaseOrder', blank=True, related_name='additional_os_doors_orders', help_text='Additional OS Doors POs for this order')
     job_finished = models.BooleanField(default=False)
     
     ORDER_TYPE_CHOICES = [

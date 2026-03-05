@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load custom_filters %}
 
 {% block title %}Sales{% endblock %}
 
@@ -7,9 +8,54 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<link href="{% static 'css/ordering.css' %}" rel="stylesheet">
+<style>
+.sale-status-open {
+    background: rgba(16, 185, 129, 0.18);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    font-weight: 600;
+}
+.sale-status-complete {
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    font-weight: 600;
+}
+.sale-status-won {
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    font-weight: 600;
+}
+.sale-status-dead {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    font-weight: 600;
+}
+.sale-status-default {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    font-weight: 500;
+}
+.completed-hidden-notice {
+    display: none;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.completed-hidden-notice:hover { background: var(--bg-tertiary); }
+.completed-hidden-notice i { margin-right: 4px; }
+</style>
 {% endblock %}
 
-{% block page_title %}Sales{% endblock %}
+{% block page_title %}Sales ({{ filtered_count }}){% endblock %}
 
 {% block content %}
 <div class="content-card">
@@ -57,16 +103,12 @@
     {% endif %}
 
     {% if sales %}
-    <div class="customers-result-bar">
-        <span class="result-count">{{ filtered_count }} sale{{ filtered_count|pluralize }}</span>
-    </div>
-    <div class="customers-table-container">
-        <table class="customers-table">
+    <div class="card">
+        <table class="table orders-table">
             <thead>
                 <tr>
                     <th>Activity ID</th>
                     <th>Customer</th>
-                    <th>Type</th>
                     <th>Status</th>
                     <th>Assigned To</th>
                     <th>Value</th>
@@ -76,9 +118,17 @@
                     <th>Order</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for sale in sales %}
+            <tbody id="sales-tbody-header" style="display:none;">
                 <tr>
+                    <td colspan="9" id="completed-hidden-notice" class="completed-hidden-notice">
+                        <i class="bi bi-eye-slash"></i>
+                        <span id="completed-hidden-text"></span> &mdash; <strong>search to reveal them</strong>
+                    </td>
+                </tr>
+            </tbody>
+            <tbody id="sales-tbody">
+                {% for sale in sales %}
+                <tr data-status="{{ sale.status|lower }}" data-completed="{% if sale.status|lower == 'complete' or sale.status|lower == 'completed' or sale.status|lower == 'won' %}1{% else %}0{% endif %}">
                     <td>
                         <a href="{% url 'sale_detail' sale.pk %}" class="customer-name-link">
                             {{ sale.anthill_activity_id }}
@@ -93,28 +143,37 @@
                         {{ sale.customer_name|default:"-" }}
                         {% endif %}
                     </td>
-                    <td>{{ sale.activity_type|default:"-" }}</td>
                     <td>
-                        <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                        {% with s=sale.status|lower %}
+                        <span class="customer-active-badge {% if s == 'open' %}sale-status-open{% elif s == 'complete' or s == 'completed' %}sale-status-complete{% elif s == 'won' %}sale-status-won{% elif s == 'dead' %}sale-status-dead{% else %}sale-status-default{% endif %}">
                             {{ sale.status|default:"-" }}
                         </span>
+                        {% endwith %}
                     </td>
                     <td>{{ sale.assigned_to_name|default:"-" }}</td>
-                    <td class="text-right">
+                    <td>
                         {% if sale.sale_value %}
                         £{{ sale.sale_value|floatformat:0 }}
                         {% else %}-{% endif %}
                     </td>
-                    <td><span class="customer-mono" style="font-size: 0.75rem;">{{ sale.contract_number|default:"-" }}</span></td>
+                    <td>{{ sale.contract_number|default:"-" }}</td>
                     <td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
                     <td>{{ sale.location|default:"-" }}</td>
                     <td>
                         {% if sale.order %}
-                        <a href="{% url 'order_details' sale.order.id %}" class="customer-order-badge">
+                        <a href="{% url 'order_details' sale.order.id %}" class="btn btn-sm btn-outline-primary">
                             {{ sale.order.sale_number }}
                         </a>
                         {% else %}
+                        {% with linked_order=order_map|get_item:sale.anthill_activity_id %}
+                        {% if linked_order %}
+                        <a href="{% url 'order_details' linked_order.id %}" class="btn btn-sm btn-outline-primary">
+                            {{ linked_order.sale_number }}
+                        </a>
+                        {% else %}
                         <span class="text-muted">-</span>
+                        {% endif %}
+                        {% endwith %}
                         {% endif %}
                     </td>
                 </tr>
@@ -164,23 +223,44 @@
 
 <script>
 const searchInput = document.getElementById('sale-search');
+const salesTbody = document.getElementById('sales-tbody');
+const noticeWrapper = document.getElementById('sales-tbody-header');
+const noticeText = document.getElementById('completed-hidden-text');
 let searchTimeout;
+
+function applyCompletedVisibility(hasSearch) {
+    if (!salesTbody) return;
+    const completedRows = salesTbody.querySelectorAll('tr[data-completed="1"]');
+    if (hasSearch) {
+        completedRows.forEach(r => r.style.display = '');
+        if (noticeWrapper) noticeWrapper.style.display = 'none';
+    } else {
+        completedRows.forEach(r => r.style.display = 'none');
+        if (noticeWrapper && completedRows.length > 0) {
+            noticeWrapper.style.display = '';
+            noticeText.textContent = completedRows.length + ' completed sale' + (completedRows.length !== 1 ? 's' : '') + ' hidden';
+        }
+    }
+}
+
+// On page load
+const initialSearch = '{{ search_query|escapejs }}';
+applyCompletedVisibility(initialSearch.length > 0);
+
+// Click notice to reveal
+if (noticeWrapper) {
+    noticeWrapper.addEventListener('click', () => {
+        applyCompletedVisibility(true);
+    });
+}
+
 if (searchInput) {
     searchInput.addEventListener('input', function() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            const query = this.value.trim();
-            const params = new URLSearchParams(window.location.search);
-            if (query) params.set('q', query);
-            else params.delete('q');
-            params.delete('page');
-            if (!params.has('age')) params.set('age', '{{ age_filter }}');
-            window.location.href = '?' + params.toString();
-        }, 500);
+        // Reveal completed rows as user types (no page reload)
+        applyCompletedVisibility(this.value.trim().length > 0);
     });
     searchInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
-            clearTimeout(searchTimeout);
             const query = this.value.trim();
             const params = new URLSearchParams(window.location.search);
             if (query) params.set('q', query);

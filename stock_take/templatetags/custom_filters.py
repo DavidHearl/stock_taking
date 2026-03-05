@@ -103,3 +103,11 @@ def short_timesince(value):
         return f'{total_hours}h ago'
     days = diff.days
     return f'{days} days ago'
+
+
+@register.filter
+def get_item(dictionary, key):
+    """Allow dict lookups in templates: {{ my_dict|get_item:key }}"""
+    if dictionary is None:
+        return None
+    return dictionary.get(str(key))

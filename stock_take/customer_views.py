@@ -2,7 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
-from .models import Customer, Order, PurchaseOrder, AnthillSale, Invoice, SyncLog, Lead
+from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead
 import logging
 import json
 import time
@@ -200,8 +200,15 @@ def customer_detail(request, pk):
     # Get linked orders
     orders = Order.objects.filter(customer=customer).order_by('-order_date')
 
-    # Get Anthill sales for this customer
-    anthill_sales = customer.anthill_sales.all().order_by('-activity_date')
+    # Get Anthill sales for this customer — annotated with payment totals
+    anthill_sales = (
+        customer.anthill_sales
+        .annotate(
+            payments_total=Sum('payments__amount'),
+            payments_count=Count('payments'),
+        )
+        .order_by('-activity_date')
+    )
 
     # Get invoices linked to this customer
     invoices = Invoice.objects.filter(customer=customer).order_by('-date')
@@ -593,9 +600,11 @@ def sales_list(request):
     cutoff_1y = now - timedelta(days=365)
     cutoff_2y = now - timedelta(days=730)
 
-    # Only Category 3 = actual sales (Room Sale + Historic Sale)
+    # Only Category 3 = actual sales (Room Sale + Historic Sale), exclude Cancelled
     sales_base = AnthillSale.objects.select_related('customer', 'order').filter(
         category='3'
+    ).exclude(
+        status__iexact='cancelled'
     ).order_by('-activity_date')
 
     if location_filter and not search_query:
@@ -669,6 +678,12 @@ def sales_list(request):
     paginator = Paginator(sales, 100)
     page_obj = paginator.get_page(page_number)
 
+    # Build a fallback map: anthill_activity_id -> Order (via Order.sale_number match)
+    # Used when AnthillSale.order FK is not populated
+    page_activity_ids = [s.anthill_activity_id for s in page_obj]
+    matched_orders = Order.objects.filter(sale_number__in=page_activity_ids).only('id', 'sale_number')
+    order_map = {o.sale_number: o for o in matched_orders}
+
     context = {
         'sales': page_obj,
         'page_obj': page_obj,
@@ -681,6 +696,7 @@ def sales_list(request):
         'count_2_10y': count_2_10y,
         'count_historic': count_historic,
         'search_expanded_from': search_expanded_from,
+        'order_map': order_map,
     }
 
     return render(request, 'stock_take/sales_list.html', context)
@@ -696,9 +712,15 @@ def sale_detail(request, pk):
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
 
+    # Get payment history for this sale
+    payments = list(sale.payments.all().order_by('date'))
+    payments_total = sum(p.amount for p in payments if p.amount) or None
+
     context = {
         'sale': sale,
         'related_sales': related_sales,
+        'payments': payments,
+        'payments_total': payments_total,
     }
 
     return render(request, 'stock_take/sale_detail.html', context)

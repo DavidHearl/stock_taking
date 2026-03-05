@@ -189,13 +189,26 @@ def _api_get(endpoint, params=None):
         "Accept": "application/json",
     }
 
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        logger.error(f"Xero API error ({endpoint}): {e}")
-        return None
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            if response.status_code == 429:
+                # Respect Retry-After header, default to 61 seconds
+                retry_after = int(response.headers.get('Retry-After', 61))
+                logger.warning(
+                    f"Xero rate limit hit ({endpoint}). "
+                    f"Waiting {retry_after}s before retry (attempt {attempt + 1}/3)"
+                )
+                import time as _time
+                _time.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"Xero API error ({endpoint}): {e}")
+            return None
+    logger.error(f"Xero API error ({endpoint}): exceeded retry limit after 429s")
+    return None
 
 
 def _api_post(endpoint, data):
@@ -379,6 +392,176 @@ def get_reports_profit_and_loss(from_date=None, to_date=None):
     if to_date:
         params["toDate"] = to_date
     return _api_get("Reports/ProfitAndLoss", params=params)
+
+
+# ─── Sale payment lookup (read-only) ───────────────────────────────
+
+def get_invoices_by_reference(reference):
+    """
+    Fetch all Xero invoices whose Reference field matches the given value.
+
+    This is used to look up invoices by Anthill contract number
+    (e.g. "BFS-SD-412885"), which Sliderobes store in the Xero invoice
+    Reference field.
+
+    Returns a list of invoice dicts (basic detail level, no Payments sub-array).
+    Returns empty list if nothing found or on error.
+    """
+    if not reference:
+        return []
+    # Xero does not support Contains()/StartsWith() on the Reference field.
+    # Use searchTerm (full-text search) then filter client-side so that references
+    # with appended text (e.g. "BFS-PO-419089 dep cc") are still matched.
+    result = _api_get("Invoices", params={
+        "searchTerm": reference,
+        "Statuses": "AUTHORISED,PAID",
+    })
+    if result and "Invoices" in result:
+        # Keep only invoices whose Reference actually contains our contract number
+        # (searchTerm also matches contact names, descriptions, etc.)
+        return [
+            inv for inv in result["Invoices"]
+            if reference.lower() in (inv.get("Reference") or "").lower()
+        ]
+    return []
+
+
+def get_invoice_with_payments(invoice_id):
+    """
+    Fetch a single Xero invoice by ID, including its Payments sub-array.
+
+    The Payments array is only returned at the single-invoice detail level
+    (GET /Invoices/{ID}), not in list responses.
+
+    Returns the invoice dict, or None on failure.
+    """
+    result = _api_get(f"Invoices/{invoice_id}")
+    if result and "Invoices" in result and result["Invoices"]:
+        return result["Invoices"][0]
+    return None
+
+
+def get_sale_payments_from_xero(contract_number, contact_name=None):
+    """
+    High-level helper: find all Xero invoices for an Anthill sale and return
+    a structured summary of invoices and their individual payments.
+
+    Args:
+        contract_number: Anthill contract number, e.g. "BFS-SD-412885".
+                         Matched against the Xero invoice Reference field.
+        contact_name:    Optional customer name for cross-validation.
+                         If provided, invoices whose contact name does NOT
+                         fuzzy-match this are excluded.
+
+    Returns:
+        List of dicts, one per matching invoice:
+        {
+            'invoice_id':     str,
+            'invoice_number': str,
+            'reference':      str,
+            'status':         str,   # 'PAID', 'AUTHORISED', 'VOIDED'
+            'total':          Decimal,
+            'amount_paid':    Decimal,
+            'amount_due':     Decimal,
+            'contact_name':   str,
+            'payments': [
+                {
+                    'payment_id':   str,
+                    'date':         datetime or None,
+                    'amount':       Decimal,
+                    'reference':    str,  # payment reference / type label
+                    'status':       str,
+                },
+                ...
+            ],
+        }
+
+    Returns empty list if Xero is not connected or nothing matches.
+    """
+    from decimal import Decimal
+    import re
+
+    invoices = get_invoices_by_reference(contract_number)
+    if not invoices:
+        return []
+
+    results = []
+
+    for inv_summary in invoices:
+        # Optional: soft name cross-check — log a warning but never skip.
+        # The reference match is already specific enough; hard-filtering by name
+        # causes false negatives when Anthill and Xero store slightly different
+        # versions of the customer's name (e.g. "liz enzor" vs "Elizabeth Enzor").
+        if contact_name:
+            xero_contact = inv_summary.get("Contact", {}).get("Name", "")
+            name_match = (
+                contact_name.lower() in xero_contact.lower()
+                or xero_contact.lower() in contact_name.lower()
+                # Also try matching on surname only (last word of each name)
+                or contact_name.split()[-1].lower() in xero_contact.lower()
+            )
+            if not name_match:
+                logger.warning(
+                    f"Invoice {inv_summary.get('InvoiceNumber')} ref={inv_summary.get('Reference')}: "
+                    f"contact '{xero_contact}' does not match '{contact_name}' — including anyway (reference matched)"
+                )
+
+        invoice_id = inv_summary.get("InvoiceID", "")
+        if not invoice_id:
+            continue
+
+        # Fetch full invoice to get the Payments sub-array
+        full_inv = get_invoice_with_payments(invoice_id)
+        if not full_inv:
+            full_inv = inv_summary  # fall back to summary if detail fetch fails
+
+        total = Decimal(str(full_inv.get("Total", 0) or 0))
+        amount_paid = Decimal(str(full_inv.get("AmountPaid", 0) or 0))
+        amount_due = Decimal(str(full_inv.get("AmountDue", 0) or 0))
+
+        # Parse individual payments
+        parsed_payments = []
+        for p in full_inv.get("Payments", []):
+            raw_date = p.get("Date", "")
+            parsed_date = None
+            if raw_date:
+                # Xero dates come as "/Date(1738234567000+0000)/"
+                ms_match = re.search(r'/Date\((\d+)', raw_date)
+                if ms_match:
+                    import datetime
+                    ts = int(ms_match.group(1)) / 1000
+                    parsed_date = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+                else:
+                    # Try ISO format fallback
+                    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+                        try:
+                            import datetime
+                            parsed_date = datetime.datetime.strptime(raw_date[:10], fmt)
+                            break
+                        except ValueError:
+                            pass
+
+            parsed_payments.append({
+                'payment_id': p.get("PaymentID", ""),
+                'date': parsed_date,
+                'amount': Decimal(str(p.get("Amount", 0) or 0)),
+                'reference': p.get("Reference", "") or "Payment",
+                'status': "Confirmed",
+            })
+
+        results.append({
+            'invoice_id': invoice_id,
+            'invoice_number': full_inv.get("InvoiceNumber", ""),
+            'reference': full_inv.get("Reference", ""),
+            'status': full_inv.get("Status", ""),
+            'total': total,
+            'amount_paid': amount_paid,
+            'amount_due': amount_due,
+            'contact_name': (full_inv.get("Contact") or {}).get("Name", ""),
+            'payments': parsed_payments,
+        })
+
+    return results
 
 
 # ─── Write API Helpers ──────────────────────────────────────────────

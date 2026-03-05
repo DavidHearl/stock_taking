@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load custom_filters %}
 
 {% block title %}Remedials{% endblock %}
 
@@ -7,9 +8,17 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<link rel="stylesheet" href="{% static 'css/ordering.css' %}">
+<style>
+    .sale-status-open     { background: rgba(16, 185, 129, 0.18); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 600; }
+    .sale-status-won      { background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); font-weight: 600; }
+    .sale-status-complete { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);  font-weight: 600; }
+    .sale-status-dead     { background: rgba(239, 68, 68, 0.15);   color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);   font-weight: 600; }
+    .sale-status-default  { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color); font-weight: 600; }
+</style>
 {% endblock %}
 
-{% block page_title %}Remedials{% endblock %}
+{% block page_title %}Remedials ({{ filtered_count }}){% endblock %}
 
 {% block content %}
 <div class="content-card">
@@ -43,16 +52,12 @@
     </div>
 
     {% if anthill_remedials %}
-    <div class="customers-result-bar">
-        <span class="result-count">{{ filtered_count }} remedial{{ filtered_count|pluralize }}</span>
-    </div>
-    <div class="customers-table-container">
-        <table class="customers-table">
+    <div class="card">
+        <table class="table orders-table">
             <thead>
                 <tr>
                     <th>Activity ID</th>
                     <th>Customer</th>
-                    <th>Type</th>
                     <th>Status</th>
                     <th>Assigned To</th>
                     <th>Date</th>
@@ -77,9 +82,8 @@
                         {{ event.customer_name|default:"-" }}
                         {% endif %}
                     </td>
-                    <td>{{ event.activity_type|default:"-" }}</td>
                     <td>
-                        <span class="customer-active-badge {% if event.status == 'won' %}active{% elif event.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                        <span class="customer-active-badge {% if event.status == 'open' %}sale-status-open{% elif event.status == 'complete' or event.status == 'completed' %}sale-status-complete{% elif event.status == 'won' %}sale-status-won{% elif event.status == 'dead' %}sale-status-dead{% else %}sale-status-default{% endif %}">
                             {{ event.status|default:"-" }}
                         </span>
                     </td>
@@ -87,13 +91,19 @@
                     <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
                     <td>{{ event.location|default:"-" }}</td>
                     <td>
+                        {% with linked_order=order_map|get_item:event.anthill_activity_id %}
                         {% if event.order %}
-                        <a href="{% url 'order_details' event.order.id %}" class="customer-order-badge">
+                        <a href="{% url 'order_details' event.order.id %}" class="btn btn-sm btn-outline-primary">
                             {{ event.order.sale_number }}
+                        </a>
+                        {% elif linked_order %}
+                        <a href="{% url 'order_details' linked_order.id %}" class="btn btn-sm btn-outline-primary">
+                            {{ linked_order.sale_number }}
                         </a>
                         {% else %}
                         <span class="text-muted">-</span>
                         {% endif %}
+                        {% endwith %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -149,8 +159,8 @@
         </h3>
     </div>
     <div id="local-remedials-section" style="display: none;">
-        <div class="customers-table-container">
-            <table class="customers-table">
+        <div class="card">
+            <table class="table orders-table">
                 <thead>
                     <tr>
                         <th>Remedial #</th>
@@ -165,7 +175,7 @@
                 <tbody>
                     {% for remedial in remedial_orders %}
                     <tr>
-                        <td><span class="customer-order-badge">{{ remedial.remedial_number }}</span></td>
+                        <td><span class="sale-status-default">{{ remedial.remedial_number }}</span></td>
                         <td>
                             <a href="{% url 'order_details' remedial.original_order.id %}" class="customer-name-link">
                                 {{ remedial.original_order.sale_number }}
@@ -175,7 +185,7 @@
                         <td>{{ remedial.created_date|date:"d/m/Y" }}</td>
                         <td>{{ remedial.scheduled_date|date:"d/m/Y"|default:"-" }}</td>
                         <td>
-                            <span class="customer-active-badge {% if remedial.is_completed %}active{% else %}inactive{% endif %}">
+                            <span class="customer-active-badge {% if remedial.is_completed %}sale-status-complete{% else %}sale-status-open{% endif %}">
                                 {% if remedial.is_completed %}Completed{% else %}In Progress{% endif %}
                             </span>
                         </td>
@@ -191,23 +201,9 @@
 
 <script>
 const searchInput = document.getElementById('remedial-search');
-let searchTimeout;
 if (searchInput) {
-    searchInput.addEventListener('input', function() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            const query = this.value.trim();
-            const params = new URLSearchParams(window.location.search);
-            if (query) params.set('q', query);
-            else params.delete('q');
-            params.delete('page');
-            if (!params.has('status')) params.set('status', '{{ status_filter }}');
-            window.location.href = '?' + params.toString();
-        }, 500);
-    });
     searchInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
-            clearTimeout(searchTimeout);
             const query = this.value.trim();
             const params = new URLSearchParams(window.location.search);
             if (query) params.set('q', query);

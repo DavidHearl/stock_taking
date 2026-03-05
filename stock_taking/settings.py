@@ -128,8 +128,8 @@ if os.getenv('DATABASE_URL'):
     DATABASES = {
         'default': dj_database_url.config(
             default=os.getenv('DATABASE_URL'),
-            conn_max_age=600,
-            conn_health_checks=True,
+            conn_max_age=0,
+            conn_health_checks=False,
             ssl_require=False  # Set to True if using Cloudflare's PostgreSQL proxy/SSL
         )
     }

@@ -16,7 +16,20 @@
 {% block content %}
 <div class="dashboard-page">
     <!-- Stats Cards -->
-    <div class="dashboard-grid dashboard-grid-5">
+    <div class="dashboard-grid dashboard-grid-6">
+        <div class="dashboard-card accent-danger">
+            <div class="card-label">
+                <i class="bi bi-exclamation-circle" style="color:#dc3545;"></i>
+                Outstanding Balance
+            </div>
+            <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
+            <div class="card-subtext">Total remaining to collect</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openOutstandingReport()">
+                    <i class="bi bi-table"></i> View Report
+                </button>
+            </div>
+        </div>
         <div class="dashboard-card accent-danger">
             <div class="card-label">
                 <i class="bi bi-calendar-check" style="color:#dc3545;"></i>
@@ -55,8 +68,6 @@
             <div class="card-subtext" id="monthlySalesCount">{{ monthly_sales_count }} sales this month</div>
         </div>
     </div>
-
-    <!-- Weekly Charts Row -->
     <div class="charts-row">
         <!-- Fits Per Week Chart -->
         <div class="chart-container">
@@ -725,4 +736,103 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+
+<!-- Outstanding Balance Report Modal -->
+<dialog id="outstandingReportModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-exclamation-circle" style="color:#dc3545;"></i>
+            <span>Outstanding Balance Report</span>
+            <span id="outstandingReportMeta" class="dash-report-meta"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a id="outstandingReportPdfBtn"
+               href="{% url 'dashboard_outstanding_pdf' %}"
+               class="dash-report-pdf-btn"
+               title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="dash-report-close" onclick="document.getElementById('outstandingReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body" id="outstandingReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+</dialog>
+
+<script>
+// Close outstanding report modal when clicking the backdrop
+document.getElementById('outstandingReportModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+function openOutstandingReport() {
+    const modal = document.getElementById('outstandingReportModal');
+    const body = document.getElementById('outstandingReportBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('outstandingReportMeta').textContent = '';
+    modal.showModal();
+    const _loc = '{{ current_location|escapejs }}';
+    const _baseReportUrl = '{% url "dashboard_outstanding_report" %}';
+    const _basePdfUrl = '{% url "dashboard_outstanding_pdf" %}';
+    const _locParam = _loc ? '?location=' + encodeURIComponent(_loc) : '';
+    const _reportUrl = _baseReportUrl + _locParam;
+    // Keep the PDF button in sync with the same location filter
+    document.getElementById('outstandingReportPdfBtn').href = _basePdfUrl + _locParam;
+    fetch(_reportUrl)
+        .then(r => r.json())
+        .then(data => {
+            const meta = document.getElementById('outstandingReportMeta');
+            if (!data.success || !data.rows.length) {
+                meta.textContent = '';
+                body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">No outstanding balances found.</p>';
+                return;
+            }
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            const totalOutstanding = data.rows.reduce((s, r) => s + r.outstanding, 0);
+            const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
+            meta.innerHTML = `&nbsp;&mdash;&nbsp;${data.count} customer${data.count !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstanding)} &nbsp;|&nbsp; ${locLabel}`;
+
+            // Group rows by year
+            const byYear = {};
+            data.rows.forEach(r => {
+                const y = r.year || 'Unknown';
+                if (!byYear[y]) byYear[y] = [];
+                byYear[y].push(r);
+            });
+            const years = Object.keys(byYear).sort((a, b) => b - a);
+
+            let html = '<table class="dash-report-table"><thead><tr>';
+            html += '<th>Customer</th><th>Sale #</th><th>Contract</th><th>Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th>';
+            html += '</tr></thead><tbody>';
+
+            years.forEach(yr => {
+                const yearRows = byYear[yr];
+                const yearTotal = yearRows.reduce((s, r) => s + r.outstanding, 0);
+                html += `<tr class="dash-report-year-sep"><td colspan="7"><strong>${yr}</strong><span class="dash-report-year-total">${fmt(yearTotal)} outstanding &mdash; ${yearRows.length} customer${yearRows.length !== 1 ? 's' : ''}</span></td></tr>`;
+
+                yearRows.forEach(r => {
+                    html += `<tr>
+                        <td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>
+                        <td>${r.sale_number}</td>
+                        <td>${r.contract || '-'}</td>
+                        <td>${r.date}</td>
+                        <td class="text-right">${fmt(r.sale_value)}</td>
+                        <td class="text-right">${fmt(r.paid)}</td>
+                        <td class="text-right" style="color:#dc3545;font-weight:600">${fmt(r.outstanding)}</td>
+                    </tr>`;
+                });
+            });
+
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        })
+        .catch(() => {
+            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        });
+}
+</script>
+
 {% endblock %}

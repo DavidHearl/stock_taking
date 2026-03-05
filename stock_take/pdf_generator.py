@@ -403,3 +403,153 @@ def generate_summary_pdf(order, price_per_sqm=12):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
+YEAR_BAND_BG = colors.HexColor('#eef2fb')
+
+
+def generate_outstanding_report_pdf(rows, location_label='All Locations'):
+    """
+    Generate an Outstanding Balance Report PDF.
+
+    `rows` is a list of dicts as returned by dashboard_outstanding_report:
+        pk, sale_number, customer, contract, date, sale_value, paid, outstanding, year
+    Returns a BytesIO buffer.
+    """
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title='Outstanding Balance Report',
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ── HEADER ──────────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=12 * mm)
+        logo.hAlign = 'LEFT'
+    else:
+        logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
+
+    title_para = Paragraph(
+        '<font size="16" color="#1a1a2e"><b>Outstanding Balance Report</b></font>',
+        styles['Normal'],
+    )
+    header_table = Table(
+        [[logo, title_para]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # ── SUMMARY BLOCK ───────────────────────────────────────────
+    total_outstanding = sum(r['outstanding'] for r in rows)
+    info_data = [
+        ['Location', location_label,
+         'Total Customers', f'{len(rows):,}'],
+        ['Generated', datetime.now().strftime('%d %b %Y at %H:%M'),
+         'Total Outstanding', f'£{total_outstanding:,.0f}'],
+    ]
+    info_table = Table(info_data, colWidths=[
+        page_width * 0.15, page_width * 0.35,
+        page_width * 0.20, page_width * 0.30,
+    ])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (2, 0), (2, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TEXTCOLOR', (3, 0), (3, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── GROUP BY YEAR ────────────────────────────────────────────
+    from collections import defaultdict
+    by_year = defaultdict(list)
+    for r in rows:
+        by_year[r['year'] or 'Unknown'].append(r)
+    years = sorted(by_year.keys(), key=lambda y: -(y if isinstance(y, int) else 0))
+
+    col_widths = [
+        page_width * 0.22,  # Customer
+        page_width * 0.10,  # Sale #
+        page_width * 0.16,  # Contract
+        page_width * 0.10,  # Date
+        page_width * 0.13,  # Sale Value
+        page_width * 0.13,  # Paid
+        page_width * 0.16,  # Outstanding
+    ]
+    headers = ['Customer', 'Sale #', 'Contract', 'Date', 'Sale Value', 'Paid', 'Outstanding']
+
+    for yr in years:
+        year_rows = by_year[yr]
+        year_total = sum(r['outstanding'] for r in year_rows)
+
+        # Year section header
+        elements.append(_section_header(
+            f'{yr} — {len(year_rows)} customer{"s" if len(year_rows) != 1 else ""}'  # noqa
+            f' &mdash; <font color="#dc3545">£{year_total:,.0f} outstanding</font>',
+            styles,
+        ))
+
+        table_data = [headers]
+        for r in year_rows:
+            table_data.append([
+                Paragraph(r['customer'], styles['CellText']),
+                r['sale_number'],
+                r['contract'] or '—',
+                r['date'],
+                f'£{r["sale_value"]:,.0f}',
+                f'£{r["paid"]:,.0f}',
+                Paragraph(f'<font color="#dc3545"><b>£{r["outstanding"]:,.0f}</b></font>',
+                          styles['CellText']),
+            ])
+
+        # Year totals row
+        table_data.append([
+            Paragraph(f'<b>{len(year_rows)} customers</b>', styles['CellText']),
+            '', '', '',
+            f'£{sum(r["sale_value"] for r in year_rows):,.0f}',
+            f'£{sum(r["paid"] for r in year_rows):,.0f}',
+            Paragraph(f'<font color="#dc3545"><b>£{year_total:,.0f}</b></font>',
+                      styles['CellText']),
+        ])
+
+        tbl = _build_table(table_data, col_widths, has_total_row=True)
+        elements.append(tbl)
+        elements.append(Spacer(1, 5 * mm))
+
+    # ── GRAND TOTAL ──────────────────────────────────────────────
+    grand_data = [['', '', '', '', 'Total Sale Value', 'Total Paid', 'Total Outstanding']]
+    grand_data.append([
+        Paragraph(f'<b>All {len(rows)} customers</b>', styles['CellText']),
+        '', '', '',
+        f'£{sum(r["sale_value"] for r in rows):,.0f}',
+        f'£{sum(r["paid"] for r in rows):,.0f}',
+        Paragraph(f'<font color="#dc3545"><b>£{total_outstanding:,.0f}</b></font>',
+                  styles['CellText']),
+    ])
+    elements.append(_build_table(grand_data, col_widths, has_total_row=True))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer

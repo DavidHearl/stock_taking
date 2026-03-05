@@ -135,6 +135,25 @@ def ordering(request):
         form.save()
         return redirect('ordering')
     
+    # Build financial map: sale_number -> {sale_value, payments_total, outstanding}
+    # Looks up AnthillSale by anthill_activity_id matching the order's sale_number
+    all_sale_numbers = list(orders.values_list('sale_number', flat=True))
+    fin_rows = (
+        AnthillSale.objects
+        .filter(anthill_activity_id__in=all_sale_numbers)
+        .annotate(payments_sum=Sum('payments__amount'))
+        .values('anthill_activity_id', 'sale_value', 'payments_sum')
+    )
+    financial_map = {}
+    for row in fin_rows:
+        sv = row['sale_value'] or Decimal('0')
+        pt = row['payments_sum'] or Decimal('0')
+        financial_map[row['anthill_activity_id']] = {
+            'sale_value': sv,
+            'payments_total': pt,
+            'outstanding': sv - pt,
+        }
+
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'boards_pos': boards_pos,
@@ -149,6 +168,7 @@ def ordering(request):
         'total_orders': total_orders,
         'completed_orders': completed_orders,
         'wip_orders': wip_orders,
+        'financial_map': financial_map,
     })
 
 @login_required
@@ -3061,14 +3081,19 @@ def add_accessories_to_po(request):
                 desc_parts.append(f'For order {acc.order.sale_number}')
             description = ' | '.join(desc_parts)
 
+            # Use StockItem.cost as the authoritative price when available —
+            # it reflects the current cost maintained in the stock database.
+            # Fall back to Accessory.cost_price (from the Anthill CSV import)
+            # only when no stock item is linked.
+            unit_price = float(acc.stock_item.cost) if acc.stock_item and acc.stock_item.cost else float(acc.cost_price or 0)
             PurchaseOrderProduct.objects.create(
                 purchase_order=po,
                 sku=acc.sku or '',
                 name=acc.name or '',
                 description=description,
-                order_price=acc.cost_price or 0,
+                order_price=unit_price,
                 order_quantity=acc.quantity or 0,
-                line_total=round(float(acc.cost_price or 0) * float(acc.quantity or 0), 2),
+                line_total=round(unit_price * float(acc.quantity or 0), 2),
                 sort_order=max_sort,
                 stock_item=acc.stock_item,
             )
@@ -3984,6 +4009,12 @@ def order_delete(request, order_id):
 
     order = get_object_or_404(Order, id=order_id)
     sale_number = order.sale_number or f"#{order_id}"
+    customer_name = f"{order.first_name} {order.last_name}".strip()
+    log_activity(
+        user=request.user,
+        event_type='order_deleted',
+        description=f'{request.user.get_full_name() or request.user.username} deleted order {sale_number} ({customer_name}).',
+    )
     order.delete()
 
     messages.success(request, f'Order {sale_number} deleted.')
@@ -4265,6 +4296,9 @@ def order_details(request, order_id):
     os_doors_purchase_order = None
     if order.os_doors_po:
         os_doors_purchase_order = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+
+    # Additional OS Doors POs (M2M)
+    additional_os_doors_pos_list = list(order.additional_os_doors_pos.order_by('-workguru_id'))
     
     # Check if all accessories are allocated
     total_accessories = order.accessories.count()
@@ -4325,6 +4359,7 @@ def order_details(request, order_id):
         'designers': Designer.objects.all().order_by('name'),
         'boards_purchase_order': boards_purchase_order,
         'os_doors_purchase_order': os_doors_purchase_order,
+        'additional_os_doors_pos_list': additional_os_doors_pos_list,
         'available_purchase_orders': available_purchase_orders,
         'purchase_invoice_lines': purchase_invoice_lines,
         'purchase_invoice_cost': purchase_invoice_cost,
@@ -7765,6 +7800,11 @@ def remedials(request):
     paginator = Paginator(anthill_remedials, 100)
     page_obj = paginator.get_page(page_number)
 
+    # Build order_map: anthill_activity_id -> Order (for unpopulated FK fallback)
+    remedial_ids = [r.anthill_activity_id for r in page_obj.object_list]
+    matched_orders = Order.objects.filter(sale_number__in=remedial_ids)
+    order_map = {o.sale_number: o for o in matched_orders}
+
     # --- Local remedial orders (legacy) ---
     remedial_orders = Remedial.objects.select_related('original_order', 'boards_po').prefetch_related('accessories').order_by('-created_date')
 
@@ -7830,6 +7870,7 @@ def remedials(request):
         'count_won': count_won,
         'count_dead': count_dead,
         'count_all': count_all,
+        'order_map': order_map,
         'remedial_orders': remedial_orders,
         'available_orders': available_orders,
     })
@@ -8023,12 +8064,35 @@ def calendar_weekly(request):
             fitter='R',  # Default fitter
         )
 
-    appointments = (
+    appointments = list(
         FitAppointment.objects
         .filter(fit_date__gte=week_start, fit_date__lte=week_end)
         .select_related('order', 'remedial')
         .order_by('fit_date', 'fitter')
     )
+
+    # Attach payment info (sale value / paid / outstanding) from linked AnthillSale
+    # Join by sale_number == anthill_activity_id (order FK is not populated)
+    sale_numbers = [a.order.sale_number for a in appointments if a.order]
+    if sale_numbers:
+        _sale_rows = (
+            AnthillSale.objects
+            .filter(anthill_activity_id__in=sale_numbers)
+            .annotate(payments_sum=Sum('payments__amount'))
+            .values('anthill_activity_id', 'sale_value', 'payments_sum')
+        )
+        _fin_map = {}
+        for row in _sale_rows:
+            sv = row['sale_value'] or Decimal('0')
+            pt = row['payments_sum'] or Decimal('0')
+            _fin_map[row['anthill_activity_id']] = {
+                'sale_value': sv,
+                'payments_total': pt,
+                'outstanding': sv - pt,
+            }
+        for appt in appointments:
+            if appt.order:
+                appt.fin = _fin_map.get(appt.order.sale_number)
 
     # Group appointments by date → fitter
     appts_map = {}
@@ -8052,6 +8116,18 @@ def calendar_weekly(request):
         except (ValueError, TypeError):
             continue
         pos_map.setdefault(d, []).append(po)
+
+    # Group POs by supplier per day so same-supplier deliveries share one card
+    pos_groups_map = {}
+    for d, pos_list in pos_map.items():
+        supplier_groups = {}
+        for po in pos_list:
+            sname = po.supplier_name or 'Unknown'
+            supplier_groups.setdefault(sname, []).append(po)
+        pos_groups_map[d] = [
+            {'supplier': sname, 'pos': plist}
+            for sname, plist in supplier_groups.items()
+        ]
 
     fitter_codes = ['R', 'G', 'S', 'P']
     fitter_names = {'R': 'Ross', 'G': 'Gavin', 'S': 'Stuart', 'P': 'Paddy'}
@@ -8090,6 +8166,7 @@ def calendar_weekly(request):
             'fitter_rows': fitter_rows,
             'has_appointments': has_appointments,
             'pos': pos_map.get(d, []),
+            'pos_groups': pos_groups_map.get(d, []),
             'sales': sales_map.get(d, []),
         })
 
@@ -9491,7 +9568,14 @@ def add_timesheet(request, order_id):
                 timesheet.hours = hours
         
         timesheet.save()
-        
+
+        log_activity(
+            user=request.user,
+            event_type='timesheet_added',
+            description=f'{request.user.get_full_name() or request.user.username} added a {timesheet_type} timesheet for order {order.sale_number or order.id} ({order.first_name} {order.last_name}).',
+            order=order,
+        )
+
         # Add petrol expense if requested
         if timesheet_type == 'installation' and data.get('petrol_amount'):
             # Use the same date as the timesheet
@@ -9571,7 +9655,16 @@ def delete_timesheet(request, timesheet_id):
     try:
         from .models import Timesheet
         timesheet = get_object_or_404(Timesheet, id=timesheet_id)
+        order = timesheet.order
+        timesheet_type = timesheet.timesheet_type
+        sale_number = order.sale_number if order else '—'
         timesheet.delete()
+        log_activity(
+            user=request.user,
+            event_type='timesheet_deleted',
+            description=f'{request.user.get_full_name() or request.user.username} deleted a {timesheet_type} timesheet for order {sale_number}.',
+            order=order,
+        )
         return JsonResponse({'success': True})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})

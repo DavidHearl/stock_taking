@@ -5,9 +5,9 @@
 {% block title %}Order Details - {{ order.sale_number }}{% endblock %}
 
 {% block page_title %}
-<span style="display:flex;align-items:center;gap:10px;">
-    <a href="{% url 'ordering' %}" style="color:var(--text-secondary);text-decoration:none;font-size:1.1rem;" title="Back to Orders"><i class="bi bi-arrow-left"></i></a>
-    Order Details: {{ order.first_name }} {{ order.last_name }}{% if order.sale_number %} <span style="font-weight:400;opacity:0.7;">({{ order.sale_number }})</span>{% endif %}
+<span class="page-title-row">
+    <a href="{% url 'ordering' %}" class="back-link" title="Back to Orders"><i class="bi bi-arrow-left"></i></a>
+    Order Details: {{ order.first_name }} {{ order.last_name }}{% if order.sale_number %} <span class="sale-number-suffix">({{ order.sale_number }})</span>{% endif %}
 </span>
 {% endblock %}
 
@@ -36,11 +36,14 @@
                     </div>
                     <!-- Navigation -->
                     <div class="workflow-compact-nav">
+                        <button class="wf-nav-btn wf-workflow" onclick="openWorkflowModal()" title="Full Workflow">
+                            <i class="bi bi-diagram-3"></i> Workflow
+                        </button>
                         <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
-                            <i class="bi bi-chevron-left"></i>
+                            <i class="bi bi-chevron-left"></i> Previous
                         </button>
                         <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
-                            <i class="bi bi-chevron-right"></i>
+                            Next <i class="bi bi-chevron-right"></i>
                         </button>
                         <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
                             <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
@@ -112,18 +115,13 @@
                     {% endif %}
                     {% endif %}
 
-                    <div class="wf-detail-actions">
-                        <button class="btn btn-secondary btn-sm" onclick="openWorkflowModal()">
-                            <i class="bi bi-diagram-3"></i> Full Workflow
-                        </button>
-                    </div>
                 </div>
             </div>
             
             <div class="card">
-                <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <div class="card-header">
                     <h3>Order Information</h3>
-                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary btn-sm" style="font-size:0.75rem;padding:3px 10px;" title="Download Summary Document PDF">
+                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary btn-sm btn-summary-doc" title="Download Summary Document PDF">
                         <i class="bi bi-file-earmark-pdf"></i> Summary
                     </a>
                 </div>
@@ -388,6 +386,15 @@
                                         </label>
                                     </div>
                                     {% endif %}
+
+                                    <!-- Add Additional Boards PO -->
+                                    {% if order.boards_po %}
+                                    <div class="section-add-row">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAdditionalBoardsPO({{ order.id }})" title="Create an additional boards PO for this order">
+                                            <i class="bi bi-plus-circle"></i> Add Additional Boards PO
+                                        </button>
+                                    </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
@@ -401,17 +408,14 @@
             <div class="card">
                 <div class="card-header">
                     <h3>Financial Summary</h3>
-                    <button class="btn btn-success btn-sm" onclick="saveFinancials({{ order.id }})" title="Save financial data">
-                        <i class="bi bi-floppy"></i> Save
+                    <button class="btn btn-sm btn-save-financials" onclick="saveFinancials({{ order.id }})" title="Save financial data">
+                        <i class="bi bi-arrow-clockwise"></i> Update
                     </button>
                 </div>
                 <div class="financial-card-body">
                     <div class="financial-cards-vertical">
                         <!-- Total Value Inc VAT (Display only) -->
                         <div class="financial-card-vertical card-total-inc">
-                            <div class="financial-card-icon">
-                                <i class="bi bi-cash-stack"></i>
-                            </div>
                             <div class="financial-card-content">
                                 <span class="financial-card-label">Total Value (Inc VAT)</span>
                                 <div class="financial-display" id="total_value_inc_vat_display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
@@ -420,9 +424,6 @@
 
                         <!-- Total Value Exc VAT (Auto-calculated) -->
                         <div class="financial-card-vertical card-total-exc">
-                            <div class="financial-card-icon">
-                                <i class="bi bi-calculator"></i>
-                            </div>
                             <div class="financial-card-content">
                                 <span class="financial-card-label">Total Value (Exc VAT)</span>
                                 <div class="financial-display" id="total_value_exc_vat_display">£{{ order.total_value_exc_vat|default:'0.00'|floatformat:2 }}</div>
@@ -431,9 +432,6 @@
 
                         <!-- Materials Cost (Auto-calculated from boards, accessories, OS doors) -->
                         <div class="financial-card-vertical card-materials">
-                            <div class="financial-card-icon">
-                                <i class="bi bi-box-seam"></i>
-                            </div>
                             <div class="financial-card-content">
                                 <span class="financial-card-label">Materials Cost (Auto)</span>
                                 <div class="financial-display" id="materials_cost_display">£{{ materials_cost|default:'0.00'|floatformat:2 }}</div>
@@ -484,9 +482,6 @@
 
                         <!-- Installation Cost -->
                         <div class="financial-card-vertical card-installation">
-                            <div class="financial-card-icon">
-                                <i class="bi bi-tools"></i>
-                            </div>
                             <div class="financial-card-content">
                                 <span class="financial-card-label">
                                     Installation Cost
@@ -566,9 +561,6 @@
 
                         <!-- Manufacturing Cost -->
                         <div class="financial-card-vertical card-manufacturing">
-                            <div class="financial-card-icon">
-                                <i class="bi bi-gear"></i>
-                            </div>
                             <div class="financial-card-content">
                                 <span class="financial-card-label">
                                     Manufacturing Cost
@@ -594,9 +586,6 @@
 
                         <!-- Profit (Auto-calculated) -->
                         <div class="financial-card-vertical card-profit">
-                            <div class="financial-card-icon">
-                                <i class="bi bi-graph-up"></i>
-                            </div>
                             <div class="financial-card-content">
                                 <span class="financial-card-label">Profit</span>
                                 <div class="financial-display" id="profit_display">£{{ order.profit|default:'0.00'|floatformat:2 }}</div>
@@ -611,41 +600,32 @@
                             </div>
                         </div>
 
-                        <!-- Fully Costed Checkbox -->
-                        <div class="fully-costed-container">
-                            <label class="fully-costed-label">
-                                <input type="checkbox" id="fully_costed_checkbox" class="fully-costed-checkbox" {% if order.fully_costed %}checked{% endif %}>
-                                <span class="fully-costed-text">
-                                    Mark as Fully Costed
-                                </span>
-                            </label>
-                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Anthill Sale Card -->
             {% if anthill_sales %}
-            <div class="card" style="margin-top: 16px;">
+            <div class="card anthill-sale-card">
                 <div class="card-header">
                     <h3><i class="bi bi-bag-check"></i> Anthill Sale{{ anthill_sales|length|pluralize }}</h3>
                 </div>
-                <div style="padding: 12px 16px;">
+                <div class="anthill-sale-body">
                     {% for sale in anthill_sales %}
-                    <div {% if not forloop.last %}style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);"{% endif %}>
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                            <a href="{% url 'sale_detail' sale.pk %}" style="font-weight: 600; font-size: 0.9rem; color: var(--accent-color); text-decoration: none;">
+                    <div class="anthill-sale-item">
+                        <div class="anthill-sale-header">
+                            <a href="{% url 'sale_detail' sale.pk %}" class="anthill-sale-link">
                                 #{{ sale.anthill_activity_id }}
                             </a>
                             <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
                                 {{ sale.status|default:"-" }}
                             </span>
                         </div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
+                        <div class="anthill-sale-details">
                             <div><strong>Type:</strong> {{ sale.activity_type|default:"-" }}</div>
                             {% if sale.assigned_to_name %}<div><strong>Assigned:</strong> {{ sale.assigned_to_name }}</div>{% endif %}
                             {% if sale.sale_value %}<div><strong>Value:</strong> £{{ sale.sale_value|floatformat:2 }}</div>{% endif %}
-                            {% if sale.contract_number %}<div><strong>Contract:</strong> <span style="font-family: monospace; font-size: 0.75rem;">{{ sale.contract_number }}</span></div>{% endif %}
+                            {% if sale.contract_number %}<div><strong>Contract:</strong> <span class="anthill-sale-contract">{{ sale.contract_number }}</span></div>{% endif %}
                             {% if sale.range_name %}<div><strong>Range:</strong> {{ sale.range_name }}</div>{% endif %}
                             {% if sale.door_type %}<div><strong>Doors:</strong> {{ sale.door_type }}</div>{% endif %}
                             {% if sale.source %}<div><strong>Source:</strong> {{ sale.source }}</div>{% endif %}
@@ -662,7 +642,7 @@
 
     <div class="full-width-section">
         {% for bpo_data in boards_po_list %}
-        <div class="card {% if not forloop.first %}mt-3{% endif %}">
+        <div class="card">
             <div class="card-header">
                 <div class="boards-header-left">
                     {% if bpo_data.purchase_order %}
@@ -737,7 +717,7 @@
                 {% if bpo_data.pnx_items %}
                     <div class="pnx-items-header">
                         <p><strong>PNX Items for this Order ({{ bpo_data.pnx_items|length }} items):</strong></p>
-                        <div style="display: flex; gap: 10px;">
+                        <div class="btn-row-gap">
                             <button type="button" class="btn btn-warning btn-sm" onclick="reimportPNX({{ bpo_data.po.id }})">
                                 <i class="bi bi-arrow-clockwise"></i> Reimport from PNX
                             </button>
@@ -873,14 +853,14 @@
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
-                                    <td colspan="11"><strong>Total Cost:</strong></td>
+                                    <td colspan="12"><strong>Total Cost:</strong></td>
                                     <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
                 {% else %}
-                    <p class="text-muted" style="padding: 12px;">No board items yet. Use "Add Board" or "Generate PNX - CAD" to add items.</p>
+                    <p class="text-muted empty-state-text">No board items yet. Use "Add Board" or "Generate PNX - CAD" to add items.</p>
                 {% endif %}
             </div>
         </div>
@@ -893,42 +873,34 @@
                 <h3>Board Details</h3>
             </div>
             <div class="card-body">
-                <p class="text-muted" style="padding: 12px;">No Boards PO assigned. Assign one in the Job Info section above.</p>
+                <p class="text-muted empty-state-text">No Boards PO assigned. Assign one in the Job Info section above.</p>
             </div>
-        </div>
-        {% endif %}
-
-        <!-- Add Additional Boards PO button -->
-        {% if order.boards_po %}
-        <div style="margin-bottom: 12px; text-align: right;">
-            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAdditionalBoardsPO({{ order.id }})" title="Create an additional boards PO for this order">
-                <i class="bi bi-plus-circle"></i> Add Additional Boards PO
-            </button>
         </div>
         {% endif %}
 
         <!-- OS Doors Section -->
         <div class="card">
             <div class="card-header">
-                <h3>
-                    OS Doors
-                    {% if order.os_doors_po %}
-                        <span class="badge badge-info badge-ml">{{ order.os_doors_po }}</span>
-                    {% endif %}
-                    {% if order.os_doors_required %}
-                        {% if order.os_doors_po %}
-                            <span class="badge badge-success badge-ml">Ordered</span>
-                        {% else %}
-                            <span class="badge badge-danger badge-ml">Required</span>
-                        {% endif %}
-                    {% endif %}
-                </h3>
-                <div class="header-actions">
+                <div class="boards-header-left">
                     {% if os_doors_purchase_order %}
                         <a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
                             <i class="bi bi-eye"></i> View PO
                         </a>
-                        <button type="button" class="btn btn-sm btn-save-dims" id="update-os-doors-po-btn"
+                    {% endif %}
+                    <h3>
+                        {% if order.os_doors_po %}{{ order.os_doors_po }}: {% endif %}OS Doors
+                        {% if order.os_doors_required %}
+                            {% if order.os_doors_po %}
+                                <span class="badge badge-success badge-ml">Ordered</span>
+                            {% else %}
+                                <span class="badge badge-danger badge-ml">Required</span>
+                            {% endif %}
+                        {% endif %}
+                    </h3>
+                </div>
+                <div class="header-actions">
+                    {% if os_doors_purchase_order %}
+                        <button type="button" class="btn btn-sm btn-outline-amber" id="update-os-doors-po-btn"
                                 title="Sync current cost/qty to the linked Purchase Order"
                                 onclick="syncOSDoorsPO({{ order.id }})">
                             <i class="bi bi-arrow-repeat"></i> Update PO
@@ -948,16 +920,16 @@
                     <button type="button" class="btn btn-sm btn-danger hidden" id="delete-os-doors-selected">
                         <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
                     </button>
-                    <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('pasteOSDoorModal')">
+                    <button class="btn btn-sm btn-outline-teal" type="button" onclick="openPasteOSDoorModal('{{ order.os_doors_po }}')">
                         <i class="bi bi-clipboard"></i> Paste OS Door
                     </button>
-                    <button class="btn btn-sm btn-add-board" type="button" onclick="toggleCollapse('addOSDoorForm')">
+                    <button class="btn btn-sm btn-outline-green" type="button" onclick="openAddOSDoorModal('{{ order.os_doors_po }}')">
                         <i class="bi bi-plus-lg"></i> Add OS Door
                     </button>
                 </div>
             </div>
             <div class="card-body">
-                <!-- Existing OS Doors -->
+                <!-- Existing OS Doors for this PO -->
                 {% if order.os_doors.all %}
                 <div class="table-container">
                     <table class="table" id="os-doors-table">
@@ -978,6 +950,7 @@
                         </thead>
                         <tbody>
                             {% for os_door in order.os_doors.all %}
+                            {% if not os_door.po_number or os_door.po_number == order.os_doors_po %}
                             <tr data-os-door-id="{{ os_door.id }}">
                                 <td><input type="checkbox" class="checkbox-input os-door-select" data-os-door-id="{{ os_door.id }}"></td>
                                 <td>{{ os_door.door_style }}</td>
@@ -1011,6 +984,7 @@
                                            data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
                                 </td>
                             </tr>
+                            {% endif %}
                             {% endfor %}
                         </tbody>
                     </table>
@@ -1019,69 +993,95 @@
                 <p class="text-muted">No OS doors added yet.</p>
                 {% endif %}
 
-                    <!-- Add OS Door Form -->
-                <div class="collapsible-form" id="addOSDoorForm">
-                    <hr>
-                    <h4>Add New OS Door</h4>
-                    <form method="POST">
-                        {% csrf_token %}
-                        <div class="form-grid-2col">
-                            <div class="form-group">
-                                <label for="{{ os_door_form.door_style.id_for_label }}">Door Style</label>
-                                {{ os_door_form.door_style }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.style_colour.id_for_label }}">Style Colour</label>
-                                {{ os_door_form.style_colour }}
-                            </div>
-                            <div class="form-group form-group-span-2">
-                                <label for="{{ os_door_form.item_description.id_for_label }}">Item Description</label>
-                                {{ os_door_form.item_description }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.height.id_for_label }}">Height (mm)</label>
-                                {{ os_door_form.height }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.width.id_for_label }}">Width (mm)</label>
-                                {{ os_door_form.width }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.colour.id_for_label }}">Colour</label>
-                                {{ os_door_form.colour }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.quantity.id_for_label }}">Quantity</label>
-                                {{ os_door_form.quantity }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.cost_price.id_for_label }}">Cost Price (£)</label>
-                                {{ os_door_form.cost_price }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ os_door_form.po_number.id_for_label }}">PO Number</label>
-                                {{ os_door_form.po_number }}
-                            </div>
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    {{ os_door_form.ordered }}
-                                    <span>Ordered</span>
-                                </label>
-                            </div>
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    {{ os_door_form.received }}
-                                    <span>Received</span>
-                                </label>
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-success" id="add-os-door-submit">
-                            <i class="bi bi-plus-lg"></i> Add OS Door
-                        </button>
-                    </form>
-                </div>
             </div>
         </div>
+
+        {% if order.os_doors_po %}
+        {% for apo in additional_os_doors_pos_list %}
+        <div class="card mt-3">
+            <div class="card-header">
+                <div class="boards-header-left">
+                    <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
+                        <i class="bi bi-eye"></i> View PO
+                    </a>
+                    <h3>{{ apo.display_number }}: OS Doors <span class="badge badge-info badge-ml">Additional</span>{% if apo.email_sent_at %} <span class="badge badge-ordered">Ordered</span>{% endif %}</h3>
+                </div>
+                <div class="header-actions">
+                    <button type="button" class="btn btn-sm btn-outline-amber" title="Sync to Purchase Order" onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}')">
+                        <i class="bi bi-arrow-repeat"></i> Update PO
+                    </button>
+                    <button class="btn btn-sm btn-outline-teal" type="button" onclick="openPasteOSDoorModal('{{ apo.display_number }}')">
+                        <i class="bi bi-clipboard"></i> Paste OS Door
+                    </button>
+                    <button class="btn btn-sm btn-outline-green" type="button" onclick="openAddOSDoorModal('{{ apo.display_number }}')">
+                        <i class="bi bi-plus-lg"></i> Add OS Door
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
+                    <thead>
+                        <tr>
+                            <th>Door Style</th>
+                            <th>Style Colour</th>
+                            <th>Height</th>
+                            <th>Width</th>
+                            <th>Colour</th>
+                            <th>Qty</th>
+                            <th>Cost Price</th>
+                            <th>Total Cost</th>
+                            <th>Ordered</th>
+                            <th>Received</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for os_door in order.os_doors.all %}
+                        {% if os_door.po_number == apo.display_number %}
+                        <tr data-os-door-id="{{ os_door.id }}">
+                            <td>{{ os_door.door_style }}</td>
+                            <td>{{ os_door.style_colour }}</td>
+                            <td>{{ os_door.height|floatformat:0 }}</td>
+                            <td>{{ os_door.width|floatformat:0 }}</td>
+                            <td>{{ os_door.colour }}</td>
+                            <td>
+                                <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60"
+                                       data-os-door-id="{{ os_door.id }}"
+                                       value="{{ os_door.quantity }}">
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100"
+                                       data-os-door-id="{{ os_door.id }}"
+                                       value="{{ os_door.cost_price }}"
+                                       placeholder="£0.00">
+                            </td>
+                            <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
+                                £{{ os_door.cost_price|multiply:os_door.quantity }}
+                            </td>
+                            <td>
+                                {% if os_door.ordered %}
+                                    <span class="status-icon success">✓</span>
+                                {% else %}
+                                    <span class="status-icon muted">✕</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <input type="checkbox" class="checkbox-input os-door-received-checkbox"
+                                       data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+        <div class="section-add-row-top">
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addAdditionalOSDoorsPO({{ order.id }})">
+                <i class="bi bi-plus-lg"></i> Add Additional OS Doors PO
+            </button>
+        </div>
+        {% endif %}
 
         <!-- Glass Section -->
         <div class="card">
@@ -1188,7 +1188,7 @@
                             </tr>
                             {% endfor %}
                             <tr class="table-total-row">
-                                <td colspan="5" class="text-right">Total:</td>
+                                <td colspan="5">Total:</td>
                                 <td>£{{ glass_items|sum_accessory_costs }}</td>
                                 <td colspan="2"></td>
                             </tr>
@@ -1285,7 +1285,7 @@
                             </tr>
                             {% endfor %}
                             <tr class="table-total-row">
-                                <td colspan="4" class="text-right">Total:</td>
+                                <td colspan="4">Total:</td>
                                 <td>£{{ raumplus_accessories|sum_accessory_costs }}</td>
                                 <td colspan="2"></td>
                             </tr>
@@ -1428,22 +1428,20 @@
                 </div>
             </div>
         </div>
-    </div>
 
     <!-- Timesheets and Expenses Section -->
-    <div class="card card-mt">
-        <div class="card-header">
-            <h3>Labor Costs & Expenses</h3>
-        </div>
-        <div class="card-body">
-            <!-- Installation Timesheets -->
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h4 class="section-header-purple mb-0">Installation Timesheets</h4>
+    <div class="timesheets-row">
+
+        <!-- Installation Card -->
+        <div class="card card-accent-purple">
+            <div class="card-header timesheet-card-header">
+                <h3>Installation</h3>
                 <button type="button" class="btn btn-danger btn-sm d-none" id="deleteSelectedInstallationBtn" onclick="deleteSelectedTimesheets('installation')">
                     <i class="bi bi-trash"></i> Delete Selected
                 </button>
             </div>
-            {% if installation_timesheets %}
+            <div class="card-body">
+                {% if installation_timesheets %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1492,20 +1490,22 @@
                         </tbody>
                     </table>
                 </div>
-            {% else %}
+                {% else %}
                 <p class="text-muted">No installation timesheets added yet.</p>
-            {% endif %}
-            
-            <hr>
-            
-            <!-- Manufacturing Timesheets -->
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h4 class="section-header-orange mb-0">Manufacturing Timesheets</h4>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Manufacturing Card -->
+        <div class="card card-accent-orange">
+            <div class="card-header timesheet-card-header">
+                <h3>Manufacturing</h3>
                 <button type="button" class="btn btn-danger btn-sm d-none" id="deleteSelectedManufacturingBtn" onclick="deleteSelectedTimesheets('manufacturing')">
                     <i class="bi bi-trash"></i> Delete Selected
                 </button>
             </div>
-            {% if manufacturing_timesheets %}
+            <div class="card-body">
+                {% if manufacturing_timesheets %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1546,15 +1546,19 @@
                         </tbody>
                     </table>
                 </div>
-            {% else %}
+                {% else %}
                 <p class="text-muted">No manufacturing timesheets added yet.</p>
-            {% endif %}
-            
-            <hr>
-            
-            <!-- Expenses -->
-            <h4 class="section-header-red">Expenses</h4>
-            {% if expenses %}
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Expenses Card -->
+        <div class="card card-accent-red">
+            <div class="card-header">
+                <h3>Expenses</h3>
+            </div>
+            <div class="card-body">
+                {% if expenses %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1590,92 +1594,90 @@
                         </tbody>
                     </table>
                 </div>
-            {% else %}
+                {% else %}
                 <p class="text-muted">No expenses added yet.</p>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<!-- Purchase Invoice Costs -->
-<div style="margin-top:16px;margin-bottom:16px;">
-    <div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;overflow:hidden;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-color);background:var(--bg-secondary);">
-            <h4 style="margin:0;font-size:0.95rem;font-weight:600;display:flex;align-items:center;gap:8px;">
-                <i class="bi bi-receipt" style="color:#6f42c1;"></i>
-                Purchase Invoice Costs
-            </h4>
-            {% if purchase_invoice_cost > 0 %}
-            <span style="font-size:0.85rem;font-weight:600;color:#6f42c1;">Total: £{{ purchase_invoice_cost|floatformat:2 }}</span>
-            {% endif %}
-        </div>
-        <div style="padding:16px 20px;">
-            {% if purchase_invoice_lines %}
-            <div class="table-container">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Invoice #</th>
-                            <th>Supplier</th>
-                            <th>Description</th>
-                            <th style="text-align:right;">Qty</th>
-                            <th style="text-align:right;">Rate</th>
-                            <th style="text-align:right;">Total</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for line in purchase_invoice_lines %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'purchase_invoice_detail' line.invoice.id %}" style="color:var(--primary-color);font-weight:600;">
-                                    {{ line.invoice.invoice_number }}
-                                </a>
-                            </td>
-                            <td>{{ line.invoice.supplier_name|default:"—" }}</td>
-                            <td>{{ line.description }}</td>
-                            <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
-                            <td style="text-align:right;">£{{ line.rate|floatformat:2 }}</td>
-                            <td style="text-align:right;font-weight:600;">£{{ line.line_total|floatformat:2 }}</td>
-                            <td>
-                                <a href="{% url 'purchase_invoice_detail' line.invoice.id %}" class="btn btn-sm btn-outline-secondary" title="View Invoice">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                        <tr style="background:var(--bg-secondary);font-weight:700;">
-                            <td colspan="5" style="text-align:right;">Total Purchase Invoice Cost:</td>
-                            <td style="text-align:right;">£{{ purchase_invoice_cost|floatformat:2 }}</td>
-                            <td></td>
-                        </tr>
-                    </tbody>
-                </table>
+                {% endif %}
             </div>
-            {% else %}
-            <p class="text-muted" style="margin:0;font-size:0.875rem;">No purchase invoice costs allocated to this order yet.
-                <a href="{% url 'purchase_invoices_list' %}" style="color:var(--primary-color);">View Purchase Invoices</a>
-            </p>
-            {% endif %}
         </div>
     </div>
-</div>
-
-<!-- Danger Zone -->
-<div style="margin-top:32px;border:2px solid var(--danger,#dc3545);border-radius:8px;padding:20px;background:var(--bg-primary,#fff);">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-        <div>
-            <h3 style="margin:0 0 4px;color:var(--danger,#dc3545);font-size:1rem;"><i class="bi bi-exclamation-triangle-fill"></i> Danger Zone</h3>
-            <p style="margin:0;color:var(--text-secondary,#666);font-size:0.85rem;">Permanently delete this order and all associated data. This action cannot be undone.</p>
+    <!-- Purchase Invoice Costs -->
+    <div class="pi-costs-wrapper">
+        <div class="pi-costs-card">
+            <div class="pi-costs-header">
+                <h4 class="pi-costs-title">
+                    <i class="bi bi-receipt pi-costs-icon"></i>
+                    Purchase Invoice Costs
+                </h4>
+                {% if purchase_invoice_cost > 0 %}
+                <span class="pi-costs-total">Total: £{{ purchase_invoice_cost|floatformat:2 }}</span>
+                {% endif %}
+            </div>
+            <div class="pi-costs-body">
+                {% if purchase_invoice_lines %}
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Invoice #</th>
+                                <th>Supplier</th>
+                                <th>Description</th>
+                                <th class="text-right">Qty</th>
+                                <th class="text-right">Rate</th>
+                                <th class="text-right">Total</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for line in purchase_invoice_lines %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'purchase_invoice_detail' line.invoice.id %}" class="pi-invoice-link">
+                                        {{ line.invoice.invoice_number }}
+                                    </a>
+                                </td>
+                                <td>{{ line.invoice.supplier_name|default:"—" }}</td>
+                                <td>{{ line.description }}</td>
+                                <td class="text-right">{{ line.quantity|floatformat:2 }}</td>
+                                <td class="text-right">£{{ line.rate|floatformat:2 }}</td>
+                                <td class="text-right font-weight-bold">£{{ line.line_total|floatformat:2 }}</td>
+                                <td>
+                                    <a href="{% url 'purchase_invoice_detail' line.invoice.id %}" class="btn btn-sm btn-outline-secondary" title="View Invoice">
+                                        <i class="bi bi-box-arrow-up-right"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="pi-total-row">
+                                <td colspan="5" class="text-right">Total Purchase Invoice Cost:</td>
+                                <td class="text-right">£{{ purchase_invoice_cost|floatformat:2 }}</td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted pi-empty">No purchase invoice costs allocated to this order yet.
+                    <a href="{% url 'purchase_invoices_list' %}" class="link-primary">View Purchase Invoices</a>
+                </p>
+                {% endif %}
+            </div>
         </div>
-        <button onclick="document.getElementById('deleteOrderModal').style.display='flex'" style="padding:10px 24px;border:2px solid var(--danger,#dc3545);background:transparent;color:var(--danger,#dc3545);border-radius:6px;cursor:pointer;font-size:0.9rem;font-weight:600;white-space:nowrap;transition:all 0.2s;" onmouseover="this.style.background='var(--danger,#dc3545)';this.style.color='#fff'" onmouseout="this.style.background='transparent';this.style.color='var(--danger,#dc3545)'">
-            <i class="bi bi-trash"></i> Delete This Order
-        </button>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="danger-zone">
+        <div class="danger-zone-inner">
+            <div>
+                <h3 class="danger-zone-title"><i class="bi bi-exclamation-triangle-fill"></i> Danger Zone</h3>
+                <p class="danger-zone-desc">Permanently delete this order and all associated data. This action cannot be undone.</p>
+            </div>
+            <button class="btn-danger-delete" onclick="document.getElementById('deleteOrderModal').style.display='flex'">
+                <i class="bi bi-trash"></i> Delete This Order
+            </button>
+        </div>
+    </div>
     </div>
 </div>
-
-</div> <!-- End page-content -->
-
 
 <!-- Modal for Uploading Accessories CSV -->
 <div class="modal" id="uploadAccessoriesModal">
@@ -1698,6 +1700,74 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('uploadAccessoriesModal')">Cancel</button>
                     <button type="submit" class="btn btn-primary">Upload & Process</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Adding OS Door -->
+<div class="modal" id="addOSDoorModal">
+    <div class="modal-overlay" onclick="closeModal('addOSDoorModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h3>Add New OS Door</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('addOSDoorModal')">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-grid-2col">
+                        <div class="form-group">
+                            <label for="{{ os_door_form.door_style.id_for_label }}">Door Style</label>
+                            {{ os_door_form.door_style }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.style_colour.id_for_label }}">Style Colour</label>
+                            {{ os_door_form.style_colour }}
+                        </div>
+                        <div class="form-group form-group-span-2">
+                            <label for="{{ os_door_form.item_description.id_for_label }}">Item Description</label>
+                            {{ os_door_form.item_description }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.height.id_for_label }}">Height (mm)</label>
+                            {{ os_door_form.height }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.width.id_for_label }}">Width (mm)</label>
+                            {{ os_door_form.width }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.colour.id_for_label }}">Colour</label>
+                            {{ os_door_form.colour }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.quantity.id_for_label }}">Quantity</label>
+                            {{ os_door_form.quantity }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.cost_price.id_for_label }}">Cost Price (£)</label>
+                            {{ os_door_form.cost_price }}
+                        </div>
+                        <div class="form-group">
+                            <label for="{{ os_door_form.po_number.id_for_label }}">PO Number</label>
+                            {{ os_door_form.po_number }}
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">{{ os_door_form.ordered }} <span>Ordered</span></label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">{{ os_door_form.received }} <span>Received</span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addOSDoorModal')">Cancel</button>
+                    <button type="submit" class="btn btn-success" id="add-os-door-submit">
+                        <i class="bi bi-plus-lg"></i> Add OS Door
+                    </button>
                 </div>
             </form>
         </div>
@@ -3918,6 +3988,11 @@ function submitParsedOSDoor() {
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Adding...';
 
+    // Inject the active PO number so the door is saved to the right PO
+    if (_osdActivePo) {
+        formData.append('po_number', _osdActivePo);
+    }
+
     // Submit via fetch to the same add-door endpoint
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
@@ -3948,6 +4023,22 @@ function submitParsedOSDoor() {
 let activeBoardsPoId = null;
 
 // Modal functions (defined outside DOMContentLoaded so onclick handlers can access them)
+function openAddOSDoorModal(poNumber) {
+    const field = document.getElementById('id_po_number');
+    if (field && poNumber) {
+        field.value = poNumber;
+    }
+    openModal('addOSDoorModal');
+}
+
+// Track active PO for Paste OS Door modal
+let _osdActivePo = '';
+
+function openPasteOSDoorModal(poNumber) {
+    _osdActivePo = poNumber || '';
+    openModal('pasteOSDoorModal');
+}
+
 function openModal(modalId, boardsPoId) {
     if (boardsPoId) {
         activeBoardsPoId = boardsPoId;
@@ -5732,13 +5823,14 @@ function createOSDoorsPO(orderId) {
     });
 }
 
-function syncOSDoorsPO(orderId) {
+function syncOSDoorsPO(orderId, poDisplayNumber, tableId) {
     const btn = document.getElementById('update-os-doors-po-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass"></i> Updating...'; }
 
-    // Collect current cost/qty from the live form inputs
+    // Collect current cost/qty from the live form inputs for the relevant table
+    const resolvedTableId = tableId || 'os-doors-table';
     const doorValues = {};
-    document.querySelectorAll('#os-doors-table tbody tr[data-os-door-id]').forEach(row => {
+    document.querySelectorAll(`#${resolvedTableId} tbody tr[data-os-door-id]`).forEach(row => {
         const id = row.getAttribute('data-os-door-id');
         const costInput = row.querySelector('.os-door-cost-input');
         const qtyInput  = row.querySelector('.os-door-qty-input');
@@ -5750,6 +5842,9 @@ function syncOSDoorsPO(orderId) {
         }
     });
 
+    const syncPayload = { door_values: doorValues };
+    if (poDisplayNumber) { syncPayload.po_workguru_id = poDisplayNumber; }
+
     fetch(`/order/${orderId}/sync-os-doors-po/`, {
         method: 'POST',
         headers: {
@@ -5757,7 +5852,7 @@ function syncOSDoorsPO(orderId) {
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
             'X-Requested-With': 'XMLHttpRequest'
         },
-        body: JSON.stringify({ door_values: doorValues })
+        body: JSON.stringify(syncPayload)
     })
     .then(r => r.json())
     .then(result => {
@@ -5776,6 +5871,33 @@ function syncOSDoorsPO(orderId) {
         console.error('Error:', error);
         showAlert('Error syncing PO: ' + error.message, 'danger');
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update PO'; }
+    });
+}
+
+// Add Additional OS Doors PO to an order
+function addAdditionalOSDoorsPO(orderId) {
+    if (!confirm('Create an additional OS Doors PO for this order?')) return;
+
+    fetch(`/order/${orderId}/add-additional-os-doors-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`Additional OS Doors PO ${result.po_number} created`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error adding additional OS Doors PO: ' + error.message, 'danger');
     });
 }
 
@@ -6260,16 +6382,16 @@ function closeDeleteModal() {
 </script>
 
 <!-- Delete Order Confirmation Modal -->
-<div id="deleteOrderModal" style="display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);" onclick="if(event.target===this)closeDeleteModal()">
-    <div style="background:var(--bg-primary,#fff);border-radius:8px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
-        <h3 style="margin:0 0 12px;color:var(--danger,#dc3545);font-size:1.1rem;"><i class="bi bi-exclamation-triangle"></i> Delete Order</h3>
-        <p style="margin:0 0 8px;color:var(--text-primary,#333);font-size:0.95rem;">Are you sure you want to delete this order?</p>
-        <p style="margin:0 0 20px;color:var(--text-secondary,#666);font-size:0.85rem;"><strong>{{ order.first_name }} {{ order.last_name }}</strong>{% if order.sale_number %} ({{ order.sale_number }}){% endif %}<br>This action cannot be undone. All associated data will be permanently removed.</p>
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
-            <button onclick="closeDeleteModal()" style="padding:6px 16px;border:1px solid var(--border-color,#ddd);background:var(--bg-secondary,#f5f5f5);color:var(--text-primary,#333);border-radius:4px;cursor:pointer;font-size:0.85rem;">Cancel</button>
-            <form method="post" action="{% url 'order_delete' order.id %}" style="margin:0;">
+<div id="deleteOrderModal" class="delete-order-modal" onclick="if(event.target===this)closeDeleteModal()">
+    <div class="delete-order-dialog">
+        <h3 class="delete-order-heading"><i class="bi bi-exclamation-triangle"></i> Delete Order</h3>
+        <p class="delete-order-body-text">Are you sure you want to delete this order?</p>
+        <p class="delete-order-sub-text"><strong>{{ order.first_name }} {{ order.last_name }}</strong>{% if order.sale_number %} ({{ order.sale_number }}){% endif %}<br>This action cannot be undone. All associated data will be permanently removed.</p>
+        <div class="delete-order-actions">
+            <button onclick="closeDeleteModal()" class="btn-modal-cancel">Cancel</button>
+            <form method="post" action="{% url 'order_delete' order.id %}" class="delete-order-form">
                 {% csrf_token %}
-                <button type="submit" style="padding:6px 16px;border:none;background:var(--danger,#dc3545);color:#fff;border-radius:4px;cursor:pointer;font-size:0.85rem;">Delete Order</button>
+                <button type="submit" class="btn-modal-delete">Delete Order</button>
             </form>
         </div>
     </div>

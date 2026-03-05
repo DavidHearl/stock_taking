@@ -1,12 +1,28 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum, Avg
-from django.db.models.functions import TruncWeek, TruncMonth
-from django.http import JsonResponse
+from django.db.models import Count, Sum, Avg, DecimalField, Value
+from django.db.models.functions import TruncWeek, TruncMonth, Coalesce
+from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
-from .models import Order, PurchaseOrder, StockItem
+from .models import Order, PurchaseOrder, StockItem, AnthillSale
+
+# Maps the user's selected_location value to the contract number prefix used by Anthill.
+# Contract numbers are the authoritative location signal — the location field in
+# AnthillSale contains dirty/incorrect data for some historical records.
+_LOCATION_CONTRACT_PREFIX = {
+    'belfast':     'BFS',
+    'dublin':      'DUB',
+    'nottingham':  'NTG',
+    'wyedean':     'WYE',
+    'midlands':    'MDE',
+}
+
+
+def _contract_prefix_for_location(location: str) -> str:
+    """Return the contract number prefix for a given selected_location value, or ''."""
+    return _LOCATION_CONTRACT_PREFIX.get(location.strip().lower(), '')
 
 
 def _get_monthly_sales_data(year, month):
@@ -258,6 +274,29 @@ def dashboard(request):
 
     # Current month sales data
     current_month_sales = _get_monthly_sales_data(today.year, today.month)
+
+    # Total outstanding balance: sum balance_payable directly from Anthill.
+    # Filter by contract number prefix (authoritative) rather than the location
+    # field which contains dirty data for some historic records.
+    profile = getattr(request.user, 'profile', None)
+    selected_location = profile.selected_location if profile else ''
+    contract_prefix = _contract_prefix_for_location(selected_location)
+    outstanding_qs = AnthillSale.objects.filter(
+        sale_value__gt=0,
+        paid_in_full=False,
+        balance_payable__gt=0,
+    )
+    if contract_prefix:
+        outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
+    total_outstanding_balance = (
+        outstanding_qs.aggregate(
+            total=Coalesce(
+                Sum('balance_payable'),
+                Value(Decimal('0')),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            )
+        )['total']
+    )
     
     context = {
         'fits_chart_data': json.dumps({
@@ -291,5 +330,96 @@ def dashboard(request):
         'today_str': today.strftime('%Y-%m-%d'),
         'sales_after_total': '{:,.0f}'.format(sales_after['total'] or Decimal('0.00')),
         'sales_after_count': sales_after['count'] or 0,
+        'total_outstanding_balance': '{:,.0f}'.format(total_outstanding_balance),
     }
     return render(request, 'stock_take/dashboard.html', context)
+
+
+@login_required
+def dashboard_outstanding_report(request):
+    """JSON endpoint — returns all customers with an outstanding balance, sorted desc."""
+    profile = getattr(request.user, 'profile', None)
+    raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
+    contract_prefix = _contract_prefix_for_location(raw_location)
+
+    qs = AnthillSale.objects.filter(
+        sale_value__gt=0,
+        paid_in_full=False,
+        balance_payable__gt=0,
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+
+    rows = (
+        qs
+        .order_by('-activity_date')
+        .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
+                'sale_value', 'balance_payable', 'activity_date', 'location')
+    )
+    results = []
+    for row in rows:
+        bp = row['balance_payable'] or Decimal('0')
+        sv = row['sale_value'] or Decimal('0')
+        dt = row['activity_date']
+        paid = max(sv - bp, Decimal('0'))  # clamp: balance_payable can exceed sale_value
+        results.append({
+            'pk': row['pk'],
+            'sale_number': row['anthill_activity_id'],
+            'customer': row['customer_name'] or '-',
+            'contract': row['contract_number'] or '',
+            'location': row['location'] or '',
+            'sale_value': float(sv),
+            'paid': float(paid),
+            'outstanding': float(bp),
+            'year': dt.year if dt else None,
+            'date': dt.strftime('%d/%m/%Y') if dt else '',
+        })
+    results.sort(key=lambda x: (-(x['year'] or 0), x['outstanding'] * -1))
+    return JsonResponse({'success': True, 'rows': results, 'count': len(results)})
+
+
+@login_required
+def dashboard_outstanding_pdf(request):
+    """Download the outstanding balance report as a PDF."""
+    from .pdf_generator import generate_outstanding_report_pdf
+
+    profile = getattr(request.user, 'profile', None)
+    raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
+    contract_prefix = _contract_prefix_for_location(raw_location)
+    location_label = raw_location.title() if raw_location else 'All Locations'
+
+    qs = AnthillSale.objects.filter(
+        sale_value__gt=0,
+        paid_in_full=False,
+        balance_payable__gt=0,
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+
+    rows = []
+    for row in qs.order_by('-activity_date').values(
+        'pk', 'anthill_activity_id', 'customer_name', 'contract_number',
+        'sale_value', 'balance_payable', 'activity_date',
+    ):
+        bp = row['balance_payable'] or Decimal('0')
+        sv = row['sale_value'] or Decimal('0')
+        dt = row['activity_date']
+        rows.append({
+            'pk': row['pk'],
+            'sale_number': row['anthill_activity_id'],
+            'customer': row['customer_name'] or '-',
+            'contract': row['contract_number'] or '',
+            'sale_value': float(sv),
+            'paid': float(max(sv - bp, Decimal('0'))),
+            'outstanding': float(bp),
+            'year': dt.year if dt else None,
+            'date': dt.strftime('%d/%m/%Y') if dt else '',
+        })
+    rows.sort(key=lambda x: (-(x['year'] or 0), -x['outstanding']))
+
+    from datetime import date
+    buffer = generate_outstanding_report_pdf(rows, location_label=location_label)
+    filename = f'Outstanding_Balance_{location_label}_{date.today().strftime("%Y%m%d")}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response

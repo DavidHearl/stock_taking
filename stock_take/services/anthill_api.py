@@ -390,3 +390,102 @@ class AnthillAPI:
         if result is not None:
             return ET.tostring(result, encoding='unicode')
         return ''
+
+    # ------------------------------------------------------------------
+    # Get Sale Payments
+    # ------------------------------------------------------------------
+    def get_sale_payments(self, activity_id: str) -> list[dict]:
+        """
+        Fetch all payment records for a given Anthill sale/activity.
+
+        Args:
+            activity_id: The Anthill activity ID (e.g. "417437")
+
+        Returns:
+            List of dicts, each containing:
+                payment_id, payment_type, date, location, user_name, amount, status
+
+        Note:
+            Run test_payments_api.py first to confirm the exact XML field names
+            returned by the Anthill API for your tenant.
+        """
+        body = f'''<GetSalePayments xmlns="{NAMESPACE}">
+          <saleId>{activity_id}</saleId>
+        </GetSalePayments>'''
+
+        root = self._soap_request('GetSalePayments', body, timeout=30)
+
+        payments = []
+
+        # Try the most likely result wrapper names
+        result = (
+            root.find(f'.//{{{NAMESPACE}}}GetSalePaymentsResult')
+            or root.find(f'.//{{{NAMESPACE}}}GetSalePayments')
+        )
+
+        if result is None:
+            # Fallback: search for any Payment elements anywhere in the response
+            payment_elements = root.findall(f'.//{{{NAMESPACE}}}Payment')
+        else:
+            payment_elements = result.findall(f'.//{{{NAMESPACE}}}Payment')
+
+        for p in payment_elements:
+            # Parse date — Anthill returns ISO or DD/MM/YY HH:MM formats
+            raw_date = self._get_text(p, 'Date') or self._get_text(p, 'PaymentDate')
+            parsed_date = None
+            if raw_date:
+                for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%d/%m/%y %H:%M', '%d/%m/%Y %H:%M'):
+                    try:
+                        parsed_date = datetime.strptime(raw_date, fmt)
+                        break
+                    except ValueError:
+                        continue
+
+            # Amount — strip currency symbol if present
+            raw_amount = self._get_text(p, 'Amount') or self._get_text(p, 'PaymentAmount')
+            amount = None
+            if raw_amount:
+                try:
+                    from decimal import Decimal, InvalidOperation
+                    amount = Decimal(raw_amount.replace('£', '').replace(',', '').strip())
+                except InvalidOperation:
+                    amount = None
+
+            # Status — "Confirmed" / "Unconfirmed" / boolean true/false
+            raw_status = (
+                self._get_text(p, 'Status')
+                or self._get_text(p, 'Confirmed')
+                or self._get_text(p, 'IsConfirmed')
+            )
+            if raw_status.lower() in ('true', '1', 'yes'):
+                status = 'Confirmed'
+            elif raw_status.lower() in ('false', '0', 'no'):
+                status = 'Unconfirmed'
+            else:
+                status = raw_status  # use as-is if already a string
+
+            payments.append({
+                'payment_id': (
+                    self._get_text(p, 'PaymentId')
+                    or self._get_text(p, 'Id')
+                    or self._get_text(p, 'ID')
+                ),
+                'payment_type': (
+                    self._get_text(p, 'PaymentType')
+                    or self._get_text(p, 'Type')
+                ),
+                'date': parsed_date,
+                'location': (
+                    self._get_text(p, 'Location')
+                    or self._get_text(p, 'LocationLabel')
+                ),
+                'user_name': (
+                    self._get_text(p, 'UserName')
+                    or self._get_text(p, 'User')
+                    or self._get_text(p, 'CreatedByUser')
+                ),
+                'amount': amount,
+                'status': status,
+            })
+
+        return payments

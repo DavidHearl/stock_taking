@@ -61,7 +61,7 @@ def generate_materials(request):
     # Get database stats
     db_stats = {
         'database_exists': False,
-        'database_path': str(DATABASE_PATH),
+        'database_path': CAD_DB_STORAGE_PATH,
         'products_db_exists': False,
         'products_db_path': str(PRODUCTS_DB_PATH),
     }

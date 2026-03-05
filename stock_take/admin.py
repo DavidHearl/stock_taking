@@ -4,7 +4,8 @@ from .models import (
     Customer, BoardsPO, Order, OSDoor, StockItem, Category, StockTakeGroup, ImportHistory, 
     Remedial, RemedialAccessory, FitAppointment, WorkflowStage, WorkflowTask, 
     OrderWorkflowProgress, TaskCompletion, Fitter, FactoryWorker, Timesheet, Expense, UserProfile,
-    StockHistory, Role, PagePermission, XeroToken, SyncLog
+    StockHistory, Role, PagePermission, XeroToken, SyncLog,
+    AnthillSale, AnthillPayment,
 )
 
 @admin.register(Customer)
@@ -284,3 +285,21 @@ class SyncLogAdmin(admin.ModelAdmin):
     list_filter = ['script_name', 'status']
     search_fields = ['script_name', 'notes']
     readonly_fields = ['script_name', 'ran_at', 'status', 'records_created', 'records_updated', 'errors', 'notes']
+
+
+@admin.register(AnthillSale)
+class AnthillSaleAdmin(admin.ModelAdmin):
+    list_display = ['anthill_activity_id', 'customer_name', 'status', 'category', 'activity_type', 'sale_value', 'activity_date', 'location']
+    search_fields = ['anthill_activity_id', 'customer_name', 'contract_number', 'anthill_customer_id']
+    list_filter = ['status', 'category', 'location', 'activity_type']
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['customer', 'order']
+
+
+@admin.register(AnthillPayment)
+class AnthillPaymentAdmin(admin.ModelAdmin):
+    list_display = ['sale', 'payment_type', 'date', 'location', 'user_name', 'amount', 'status']
+    search_fields = ['sale__anthill_activity_id', 'sale__customer_name', 'payment_type', 'user_name', 'anthill_payment_id']
+    list_filter = ['payment_type', 'status', 'location']
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['sale']

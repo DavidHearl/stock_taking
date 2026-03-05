@@ -3,8 +3,9 @@ Context processors for role-based access control.
 Adds user permissions and navigation visibility to every template context.
 """
 
-from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket
+from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket, AnthillSale
 from .permissions import get_user_permissions
+from django.core.cache import cache
 
 
 def user_permissions(request):
@@ -50,13 +51,27 @@ def user_permissions(request):
     # Location: current selection from profile, available from DB
     current_location = profile.selected_location if profile else ''
     try:
-        from .models import Customer
-        available_locations = list(
-            Customer.objects.exclude(location__isnull=True).exclude(location='')
-            .values_list('location', flat=True).distinct().order_by('location')
-        )
+        available_locations = cache.get('nav_available_locations')
+        if available_locations is None:
+            from .models import Customer
+            available_locations = list(
+                Customer.objects.exclude(location__isnull=True).exclude(location='')
+                .values_list('location', flat=True).distinct().order_by('location')
+            )
+            cache.set('nav_available_locations', available_locations, 300)
     except Exception:
         available_locations = []
+
+    # Cached nav counts (refresh every 2 minutes)
+    nav_counts = cache.get('nav_counts')
+    if nav_counts is None:
+        nav_counts = {
+            'open_ticket_count': Ticket.objects.filter(status__in=['open', 'in_progress']).count(),
+            'unread_ticket_count': Ticket.objects.filter(read_by_admin=False).exclude(status='closed').count() if is_admin else 0,
+            'open_sales_count': AnthillSale.objects.filter(status__iexact='open').exclude(category='8').count(),
+            'open_remedials_count': AnthillSale.objects.filter(category='8', status__iexact='open').count(),
+        }
+        cache.set('nav_counts', nav_counts, 120)
 
     return {
         'role_perms': perms,
@@ -67,8 +82,11 @@ def user_permissions(request):
         'current_location': current_location,
         'available_locations': available_locations,
         # Ticket counts for nav badges
-        'open_ticket_count': Ticket.objects.filter(status__in=['open', 'in_progress']).count(),
-        'unread_ticket_count': Ticket.objects.filter(read_by_admin=False).exclude(status='closed').count() if is_admin else 0,
+        'open_ticket_count': nav_counts['open_ticket_count'],
+        'unread_ticket_count': nav_counts['unread_ticket_count'],
+        # Sales & remedials counts for nav
+        'open_sales_count': nav_counts['open_sales_count'],
+        'open_remedials_count': nav_counts['open_remedials_count'],
         # Impersonation context
         'is_impersonating': getattr(request, 'is_impersonating', False),
         'real_user': getattr(request, 'real_user', request.user),

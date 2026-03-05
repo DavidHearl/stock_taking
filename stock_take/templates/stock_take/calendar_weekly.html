@@ -183,14 +183,26 @@
                              data-address="{{ appt.order.address|default:'-' }}"
                              data-postcode="{{ appt.order.postcode|default:'-' }}"
                              onclick="selectAppointmentFromCard(this)">
-                            <div class="wk-card-line1">
-                                <span class="wk-fitter-name">{{ fitter.name }}</span>
-                                <div class="wk-indicators">
-                                    <span class="indicator {% if appt.order.materials_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Materials">M</span>
-                                    <span class="indicator {% if appt.order.paperwork_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Paperwork">P</span>
-                                </div>
+                            <div class="wk-card-header">
+                                <span class="wk-card-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
+                                <span class="wk-card-salenum">{{ appt.order.sale_number }}</span>
                             </div>
-                            <div class="wk-card-line2">{{ appt.order.first_name }} {{ appt.order.last_name }} &middot; {{ appt.order.sale_number }}</div>
+                            <div class="wk-card-rows">
+                                <div class="wk-card-row">
+                                    <span class="wk-fin-label">Fitter</span>
+                                    <span class="wk-fin-val">{{ fitter.name }}</span>
+                                </div>
+                                {% if appt.fin and appt.fin.sale_value %}
+                                <div class="wk-card-row">
+                                    <span class="wk-fin-label">Sale Value</span>
+                                    <span class="wk-fin-val {% if appt.fin.outstanding == 0 %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.sale_value|floatformat:0 }}</span>
+                                </div>
+                                <div class="wk-card-row">
+                                    <span class="wk-fin-label">Outstanding</span>
+                                    <span class="wk-fin-val {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
                         </div>
                         {% elif appt.remedial %}
                         <div class="wk-card remedial-card"
@@ -209,29 +221,37 @@
                              data-address="{{ appt.remedial.address|default:'-' }}"
                              data-postcode="{{ appt.remedial.postcode|default:'-' }}"
                              onclick="selectAppointmentFromCard(this)">
-                            <div class="wk-card-line1">
-                                <span class="wk-fitter-name">{{ fitter.name }}</span>
+                            <div class="wk-card-header">
+                                <span class="wk-card-name">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
+                                <span class="wk-card-salenum">{{ appt.remedial.remedial_number }}</span>
                             </div>
-                            <div class="wk-card-line2">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }} &middot; {{ appt.remedial.remedial_number }}</div>
+                            <div class="wk-card-rows">
+                                <div class="wk-card-row">
+                                    <span class="wk-fin-label">Fitter</span>
+                                    <span class="wk-fin-val">{{ fitter.name }}</span>
+                                </div>
+                            </div>
                         </div>
                         {% endif %}
                     {% endfor %}
                 {% endfor %}
 
-                {% for po in day.pos %}
-                <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="wk-po-card" title="{{ po.display_number }} — {{ po.supplier_name|default:'Unknown' }}">
-                    <div>
+                {% for group in day.pos_groups %}
+                <div class="wk-po-card">
+                    <div class="wk-po-supplier-header">
                         <i class="bi bi-truck"></i>
+                        <span class="wk-po-supplier">{{ group.supplier }}</span>
+                    </div>
+                    {% for po in group.pos %}
+                    <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="wk-po-row">
                         <span class="wk-po-num">{{ po.display_number }}</span>
                         <span class="wk-po-customer">{{ po.project_name|default:"" }}</span>
-                    </div>
-                    <div class="wk-po-line2">
-                        <span class="wk-po-supplier">{{ po.supplier_name|default:"—" }}</span>
-                    </div>
-                </a>
+                    </a>
+                    {% endfor %}
+                </div>
                 {% endfor %}
 
-                {% if not day.has_appointments and not day.pos %}
+                {% if not day.has_appointments and not day.pos_groups %}
                 <div class="wk-empty">—</div>
                 {% endif %}
             </div>

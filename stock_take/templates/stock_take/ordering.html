@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static custom_filters %}
 
 {% block title %}Ordering{% endblock %}
 
@@ -51,7 +51,10 @@
 
 <!-- Search Box -->
 <div class="search-box">
-    <input type="text" id="orderSearch" placeholder="🔍 Search orders...">
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="orderSearch" placeholder="Search orders..." autocomplete="off">
+    </div>
 </div>
 
 <div class="card">
@@ -70,13 +73,13 @@
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="sortable text-center" data-sort="sale_number">
+                <th class="sortable" data-sort="sale_number">
                     Sale # 
                     {% if current_sort == 'sale_number' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="sortable text-center" data-sort="fit_date">
+                <th class="sortable" data-sort="fit_date">
                     Fit Date 
                     {% if current_sort == 'fit_date' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
@@ -89,11 +92,10 @@
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="text-center">OS Doors</th>
-                <th class="text-center">CSV</th>
-                <th class="text-center">Acc</th>
-                <th class="text-center">Ord</th>
-                <th class="text-center">Ant</th>
+                <th>OS Doors</th>
+                <th class="text-center">Accessories</th>
+                <th class="text-center">Ordered</th>
+                <th class="text-center" colspan="2">Anthill</th>
                 <th class="text-center">Actions</th>
             </tr>
         </thead>
@@ -107,11 +109,12 @@
             >
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
-                <td class="text-center">{{ order.sale_number }}</td>
-                <td class="text-center">{{ order.fit_date|date:"d F"|default:"-" }}</td>
-                <td class="text-center">{{ order.time_allowance|default:"-" }}</td>
+                <td>{{ order.sale_number }}</td>
+                <td>{{ order.fit_date|date:"d F"|default:"-" }}</td>
+                <td>{{ order.time_allowance|default:"-" }}</td>
+
                 <!-- Boards -->
-                <td class="text-center">
+                <td>
                     {% if not order.job_finished %}
                         {% if order.boards_po %}
                             <div class="status-cell">
@@ -134,7 +137,7 @@
                     {% endif %}
                 </td>
                 <!-- OS Doors -->
-                <td class="text-center">
+                <td>
                     {% if order.os_doors.exists or order.os_doors_required %}
                         <div class="status-cell">
                             <a class="po-link" href="{% url 'order_details' order.id %}">
@@ -156,34 +159,38 @@
                         <span class="text-muted">-</span>
                     {% endif %}
                 </td>
-                <!-- Address Check -->
-                <td class="text-center">
-                    {% if order.address %}
-                        <span class="status-icon success" title="Has Address">✓</span>
-                    {% else %}
-                        <span class="status-icon danger" title="No Address">✗</span>
-                    {% endif %}
-                </td>
                 <!-- Accessories Check -->
-                <td class="text-center" data-indicator="accessories">
+                <td data-indicator="accessories">
                     <!-- Loaded via AJAX -->
                 </td>
                 <!-- Items ordered Check -->
-                <td class="text-center">
+                <td>
                     {% if order.all_items_ordered %}
                         <span class="status-icon success" title="All Materials Ordered">✓</span>
                     {% endif %}
                 </td>
-                <td class="text-center" onclick="event.stopPropagation();">
+                <td onclick="event.stopPropagation();">
                     {% if order.anthill_id %}
-                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" 
-                           target="_blank" class="btn btn-sm btn-outline-success" title="Open in Anthill CRM">
-                            👤
+                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"
+                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Customer">
+                            <i class="bi bi-person-fill"></i> Customer
                         </a>
+                    {% else %}
+                        <span class="text-muted">—</span>
                     {% endif %}
                 </td>
-                <td class="text-center" onclick="event.stopPropagation();">
-                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary">Details</a>
+                <td onclick="event.stopPropagation();">
+                    {% if order.sale_number %}
+                        <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}"
+                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Sale">
+                            <i class="bi bi-receipt"></i> Sale
+                        </a>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td onclick="event.stopPropagation();">
+                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="width: 100%; display: block; text-align: center;">Details</a>
                 </td>
             </tr>
 

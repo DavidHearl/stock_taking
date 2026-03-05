@@ -1,249 +1,380 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Event {{ sale.anthill_activity_id }} - Detail{% endblock %}
+{% block title %}Sale {{ sale.contract_number|default:sale.anthill_activity_id }} - Detail{% endblock %}
 
 {% block nav_sales_active %}active{% endblock %}
 
+{% block page_title %}
+<span class="page-title-row">
+    <a href="{% url 'sales_list' %}" class="back-link" title="Back to Sales"><i class="bi bi-arrow-left"></i></a>
+    Sale Detail: {{ sale.customer_name|default:sale.anthill_activity_id }}{% if sale.contract_number %} <span class="sale-number-suffix">({{ sale.contract_number }})</span>{% endif %}
+</span>
+{% endblock %}
+
 {% block extra_css %}
+<link href="{% static 'css/order_details.css' %}" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <div class="customer-detail-header">
-        <div class="customer-detail-title">
-            <a href="{% url 'sales_list' %}" class="back-link" title="Back to Events">
-                <i class="bi bi-arrow-left"></i>
-            </a>
-            <h1>Event #{{ sale.anthill_activity_id }}</h1>
-            <span class="customer-active-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}active{% else %}inactive{% endif %}">
-                {{ sale.status|default:"Unknown" }}
-            </span>
-        </div>
-    </div>
+<div class="page-content">
+    <div class="order-details-grid">
 
-    <!-- Sale Info Grid -->
-    <div class="customer-info-grid">
-        <!-- Sale Details -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-bag-check"></i> Event Details</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Activity ID</span>
-                <span class="customer-info-value">{{ sale.anthill_activity_id }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Type</span>
-                <span class="customer-info-value">{{ sale.activity_type|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Category</span>
-                <span class="customer-info-value">{{ sale.category|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Status</span>
-                <span class="customer-info-value">
+        <!-- ===== MAIN COLUMN ===== -->
+        <div class="main-column">
+
+            <!-- Sale Information Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="bi bi-bag-check"></i> Sale Information</h3>
                     <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
-                        {{ sale.status|default:"-" }}
+                        {{ sale.status|default:"Unknown" }}
                     </span>
-                </span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Date</span>
-                <span class="customer-info-value">{{ sale.activity_date|date:"d/m/Y H:i"|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Location</span>
-                <span class="customer-info-value">{{ sale.location|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Assigned To</span>
-                <span class="customer-info-value">{{ sale.assigned_to_name|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Source</span>
-                <span class="customer-info-value">{{ sale.source|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Contract Number</span>
-                <span class="customer-info-value customer-mono">{{ sale.contract_number|default:"-" }}</span>
-            </div>
-        </div>
+                </div>
+                <div class="card-body padded">
+                    <div class="form-grid-3col">
 
-        <!-- Financial Data -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-currency-pound"></i> Financial</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Sale Value (Inc VAT)</span>
-                <span class="customer-info-value">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Profit</span>
-                <span class="customer-info-value">{% if sale.profit %}£{{ sale.profit|floatformat:2 }}{% else %}-{% endif %}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Deposit Required</span>
-                <span class="customer-info-value">{% if sale.deposit_required %}£{{ sale.deposit_required|floatformat:2 }}{% else %}-{% endif %}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Balance Payable</span>
-                <span class="customer-info-value">{% if sale.balance_payable %}£{{ sale.balance_payable|floatformat:2 }}{% else %}-{% endif %}</span>
-            </div>
-        </div>
+                        <!-- Col 1: Sale Details -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title sale">Sale Details</h4>
+                            </div>
+                            <div class="info-display">
+                                <div>
+                                    <div class="field-label">Contract Number</div>
+                                    <div class="field-value field-value-large customer-mono">{{ sale.contract_number|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Activity ID</div>
+                                    <div class="field-value customer-mono">{{ sale.anthill_activity_id }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Type</div>
+                                    <div class="field-value">{{ sale.activity_type|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Category</div>
+                                    <div class="field-value">{{ sale.category|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Date</div>
+                                    <div class="field-value">{{ sale.activity_date|date:"d M Y H:i"|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Location</div>
+                                    <div class="field-value">{{ sale.location|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Assigned To</div>
+                                    <div class="field-value">{{ sale.assigned_to_name|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Source</div>
+                                    <div class="field-value">{{ sale.source|default:"-" }}</div>
+                                </div>
+                            </div>
+                        </div>
 
-        <!-- Product Info -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-box-seam"></i> Product Info</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Range</span>
-                <span class="customer-info-value">{{ sale.range_name|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Door Type</span>
-                <span class="customer-info-value">{{ sale.door_type|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Products Included</span>
-                <span class="customer-info-value">{{ sale.products_included|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Fit From Date</span>
-                <span class="customer-info-value">{{ sale.fit_from_date|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Goods Due In</span>
-                <span class="customer-info-value">{{ sale.goods_due_in|default:"-" }}</span>
-            </div>
-        </div>
+                        <!-- Col 2: Financial -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title customer">Financial</h4>
+                            </div>
+                            <div class="info-display">
+                                <div>
+                                    <div class="field-label">Sale Value (Inc VAT)</div>
+                                    <div class="field-value field-value-large">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Profit</div>
+                                    <div class="field-value">{% if sale.profit %}£{{ sale.profit|floatformat:2 }}{% else %}-{% endif %}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Deposit Required</div>
+                                    <div class="field-value">{% if sale.deposit_required %}£{{ sale.deposit_required|floatformat:2 }}{% else %}-{% endif %}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Balance Payable</div>
+                                    <div class="field-value">{% if sale.balance_payable %}£{{ sale.balance_payable|floatformat:2 }}{% else %}-{% endif %}</div>
+                                </div>
+                                {% if payments_total %}
+                                <div>
+                                    <div class="field-label">Total Payments Received</div>
+                                    <div class="field-value field-value-large" style="color: #10b981;">£{{ payments_total|floatformat:2 }}</div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
 
-        <!-- Customer Link -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-person"></i> Customer</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Customer Name</span>
-                <span class="customer-info-value">
-                    {% if sale.customer %}
-                    <a href="{% url 'customer_detail' sale.customer.pk %}">{{ sale.customer.name }}</a>
-                    {% else %}
-                    {{ sale.customer_name|default:"-" }}
-                    {% endif %}
-                </span>
+                        <!-- Col 3: Product Info -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title job">Product Info</h4>
+                            </div>
+                            <div class="info-display">
+                                <div>
+                                    <div class="field-label">Range</div>
+                                    <div class="field-value">{{ sale.range_name|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Door Type</div>
+                                    <div class="field-value">{{ sale.door_type|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Products Included</div>
+                                    <div class="field-value">{{ sale.products_included|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Fit From Date</div>
+                                    <div class="field-value">{{ sale.fit_from_date|default:"-" }}</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Goods Due In</div>
+                                    <div class="field-value">{{ sale.goods_due_in|default:"-" }}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
             </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Anthill Customer ID</span>
-                <span class="customer-info-value customer-mono">{{ sale.anthill_customer_id|default:"-" }}</span>
+
+            <!-- Payment History Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="bi bi-cash-stack"></i> Payment History</h3>
+                    {% if payments %}<span class="tab-count" style="margin-left: 6px;">{{ payments|length }}</span>{% endif %}
+                </div>
+                {% if payments %}
+                <table class="table orders-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Reference</th>
+                            <th>Date</th>
+                            <th>Amount Paid</th>
+                            <th>Outstanding</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in payments %}
+                        <tr>
+                            <td>{{ p.xero_invoice_number|default:"-" }}</td>
+                            <td>{{ p.payment_type|default:"-" }}</td>
+                            <td>{{ p.date|date:"d/m/Y"|default:"-" }}</td>
+                            <td>{% if p.amount %}£{{ p.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td>{% if p.invoice_amount_due is not None %}£{{ p.invoice_amount_due|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td>
+                                {% if p.status|lower == 'authorised' %}
+                                <span class="customer-active-badge active">Authorised</span>
+                                {% elif p.status|lower == 'paid' %}
+                                <span class="customer-active-badge" style="background:#10b981; color:#fff;">Paid</span>
+                                {% elif p.status %}
+                                <span class="customer-active-badge inactive">{{ p.status }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3" style="text-align:right; font-weight:600; padding:10px 12px; font-size:0.78rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">Total Paid</td>
+                            <td style="font-weight:700; padding:10px 8px;">
+                                {% if payments_total %}£{{ payments_total|floatformat:2 }}{% else %}-{% endif %}
+                            </td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}
+                <div class="card-body padded">
+                    <div style="text-align:center; padding: 24px 0; color: var(--text-secondary);">
+                        <i class="bi bi-cash-stack" style="font-size: 2rem; display:block; margin-bottom:8px; opacity:0.4;"></i>
+                        <p style="margin: 0 0 6px;">No payment records found for this sale.</p>
+                        <small style="color: var(--text-muted);">
+                            Run <code>python manage.py sync_xero_sale_payments --sale-id {{ sale.anthill_activity_id }}</code> to fetch from Xero.
+                        </small>
+                    </div>
+                </div>
+                {% endif %}
             </div>
-            {% if sale.customer %}
-            <div class="customer-info-row">
-                <span class="customer-info-label">Email</span>
-                <span class="customer-info-value">{{ sale.customer.email|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Phone</span>
-                <span class="customer-info-value">{{ sale.customer.phone|default:"-" }}</span>
+
+            <!-- Related Sales Card -->
+            {% if related_sales %}
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="bi bi-clock-history"></i> Other Sales for this Customer</h3>
+                    <span class="tab-count" style="margin-left: 6px;">{{ related_sales|length }}</span>
+                </div>
+                <table class="table orders-table">
+                    <thead>
+                        <tr>
+                            <th>Activity ID</th>
+                            <th>Contract</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                            <th>Linked Order</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for related in related_sales %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'sale_detail' related.pk %}" class="customer-name-link">
+                                    {{ related.anthill_activity_id }}
+                                </a>
+                            </td>
+                            <td><span class="customer-mono" style="font-size:0.8rem;">{{ related.contract_number|default:"-" }}</span></td>
+                            <td>{{ related.activity_type|default:"-" }}</td>
+                            <td>
+                                <span class="customer-active-badge {% if related.status|lower == 'complete' or related.status|lower == 'completed' %}active{% elif related.status|lower == 'dead' %}danger{% else %}inactive{% endif %}">
+                                    {{ related.status|default:"-" }}
+                                </span>
+                            </td>
+                            <td>{{ related.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                            <td>
+                                {% if related.order %}
+                                <a href="{% url 'order_details' related.order.id %}" class="customer-order-badge">
+                                    {{ related.order.sale_number }}
+                                </a>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
             {% endif %}
+
         </div>
 
-        <!-- Linked Order -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-folder"></i> Linked Order</h3>
-            {% if sale.order %}
-            <div class="customer-info-row">
-                <span class="customer-info-label">Sale Number</span>
-                <span class="customer-info-value">
-                    <a href="{% url 'order_details' sale.order.id %}">{{ sale.order.sale_number }}</a>
-                </span>
+        <!-- ===== SIDEBAR COLUMN ===== -->
+        <div class="sidebar-column">
+
+            <!-- Customer Card -->
+            <div class="card" style="margin-bottom: 24px;">
+                <div class="card-header">
+                    <h3><i class="bi bi-person"></i> Customer</h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="info-display">
+                        <div>
+                            <div class="field-label">Customer Name</div>
+                            <div class="field-value field-value-large">
+                                {% if sale.customer %}
+                                <a href="{% url 'customer_detail' sale.customer.pk %}">{{ sale.customer.name }}</a>
+                                {% else %}
+                                {{ sale.customer_name|default:"-" }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="field-label">Anthill Customer ID</div>
+                            <div class="field-row-with-button">
+                                <div class="field-value customer-mono">{{ sale.anthill_customer_id|default:"-" }}</div>
+                                {% if sale.anthill_customer_id %}
+                                <a href="https://sliderobes.anthillcrm.com/customers/{{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if sale.customer %}
+                        <div>
+                            <div class="field-label">Email</div>
+                            <div class="field-value" style="word-break:break-all;">{{ sale.customer.email|default:"-" }}</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Phone</div>
+                            <div class="field-value">{{ sale.customer.phone|default:"-" }}</div>
+                        </div>
+                        {% endif %}
+                        <div style="margin-top: 10px;">
+                            <a href="https://sliderobes.anthillcrm.com/customers/{{ sale.anthill_customer_id }}/activities/{{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success" style="width:100%; text-align:center; display:block;">
+                                <i class="bi bi-box-arrow-up-right"></i> Open in Anthill CRM
+                            </a>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Order Date</span>
-                <span class="customer-info-value">{{ sale.order.order_date|date:"d/m/Y"|default:"-" }}</span>
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Status</span>
-                <span class="customer-info-value">
-                    {% if sale.order.job_finished %}
-                    <span class="customer-active-badge active">Finished</span>
+
+            <!-- Linked Order Card -->
+            <div class="card" style="margin-bottom: 24px;">
+                <div class="card-header">
+                    <h3><i class="bi bi-folder"></i> Linked Order</h3>
+                </div>
+                <div class="card-body padded">
+                    {% if sale.order %}
+                    <div class="info-display">
+                        <div>
+                            <div class="field-label">Sale Number</div>
+                            <div class="field-value field-value-medium">
+                                <a href="{% url 'order_details' sale.order.id %}">{{ sale.order.sale_number }}</a>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="field-label">Order Date</div>
+                            <div class="field-value">{{ sale.order.order_date|date:"d M Y"|default:"-" }}</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Status</div>
+                            <div class="field-value">
+                                {% if sale.order.job_finished %}
+                                <span class="customer-active-badge active">Finished</span>
+                                {% else %}
+                                <span class="customer-active-badge inactive">Active</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <a href="{% url 'order_details' sale.order.id %}" class="btn btn-sm btn-outline-primary" style="width:100%; text-align:center; display:block;">
+                                <i class="bi bi-eye"></i> View Full Order
+                            </a>
+                        </div>
+                    </div>
                     {% else %}
-                    <span class="customer-active-badge inactive">Active</span>
+                    <div style="text-align:center; padding: 20px 0; color: var(--text-secondary);">
+                        <i class="bi bi-folder" style="font-size:1.8rem; display:block; margin-bottom:8px; opacity:0.35;"></i>
+                        <p style="margin:0; font-size:0.85rem;">No local order linked to this sale.</p>
+                    </div>
                     {% endif %}
-                </span>
+                </div>
             </div>
-            {% else %}
-            <div class="customer-tab-empty" style="padding: 20px;">
-                <i class="bi bi-folder" style="font-size: 1.5rem;"></i>
-                <p>No local order linked to this event.</p>
+
+            <!-- System Info Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="bi bi-info-circle"></i> System Info</h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="info-display">
+                        <div>
+                            <div class="field-label">Activity ID</div>
+                            <div class="field-value customer-mono">{{ sale.anthill_activity_id }}</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Anthill Customer ID</div>
+                            <div class="field-value customer-mono">{{ sale.anthill_customer_id|default:"-" }}</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Created</div>
+                            <div class="field-value">{{ sale.created_at|date:"d M Y H:i" }}</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Last Updated</div>
+                            <div class="field-value">{{ sale.updated_at|date:"d M Y H:i" }}</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            {% endif %}
-        </div>
-    </div>
 
-    <!-- Related Sales for same customer -->
-    {% if related_sales %}
-    <div class="customer-tabs-section" style="margin-top: 24px;">
-        <h3 style="margin-bottom: 12px; font-size: 1rem; color: var(--text-primary);">
-            <i class="bi bi-clock-history"></i> Other Events for this Customer ({{ related_sales|length }})
-        </h3>
-        <div class="customer-table-container">
-            <table class="customer-orders-table">
-                <thead>
-                    <tr>
-                        <th>Activity ID</th>
-                        <th>Type</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                        <th>Linked Order</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for related in related_sales %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'sale_detail' related.pk %}" class="customer-name-link">
-                                {{ related.anthill_activity_id }}
-                            </a>
-                        </td>
-                        <td>{{ related.activity_type|default:"-" }}</td>
-                        <td>
-                            <span class="customer-active-badge {% if related.status|lower == 'complete' or related.status|lower == 'completed' %}active{% else %}inactive{% endif %}">
-                                {{ related.status|default:"-" }}
-                            </span>
-                        </td>
-                        <td>{{ related.activity_date|date:"d/m/Y"|default:"-" }}</td>
-                        <td>
-                            {% if related.order %}
-                            <a href="{% url 'order_details' related.order.id %}" class="customer-order-badge">
-                                {{ related.order.sale_number }}
-                            </a>
-                            {% else %}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- System Info -->
-    <div class="customer-system-info">
-        <div class="system-info-row">
-            <span>Anthill Activity ID</span>
-            <span class="customer-mono">{{ sale.anthill_activity_id }}</span>
-        </div>
-        <div class="system-info-row">
-            <span>Anthill Customer ID</span>
-            <span class="customer-mono">{{ sale.anthill_customer_id|default:"-" }}</span>
-        </div>
-        <div class="system-info-row">
-            <span>Created</span>
-            <span>{{ sale.created_at|date:"d/m/Y H:i" }}</span>
-        </div>
-        <div class="system-info-row">
-            <span>Last Updated</span>
-            <span>{{ sale.updated_at|date:"d/m/Y H:i" }}</span>
         </div>
     </div>
 </div>

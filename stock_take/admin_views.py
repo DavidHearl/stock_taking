@@ -350,6 +350,23 @@ SCRIPT_GROUPS = [
                     {'cmd': 'python sync_anthill_workflow.py --days 180', 'note': 'Only refresh sales active within last 180 days'},
                 ],
             },
+            {
+                'log_name': 'sync_anthill_payments',
+                'label': 'Payment History Sync  ⚠️ API limitation',
+                'description': (
+                    '⚠️ NOT AVAILABLE — The Anthill CRM SOAP API does not expose a payment read endpoint. '
+                    'The only payment methods available are AddPayment / AddPaymentByUserId (write-only). '
+                    'There is no GetSalePayments or equivalent GET method; payment history visible in '
+                    'the Anthill UI cannot be fetched via the API. '
+                    'The AnthillPayment model and command are retained as placeholders in case Anthill '
+                    'exposes a read endpoint in a future API version.'
+                ),
+                'file': 'stock_take/management/commands/sync_anthill_payments.py',
+                'schedule': 'N/A — API does not support reading payments',
+                'commands': [
+                    {'cmd': 'python manage.py sync_anthill_payments', 'note': '⚠️ Will exit immediately with API limitation notice'},
+                ],
+            },
         ],
     },
     {
@@ -385,6 +402,43 @@ SCRIPT_GROUPS = [
                     {'cmd': 'python manage.py sync_xero_invoices', 'note': 'Sync invoices for all customers with a Xero ID'},
                     {'cmd': 'python manage.py sync_xero_invoices --dry-run', 'note': 'Preview without saving'},
                     {'cmd': 'python manage.py sync_xero_invoices --customer 123', 'note': 'Single customer (by database PK)'},
+                ],
+            },
+            {
+                'log_name': 'sync_xero_sale_payments',
+                'label': 'Sync Sale Payments from Xero',
+                'description': (
+                    'Fetches payment records for Anthill sales from Xero by matching the sale contract number '
+                    '(e.g. "BFS-SD-412885") against the Xero invoice Reference field. '
+                    'For each matched invoice, individual payments are stored as AnthillPayment records. '
+                    'Read-only — this command never writes to or modifies any data in Xero. '
+                    'Prerequisites: Xero must be connected (/xero/status/) and sales must have a contract '
+                    'number (run sync_anthill_workflow first).'
+                ),
+                'file': 'stock_take/management/commands/sync_xero_sale_payments.py',
+                'schedule': 'Manual / Scheduled',
+                'commands': [
+                    {'cmd': 'python manage.py sync_xero_sale_payments', 'note': 'Sync all Category 3 sales with a contract number'},
+                    {'cmd': 'python manage.py sync_xero_sale_payments --days 90', 'note': 'Only sales active within last 90 days'},
+                    {'cmd': 'python manage.py sync_xero_sale_payments --sale-id 417437', 'note': 'Single sale by Anthill activity ID'},
+                    {'cmd': 'python manage.py sync_xero_sale_payments --dry-run', 'note': 'Preview without saving to database'},
+                    {'cmd': 'python manage.py sync_xero_sale_payments --no-name-check', 'note': 'Match by reference only (skip contact name cross-check)'},
+                ],
+            },
+            {
+                'log_name': 'mark_historic_sales_paid',
+                'label': 'Mark Historic Sales as Paid',
+                'description': (
+                    'Marks all existing AnthillSale records as paid_in_full=True to establish a clean '
+                    'baseline for the outstanding balance dashboard card and report. Run this once after '
+                    'setting up Xero payment sync. Use --location to restrict to a single location.'
+                ),
+                'file': 'stock_take/management/commands/mark_historic_sales_paid.py',
+                'schedule': 'One-time',
+                'commands': [
+                    {'cmd': 'python manage.py mark_historic_sales_paid --dry-run', 'note': 'Preview how many records would be updated'},
+                    {'cmd': 'python manage.py mark_historic_sales_paid', 'note': 'Mark all unpaid sales as paid'},
+                    {'cmd': 'python manage.py mark_historic_sales_paid --location Belfast', 'note': 'Only Belfast sales'},
                 ],
             },
         ],

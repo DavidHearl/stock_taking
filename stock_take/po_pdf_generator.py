@@ -353,21 +353,29 @@ def generate_purchase_order_pdf(purchase_order, products):
     ]]
 
     subtotal = Decimal('0')
+    def _clean(val):
+        """Return the stripped value if non-empty and not a bare dash, else False."""
+        s = (val or '').strip()
+        return s if s not in ('', '-') else False
+
     for product in products:
         qty = product.order_quantity or product.quantity or Decimal('0')
         rate = product.order_price or Decimal('0')
         line_total = product.line_total or (qty * rate)
         subtotal += Decimal(str(line_total))
 
-        # Use supplier_code from the linked StockItem if available, then fall back
-        # to the code stored directly on the PO line
+        # Use supplier's own SKU/code in preference to our internal SKU.
+        # Priority: StockItem.supplier_sku → StockItem.supplier_code →
+        #           PurchaseOrderProduct.supplier_code → PurchaseOrderProduct.sku
         code = ''
-        if product.stock_item and product.stock_item.supplier_code and product.stock_item.supplier_code.strip() not in ('', '-'):
-            code = product.stock_item.supplier_code
-        elif product.supplier_code and product.supplier_code.strip() not in ('', '-'):
-            code = product.supplier_code
-        else:
-            code = product.sku or ''
+        if product.stock_item:
+            code = (_clean(product.stock_item.supplier_sku)
+                    or _clean(product.stock_item.supplier_code)
+                    or '')
+        if not code:
+            code = (_clean(product.supplier_code)
+                    or product.sku
+                    or '')
 
         # Combine name and description for display
         desc_text = str(product.name or '')
