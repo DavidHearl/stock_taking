@@ -712,15 +712,345 @@ def sale_detail(request, pk):
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
 
-    # Get payment history for this sale
-    payments = list(sale.payments.all().order_by('date'))
-    payments_total = sum(p.amount for p in payments if p.amount) or None
+    # Get payment history for this sale, split by source
+    all_payments = list(sale.payments.all().order_by('date'))
+    xero_payments = [p for p in all_payments if p.source != 'manual']
+    manual_payments = [p for p in all_payments if p.source == 'manual']
+    payments_total = sum(p.amount for p in all_payments if p.amount) or None
+    xero_payments_total = sum(p.amount for p in xero_payments if p.amount) or None
+    manual_payments_total = sum(p.amount for p in manual_payments if p.amount) or None
 
     context = {
         'sale': sale,
         'related_sales': related_sales,
-        'payments': payments,
+        'payments': all_payments,
+        'xero_payments': xero_payments,
+        'manual_payments': manual_payments,
         'payments_total': payments_total,
+        'xero_payments_total': xero_payments_total,
+        'manual_payments_total': manual_payments_total,
     }
 
     return render(request, 'stock_take/sale_detail.html', context)
+
+
+def _recalculate_sale_balance(sale):
+    """Recompute balance_payable and paid_in_full from all payment records."""
+    from decimal import Decimal
+    total_paid = sale.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    sale_value = sale.sale_value or Decimal('0')
+    new_balance = max(sale_value - total_paid, Decimal('0'))
+    sale.balance_payable = new_balance
+    sale.paid_in_full = new_balance <= Decimal('0')
+    sale.save(update_fields=['balance_payable', 'paid_in_full'])
+
+
+@login_required
+def add_manual_payment(request, pk):
+    """Add one or more manual payments to a sale (POST, JSON body)."""
+    from django.views.decorators.http import require_POST
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+    try:
+        data = json.loads(request.body)
+        payments_data = data.get('payments', [])
+    except (json.JSONDecodeError, KeyError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    from decimal import Decimal, InvalidOperation
+    from datetime import datetime
+
+    created_ids = []
+    errors = []
+    for i, p in enumerate(payments_data):
+        # Parse date — accept "dd/mm/yy HH:MM", "dd/mm/yyyy HH:MM", "dd/mm/yy", "dd/mm/yyyy"
+        date_val = None
+        raw_date = str(p.get('date', '')).strip()
+        for fmt in ('%d/%m/%y %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%y', '%d/%m/%Y'):
+            try:
+                date_val = datetime.strptime(raw_date, fmt)
+                break
+            except ValueError:
+                continue
+
+        amount_str = str(p.get('amount', '')).replace('£', '').replace(',', '').strip()
+        try:
+            amount = Decimal(amount_str) if amount_str else None
+        except InvalidOperation:
+            errors.append(f'Row {i + 1}: invalid amount "{amount_str}"')
+            continue
+
+        payment = AnthillPayment.objects.create(
+            sale=sale,
+            source='manual',
+            payment_type=str(p.get('type', '')).strip(),
+            date=date_val,
+            location=str(p.get('location', '')).strip(),
+            user_name=str(p.get('user', '')).strip(),
+            amount=amount,
+            status=str(p.get('status', '')).strip(),
+        )
+        created_ids.append(payment.pk)
+
+    if errors and not created_ids:
+        return JsonResponse({'success': False, 'errors': errors}, status=400)
+
+    _recalculate_sale_balance(sale)
+    return JsonResponse({'success': True, 'created': len(created_ids), 'errors': errors})
+
+
+@login_required
+def delete_manual_payment(request, pk, payment_pk):
+    """Delete a manual payment (POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk, source='manual')
+    sale = payment.sale
+    payment.delete()
+    _recalculate_sale_balance(sale)
+    return JsonResponse({'success': True})
+
+
+@login_required
+def scrape_anthill_payments(request, pk):
+    """
+    Server-side scrape of the paymentsTable from the Anthill CRM activity page.
+
+    Uses only the Python standard library (html.parser) — no third-party packages
+    required.  Authenticates using ANTHILL_USERNAME / ANTHILL_PASSWORD env vars,
+    fetches the sale's activity page, parses the ``paymentsTable`` HTML table, and
+    returns the rows as JSON so the client can review and selectively import them.
+    """
+    import os
+    import re
+    import requests as req_lib
+    from html.parser import HTMLParser
+
+    # ── Minimal HTML parser using stdlib only ─────────────────────────────────
+    class _TableParser(HTMLParser):
+        """Extract rows from the first <table class="paymentsTable">."""
+
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self._in_target = False   # inside the paymentsTable
+            self._depth = 0           # nesting depth inside the table
+            self._in_row = False
+            self._in_cell = False
+            self._current_row = []
+            self._current_cell_parts = []
+            self.rows = []            # [[cell_text, ...], ...]
+            self.found = False
+
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            if tag == 'table':
+                classes = attr_dict.get('class', '')
+                if 'paymentsTable' in classes.split():
+                    self._in_target = True
+                    self._depth = 1
+                    return
+            if self._in_target:
+                if tag == 'table':
+                    self._depth += 1
+                elif tag == 'tr':
+                    self._in_row = True
+                    self._current_row = []
+                elif tag in ('td', 'th'):
+                    self._in_cell = True
+                    self._current_cell_parts = []
+
+        def handle_endtag(self, tag):
+            if not self._in_target:
+                return
+            if tag == 'table':
+                self._depth -= 1
+                if self._depth == 0:
+                    self._in_target = False
+                    self.found = True
+            elif tag == 'tr' and self._in_row:
+                self._in_row = False
+                self.rows.append(self._current_row)
+                self._current_row = []
+            elif tag in ('td', 'th') and self._in_cell:
+                self._in_cell = False
+                text = ' '.join(self._current_cell_parts).strip()
+                # Collapse internal whitespace
+                text = re.sub(r'\s+', ' ', text).strip()
+                self._current_row.append(text)
+                self._current_cell_parts = []
+
+        def handle_data(self, data):
+            if self._in_cell:
+                stripped = data.strip()
+                if stripped:
+                    self._current_cell_parts.append(stripped)
+
+    # ──────────────────────────────────────────────────────────────────────────
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+
+    username = os.getenv('ANTHILL_USER_USERNAME')
+    password = os.getenv('ANTHILL_USER_PASSWORD')
+    subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+
+    if not username or not password:
+        return JsonResponse({
+            'success': False,
+            'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD are not set in the environment.',
+        })
+
+    base_url = f'https://{subdomain}.anthillcrm.com'
+    sale_url = f'{base_url}/system/Orders/ViewOrder.aspx?OrderID={sale.anthill_activity_id}'
+
+    session = req_lib.Session()
+    session.headers['User-Agent'] = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    )
+
+    try:
+        # ── Step 1: attempt to load the sale page ─────────────────────────────
+        resp = session.get(sale_url, timeout=20, allow_redirects=True)
+
+        # ── Step 2: if redirected to login/signin, authenticate then retry ──────
+        def _is_auth_page(url):
+            u = url.lower()
+            return 'login' in u or 'signin' in u or '/sign-in' in u
+
+        if _is_auth_page(resp.url) or resp.status_code in (401, 403):
+            # Parse the login form with the same stdlib parser
+            class _FormParser(HTMLParser):
+                def __init__(self):
+                    super().__init__(convert_charrefs=True)
+                    self._in_form = False
+                    self.action = ''
+                    self.fields = {}
+
+                def handle_starttag(self, tag, attrs):
+                    attr_dict = dict(attrs)
+                    if tag == 'form':
+                        self._in_form = True
+                        self.action = attr_dict.get('action', '')
+                    elif tag == 'input' and self._in_form:
+                        name = attr_dict.get('name', '').strip()
+                        value = attr_dict.get('value', '')
+                        if name:
+                            self.fields[name] = value
+
+                def handle_endtag(self, tag):
+                    if tag == 'form':
+                        self._in_form = False
+
+            fp = _FormParser()
+            fp.feed(resp.text)
+
+            payload = dict(fp.fields)
+            login_post_url = resp.url
+
+            if fp.action:
+                action = fp.action.strip()
+                if action.startswith('http'):
+                    login_post_url = action
+                elif action.startswith('/'):
+                    login_post_url = base_url + action
+                else:
+                    login_post_url = resp.url.rsplit('/', 1)[0] + '/' + action
+
+            # Fill username and password by matching common field-name patterns
+            u_filled = p_filled = False
+            for name in list(payload.keys()):
+                nl = name.lower()
+                if not u_filled and any(k in nl for k in ('user', 'email', 'login')) \
+                        and 'view' not in nl and 'event' not in nl:
+                    payload[name] = username
+                    u_filled = True
+                elif not p_filled and 'pass' in nl:
+                    payload[name] = password
+                    p_filled = True
+
+            if not u_filled:
+                payload['username'] = username
+            if not p_filled:
+                payload['password'] = password
+
+            login_resp = session.post(login_post_url, data=payload, timeout=20, allow_redirects=True)
+
+            if _is_auth_page(login_resp.url):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Anthill login failed — please check ANTHILL_USERNAME and ANTHILL_PASSWORD.',
+                })
+
+            resp = session.get(sale_url, timeout=20)
+
+    except req_lib.exceptions.RequestException as exc:
+        return JsonResponse({'success': False, 'error': f'Network error contacting Anthill: {exc}'})
+
+    # ── Step 3: parse the paymentsTable from the main page ──────────────────
+    # The Payments tab uses onclick="return switchTo(this, '#pnlPayments');"
+    # with href="#" — it is a pure client-side visibility toggle, not a
+    # separate URL.  The paymentsTable is already embedded in the original
+    # page HTML; we just need to parse it directly from resp.text.
+    parser = _TableParser()
+    parser.feed(resp.text)
+
+    diag = {
+        'final_url': resp.url,
+        'http_status': resp.status_code,
+        'raw_has_payments_table': 'paymentsTable' in resp.text,
+        'html_sample': resp.text[:5000].replace('\n', ' ').replace('\r', ''),
+    }
+    title_match = re.search(r'<title[^>]*>([^<]{0,120})</title>', resp.text, re.IGNORECASE)
+    if title_match:
+        diag['page_title'] = title_match.group(1).strip()
+
+    if not parser.found:
+        return JsonResponse({
+            'success': False,
+            'error': (
+                'Payments table not found on the Anthill page. '
+                'The page may still require login, or the table structure may have changed.'
+            ),
+            'diag': diag,
+        })
+
+
+    payments = []
+    for row in parser.rows[1:]:   # skip the header row (th cells)
+        if len(row) < 5:
+            continue
+        # Skip rows that are only action links (edit / delete / receipt etc.)
+        action_words = {'edit', 'delete', 'receipt', 'unconfirm', 'confirm', 'view'}
+        non_empty = [c for c in row if c]
+        if non_empty and all(c.lower() in action_words for c in non_empty):
+            continue
+
+        payment_type = row[0]
+        date_str     = row[1]
+        location     = row[2]
+        user         = row[3]
+        amount_str   = row[4]
+        status       = row[5].strip() if len(row) > 5 else ''
+
+        amount_clean = amount_str.replace('£', '').replace(',', '').strip()
+
+        if not payment_type or not amount_clean:
+            continue
+
+        payments.append({
+            'type': payment_type,
+            'date': date_str,
+            'location': location,
+            'user': user,
+            'amount': amount_clean,
+            'status': status,
+        })
+
+    return JsonResponse({'success': True, 'payments': payments})
+

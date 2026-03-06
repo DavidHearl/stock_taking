@@ -1,12 +1,12 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum, Avg, DecimalField, Value
+from django.db.models import Count, Sum, Avg, DecimalField, Value, OuterRef, Subquery
 from django.db.models.functions import TruncWeek, TruncMonth, Coalesce
 from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
-from .models import Order, PurchaseOrder, StockItem, AnthillSale
+from .models import Order, PurchaseOrder, StockItem, StockHistory, AnthillSale, AnthillPayment
 
 # Maps the user's selected_location value to the contract number prefix used by Anthill.
 # Contract numbers are the authoritative location signal — the location field in
@@ -70,6 +70,86 @@ def dashboard_sales_after(request):
         'total': float(agg['total'] or 0),
         'count': agg['count'] or 0,
     })
+
+
+def _build_sales_after_rows(cutoff):
+    """Return a list of order row dicts for fit_date >= cutoff, including payment totals."""
+    payments_subquery = Subquery(
+        AnthillPayment.objects.filter(sale__order=OuterRef('pk'))
+        .values('sale__order')
+        .annotate(total=Sum('amount'))
+        .values('total'),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+    qs = (
+        Order.objects
+        .filter(fit_date__gte=cutoff, total_value_exc_vat__gt=0)
+        .annotate(total_paid=Coalesce(
+            payments_subquery, Value(Decimal('0')),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ))
+        .order_by('fit_date')
+        .values('pk', 'first_name', 'last_name', 'sale_number',
+                'order_date', 'fit_date', 'total_value_exc_vat', 'designer__name', 'total_paid')
+    )
+    rows = []
+    for o in qs:
+        customer_name = f"{o['first_name']} {o['last_name']}".strip() or '-'
+        sv = float(o['total_value_exc_vat'])
+        paid = float(o['total_paid'] or 0)
+        remaining = max(sv - paid, 0)
+        rows.append({
+            'pk': o['pk'],
+            'customer': customer_name,
+            'sale_number': o['sale_number'] or '',
+            'order_date': o['order_date'].strftime('%d/%m/%Y') if o['order_date'] else '',
+            'fit_date': o['fit_date'].strftime('%d/%m/%Y') if o['fit_date'] else '',
+            'sale_value': sv,
+            'paid': paid,
+            'remaining': remaining,
+            'designer': o['designer__name'] or '-',
+        })
+    return rows
+
+
+@login_required
+def dashboard_sales_after_report(request):
+    """JSON endpoint – returns per-order breakdown for orders with fit_date >= given date."""
+    date_str = request.GET.get('date', '')
+    try:
+        cutoff = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        cutoff = datetime.now().date()
+
+    rows = _build_sales_after_rows(cutoff)
+    total = sum(r['sale_value'] for r in rows)
+    return JsonResponse({
+        'success': True,
+        'rows': rows,
+        'count': len(rows),
+        'total': total,
+        'cutoff': cutoff.strftime('%d/%m/%Y'),
+    })
+
+
+@login_required
+def dashboard_sales_after_pdf(request):
+    """Download the sales-after-date report as a PDF."""
+    from .pdf_generator import generate_sales_after_pdf
+    from datetime import date as date_type
+
+    date_str = request.GET.get('date', '')
+    try:
+        cutoff = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        cutoff = datetime.now().date()
+
+    rows = _build_sales_after_rows(cutoff)
+    buffer = generate_sales_after_pdf(rows, cutoff_date=cutoff)
+    filename = f'Sales_After_{cutoff.strftime("%Y%m%d")}_{date_type.today().strftime("%Y%m%d")}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 @login_required
@@ -174,6 +254,16 @@ def dashboard(request):
     stock_items = StockItem.objects.filter(tracking_type='stock', quantity__gt=0)
     total_stock_value = sum(item.cost * item.quantity for item in stock_items) or Decimal('0.00')
     stock_item_count = stock_items.count()
+
+    # 7-day stock value change
+    seven_days_ago = today - timedelta(days=7)
+    recent_history = (
+        StockHistory.objects
+        .filter(created_at__date__gte=seven_days_ago, stock_item__tracking_type='stock')
+        .exclude(change_type__in=['sale', 'purchase'])
+        .select_related('stock_item')
+    )
+    stock_value_7day_delta = sum(h.change_amount * h.stock_item.cost for h in recent_history) or Decimal('0.00')
     
     # Monthly board costs - aggregate materials_cost by month (past 12 months + future 3 months)
     twelve_months_ago = today.replace(day=1) - timedelta(days=365)
@@ -281,22 +371,29 @@ def dashboard(request):
     profile = getattr(request.user, 'profile', None)
     selected_location = profile.selected_location if profile else ''
     contract_prefix = _contract_prefix_for_location(selected_location)
-    outstanding_qs = AnthillSale.objects.filter(
-        sale_value__gt=0,
-        paid_in_full=False,
-        balance_payable__gt=0,
+
+    # Compute real outstanding dynamically: sale_value - sum(all payments)
+    payments_subquery = Subquery(
+        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        .values('sale')
+        .annotate(total=Sum('amount'))
+        .values('total'),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+    outstanding_qs = (
+        AnthillSale.objects
+        .filter(sale_value__gt=0)
+        .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
+        .values('sale_value', 'total_paid')
     )
     if contract_prefix:
         outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
-    total_outstanding_balance = (
-        outstanding_qs.aggregate(
-            total=Coalesce(
-                Sum('balance_payable'),
-                Value(Decimal('0')),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            )
-        )['total']
-    )
+
+    total_outstanding_balance = sum(
+        max((row['sale_value'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
+        for row in outstanding_qs
+        if (row['sale_value'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
+    ) or Decimal('0')
     
     context = {
         'fits_chart_data': json.dumps({
@@ -321,6 +418,8 @@ def dashboard(request):
         'pending_pos_count': pending_pos,
         'total_stock_value': '{:,.0f}'.format(total_stock_value),
         'stock_item_count': '{:,}'.format(stock_item_count),
+        'stock_value_7day_delta': float(stock_value_7day_delta),
+        'stock_value_7day_delta_str': '{:,.0f}'.format(abs(stock_value_7day_delta)),
         'this_week_sales': '{:,.0f}'.format(this_week_sales),
         'monthly_sales_total': '{:,.0f}'.format(Decimal(str(current_month_sales['total']))),
         'monthly_sales_avg': '{:,.0f}'.format(Decimal(str(current_month_sales['avg']))),
@@ -336,32 +435,165 @@ def dashboard(request):
 
 
 @login_required
+def dashboard_stock_report(request):
+    """JSON endpoint — returns recent stock changes and current stock levels."""
+    CHANGE_TYPE_LABELS = {
+        'stock_take': 'Stock Take',
+        'purchase': 'Purchase',
+        'sale': 'Sale/Usage',
+        'adjustment': 'Adjustment',
+        'initial': 'Initial Stock',
+    }
+
+    three_days_ago = datetime.now() - timedelta(days=3)
+    history_qs = (
+        StockHistory.objects
+        .filter(
+            stock_item__tracking_type='stock',
+            created_at__gte=three_days_ago,
+        )
+        .exclude(change_type__in=['sale', 'purchase'])
+        .select_related('stock_item', 'stock_item__category')
+        .order_by('-created_at')
+    )
+    recent_changes = []
+    for h in history_qs:
+        value_change = float(h.change_amount * h.stock_item.cost)
+        recent_changes.append({
+            'date': h.created_at.strftime('%d/%m/%Y %H:%M'),
+            'sku': h.stock_item.sku,
+            'name': h.stock_item.name,
+            'change_type': CHANGE_TYPE_LABELS.get(h.change_type, h.change_type),
+            'change_amount': h.change_amount,
+            'unit_cost': float(h.stock_item.cost),
+            'value_change': value_change,
+            'reference': h.reference or '',
+            'notes': h.notes or '',
+        })
+
+    stock_qs = (
+        StockItem.objects
+        .filter(tracking_type='stock', quantity__gt=0)
+        .select_related('category')
+    )
+    current_stock = []
+    for item in stock_qs:
+        current_stock.append({
+            'sku': item.sku,
+            'name': item.name,
+            'category': item.category.name if item.category else '—',
+            'location': item.location or '—',
+            'unit_cost': float(item.cost),
+            'quantity': item.quantity,
+            'total_value': float(item.cost * item.quantity),
+        })
+    current_stock.sort(key=lambda i: i['total_value'], reverse=True)
+
+    total_value = sum(i['total_value'] for i in current_stock)
+    return JsonResponse({
+        'success': True,
+        'recent_changes': recent_changes,
+        'current_stock': current_stock,
+        'total_value': total_value,
+        'stock_count': len(current_stock),
+    })
+
+
+@login_required
+def dashboard_stock_pdf(request):
+    """Download the stock report as a PDF."""
+    from .pdf_generator import generate_stock_report_pdf
+    from datetime import date as date_type
+
+    CHANGE_TYPE_LABELS = {
+        'stock_take': 'Stock Take',
+        'purchase': 'Purchase',
+        'sale': 'Sale/Usage',
+        'adjustment': 'Adjustment',
+        'initial': 'Initial Stock',
+    }
+
+    three_days_ago = datetime.now() - timedelta(days=3)
+    history_qs = (
+        StockHistory.objects
+        .filter(
+            stock_item__tracking_type='stock',
+            created_at__gte=three_days_ago,
+        )
+        .exclude(change_type__in=['sale', 'purchase'])
+        .select_related('stock_item', 'stock_item__category')
+        .order_by('-created_at')
+    )
+    recent_changes = []
+    for h in history_qs:
+        recent_changes.append({
+            'date': h.created_at.strftime('%d/%m/%Y'),
+            'sku': h.stock_item.sku,
+            'name': h.stock_item.name,
+            'change_type': CHANGE_TYPE_LABELS.get(h.change_type, h.change_type),
+            'change_amount': h.change_amount,
+            'unit_cost': float(h.stock_item.cost),
+            'value_change': float(h.change_amount * h.stock_item.cost),
+            'reference': h.reference or '',
+        })
+
+    stock_qs = (
+        StockItem.objects
+        .filter(tracking_type='stock', quantity__gt=0)
+        .select_related('category')
+    )
+    current_stock = []
+    for item in stock_qs:
+        current_stock.append({
+            'sku': item.sku,
+            'name': item.name,
+            'category': item.category.name if item.category else '—',
+            'location': item.location or '—',
+            'unit_cost': float(item.cost),
+            'quantity': item.quantity,
+            'total_value': float(item.cost * item.quantity),
+        })
+    current_stock.sort(key=lambda i: i['total_value'], reverse=True)
+
+    buffer = generate_stock_report_pdf(recent_changes, current_stock)
+    filename = f'Stock_Report_{date_type.today().strftime("%Y%m%d")}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
 def dashboard_outstanding_report(request):
-    """JSON endpoint — returns all customers with an outstanding balance, sorted desc."""
     profile = getattr(request.user, 'profile', None)
     raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
     contract_prefix = _contract_prefix_for_location(raw_location)
 
-    qs = AnthillSale.objects.filter(
-        sale_value__gt=0,
-        paid_in_full=False,
-        balance_payable__gt=0,
+    payments_subquery = Subquery(
+        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        .values('sale')
+        .annotate(total=Sum('amount'))
+        .values('total'),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+    qs = (
+        AnthillSale.objects
+        .filter(sale_value__gt=0)
+        .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
+        .order_by('-activity_date')
+        .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
+                'sale_value', 'activity_date', 'location', 'total_paid')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
 
-    rows = (
-        qs
-        .order_by('-activity_date')
-        .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'balance_payable', 'activity_date', 'location')
-    )
     results = []
-    for row in rows:
-        bp = row['balance_payable'] or Decimal('0')
+    for row in qs:
         sv = row['sale_value'] or Decimal('0')
+        total_paid = row['total_paid'] or Decimal('0')
+        real_outstanding = sv - total_paid
+        if real_outstanding <= Decimal('0'):
+            continue
         dt = row['activity_date']
-        paid = max(sv - bp, Decimal('0'))  # clamp: balance_payable can exceed sale_value
         results.append({
             'pk': row['pk'],
             'sale_number': row['anthill_activity_id'],
@@ -369,8 +601,8 @@ def dashboard_outstanding_report(request):
             'contract': row['contract_number'] or '',
             'location': row['location'] or '',
             'sale_value': float(sv),
-            'paid': float(paid),
-            'outstanding': float(bp),
+            'paid': float(total_paid),
+            'outstanding': float(real_outstanding),
             'year': dt.year if dt else None,
             'date': dt.strftime('%d/%m/%Y') if dt else '',
         })
@@ -388,21 +620,31 @@ def dashboard_outstanding_pdf(request):
     contract_prefix = _contract_prefix_for_location(raw_location)
     location_label = raw_location.title() if raw_location else 'All Locations'
 
-    qs = AnthillSale.objects.filter(
-        sale_value__gt=0,
-        paid_in_full=False,
-        balance_payable__gt=0,
+    payments_subquery = Subquery(
+        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        .values('sale')
+        .annotate(total=Sum('amount'))
+        .values('total'),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+    qs = (
+        AnthillSale.objects
+        .filter(sale_value__gt=0)
+        .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
+        .order_by('-activity_date')
+        .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
+                'sale_value', 'activity_date', 'total_paid')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
 
     rows = []
-    for row in qs.order_by('-activity_date').values(
-        'pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-        'sale_value', 'balance_payable', 'activity_date',
-    ):
-        bp = row['balance_payable'] or Decimal('0')
+    for row in qs:
         sv = row['sale_value'] or Decimal('0')
+        total_paid = row['total_paid'] or Decimal('0')
+        real_outstanding = sv - total_paid
+        if real_outstanding <= Decimal('0'):
+            continue
         dt = row['activity_date']
         rows.append({
             'pk': row['pk'],
@@ -410,8 +652,8 @@ def dashboard_outstanding_pdf(request):
             'customer': row['customer_name'] or '-',
             'contract': row['contract_number'] or '',
             'sale_value': float(sv),
-            'paid': float(max(sv - bp, Decimal('0'))),
-            'outstanding': float(bp),
+            'paid': float(total_paid),
+            'outstanding': float(real_outstanding),
             'year': dt.year if dt else None,
             'date': dt.strftime('%d/%m/%Y') if dt else '',
         })

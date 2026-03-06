@@ -553,3 +553,293 @@ def generate_outstanding_report_pdf(rows, location_label='All Locations'):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
+
+def generate_stock_report_pdf(recent_changes, current_stock):
+    """
+    Generate a Stock Report PDF.
+
+    `recent_changes` — list of dicts: date, sku, name, change_type, change_amount,
+                       unit_cost, value_change, reference
+    `current_stock`  — list of dicts: sku, name, category, location, unit_cost,
+                       quantity, total_value
+    Returns a BytesIO buffer.
+    """
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title='Stock Report',
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ── HEADER ──────────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=12 * mm)
+        logo.hAlign = 'LEFT'
+    else:
+        logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
+
+    title_para = Paragraph(
+        '<font size="16" color="#1a1a2e"><b>Stock Report</b></font>',
+        styles['Normal'],
+    )
+    header_table = Table(
+        [[logo, title_para]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # ── SUMMARY BLOCK ───────────────────────────────────────────
+    total_stock_value = sum(i['total_value'] for i in current_stock)
+    info_data = [
+        ['Items in Stock', f'{len(current_stock):,}', 'Total Stock Value', f'£{total_stock_value:,.0f}'],
+        ['Recent Changes', f'{len(recent_changes):,}', 'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
+    ]
+    info_table = Table(info_data, colWidths=[
+        page_width * 0.18, page_width * 0.32,
+        page_width * 0.20, page_width * 0.30,
+    ])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (2, 0), (2, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TEXTCOLOR', (3, 0), (3, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── SECTION 1: RECENT CHANGES ────────────────────────────────
+    elements.append(_section_header('Stock Changes (past 3 days)', styles))
+
+    if recent_changes:
+        change_col_widths = [
+            page_width * 0.34,  # Item (SKU + Name)
+            page_width * 0.12,  # Type
+            page_width * 0.09,  # Qty Δ
+            page_width * 0.14,  # Value Δ
+            page_width * 0.16,  # Date
+            page_width * 0.15,  # Reference
+        ]
+        change_headers = ['Item', 'Type', 'Qty Δ', 'Value Δ', 'Date', 'Reference']
+        change_data = [change_headers]
+        for c in recent_changes:
+            qty_sign = '+' if c['change_amount'] > 0 else ''
+            val_sign = '+' if c['value_change'] > 0 else ''
+            qty_color = '#28a745' if c['change_amount'] > 0 else '#dc3545'
+            val_color = '#28a745' if c['value_change'] > 0 else '#dc3545'
+            change_data.append([
+                Paragraph(
+                    f'<b>{c["sku"]}</b><br/>'
+                    f'<font size="7" color="#888888">{c["name"]}</font>',
+                    styles['CellText']
+                ),
+                Paragraph(
+                    c['change_type'].replace('_', ' ').capitalize(),
+                    styles['CellTextSmall']
+                ),
+                Paragraph(
+                    f'<font color="{qty_color}"><b>{qty_sign}{c["change_amount"]:,}</b></font>',
+                    styles['CellText']
+                ),
+                Paragraph(
+                    f'<font color="{val_color}"><b>{val_sign}£{abs(c["value_change"]):,.0f}</b></font>',
+                    styles['CellText']
+                ),
+                Paragraph(c['date'], styles['CellTextSmall']),
+                Paragraph(c['reference'] or '—', styles['CellTextSmall']),
+            ])
+        elements.append(_build_table(change_data, change_col_widths))
+    else:
+        elements.append(Paragraph('<i>No stock changes recorded.</i>', styles['Normal']))
+
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── SECTION 2: CURRENT STOCK ─────────────────────────────────
+    elements.append(_section_header(f'Current Stock ({len(current_stock)} items)', styles))
+
+    if current_stock:
+        stock_col_widths = [
+            page_width * 0.52,  # Item (SKU + Name + Category + Location)
+            page_width * 0.24,  # Qty × Unit Cost
+            page_width * 0.24,  # Total Value
+        ]
+        stock_headers = ['Item', 'Qty × Unit Cost', 'Total Value']
+        stock_data = [stock_headers]
+        for i in current_stock:
+            meta_parts = [p for p in [i['category'], i['location']] if p]
+            meta_str = ' · '.join(meta_parts)
+            item_html = f'<b>{i["sku"]}</b><br/><font size="7" color="#888888">{i["name"]}'
+            if meta_str:
+                item_html += f' &nbsp;·&nbsp; {meta_str}'
+            item_html += '</font>'
+            stock_data.append([
+                Paragraph(item_html, styles['CellText']),
+                Paragraph(
+                    f'{i["quantity"]:,} × £{i["unit_cost"]:,.2f}',
+                    styles['CellTextSmall']
+                ),
+                Paragraph(
+                    f'<b>£{i["total_value"]:,.0f}</b>',
+                    styles['CellText']
+                ),
+            ])
+        # Totals row
+        grand_qty = sum(i['quantity'] for i in current_stock)
+        stock_data.append([
+            Paragraph(f'<b>{len(current_stock):,} items &nbsp;·&nbsp; {grand_qty:,} units total</b>', styles['CellText']),
+            '',
+            Paragraph(f'<b>£{total_stock_value:,.0f}</b>', styles['CellText']),
+        ])
+        elements.append(_build_table(stock_data, stock_col_widths, has_total_row=True))
+    else:
+        elements.append(Paragraph('<i>No stock items found.</i>', styles['Normal']))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_sales_after_pdf(rows, cutoff_date=None):
+    """
+    Generate a Sales After Date PDF.
+
+    `rows` is a list of dicts with keys: pk, customer, sale_number, order_date,
+    fit_date, sale_value, designer.
+    Returns a BytesIO buffer.
+    """
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    cutoff_label = cutoff_date.strftime('%d %b %Y') if cutoff_date else '—'
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title=f'Sales After {cutoff_label}',
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ── HEADER ──────────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=12 * mm)
+        logo.hAlign = 'LEFT'
+    else:
+        logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
+
+    title_para = Paragraph(
+        f'<font size="16" color="#1a1a2e"><b>Sales After {cutoff_label}</b></font>',
+        styles['Normal'],
+    )
+    header_table = Table(
+        [[logo, title_para]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # ── SUMMARY BLOCK ───────────────────────────────────────────
+    total_value = sum(r['sale_value'] for r in rows)
+    info_data = [
+        ['Orders', f'{len(rows):,}', 'Total Value', f'£{total_value:,.0f}'],
+        ['From Date', cutoff_label, 'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
+    ]
+    info_table = Table(info_data, colWidths=[
+        page_width * 0.15, page_width * 0.35,
+        page_width * 0.20, page_width * 0.30,
+    ])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (2, 0), (2, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TEXTCOLOR', (3, 0), (3, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── ORDERS TABLE ─────────────────────────────────────────────
+    col_widths = [
+        page_width * 0.22,  # Customer
+        page_width * 0.08,  # Sale #
+        page_width * 0.10,  # Order Date
+        page_width * 0.10,  # Fit Date
+        page_width * 0.18,  # Designer
+        page_width * 0.14,  # Sale Value
+        page_width * 0.10,  # Paid
+        page_width * 0.08,  # Remaining
+    ]
+    headers = ['Customer', 'Sale #', 'Order Date', 'Fit Date', 'Designer', 'Sale Value', 'Paid', 'Remaining']
+
+    table_data = [headers]
+    for r in rows:
+        remaining = r.get('remaining', max(r['sale_value'] - r.get('paid', 0), 0))
+        remaining_cell = (
+            Paragraph(f'<font color="#dc3545"><b>£{remaining:,.0f}</b></font>', styles['CellText'])
+            if remaining > 0 else f'£{remaining:,.0f}'
+        )
+        table_data.append([
+            Paragraph(r['customer'], styles['CellText']),
+            r['sale_number'] or '—',
+            r['order_date'] or '—',
+            r['fit_date'] or '—',
+            r['designer'] or '—',
+            f'£{r["sale_value"]:,.0f}',
+            f'£{r.get("paid", 0):,.0f}',
+            remaining_cell,
+        ])
+
+    total_paid = sum(r.get('paid', 0) for r in rows)
+    total_remaining = sum(r.get('remaining', max(r['sale_value'] - r.get('paid', 0), 0)) for r in rows)
+    # Totals row
+    table_data.append([
+        Paragraph(f'<b>{len(rows)} orders</b>', styles['CellText']),
+        '', '', '', 'Total',
+        f'£{total_value:,.0f}',
+        f'£{total_paid:,.0f}',
+        Paragraph(f'<font color="#dc3545"><b>£{total_remaining:,.0f}</b></font>', styles['CellText']),
+    ])
+
+    elements.append(_build_table(table_data, col_widths, has_total_row=True))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer

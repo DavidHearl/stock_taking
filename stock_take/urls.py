@@ -3,10 +3,10 @@ from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
-from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_outstanding_report, dashboard_outstanding_pdf
+from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_outstanding_report, dashboard_outstanding_pdf
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice
-from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail
+from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, add_manual_payment, delete_manual_payment, scrape_anthill_payments
 from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
@@ -28,6 +28,10 @@ urlpatterns = [
     path('', dashboard, name='dashboard'),
     path('dashboard/monthly-sales/', dashboard_monthly_sales, name='dashboard_monthly_sales'),
     path('dashboard/sales-after/', dashboard_sales_after, name='dashboard_sales_after'),
+    path('dashboard/sales-after/report/', dashboard_sales_after_report, name='dashboard_sales_after_report'),
+    path('dashboard/sales-after/pdf/', dashboard_sales_after_pdf, name='dashboard_sales_after_pdf'),
+    path('dashboard/stock-report/', dashboard_stock_report, name='dashboard_stock_report'),
+    path('dashboard/stock-report/pdf/', dashboard_stock_pdf, name='dashboard_stock_pdf'),
     path('dashboard/outstanding-report/', dashboard_outstanding_report, name='dashboard_outstanding_report'),
     path('dashboard/outstanding-report/pdf/', dashboard_outstanding_pdf, name='dashboard_outstanding_pdf'),
 
@@ -123,6 +127,9 @@ urlpatterns = [
     path('events/', events_list, name='events_list'),
     path('sales/', sales_list, name='sales_list'),
     path('sale/<int:pk>/', sale_detail, name='sale_detail'),
+    path('sale/<int:pk>/payments/add-manual/', add_manual_payment, name='add_manual_payment'),
+    path('sale/<int:pk>/payments/<int:payment_pk>/delete/', delete_manual_payment, name='delete_manual_payment'),
+    path('sale/<int:pk>/payments/scrape-anthill/', scrape_anthill_payments, name='scrape_anthill_payments'),
     path('customers/', customers_list, name='customers_list'),
     path('customers/create/', customer_create, name='customer_create'),
     path('customer/<int:pk>/', customer_detail, name='customer_detail'),

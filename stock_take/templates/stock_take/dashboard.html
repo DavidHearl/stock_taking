@@ -39,11 +39,28 @@
             </div>
             <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
             <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openSalesAfterReport()">
+                    <i class="bi bi-table"></i> View Report
+                </button>
+            </div>
         </div>
         <div class="dashboard-card">
             <div class="card-label"><i class="bi bi-box-seam"></i> Stock Value</div>
             <div class="card-value">&pound;{{ total_stock_value }}</div>
             <div class="card-subtext">{{ stock_item_count }} items in stock</div>
+            {% if stock_value_7day_delta > 0 %}
+            <div class="card-subtext" style="color:#28a745;font-weight:600;">&#9650; &pound;{{ stock_value_7day_delta_str }} past 7 days</div>
+            {% elif stock_value_7day_delta < 0 %}
+            <div class="card-subtext" style="color:#dc3545;font-weight:600;">&#9660; &pound;{{ stock_value_7day_delta_str }} past 7 days</div>
+            {% else %}
+            <div class="card-subtext" style="color:var(--text-secondary);">No change in past 7 days</div>
+            {% endif %}
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openStockReport()">
+                    <i class="bi bi-table"></i> View Report
+                </button>
+            </div>
         </div>
         <div class="dashboard-card">
             <div class="card-label"><i class="bi bi-cash-stack"></i> This Week's Sales</div>
@@ -746,6 +763,9 @@ document.addEventListener('DOMContentLoaded', function() {
             <span id="outstandingReportMeta" class="dash-report-meta"></span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
+            <button id="outstandingHidePaymentsBtn" class="dash-report-filter-btn" onclick="toggleHidePayments()" title="Only show sales with no payment records">
+                <i class="bi bi-funnel"></i> Hide Paid
+            </button>
             <a id="outstandingReportPdfBtn"
                href="{% url 'dashboard_outstanding_pdf' %}"
                class="dash-report-pdf-btn"
@@ -768,7 +788,27 @@ document.getElementById('outstandingReportModal').addEventListener('click', func
     if (e.target === this) this.close();
 });
 
+let outstandingHidePayments = false;
+function toggleHidePayments() {
+    outstandingHidePayments = !outstandingHidePayments;
+    const btn = document.getElementById('outstandingHidePaymentsBtn');
+    btn.classList.toggle('active', outstandingHidePayments);
+    btn.innerHTML = outstandingHidePayments
+        ? '<i class="bi bi-funnel-fill"></i> Show All'
+        : '<i class="bi bi-funnel"></i> Hide Paid';
+    document.querySelectorAll('#outstandingReportBody tr[data-has-payments]').forEach(tr => {
+        if (outstandingHidePayments) {
+            tr.style.display = tr.dataset.hasPayments === '1' ? 'none' : '';
+        } else {
+            tr.style.display = '';
+        }
+    });
+}
+
 function openOutstandingReport() {
+    outstandingHidePayments = false;
+    const btn = document.getElementById('outstandingHidePaymentsBtn');
+    if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="bi bi-funnel"></i> Hide Paid'; }
     const modal = document.getElementById('outstandingReportModal');
     const body = document.getElementById('outstandingReportBody');
     body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
@@ -805,23 +845,31 @@ function openOutstandingReport() {
             const years = Object.keys(byYear).sort((a, b) => b - a);
 
             let html = '<table class="dash-report-table"><thead><tr>';
-            html += '<th>Customer</th><th>Sale #</th><th>Contract</th><th>Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th>';
+            html += '<th>Customer</th><th>Sale #</th><th>Anthill</th><th>Contract</th><th>Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-center" title="Has payment records">Pmts</th>';
             html += '</tr></thead><tbody>';
 
             years.forEach(yr => {
                 const yearRows = byYear[yr];
                 const yearTotal = yearRows.reduce((s, r) => s + r.outstanding, 0);
-                html += `<tr class="dash-report-year-sep"><td colspan="7"><strong>${yr}</strong><span class="dash-report-year-total">${fmt(yearTotal)} outstanding &mdash; ${yearRows.length} customer${yearRows.length !== 1 ? 's' : ''}</span></td></tr>`;
+                html += `<tr class="dash-report-year-sep"><td colspan="9"><strong>${yr}</strong><span class="dash-report-year-total">${fmt(yearTotal)} outstanding &mdash; ${yearRows.length} customer${yearRows.length !== 1 ? 's' : ''}</span></td></tr>`;
 
                 yearRows.forEach(r => {
-                    html += `<tr>
+                    const anthillCell = r.sale_number
+                        ? '<a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID=' + r.sale_number + '" target="_blank" class="dash-report-anthill-btn" title="Open in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>'
+                        : '-';
+                    const pmtDot = r.paid > 0
+                        ? '<span title="Has payments" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;"></span>'
+                        : '<span title="No payments recorded" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc3545;"></span>';
+                    html += `<tr data-has-payments="${r.paid > 0 ? 1 : 0}">
                         <td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>
-                        <td>${r.sale_number}</td>
+                        <td>${r.sale_number ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>' : '-'}</td>
+                        <td>${anthillCell}</td>
                         <td>${r.contract || '-'}</td>
                         <td>${r.date}</td>
                         <td class="text-right">${fmt(r.sale_value)}</td>
                         <td class="text-right">${fmt(r.paid)}</td>
                         <td class="text-right" style="color:#dc3545;font-weight:600">${fmt(r.outstanding)}</td>
+                        <td class="text-center">${pmtDot}</td>
                     </tr>`;
                 });
             });
@@ -830,6 +878,233 @@ function openOutstandingReport() {
             body.innerHTML = html;
         })
         .catch(() => {
+            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        });
+}
+</script>
+
+<!-- Sales After Date Report Modal -->
+<dialog id="salesAfterReportModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-calendar-check" style="color:#dc3545;"></i>
+            <span>Sales After Date Report</span>
+            <span id="salesAfterReportMeta" class="dash-report-meta"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a id="salesAfterReportPdfBtn"
+               href="{% url 'dashboard_sales_after_pdf' %}"
+               class="dash-report-pdf-btn"
+               title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="dash-report-close" onclick="document.getElementById('salesAfterReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body" id="salesAfterReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+</dialog>
+
+<script>
+document.getElementById('salesAfterReportModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+function openSalesAfterReport() {
+    const modal = document.getElementById('salesAfterReportModal');
+    const body = document.getElementById('salesAfterReportBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('salesAfterReportMeta').textContent = '';
+    modal.showModal();
+
+    const date = document.getElementById('salesAfterDate').value || '{{ today_str }}';
+    const _baseReportUrl = '{% url "dashboard_sales_after_report" %}';
+    const _basePdfUrl = '{% url "dashboard_sales_after_pdf" %}';
+    const _dateParam = '?date=' + encodeURIComponent(date);
+    const _reportUrl = _baseReportUrl + _dateParam;
+    document.getElementById('salesAfterReportPdfBtn').href = _basePdfUrl + _dateParam;
+
+    fetch(_reportUrl)
+        .then(r => r.json())
+        .then(data => {
+            const meta = document.getElementById('salesAfterReportMeta');
+            if (!data.success || !data.rows.length) {
+                meta.textContent = '';
+                body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">No orders found from this date.</p>';
+                return;
+            }
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            meta.innerHTML = '&nbsp;&mdash;&nbsp;' + data.count + ' order' + (data.count !== 1 ? 's' : '') +
+                ' &nbsp;|&nbsp; ' + fmt(data.total) + ' &nbsp;|&nbsp; from ' + data.cutoff;
+
+            let html = '<table class="dash-report-table"><thead><tr>';
+            html += '<th>Customer</th><th>Sale #</th><th>Order Date</th><th>Fit Date</th><th>Designer</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Remaining</th>';
+            html += '</tr></thead><tbody>';
+
+            data.rows.forEach(r => {
+                const saleLink = r.sale_number
+                    ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>'
+                    : '-';
+                const remainingStyle = r.remaining > 0 ? ' style="color:#dc3545;font-weight:600;"' : '';
+                html += '<tr>' +
+                    '<td><a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.customer + '</a></td>' +
+                    '<td>' + saleLink + '</td>' +
+                    '<td>' + (r.order_date || '-') + '</td>' +
+                    '<td>' + (r.fit_date || '-') + '</td>' +
+                    '<td>' + r.designer + '</td>' +
+                    '<td class="text-right">' + fmt(r.sale_value) + '</td>' +
+                    '<td class="text-right">' + fmt(r.paid) + '</td>' +
+                    '<td class="text-right"' + remainingStyle + '>' + fmt(r.remaining) + '</td>' +
+                    '</tr>';
+            });
+
+            // Total row
+            const grandTotal = data.rows.reduce(function(s, r) { return s + r.sale_value; }, 0);
+            const grandPaid = data.rows.reduce(function(s, r) { return s + r.paid; }, 0);
+            const grandRemaining = data.rows.reduce(function(s, r) { return s + r.remaining; }, 0);
+            html += '<tr class="dash-report-year-sep">' +
+                '<td colspan="5"><strong>' + data.count + ' order' + (data.count !== 1 ? 's' : '') + '</strong>' +
+                '<span class="dash-report-year-total">' + fmt(grandTotal) + ' total</span></td>' +
+                '<td class="text-right" style="font-weight:600;">' + fmt(grandTotal) + '</td>' +
+                '<td class="text-right" style="font-weight:600;">' + fmt(grandPaid) + '</td>' +
+                '<td class="text-right" style="font-weight:600;color:#dc3545;">' + fmt(grandRemaining) + '</td>' +
+                '</tr>';
+
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        })
+        .catch(function() {
+            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        });
+}
+</script>
+
+<!-- Stock Report Modal -->
+<dialog id="stockReportModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-box-seam"></i>
+            <span>Stock Report</span>
+            <span id="stockReportMeta" class="dash-report-meta"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a id="stockReportPdfBtn"
+               href="{% url 'dashboard_stock_pdf' %}"
+               class="dash-report-pdf-btn"
+               title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="dash-report-close" onclick="document.getElementById('stockReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body" id="stockReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+</dialog>
+
+<script>
+document.getElementById('stockReportModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+function openStockReport() {
+    const modal = document.getElementById('stockReportModal');
+    const body = document.getElementById('stockReportBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('stockReportMeta').textContent = '';
+    modal.showModal();
+
+    fetch('{% url "dashboard_stock_report" %}')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load stock data.</p>';
+                return;
+            }
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            document.getElementById('stockReportMeta').innerHTML =
+                '&nbsp;&mdash;&nbsp;' + data.stock_count.toLocaleString() + ' items &nbsp;|&nbsp; ' + fmt(data.total_value);
+
+            let html = '';
+
+            // ── Section 1: Recent Changes ────────────────────────
+            html += '<h4 style="margin:0 0 8px;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' +
+                '<i class="bi bi-clock-history"></i> Stock Changes (past 3 days)</h4>';
+
+            if (data.recent_changes.length) {
+                html += '<div style="border:1px solid var(--border-color);border-radius:6px;overflow:hidden;margin-bottom:20px;">';
+                data.recent_changes.forEach((c, idx) => {
+                    const qtyColor = c.change_amount > 0 ? '#28a745' : '#dc3545';
+                    const valColor = c.value_change > 0 ? '#28a745' : '#dc3545';
+                    const qtySign = c.change_amount > 0 ? '+' : '';
+                    const valSign = c.value_change > 0 ? '+' : '';
+                    const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
+                    html += '<div style="display:flex;align-items:center;padding:10px 14px;gap:14px;' + border + '">' +
+                        // Left: SKU + name
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.sku + '</div>' +
+                            '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.name + '</div>' +
+                        '</div>' +
+                        // Middle: type badge + reference
+                        '<div style="text-align:center;min-width:80px;">' +
+                            '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:600;background:var(--card-bg);border:1px solid var(--border-color);text-transform:capitalize;">' + c.change_type.replace('_', ' ') + '</span>' +
+                            '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">' + (c.reference || '—') + '</div>' +
+                        '</div>' +
+                        // Right: qty delta + value delta
+                        '<div style="text-align:right;min-width:72px;">' +
+                            '<div style="font-weight:600;font-size:0.88rem;color:' + qtyColor + ';">' + qtySign + c.change_amount.toLocaleString() + '</div>' +
+                            '<div style="font-size:0.75rem;color:' + valColor + ';">' + valSign + fmt(Math.abs(c.value_change)) + '</div>' +
+                        '</div>' +
+                        // Far right: date
+                        '<div style="text-align:right;min-width:78px;color:var(--text-secondary);font-size:0.72rem;white-space:nowrap;">' + c.date + '</div>' +
+                    '</div>';
+                });
+                html += '</div>';
+            } else {
+                html += '<p style="color:var(--text-secondary);padding:8px 0 16px;">No stock changes recorded.</p>';
+            }
+
+            // ── Section 2: Current Stock ─────────────────────────
+            html += '<h4 style="margin:0 0 8px;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' +
+                '<i class="bi bi-boxes"></i> Current Stock (' + data.stock_count.toLocaleString() + ' items)</h4>';
+
+            if (data.current_stock.length) {
+                const grandQty = data.current_stock.reduce(function(s, i) { return s + i.quantity; }, 0);
+                html += '<div style="border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">';
+                data.current_stock.forEach((i, idx) => {
+                    const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
+                    const meta = [i.category, i.location].filter(Boolean).join(' · ');
+                    html += '<div style="display:flex;align-items:center;padding:10px 14px;gap:14px;' + border + '">' +
+                        // Left: SKU + name
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.sku + '</div>' +
+                            '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.name + (meta ? ' &nbsp;·&nbsp; ' + meta : '') + '</div>' +
+                        '</div>' +
+                        // Right: qty × cost | total
+                        '<div style="text-align:right;white-space:nowrap;">' +
+                            '<div style="font-weight:600;font-size:0.88rem;">' + fmt(i.total_value) + '</div>' +
+                            '<div style="font-size:0.75rem;color:var(--text-secondary);">' + i.quantity.toLocaleString() + ' &times; \u00a3' + i.unit_cost.toFixed(2) + '</div>' +
+                        '</div>' +
+                    '</div>';
+                });
+                // Totals row
+                html += '<div style="display:flex;align-items:center;padding:10px 14px;gap:14px;border-top:2px solid var(--border-color);background:var(--card-bg);">' +
+                    '<div style="flex:1;font-weight:600;font-size:0.85rem;">' + data.stock_count.toLocaleString() + ' items total &nbsp;&bull;&nbsp; ' + grandQty.toLocaleString() + ' units</div>' +
+                    '<div style="font-weight:700;font-size:0.95rem;">' + fmt(data.total_value) + '</div>' +
+                '</div>';
+                html += '</div>';
+            } else {
+                html += '<p style="color:var(--text-secondary);padding:8px 0;">No stock items found.</p>';
+            }
+
+            body.innerHTML = html;
+        })
+        .catch(function() {
             body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
         });
 }

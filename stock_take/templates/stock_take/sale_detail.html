@@ -15,6 +15,120 @@
 {% block extra_css %}
 <link href="{% static 'css/order_details.css' %}" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<style>
+.payment-source-label {
+    padding: 6px 16px 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.payment-source-label:first-of-type { border-top: none; }
+.manual-input {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 0.85rem;
+    box-sizing: border-box;
+    width: 100%;
+}
+.manual-input:focus { outline: none; border-color: var(--accent-blue, #4a9eff); }
+
+.manual-entry-table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+}
+.manual-entry-table th,
+.manual-entry-table td {
+    border: 1px solid var(--border-color);
+    padding: 6px 8px;
+    vertical-align: middle;
+}
+.manual-entry-table th {
+    background: var(--bg-tertiary, var(--bg-secondary));
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+a.field-link {
+    color: var(--accent-blue, #4a9eff);
+    text-decoration: none;
+    font-weight: 500;
+}
+a.field-link:hover { text-decoration: underline; }
+
+/* Manual payment modal */
+#addManualPaymentModal,
+#scrapeAnthillModal {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0;
+    max-width: 700px;
+    width: 96vw;
+    max-height: 88vh;
+    box-shadow: var(--shadow-lg);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+#addManualPaymentModal {
+    max-width: 1100px;
+}
+#addManualPaymentModal[open],
+#scrapeAnthillModal[open] {
+    display: flex;
+    flex-direction: column;
+}
+#addManualPaymentModal::backdrop,
+#scrapeAnthillModal::backdrop {
+    background: rgba(0,0,0,0.55);
+}
+.manual-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.9rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.manual-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.manual-modal-body {
+    overflow-y: auto;
+    flex: 1;
+    padding: 20px;
+}
+.manual-modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+}
+.manual-modal-close:hover { color: var(--text-primary); }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -144,9 +258,19 @@
             <div class="card">
                 <div class="card-header">
                     <h3><i class="bi bi-cash-stack"></i> Payment History</h3>
-                    {% if payments %}<span class="tab-count" style="margin-left: 6px;">{{ payments|length }}</span>{% endif %}
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        {% if payments %}<span class="tab-count">{{ payments|length }}</span>{% endif %}
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="openScrapeAnthillModal()">
+                            <i class="bi bi-cloud-download"></i> Scrape from Anthill
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAddManualModal()">
+                            <i class="bi bi-plus-lg"></i> Add Manual Payment
+                        </button>
+                    </div>
                 </div>
-                {% if payments %}
+
+                {% if xero_payments %}
+                <div class="payment-source-label"><i class="bi bi-cloud"></i> Xero Payments</div>
                 <table class="table orders-table">
                     <thead>
                         <tr>
@@ -159,7 +283,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for p in payments %}
+                        {% for p in xero_payments %}
                         <tr>
                             <td>{{ p.xero_invoice_number|default:"-" }}</td>
                             <td>{{ p.payment_type|default:"-" }}</td>
@@ -182,26 +306,459 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="3" style="text-align:right; font-weight:600; padding:10px 12px; font-size:0.78rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">Total Paid</td>
+                            <td colspan="3" style="text-align:right; font-weight:600; padding:10px 12px; font-size:0.78rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">Total</td>
                             <td style="font-weight:700; padding:10px 8px;">
-                                {% if payments_total %}£{{ payments_total|floatformat:2 }}{% else %}-{% endif %}
+                                {% if xero_payments_total %}£{{ xero_payments_total|floatformat:2 }}{% else %}-{% endif %}
                             </td>
                             <td colspan="2"></td>
                         </tr>
                     </tfoot>
                 </table>
-                {% else %}
+                {% endif %}
+
+                {% if manual_payments %}
+                <div class="payment-source-label"><i class="bi bi-pencil"></i> Manual Payments</div>
+                <table class="table orders-table" id="manualPaymentsTable">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Date</th>
+                            <th>Location</th>
+                            <th>User</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in manual_payments %}
+                        <tr id="manual-row-{{ p.pk }}">
+                            <td>{{ p.payment_type|default:"-" }}</td>
+                            <td>{{ p.date|date:"d/m/Y H:i"|default:"-" }}</td>
+                            <td>{{ p.location|default:"-" }}</td>
+                            <td>{{ p.user_name|default:"-" }}</td>
+                            <td>{% if p.amount %}£{{ p.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td>
+                                {% if p.status %}
+                                <span class="customer-active-badge {% if p.status|lower == 'confirmed' %}active{% else %}inactive{% endif %}">{{ p.status }}</span>
+                                {% else %}<span class="text-muted">-</span>{% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteManualPayment({{ p.pk }})" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="4" style="text-align:right; font-weight:600; padding:10px 12px; font-size:0.78rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">Total</td>
+                            <td style="font-weight:700; padding:10px 8px;">
+                                {% if manual_payments_total %}£{{ manual_payments_total|floatformat:2 }}{% else %}-{% endif %}
+                            </td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% endif %}
+
+                {% if not xero_payments and not manual_payments %}
                 <div class="card-body padded">
                     <div style="text-align:center; padding: 24px 0; color: var(--text-secondary);">
                         <i class="bi bi-cash-stack" style="font-size: 2rem; display:block; margin-bottom:8px; opacity:0.4;"></i>
                         <p style="margin: 0 0 6px;">No payment records found for this sale.</p>
                         <small style="color: var(--text-muted);">
-                            Run <code>python manage.py sync_xero_sale_payments --sale-id {{ sale.anthill_activity_id }}</code> to fetch from Xero.
+                            Run <code>python manage.py sync_xero_sale_payments --sale-id {{ sale.anthill_activity_id }}</code> to fetch from Xero, or use the button above to add manual payments.
                         </small>
                     </div>
                 </div>
                 {% endif %}
+
             </div>
+
+            <!-- Add Manual Payment Modal -->
+            <dialog id="addManualPaymentModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-cash-stack" style="color:#4a9eff;"></i>
+                        <span>Add Manual Payments</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeAddManualModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block; font-size:0.8rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                            <i class="bi bi-clipboard"></i> Paste from Anthill (optional)
+                        </label>
+                        <textarea id="anthillPasteArea" rows="4"
+                            placeholder="Paste the payment table from Anthill CRM here and click Parse..."
+                            style="width:100%; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; padding:8px 10px; font-size:0.82rem; font-family:monospace; resize:vertical;"></textarea>
+                        <div style="display:flex; gap:8px; margin-top:8px;">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="parseAnthillPaste()">
+                                <i class="bi bi-magic"></i> Parse
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearManualRows()">
+                                <i class="bi bi-x"></i> Clear rows
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="overflow-x:auto;">
+                        <table class="manual-entry-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:18%;">Type</th>
+                                    <th style="width:20%;">Date</th>
+                                    <th style="width:14%;">Location</th>
+                                    <th style="width:16%;">User</th>
+                                    <th style="width:13%;">Amount (£)</th>
+                                    <th style="width:14%;">Status</th>
+                                    <th style="width:5%;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="manualEntryBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addManualRow()">
+                            <i class="bi bi-plus"></i> Add Row
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success" id="saveManualBtn" onclick="saveManualPayments()" disabled>
+                            <i class="bi bi-check-lg"></i> Save Payments
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeAddManualModal()">
+                            Cancel
+                        </button>
+                        <span id="manualSaveMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+                    </div>
+                </div>
+            </dialog>
+
+            <!-- Sync from Anthill Approval Modal -->
+            <dialog id="scrapeAnthillModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-cloud-download" style="color:#28a745;"></i>
+                        <span>Sync Payments from Anthill</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="document.getElementById('scrapeAnthillModal').close()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div id="scrapeModalBody"></div>
+                    <div style="display:flex; gap:8px; margin-top:14px; align-items:center;">
+                        <button type="button" class="btn btn-sm btn-success" id="scrapeImportBtn" onclick="importScrapeSelected()" style="display:none;">
+                            <i class="bi bi-check-lg"></i> Import
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('scrapeAnthillModal').close()">
+                            Cancel
+                        </button>
+                        <span id="scrapeMsg" style="font-size:0.82rem;"></span>
+                    </div>
+                </div>
+            </dialog>
+
+            <script>
+            const SALE_PK = {{ sale.pk }};
+            const ADD_MANUAL_URL = "{% url 'add_manual_payment' sale.pk %}";
+            const SCRAPE_ANTHILL_URL = "{% url 'scrape_anthill_payments' sale.pk %}";
+            const DELETE_MANUAL_BASE = "/sale/{{ sale.pk }}/payments/";
+            const CSRF_TOKEN = '{{ csrf_token }}';
+
+            // ── Scrape-from-Anthill modal ────────────────────────────────────
+            function openScrapeAnthillModal() {
+                const modal = document.getElementById('scrapeAnthillModal');
+                const body = document.getElementById('scrapeModalBody');
+                const importBtn = document.getElementById('scrapeImportBtn');
+                const msg = document.getElementById('scrapeMsg');
+
+                body.innerHTML = '<div style="text-align:center;padding:28px 0;color:var(--text-secondary);"><i class="bi bi-arrow-repeat" style="font-size:1.6rem;animation:spin 1s linear infinite;"></i><p style="margin-top:12px;">Fetching payments from Anthill&hellip;</p></div>';
+                importBtn.style.display = 'none';
+                msg.textContent = '';
+                modal.showModal();
+
+                fetch(SCRAPE_ANTHILL_URL, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN},
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        const d = data.diag || {};
+                        let diagHtml = '';
+                        if (d.final_url || d.page_title || d.raw_has_payments_table !== undefined) {
+                            diagHtml += '<details style="margin-top:12px;font-size:0.78rem;color:var(--text-secondary);">' +
+                                '<summary style="cursor:pointer;font-weight:600;color:var(--text-secondary);">Diagnostic info</summary>' +
+                                '<div style="margin-top:8px;padding:10px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border-color);font-family:monospace;line-height:1.6;">';
+                            if (d.http_status)           diagHtml += 'HTTP status: <b>' + escHtml(String(d.http_status)) + '</b><br>';
+                            if (d.final_url)             diagHtml += 'Fetched URL: <b>' + escHtml(d.final_url) + '</b><br>';
+                            if (d.page_title)            diagHtml += 'Page title: <b>' + escHtml(d.page_title) + '</b><br>';
+                            diagHtml += '"paymentsTable" in HTML: <b>' + (d.raw_has_payments_table ? 'YES ✓' : 'NO ✗') + '</b><br>';
+                            if (d.html_sample) diagHtml += '<br><b>First 5000 chars of response:</b><br><span style="font-size:0.7rem;word-break:break-all;">' + escHtml(d.html_sample) + '</span>';
+                            diagHtml += '</div></details>';
+                        }
+                        body.innerHTML = '<p style="color:#dc3545;padding:12px 0 4px;"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>' + diagHtml;
+                        return;
+                    }
+                    if (!data.payments.length) {
+                        body.innerHTML = '<p style="color:var(--text-secondary);padding:12px 0;">No payments found on the Anthill page.</p>';
+                        return;
+                    }
+                    renderScrapeResults(data.payments);
+                    importBtn.style.display = '';
+                })
+                .catch(() => {
+                    body.innerHTML = '<p style="color:#dc3545;padding:12px 0;"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach the server.</p>';
+                });
+            }
+
+            function renderScrapeResults(payments) {
+                const body = document.getElementById('scrapeModalBody');
+                let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;">Review the payments below and check the ones you want to import.</p>';
+                html += '<div style="border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">';
+                payments.forEach((p, idx) => {
+                    const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
+                    html += `<label style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;${border}" class="scrape-row">`;
+                    html += `<input type="checkbox" class="scrape-check" checked data-idx="${idx}" style="flex-shrink:0;width:16px;height:16px;cursor:pointer;">`;
+                    html += `<div style="flex:1;min-width:0;">`;
+                    html += `<div style="font-weight:600;font-size:0.88rem;">${escHtml(p.type)}</div>`;
+                    html += `<div style="font-size:0.75rem;color:var(--text-secondary);">${escHtml(p.date)} &nbsp;&bull;&nbsp; ${escHtml(p.location)} &nbsp;&bull;&nbsp; ${escHtml(p.user)}</div>`;
+                    html += `</div>`;
+                    html += `<div style="text-align:right;white-space:nowrap;">`;
+                    html += `<div style="font-weight:600;font-size:0.9rem;">&pound;${escHtml(p.amount)}</div>`;
+                    if (p.status) html += `<div style="font-size:0.72rem;color:#28a745;">${escHtml(p.status)}</div>`;
+                    html += `</div></label>`;
+                });
+                html += '</div>';
+                document.getElementById('scrapeModalBody').innerHTML = html;
+
+                // Store payment data on the checkboxes for retrieval on import
+                document.querySelectorAll('.scrape-check').forEach(cb => {
+                    cb._payment = payments[parseInt(cb.dataset.idx)];
+                });
+
+                document.getElementById('scrapeImportBtn').textContent = `Import ${payments.length} Payment${payments.length !== 1 ? 's' : ''}`;
+
+                document.querySelectorAll('.scrape-check').forEach(cb => {
+                    cb.addEventListener('change', updateScrapeImportBtn);
+                });
+            }
+
+            function updateScrapeImportBtn() {
+                const checked = document.querySelectorAll('.scrape-check:checked');
+                const btn = document.getElementById('scrapeImportBtn');
+                btn.disabled = checked.length === 0;
+                btn.textContent = `Import ${checked.length} Payment${checked.length !== 1 ? 's' : ''}`;
+            }
+
+            function importScrapeSelected() {
+                const checked = Array.from(document.querySelectorAll('.scrape-check:checked'));
+                if (!checked.length) return;
+
+                const payments = checked.map(cb => ({
+                    type: cb._payment.type,
+                    date: cb._payment.date,
+                    location: cb._payment.location,
+                    user: cb._payment.user,
+                    amount: cb._payment.amount,
+                    status: cb._payment.status,
+                }));
+
+                const btn = document.getElementById('scrapeImportBtn');
+                const msg = document.getElementById('scrapeMsg');
+                btn.disabled = true;
+                msg.textContent = 'Saving…';
+
+                fetch(ADD_MANUAL_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                    body: JSON.stringify({ payments }),
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        msg.style.color = '#dc3545';
+                        msg.textContent = 'Error: ' + (data.errors || [data.error]).join(', ');
+                        btn.disabled = false;
+                    }
+                })
+                .catch(() => {
+                    msg.style.color = '#dc3545';
+                    msg.textContent = 'Network error. Please try again.';
+                    btn.disabled = false;
+                });
+            }
+
+            document.getElementById('scrapeAnthillModal').addEventListener('click', function(e) {
+                if (e.target === this) this.close();
+            });
+            // ── End scrape modal ─────────────────────────────────────────────
+
+            function openAddManualModal() {
+                const modal = document.getElementById('addManualPaymentModal');
+                if (document.getElementById('manualEntryBody').children.length === 0) {
+                    addManualRow();
+                }
+                modal.showModal();
+            }
+
+            function closeAddManualModal() {
+                document.getElementById('addManualPaymentModal').close();
+            }
+
+            document.getElementById('addManualPaymentModal').addEventListener('click', function(e) {
+                if (e.target === this) closeAddManualModal();
+            });
+
+            function addManualRow(data) {
+                const tbody = document.getElementById('manualEntryBody');
+                const d = data || {};
+                const inputStyle = 'width:100%; box-sizing:border-box;';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><input class="manual-input" type="text" placeholder="e.g. Deposit" value="${escHtml(d.type||'')}" style="${inputStyle}"></td>
+                    <td><input class="manual-input" type="text" placeholder="dd/mm/yy HH:MM" value="${escHtml(d.date||'')}" style="${inputStyle}"></td>
+                    <td><input class="manual-input" type="text" placeholder="Belfast" value="${escHtml(d.location||'')}" style="${inputStyle}"></td>
+                    <td><input class="manual-input" type="text" placeholder="User.Name" value="${escHtml(d.user||'')}" style="${inputStyle}"></td>
+                    <td><input class="manual-input" type="number" step="0.01" min="0" placeholder="0.00" value="${escHtml(d.amount||'')}" style="${inputStyle}"></td>
+                    <td><input class="manual-input" type="text" placeholder="Confirmed" value="${escHtml(d.status||'')}" style="${inputStyle}"></td>
+                    <td style="text-align:center;"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); updateSaveBtn()"><i class="bi bi-trash"></i></button></td>
+                `;
+                tbody.appendChild(tr);
+                tr.querySelectorAll('.manual-input').forEach(el => el.addEventListener('input', updateSaveBtn));
+                updateSaveBtn();
+            }
+
+            function escHtml(str) {
+                return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+
+            function clearManualRows() {
+                document.getElementById('manualEntryBody').innerHTML = '';
+                document.getElementById('anthillPasteArea').value = '';
+                updateSaveBtn();
+            }
+
+            function updateSaveBtn() {
+                const rows = document.querySelectorAll('#manualEntryBody tr');
+                document.getElementById('saveManualBtn').disabled = rows.length === 0;
+            }
+
+            function parseAnthillPaste() {
+                const raw = document.getElementById('anthillPasteArea').value;
+                const payments = [];
+                const lines = raw.split('\n');
+
+                let i = 0;
+                while (i < lines.length) {
+                    const line = lines[i].trim();
+                    i++;
+                    if (!line) continue;
+
+                    const parts = line.split('\t').map(s => s.trim()).filter(s => s);
+                    if (!parts.length) continue;
+
+                    // Skip header row
+                    if (parts[0].toLowerCase() === 'type') continue;
+
+                    // Skip action lines (edit/delete/receipt etc.)
+                    const actionWords = ['edit', 'delete', 'receipt', 'unconfirm', 'confirm', 'view'];
+                    if (parts.every(p => actionWords.includes(p.toLowerCase()))) continue;
+                    if (parts.some(p => actionWords.includes(p.toLowerCase())) && parts.length <= 6) continue;
+
+                    // Check if it has an amount (£X.XX)
+                    const amountPart = parts.find(p => /^£[\d,]+(\.\d+)?$/.test(p));
+                    if (!amountPart) {
+                        // Could be a status line (e.g. "Confirmed") for the previous payment
+                        if (payments.length > 0 && !payments[payments.length - 1].status && parts.length === 1) {
+                            payments[payments.length - 1].status = parts[0];
+                        }
+                        continue;
+                    }
+
+                    // Find the date field
+                    const dateIdx = parts.findIndex(p => /^\d{2}\/\d{2}\/\d{2,4}/.test(p));
+                    if (dateIdx < 0) continue;
+
+                    const type = parts.slice(0, dateIdx).join(' ');
+                    const date = parts[dateIdx];
+                    const location = parts[dateIdx + 1] || '';
+                    const user = parts[dateIdx + 2] || '';
+                    const amount = amountPart.replace(/[£,]/g, '');
+
+                    payments.push({ type, date, location, user, amount, status: '' });
+                }
+
+                if (!payments.length) {
+                    document.getElementById('manualSaveMsg').style.color = 'var(--text-secondary)';
+                    document.getElementById('manualSaveMsg').textContent = 'No payments found in pasted text.';
+                    return;
+                }
+                document.getElementById('manualSaveMsg').textContent = '';
+                document.getElementById('manualEntryBody').innerHTML = '';
+                payments.forEach(p => addManualRow(p));
+            }
+
+            function saveManualPayments() {
+                const rows = document.querySelectorAll('#manualEntryBody tr');
+                const payments = [];
+                rows.forEach(tr => {
+                    const inputs = tr.querySelectorAll('input');
+                    payments.push({
+                        type: inputs[0].value.trim(),
+                        date: inputs[1].value.trim(),
+                        location: inputs[2].value.trim(),
+                        user: inputs[3].value.trim(),
+                        amount: inputs[4].value.trim(),
+                        status: inputs[5].value.trim(),
+                    });
+                });
+
+                const btn = document.getElementById('saveManualBtn');
+                const msg = document.getElementById('manualSaveMsg');
+                btn.disabled = true;
+                msg.textContent = 'Saving…';
+
+                fetch(ADD_MANUAL_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                    body: JSON.stringify({ payments }),
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        msg.textContent = '';
+                        location.reload();
+                    } else {
+                        msg.style.color = '#dc3545';
+                        msg.textContent = 'Error: ' + (data.errors || [data.error]).join(', ');
+                        btn.disabled = false;
+                    }
+                })
+                .catch(() => {
+                    msg.style.color = '#dc3545';
+                    msg.textContent = 'Network error. Please try again.';
+                    btn.disabled = false;
+                });
+            }
+
+            function deleteManualPayment(paymentPk) {
+                if (!confirm('Delete this manual payment?')) return;
+                fetch(DELETE_MANUAL_BASE + paymentPk + '/delete/', {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN},
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const row = document.getElementById('manual-row-' + paymentPk);
+                        if (row) row.remove();
+                    }
+                });
+            }
+            </script>
 
             <!-- Related Sales Card -->
             {% if related_sales %}
@@ -269,7 +826,7 @@
                             <div class="field-label">Customer Name</div>
                             <div class="field-value field-value-large">
                                 {% if sale.customer %}
-                                <a href="{% url 'customer_detail' sale.customer.pk %}">{{ sale.customer.name }}</a>
+                                <a href="{% url 'customer_detail' sale.customer.pk %}" class="field-link">{{ sale.customer.name }}</a>
                                 {% else %}
                                 {{ sale.customer_name|default:"-" }}
                                 {% endif %}
