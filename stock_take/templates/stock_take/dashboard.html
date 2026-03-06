@@ -803,6 +803,33 @@ function toggleHidePayments() {
             tr.style.display = '';
         }
     });
+    // Recalculate counts and totals for each year separator
+    const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+    document.querySelectorAll('#outstandingReportBody tr[data-year-sep]').forEach(sepRow => {
+        const yr = sepRow.dataset.yearSep;
+        let visibleCount = 0, visibleTotal = 0;
+        document.querySelectorAll(`#outstandingReportBody tr[data-year="${yr}"]`).forEach(tr => {
+            if (tr.style.display !== 'none') {
+                visibleCount++;
+                visibleTotal += parseFloat(tr.dataset.outstanding || 0);
+            }
+        });
+        const span = sepRow.querySelector('.dash-report-year-total');
+        if (span) span.textContent = `${fmt(visibleTotal)} outstanding \u2014 ${visibleCount} customer${visibleCount !== 1 ? 's' : ''}`;
+    });
+    // Recalculate the header meta
+    let totalVisible = 0, totalOutstandingVisible = 0;
+    document.querySelectorAll('#outstandingReportBody tr[data-outstanding]').forEach(tr => {
+        if (tr.style.display !== 'none') {
+            totalVisible++;
+            totalOutstandingVisible += parseFloat(tr.dataset.outstanding || 0);
+        }
+    });
+    const meta = document.getElementById('outstandingReportMeta');
+    if (meta) {
+        const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
+        meta.innerHTML = `&nbsp;&mdash;&nbsp;${totalVisible} customer${totalVisible !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstandingVisible)} &nbsp;|&nbsp; ${locLabel}`;
+    }
 }
 
 function openOutstandingReport() {
@@ -851,7 +878,7 @@ function openOutstandingReport() {
             years.forEach(yr => {
                 const yearRows = byYear[yr];
                 const yearTotal = yearRows.reduce((s, r) => s + r.outstanding, 0);
-                html += `<tr class="dash-report-year-sep"><td colspan="9"><strong>${yr}</strong><span class="dash-report-year-total">${fmt(yearTotal)} outstanding &mdash; ${yearRows.length} customer${yearRows.length !== 1 ? 's' : ''}</span></td></tr>`;
+                html += `<tr class="dash-report-year-sep" data-year-sep="${yr}"><td colspan="9"><strong>${yr}</strong><span class="dash-report-year-total">${fmt(yearTotal)} outstanding &mdash; ${yearRows.length} customer${yearRows.length !== 1 ? 's' : ''}</span></td></tr>`;
 
                 yearRows.forEach(r => {
                     const anthillCell = r.sale_number
@@ -860,7 +887,7 @@ function openOutstandingReport() {
                     const pmtDot = r.paid > 0
                         ? '<span title="Has payments" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;"></span>'
                         : '<span title="No payments recorded" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc3545;"></span>';
-                    html += `<tr data-has-payments="${r.paid > 0 ? 1 : 0}">
+                    html += `<tr data-has-payments="${r.paid > 0 ? 1 : 0}" data-year="${yr}" data-outstanding="${r.outstanding}">
                         <td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>
                         <td>${r.sale_number ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>' : '-'}</td>
                         <td>${anthillCell}</td>
