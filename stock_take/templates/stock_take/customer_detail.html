@@ -5,453 +5,370 @@
 
 {% block nav_customers_active %}active{% endblock %}
 
-{% block page_title %}Customer Details{% endblock %}
+{% block page_title %}
+<span class="page-title-row">
+    <a href="{% url 'customers_list' %}" class="back-link" title="Back to Customers"><i class="bi bi-arrow-left"></i></a>
+    Customer Details
+</span>
+{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<link href="{% static 'css/order_details.css' %}" rel="stylesheet">
+<link href="{% static 'css/customers.css' %}" rel="stylesheet">
+<link href="{% static 'css/customer_detail.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <div class="customer-detail-header">
-        <div class="customer-detail-title">
-            <a href="{% url 'customers_list' %}" class="back-link" title="Back to Customers">
-                <i class="bi bi-arrow-left"></i>
-            </a>
-            <h1>{{ customer.name|default:customer }}</h1>
-            {% if customer.is_active %}
-            <span class="customer-active-badge active">Active</span>
-            {% else %}
-            <span class="customer-active-badge inactive">Inactive</span>
-            {% endif %}
-            {% if customer.code %}
-            <span class="customer-code-badge">{{ customer.code }}</span>
-            {% endif %}
-        </div>
-        <div class="customer-detail-actions">
-            <button class="btn-edit-customer" id="btn-edit" onclick="toggleEditMode()"><i class="bi bi-pencil"></i> Edit</button>
-            <button class="btn-save-customer" id="btn-save" style="display:none;" onclick="saveCustomer()"><i class="bi bi-check-lg"></i> Save Changes</button>
-            <button class="btn-cancel-customer" id="btn-cancel" style="display:none;" onclick="cancelEdit()"><i class="bi bi-x-lg"></i> Cancel</button>
-        </div>
-    </div>
+<div class="page-content">
+    <div class="order-details-grid">
 
-    <div id="save-notification" class="customer-save-notification" style="display:none;"></div>
+        <!-- ===== MAIN COLUMN ===== -->
+        <div class="main-column">
 
-    <!-- Customer Info Grid -->
-    <div class="customer-info-grid" id="customer-info">
-        <!-- Contact Information -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-person-lines-fill"></i> Contact Details</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Name</span>
-                <span class="customer-info-value view-val">{{ customer.name|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="name" value="{{ customer.name|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Email</span>
-                <span class="customer-info-value view-val">
-                    {% if customer.email %}
-                    <a href="mailto:{{ customer.email }}">{{ customer.email }}</a>
-                    {% else %}-{% endif %}
-                </span>
-                <input class="customer-edit-input edit-val" data-field="email" type="email" value="{{ customer.email|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Phone</span>
-                <span class="customer-info-value view-val">{{ customer.phone|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="phone" value="{{ customer.phone|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Fax</span>
-                <span class="customer-info-value view-val">{{ customer.fax|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="fax" value="{{ customer.fax|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Website</span>
-                <span class="customer-info-value view-val">
-                    {% if customer.website %}
-                    <a href="{{ customer.website }}" target="_blank">{{ customer.website }}</a>
-                    {% else %}-{% endif %}
-                </span>
-                <input class="customer-edit-input edit-val" data-field="website" value="{{ customer.website|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Tax / VAT</span>
-                <span class="customer-info-value view-val">{{ customer.abn|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="abn" value="{{ customer.abn|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Client Code</span>
-                <span class="customer-info-value view-val">{{ customer.code|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="code" value="{{ customer.code|default:'' }}" style="display:none;">
-            </div>
-        </div>
-
-        <!-- Address -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-geo-alt"></i> Address</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Address 1</span>
-                <span class="customer-info-value view-val">{{ customer.address_1|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="address_1" value="{{ customer.address_1|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Address 2</span>
-                <span class="customer-info-value view-val">{{ customer.address_2|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="address_2" value="{{ customer.address_2|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">City</span>
-                <span class="customer-info-value view-val">{{ customer.city|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="city" value="{{ customer.city|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Suburb</span>
-                <span class="customer-info-value view-val">{{ customer.suburb|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="suburb" value="{{ customer.suburb|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">State</span>
-                <span class="customer-info-value view-val">{{ customer.state|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="state" value="{{ customer.state|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Postcode</span>
-                <span class="customer-info-value view-val">{{ customer.postcode|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="postcode" value="{{ customer.postcode|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Country</span>
-                <span class="customer-info-value view-val">{{ customer.country|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="country" value="{{ customer.country|default:'' }}" style="display:none;">
-            </div>
-        </div>
-
-        <!-- Financial & Settings -->
-        <div class="customer-info-section">
-            <h3><i class="bi bi-cash-stack"></i> Financial</h3>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Currency</span>
-                <span class="customer-info-value view-val">{{ customer.currency|default:"GBP" }}</span>
-                <input class="customer-edit-input edit-val" data-field="currency" value="{{ customer.currency|default:'GBP' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Price Tier</span>
-                <span class="customer-info-value view-val">{{ customer.price_tier|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="price_tier" value="{{ customer.price_tier|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Credit Terms</span>
-                <span class="customer-info-value view-val">{{ customer.credit_terms_type|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="credit_terms_type" value="{{ customer.credit_terms_type|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Credit Days</span>
-                <span class="customer-info-value view-val">{{ customer.credit_days|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="credit_days" value="{{ customer.credit_days|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Credit Limit</span>
-                <span class="customer-info-value view-val">£{{ customer.credit_limit|floatformat:2 }}</span>
-                <input class="customer-edit-input edit-val" data-field="credit_limit" type="number" step="0.01" value="{{ customer.credit_limit }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Billing Client</span>
-                <span class="customer-info-value view-val">{{ customer.billing_client|default:"-" }}</span>
-                <input class="customer-edit-input edit-val" data-field="billing_client" value="{{ customer.billing_client|default:'' }}" style="display:none;">
-            </div>
-            <div class="customer-info-row">
-                <span class="customer-info-label">Xero ID</span>
-                <span class="customer-info-value customer-mono view-val">{{ customer.xero_id|default:"-" }}</span>
-            </div>
-            {% if customer.anthill_customer_id %}
-            <div class="customer-info-row">
-                <span class="customer-info-label">Anthill ID</span>
-                <span class="customer-info-value customer-mono view-val">
-                    <a href="https://sliderobes.anthillcrm.com/customers/{{ customer.anthill_customer_id }}" target="_blank" rel="noopener" title="Open in Anthill CRM">
-                        {{ customer.anthill_customer_id }} <i class="bi bi-box-arrow-up-right" style="font-size:0.75em;"></i>
-                    </a>
-                </span>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Tabs Section -->
-    <div class="customer-tabs-section">
-        <div class="customer-tabs">
-            <button class="customer-tab active" data-tab="sales" onclick="switchTab('sales')">
-                <i class="bi bi-bag-check"></i> Sales
-                {% if anthill_sales_count %}<span class="tab-count">{{ anthill_sales_count }}</span>{% endif %}
-            </button>
-            <button class="customer-tab" data-tab="contacts" onclick="switchTab('contacts')">
-                <i class="bi bi-person-badge"></i> Contacts
-                {% if contacts %}<span class="tab-count">{{ contacts|length }}</span>{% endif %}
-            </button>
-            <button class="customer-tab" data-tab="projects" onclick="switchTab('projects')">
-                <i class="bi bi-folder"></i> Projects
-                {% if orders %}<span class="tab-count">{{ order_count }}</span>{% endif %}
-            </button>
-            <button class="customer-tab" data-tab="invoices" onclick="switchTab('invoices')">
-                <i class="bi bi-receipt"></i> Invoices
-            </button>
-            <button class="customer-tab" data-tab="quotes" onclick="switchTab('quotes')">
-                <i class="bi bi-file-text"></i> Quotes
-            </button>
-            <button class="customer-tab" data-tab="notes" onclick="switchTab('notes')">
-                <i class="bi bi-journal-text"></i> General Notes
-            </button>
-        </div>
-
-        <!-- Sales Tab -->
-        <div class="customer-tab-content active" id="tab-sales">
-            {% if anthill_sales %}
-            <div class="customer-table-container">
-                <table class="customer-orders-table">
-                    <thead>
-                        <tr>
-                            <th>Activity ID</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                            <th>Date</th>
-                            <th>Location</th>
-                            <th>Paid</th>
-                            <th>Linked Order</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for sale in anthill_sales %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'sale_detail' sale.pk %}" class="customer-order-link">
-                                    {{ sale.anthill_activity_id }}
-                                </a>
-                                <a href="https://sliderobes.anthillcrm.com/customers/{{ sale.anthill_customer_id }}/activities/{{ sale.anthill_activity_id }}" target="_blank" rel="noopener" title="Open in Anthill CRM" style="margin-left:6px; opacity:0.6; font-size:0.8em;">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </a>
-                            </td>
-                            <td>{{ sale.activity_type|default:"-" }}</td>
-                            <td>
-                                <span class="order-status-badge {% if sale.status|lower == 'complete' or sale.status|lower == 'completed' %}status-complete{% elif sale.status|lower == 'closed' %}status-closed{% elif sale.status|lower == 'dead' %}status-dead{% elif sale.status|lower == 'open' %}status-open{% else %}status-open{% endif %}">
-                                    {{ sale.status|default:"-" }}
-                                </span>
-                            </td>
-                            <td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
-                            <td>{{ sale.location|default:"-" }}</td>
-                            <td>
-                                {% if sale.payments_total %}
-                                <a href="{% url 'sale_detail' sale.pk %}" title="{{ sale.payments_count }} payment(s)" style="text-decoration:none;">
-                                    £{{ sale.payments_total|floatformat:2 }}
-                                    <small style="opacity:0.6;">({{ sale.payments_count }})</small>
-                                </a>
-                                {% else %}
-                                <span class="text-muted">-</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if sale.order %}
-                                <a href="{% url 'order_details' sale.order.id %}" class="customer-order-link">
-                                    {{ sale.order.sale_number }}
-                                </a>
-                                {% else %}
-                                <span class="text-muted">-</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="customer-tab-empty">
-                <i class="bi bi-bag"></i>
-                <p>No sales found for this customer.</p>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Contacts Tab -->
-        <div class="customer-tab-content" id="tab-contacts">
-            {% if contacts %}
-            <div class="customer-contacts-grid">
-                {% for contact in contacts %}
-                <div class="customer-contact-card">
-                    <div class="contact-name">
-                        <i class="bi bi-person-circle"></i>
-                        {{ contact.firstName|default:"" }} {{ contact.lastName|default:"" }}
+            <!-- Customer Information Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Customer Information
+                        {% if customer.is_active %}
+                        <span class="customer-active-badge active" style="margin-left:8px;">Active</span>
+                        {% else %}
+                        <span class="customer-active-badge inactive" style="margin-left:8px;">Inactive</span>
+                        {% endif %}
+                    </h3>
+                    <div class="header-actions">
+                        <button class="btn btn-sm btn-outline-primary" id="btn-edit" onclick="toggleEditMode()"><i class="bi bi-pencil"></i> Edit</button>
+                        <button class="btn btn-sm btn-outline-success" id="btn-save" style="display:none;" onclick="saveCustomer()"><i class="bi bi-check-lg"></i> Save</button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btn-cancel" style="display:none;" onclick="cancelEdit()"><i class="bi bi-x-lg"></i> Cancel</button>
                     </div>
-                    {% if contact.email %}
-                    <div class="contact-detail">
-                        <i class="bi bi-envelope"></i>
-                        <a href="mailto:{{ contact.email }}">{{ contact.email }}</a>
+                </div>
+                <div class="card-body padded">
+                    <div id="save-notification" class="save-notification" style="display:none;"></div>
+                    <div class="form-grid-3col" id="customer-info">
+
+                        <!-- Contact Details -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title sale">Contact Details</h4>
+                            </div>
+                            <div class="info-display">
+                                <div>
+                                    <div class="field-label">Name</div>
+                                    <div class="field-value field-value-large view-val">{{ customer.name|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="name" value="{{ customer.name|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Email</div>
+                                    <div class="field-value view-val">
+                                        {% if customer.email %}<a href="mailto:{{ customer.email }}">{{ customer.email }}</a>{% else %}-{% endif %}
+                                    </div>
+                                    <input class="customer-edit-input edit-val" data-field="email" type="email" value="{{ customer.email|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Phone</div>
+                                    <div class="field-value view-val">{{ customer.phone|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="phone" value="{{ customer.phone|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Client Code</div>
+                                    <div class="field-value view-val">{{ customer.code|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="code" value="{{ customer.code|default:'' }}" style="display:none;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Address -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title customer">Address</h4>
+                            </div>
+                            <div class="info-display">
+                                <div>
+                                    <div class="field-label">Address</div>
+                                    <div class="field-value view-val">{{ customer.address_1|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="address_1" value="{{ customer.address_1|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Address 2</div>
+                                    <div class="field-value view-val">{{ customer.address_2|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="address_2" value="{{ customer.address_2|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">City</div>
+                                    <div class="field-value view-val">{{ customer.city|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="city" value="{{ customer.city|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Postcode</div>
+                                    <div class="field-value view-val">{{ customer.postcode|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="postcode" value="{{ customer.postcode|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Country</div>
+                                    <div class="field-value view-val">{{ customer.country|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="country" value="{{ customer.country|default:'' }}" style="display:none;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Financial -->
+                        <div>
+                            <div class="info-section-header">
+                                <h4 class="info-section-title job">Financial</h4>
+                            </div>
+                            <div class="info-display">
+                                <div>
+                                    <div class="field-label">Currency</div>
+                                    <div class="field-value view-val">{{ customer.currency|default:"GBP" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="currency" value="{{ customer.currency|default:'GBP' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Credit Limit</div>
+                                    <div class="field-value view-val">£{{ customer.credit_limit|floatformat:2 }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="credit_limit" type="number" step="0.01" value="{{ customer.credit_limit }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Credit Terms</div>
+                                    <div class="field-value view-val">{{ customer.credit_terms_type|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="credit_terms_type" value="{{ customer.credit_terms_type|default:'' }}" style="display:none;">
+                                </div>
+                                <div>
+                                    <div class="field-label">Billing Client</div>
+                                    <div class="field-value view-val">{{ customer.billing_client|default:"-" }}</div>
+                                    <input class="customer-edit-input edit-val" data-field="billing_client" value="{{ customer.billing_client|default:'' }}" style="display:none;">
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
-                    {% endif %}
-                    {% if contact.phone %}
-                    <div class="contact-detail">
-                        <i class="bi bi-telephone"></i> {{ contact.phone }}
+                </div>
+            </div>
+
+            <!-- Sales & Orders Card (tree hierarchy: Lead → Sale → Order) -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Sales &amp; Orders
+                        {% if anthill_sales_count %}<span class="customer-active-badge inactive" style="margin-left:8px;">{{ anthill_sales_count }}</span>{% endif %}
+                    </h3>
+                </div>
+                <div class="card-body">
+                    {% if sales_data %}
+                    <div class="cd-tree">
+
+                        <div class="cd-sales-group">
+                            {% for entry in sales_data %}
+                            {% with sale=entry.sale lead_activity=entry.lead_activity %}
+                            <div class="cd-sale-item" id="cd-sale-{{ sale.pk }}">
+
+                                <!-- Sale node (clickable header) -->
+                                <div class="cd-sale-header" onclick="toggleSale({{ sale.pk }})">
+                                    <div class="cd-sale-icon"><i class="bi bi-tag"></i></div>
+                                    <div class="cd-sale-main">
+                                        <div class="cd-sale-contract">
+                                            <a href="{% url 'sale_detail' sale.pk %}" onclick="event.stopPropagation()">
+                                                {{ sale.contract_number|default:sale.anthill_activity_id }}
+                                            </a>
+                                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="cd-anthill-link" onclick="event.stopPropagation()" title="Open in Anthill">
+                                                <i class="bi bi-box-arrow-up-right"></i>
+                                            </a>
+                                        </div>
+                                        <div class="cd-sale-sub">{{ sale.activity_type|default:"" }}{% if sale.location %} &middot; {{ sale.location }}{% endif %}</div>
+                                    </div>
+                                    <div class="cd-sale-date">{{ sale.activity_date|date:"d M Y"|default:"-" }}</div>
+                                    <div class="cd-sale-value-col">
+                                        <div class="cd-sale-value">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                        {% if sale.payments_total %}<div class="cd-sale-paid">£{{ sale.payments_total|floatformat:2 }} paid</div>{% endif %}
+                                    </div>
+                                    <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
+                                        {{ sale.status|default:"unknown" }}
+                                    </span>
+                                    <div class="cd-chevron"><i class="bi bi-chevron-right"></i></div>
+                                </div>
+
+                                <!-- Children (expanded): Source Lead Activity + Order node -->
+                                <div class="cd-children">
+                                    {% if lead_activity %}
+                                    <div class="cd-lead-activity-node">
+                                        <div class="cd-la-icon"><i class="bi bi-person-raised-hand"></i></div>
+                                        <div class="cd-la-main">
+                                            <div class="cd-la-number">
+                                                <a href="{% url 'sale_detail' lead_activity.pk %}" onclick="event.stopPropagation()">
+                                                    {{ lead_activity.anthill_activity_id }}
+                                                </a>
+                                            </div>
+                                            <div class="cd-la-sub">{{ lead_activity.activity_type }}{% if lead_activity.location %} &middot; {{ lead_activity.location }}{% endif %}</div>
+                                        </div>
+                                        <div class="cd-la-date">{{ lead_activity.activity_date|date:"d M Y"|default:"-" }}</div>
+                                        <div class="cd-la-value">{% if lead_activity.sale_value %}£{{ lead_activity.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                        <span class="customer-active-badge {% if lead_activity.status == 'converted' %}active{% elif lead_activity.status == 'dead' or lead_activity.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
+                                            {{ lead_activity.status|default:"unknown" }}
+                                        </span>
+                                    </div>
+                                    {% endif %}
+                                    {% if sale.order %}
+                                    <div class="cd-order-node">
+                                        <div class="cd-order-icon"><i class="bi bi-folder2-open"></i></div>
+                                        <div class="cd-order-main">
+                                            <div class="cd-order-number">
+                                                <a href="{% url 'order_details' sale.order.id %}">{{ sale.order.sale_number }}</a>
+                                            </div>
+                                            <div class="cd-order-sub">{% if sale.order.designer %}{{ sale.order.designer.get_full_name|default:sale.order.designer.username }}{% endif %}</div>
+                                        </div>
+                                        <div class="cd-order-date">{% if sale.order.fit_date %}Fit {{ sale.order.fit_date|date:"d M Y" }}{% else %}-{% endif %}</div>
+                                        <div class="cd-order-value">{% if sale.order.total_value_exc_vat %}£{{ sale.order.total_value_exc_vat|floatformat:2 }}{% else %}-{% endif %}</div>
+                                        <span class="customer-active-badge {% if sale.order.job_finished %}active{% else %}inactive{% endif %}">
+                                            {% if sale.order.job_finished %}Finished{% else %}Active{% endif %}
+                                        </span>
+                                    </div>
+                                    {% elif not lead_activity %}
+                                    <div class="cd-no-child">No linked order</div>
+                                    {% endif %}
+                                </div>
+
+                            </div>
+                            {% endwith %}
+                            {% endfor %}
+                        </div>
+
                     </div>
-                    {% endif %}
-                    {% if contact.mobile %}
-                    <div class="contact-detail">
-                        <i class="bi bi-phone"></i> {{ contact.mobile }}
-                    </div>
-                    {% endif %}
-                    {% if contact.position %}
-                    <div class="contact-detail">
-                        <i class="bi bi-briefcase"></i> {{ contact.position }}
+                    {% else %}
+                    <div style="text-align:center; padding:32px 0; color:var(--text-secondary);">
+                        <i class="bi bi-bag" style="font-size:2rem; display:block; margin-bottom:8px; opacity:0.35;"></i>
+                        <p style="margin:0; font-size:0.88rem;">No sales found for this customer.</p>
                     </div>
                     {% endif %}
                 </div>
-                {% endfor %}
             </div>
-            {% else %}
-            <div class="customer-tab-empty">
-                <i class="bi bi-person-badge"></i>
-                <p>No contacts found for this customer.</p>
-            </div>
-            {% endif %}
-        </div>
 
-        <!-- Projects Tab -->
-        <div class="customer-tab-content" id="tab-projects">
-            {% if orders %}
-            <div class="customer-table-container">
-                <table class="customer-orders-table">
-                    <thead>
-                        <tr>
-                            <th>Sale Number</th>
-                            <th>Order Date</th>
-                            <th>Fit Date</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for order in orders %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'order_details' order.id %}" class="customer-order-link">
-                                    {{ order.sale_number }}
-                                </a>
-                            </td>
-                            <td>{{ order.order_date|date:"d/m/Y" }}</td>
-                            <td>{{ order.fit_date|date:"d/m/Y" }}</td>
-                            <td>
-                                <span class="order-type-badge {{ order.order_type }}">
-                                    {{ order.get_order_type_display }}
-                                </span>
-                            </td>
-                            <td>
-                                {% if order.job_finished %}
-                                <span class="order-status-badge finished">Finished</span>
-                                {% else %}
-                                <span class="order-status-badge active">Active</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="customer-tab-empty">
-                <i class="bi bi-folder"></i>
-                <p>No projects linked to this customer.</p>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Invoices Tab -->
-        <div class="customer-tab-content" id="tab-invoices">
+            <!-- Invoices Card -->
             {% if invoices %}
-            <div class="customer-table-container">
-                <table class="customer-orders-table">
-                    <thead>
-                        <tr>
-                            <th>Invoice #</th>
-                            <th>Date</th>
-                            <th>Due Date</th>
-                            <th>Total</th>
-                            <th>Paid</th>
-                            <th>Outstanding</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for inv in invoices %}
-                        <tr>
-                            <td>{{ inv.invoice_number }}</td>
-                            <td>{{ inv.date|date:"d/m/Y"|default:"-" }}</td>
-                            <td>{{ inv.due_date|date:"d/m/Y"|default:"-" }}</td>
-                            <td>£{{ inv.total|floatformat:2 }}</td>
-                            <td>£{{ inv.amount_paid|floatformat:2 }}</td>
-                            <td>£{{ inv.amount_outstanding|floatformat:2 }}</td>
-                            <td>
-                                <span class="order-status-badge {% if inv.payment_status == 'paid' %}status-complete{% elif inv.payment_status == 'partial' %}status-open{% elif inv.is_overdue %}status-dead{% else %}status-open{% endif %}">
-                                    {% if inv.is_overdue %}Overdue{% else %}{{ inv.get_payment_status_display }}{% endif %}
-                                </span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="customer-tab-empty">
-                <i class="bi bi-receipt"></i>
-                <p>No invoices linked to this customer.</p>
+            <div class="card">
+                <div class="card-header">
+                    <h3>Invoices <span class="customer-active-badge inactive" style="margin-left:8px;">{{ invoice_count }}</span></h3>
+                </div>
+                <div class="card-body">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--border-color);">
+                                <th style="padding:8px 16px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); font-weight:700;">Invoice #</th>
+                                <th style="padding:8px 16px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); font-weight:700;">Date</th>
+                                <th style="padding:8px 16px; text-align:right; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); font-weight:700;">Total</th>
+                                <th style="padding:8px 16px; text-align:right; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); font-weight:700;">Outstanding</th>
+                                <th style="padding:8px 16px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary); font-weight:700;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for inv in invoices %}
+                            <tr style="border-bottom:1px solid var(--border-color);">
+                                <td style="padding:8px 16px;">{{ inv.invoice_number }}</td>
+                                <td style="padding:8px 16px;">{{ inv.date|date:"d/m/Y"|default:"-" }}</td>
+                                <td style="padding:8px 16px; text-align:right;">£{{ inv.total|floatformat:2 }}</td>
+                                <td style="padding:8px 16px; text-align:right;">£{{ inv.amount_outstanding|floatformat:2 }}</td>
+                                <td style="padding:8px 16px;">
+                                    <span class="customer-active-badge {% if inv.payment_status == 'paid' %}active{% elif inv.is_overdue %}danger{% else %}inactive{% endif %}">
+                                        {% if inv.is_overdue %}Overdue{% else %}{{ inv.get_payment_status_display }}{% endif %}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
             {% endif %}
+
         </div>
 
-        <!-- Quotes Tab -->
-        <div class="customer-tab-content" id="tab-quotes">
-            <div class="customer-tab-empty">
-                <i class="bi bi-file-text"></i>
-                <p>No quote data available.</p>
+        <!-- ===== SIDEBAR COLUMN ===== -->
+        <div class="sidebar-column">
+
+            <!-- Contacts Card -->
+            {% if contacts %}
+            <div class="card" style="margin-bottom:24px;">
+                <div class="card-header">
+                    <h3>Contacts <span class="customer-active-badge inactive" style="margin-left:8px;">{{ contacts|length }}</span></h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="info-display">
+                        {% for contact in contacts %}
+                        <div style="padding-bottom:10px; {% if not forloop.last %}border-bottom:1px solid var(--border-color); margin-bottom:10px;{% endif %}">
+                            <div class="field-value" style="font-weight:600;">{{ contact.firstName|default:"" }} {{ contact.lastName|default:"" }}</div>
+                            {% if contact.email %}<div class="field-label"><a href="mailto:{{ contact.email }}" style="color:var(--accent-blue,#4a9eff);">{{ contact.email }}</a></div>{% endif %}
+                            {% if contact.phone %}<div class="field-label">{{ contact.phone }}</div>{% endif %}
+                            {% if contact.position %}<div class="field-label" style="font-style:italic;">{{ contact.position }}</div>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
             </div>
-        </div>
+            {% endif %}
 
-        <!-- General Notes Tab -->
-        <div class="customer-tab-content" id="tab-notes">
-            <div class="customer-tab-empty">
-                <i class="bi bi-journal-text"></i>
-                <p>No general notes for this customer.</p>
+            <!-- System Info Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>System Info</h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="info-display">
+                        {% if customer.anthill_customer_id %}
+                        <div>
+                            <div class="field-label">Anthill ID</div>
+                            <div class="field-row-with-button">
+                                <div class="field-value">{{ customer.anthill_customer_id }}</div>
+                                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ customer.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="field-label">Anthill Sales</div>
+                            <div class="field-row-with-button">
+                                <div class="field-value">{{ anthill_sales_count }} activit{{ anthill_sales_count|pluralize:"y,ies" }}</div>
+                                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ customer.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if customer.xero_id %}
+                        <div>
+                            <div class="field-label">Xero ID</div>
+                            <div class="field-value">{{ customer.xero_id }}</div>
+                        </div>
+                        {% endif %}
+                        {% if customer.workguru_id %}
+                        <div>
+                            <div class="field-label">WorkGuru ID</div>
+                            <div class="field-value">{{ customer.workguru_id }}</div>
+                        </div>
+                        {% endif %}
+                        {% if customer.creation_time %}
+                        <div>
+                            <div class="field-label">Created</div>
+                            <div class="field-value">{{ customer.creation_time|date:"d M Y H:i" }}</div>
+                        </div>
+                        {% endif %}
+                        {% if customer.last_modification_time %}
+                        <div>
+                            <div class="field-label">Last Modified</div>
+                            <div class="field-value">{{ customer.last_modification_time|date:"d M Y H:i" }}</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
 
-    <!-- System Info -->
-    <div class="customer-system-info">
-        <div class="system-info-row">
-            <span>WorkGuru ID</span>
-            <span class="customer-mono">{{ customer.workguru_id|default:"-" }}</span>
         </div>
-        {% if customer.creation_time %}
-        <div class="system-info-row">
-            <span>Created</span>
-            <span>{{ customer.creation_time|date:"d/m/Y H:i" }}</span>
-        </div>
-        {% endif %}
-        {% if customer.last_modification_time %}
-        <div class="system-info-row">
-            <span>Last Modified</span>
-            <span>{{ customer.last_modification_time|date:"d/m/Y H:i" }}</span>
-        </div>
-        {% endif %}
+
     </div>
 </div>
 
 <script>
-function switchTab(tabName) {
-    document.querySelectorAll('.customer-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.customer-tab-content').forEach(c => c.classList.remove('active'));
-    document.querySelector(`.customer-tab[data-tab="${tabName}"]`).classList.add('active');
-    document.getElementById(`tab-${tabName}`).classList.add('active');
+function toggleSale(pk) {
+    const item = document.getElementById('cd-sale-' + pk);
+    item.classList.toggle('expanded');
 }
 
 function toggleEditMode() {
-    document.getElementById('customer-info').classList.add('editing');
     document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
     document.getElementById('btn-edit').style.display = 'none';
@@ -460,23 +377,17 @@ function toggleEditMode() {
 }
 
 function cancelEdit() {
-    document.getElementById('customer-info').classList.remove('editing');
     document.querySelectorAll('.view-val').forEach(el => el.style.display = '');
-    document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.edit-val').forEach(el => { el.style.display = 'none'; el.value = el.defaultValue; });
     document.getElementById('btn-edit').style.display = '';
     document.getElementById('btn-save').style.display = 'none';
     document.getElementById('btn-cancel').style.display = 'none';
-    // Reset input values to original
-    document.querySelectorAll('.edit-val').forEach(input => {
-        input.value = input.getAttribute('data-original') || input.defaultValue;
-    });
 }
 
 function saveCustomer() {
     const data = {};
-    document.querySelectorAll('.edit-val').forEach(input => {
-        const field = input.getAttribute('data-field');
-        if (field) data[field] = input.value;
+    document.querySelectorAll('.edit-val[data-field]').forEach(input => {
+        data[input.getAttribute('data-field')] = input.value;
     });
 
     const btn = document.getElementById('btn-save');
@@ -487,36 +398,34 @@ function saveCustomer() {
 
     fetch("{% url 'customer_save' customer.pk %}", {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token }}'
-        },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
         body: JSON.stringify(data)
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(result => {
         if (result.success) {
-            notification.className = 'customer-save-notification success';
-            notification.innerHTML = '<i class="bi bi-check-circle"></i> Customer saved successfully';
+            notification.className = 'save-notification success';
+            notification.innerHTML = '<i class="bi bi-check-circle"></i> Saved successfully';
             notification.style.display = 'flex';
             setTimeout(() => location.reload(), 800);
         } else {
-            notification.className = 'customer-save-notification error';
+            notification.className = 'save-notification error';
             notification.innerHTML = '<i class="bi bi-exclamation-circle"></i> ' + (result.error || 'Failed to save');
             notification.style.display = 'flex';
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-check-lg"></i> Save Changes';
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
             setTimeout(() => notification.style.display = 'none', 3000);
         }
     })
-    .catch(err => {
-        notification.className = 'customer-save-notification error';
+    .catch(() => {
+        notification.className = 'save-notification error';
         notification.innerHTML = '<i class="bi bi-exclamation-circle"></i> Network error';
         notification.style.display = 'flex';
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-check-lg"></i> Save Changes';
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
         setTimeout(() => notification.style.display = 'none', 3000);
     });
 }
 </script>
 {% endblock %}
+

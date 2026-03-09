@@ -351,6 +351,44 @@ SCRIPT_GROUPS = [
                 ],
             },
             {
+                'log_name': 'sync_anthill_fit_dates',
+                'label': 'Sync Installation (Fit) Dates from Anthill',
+                'description': (
+                    'Parses the "Fit From Date" custom field (synced from Anthill as text by '
+                    'sync_anthill_workflow) into AnthillSale.fit_date (a proper date field). '
+                    'The Anthill SOAP API does not expose appointments, so the fit date comes '
+                    'from this custom field (format: DD/MM/YYYY). '
+                    'Run this after sync_anthill_workflow to ensure all fit dates are populated. '
+                    'sync_anthill_workflow also parses fit dates automatically on each run.'
+                ),
+                'file': 'stock_take/management/commands/sync_anthill_fit_dates.py',
+                'schedule': 'Manual / after sync_anthill_workflow',
+                'commands': [
+                    {'cmd': 'python manage.py sync_anthill_fit_dates --dry-run', 'note': 'Preview changes without saving'},
+                    {'cmd': 'python manage.py sync_anthill_fit_dates', 'note': 'Parse all fit_from_date values into fit_date'},
+                    {'cmd': 'python manage.py sync_anthill_fit_dates --missing-only', 'note': 'Only sales with no fit_date yet (fastest)'},
+                    {'cmd': 'python manage.py sync_anthill_fit_dates --days 365', 'note': 'Only sales from the last 12 months'},
+                    {'cmd': 'python manage.py sync_anthill_fit_dates --sale-id 419324', 'note': 'Single sale (for testing)'},
+                ],
+            },
+            {
+                'log_name': None,
+                'label': 'Backfill Sale Fit Dates (from Orders — one-off)',
+                'description': (
+                    'One-off command that copied confirmed fit dates from linked Order records into '
+                    'AnthillSale.fit_date (117 records updated on 2026-03-09). '
+                    'Superseded by sync_anthill_fit_dates which parses the Fit From Date '
+                    'custom field (already synced by sync_anthill_workflow).'
+                ),
+                'file': 'stock_take/management/commands/backfill_sale_fit_dates.py',
+                'schedule': 'One-off (already run — 117 records updated)',
+                'commands': [
+                    {'cmd': 'python manage.py backfill_sale_fit_dates --dry-run', 'note': 'Preview without saving'},
+                    {'cmd': 'python manage.py backfill_sale_fit_dates', 'note': 'Copy fit dates from linked Orders'},
+                    {'cmd': 'python manage.py backfill_sale_fit_dates --force', 'note': 'Overwrite existing fit dates too'},
+                ],
+            },
+            {
                 'log_name': 'sync_anthill_payments',
                 'label': 'Payment History Sync  ⚠️ API limitation',
                 'description': (

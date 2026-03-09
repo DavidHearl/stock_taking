@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum, Avg, DecimalField, Value, OuterRef, Subquery
+from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery
 from django.db.models.functions import TruncWeek, TruncMonth, Coalesce
 from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
@@ -25,44 +25,44 @@ def _contract_prefix_for_location(location: str) -> str:
     return _LOCATION_CONTRACT_PREFIX.get(location.strip().lower(), '')
 
 
-def _get_monthly_sales_data(year, month):
-    """Calculate monthly sales stats for a given year/month."""
+def _get_monthly_sales_data(year, month, contract_prefix=''):
+    """Calculate monthly sales stats for a given year/month using fit_date."""
     from calendar import monthrange
     first_day = datetime(year, month, 1).date()
     last_day = datetime(year, month, monthrange(year, month)[1]).date()
 
-    orders = Order.objects.filter(
+    sales_qs = AnthillSale.objects.filter(
         fit_date__gte=first_day,
         fit_date__lte=last_day,
-        total_value_exc_vat__gt=0,
-    )
-    agg = orders.aggregate(
-        total=Sum('total_value_exc_vat'),
-        avg=Avg('total_value_exc_vat'),
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        sales_qs = sales_qs.filter(contract_number__istartswith=contract_prefix)
+    agg = sales_qs.aggregate(
+        total=Sum('sale_value'),
         count=Count('id'),
     )
     return {
         'total': float(agg['total'] or 0),
-        'avg': float(agg['avg'] or 0),
         'count': agg['count'] or 0,
     }
 
 
 @login_required
 def dashboard_sales_after(request):
-    """AJAX endpoint – return total value and count of orders whose fit_date >= given date."""
+    """AJAX endpoint – return total value and count of sales whose fit_date >= given date."""
     date_str = request.GET.get('date', '')
     try:
         cutoff = datetime.strptime(date_str, '%Y-%m-%d').date()
     except (ValueError, TypeError):
         cutoff = datetime.now().date()
 
-    orders = Order.objects.filter(
+    sales_qs = AnthillSale.objects.filter(
         fit_date__gte=cutoff,
-        total_value_exc_vat__gt=0,
-    )
-    agg = orders.aggregate(
-        total=Sum('total_value_exc_vat'),
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    agg = sales_qs.aggregate(
+        total=Sum('sale_value'),
         count=Count('id'),
     )
     return JsonResponse({
@@ -73,41 +73,38 @@ def dashboard_sales_after(request):
 
 
 def _build_sales_after_rows(cutoff):
-    """Return a list of order row dicts for fit_date >= cutoff, including payment totals."""
-    payments_subquery = Subquery(
-        AnthillPayment.objects.filter(sale__order=OuterRef('pk'))
-        .values('sale__order')
-        .annotate(total=Sum('amount'))
-        .values('total'),
-        output_field=DecimalField(max_digits=14, decimal_places=2),
-    )
+    """Return a list of sale row dicts for fit_date >= cutoff, with payment totals."""
     qs = (
-        Order.objects
-        .filter(fit_date__gte=cutoff, total_value_exc_vat__gt=0)
-        .annotate(total_paid=Coalesce(
-            payments_subquery, Value(Decimal('0')),
+        AnthillSale.objects
+        .filter(fit_date__gte=cutoff, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .annotate(payments_total=Coalesce(
+            Sum('payments__amount'), Value(Decimal('0')),
             output_field=DecimalField(max_digits=14, decimal_places=2),
         ))
+        .select_related('customer')
         .order_by('fit_date')
-        .values('pk', 'first_name', 'last_name', 'sale_number',
-                'order_date', 'fit_date', 'total_value_exc_vat', 'designer__name', 'total_paid')
+        .values(
+            'pk', 'anthill_activity_id', 'contract_number', 'customer_name',
+            'fit_date', 'activity_date', 'sale_value', 'assigned_to_name',
+            'payments_total', 'location',
+        )
     )
     rows = []
-    for o in qs:
-        customer_name = f"{o['first_name']} {o['last_name']}".strip() or '-'
-        sv = float(o['total_value_exc_vat'])
-        paid = float(o['total_paid'] or 0)
+    for s in qs:
+        sv = float(s['sale_value'] or 0)
+        paid = float(s['payments_total'] or 0)
         remaining = max(sv - paid, 0)
         rows.append({
-            'pk': o['pk'],
-            'customer': customer_name,
-            'sale_number': o['sale_number'] or '',
-            'order_date': o['order_date'].strftime('%d/%m/%Y') if o['order_date'] else '',
-            'fit_date': o['fit_date'].strftime('%d/%m/%Y') if o['fit_date'] else '',
+            'pk': s['pk'],
+            'customer': s['customer_name'] or '-',
+            'sale_number': s['contract_number'] or s['anthill_activity_id'] or '',
+            'order_date': s['activity_date'].strftime('%d/%m/%Y') if s['activity_date'] else '',
+            'fit_date': s['fit_date'].strftime('%d/%m/%Y') if s['fit_date'] else '',
             'sale_value': sv,
             'paid': paid,
             'remaining': remaining,
-            'designer': o['designer__name'] or '-',
+            'designer': s['assigned_to_name'] or '-',
         })
     return rows
 
@@ -161,8 +158,10 @@ def dashboard_monthly_sales(request):
     except (ValueError, TypeError):
         return JsonResponse({'error': 'Invalid year/month'}, status=400)
 
-    data = _get_monthly_sales_data(year, month)
-    return JsonResponse({'success': True, **data})
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    data = _get_monthly_sales_data(year, month, contract_prefix)
+    return JsonResponse({'success': True, 'total': data['total'], 'count': data['count']})
 
 
 @login_required
@@ -173,17 +172,24 @@ def dashboard(request):
     profile = getattr(request.user, 'profile', None)
     if profile and profile.role and profile.role.name == 'franchise':
         return redirect('claim_service')
-    
+
+    selected_location = profile.selected_location if profile else ''
+    contract_prefix = _contract_prefix_for_location(selected_location)
+
     # Get fits per week data (past 52 weeks + future 12 weeks to show scheduled fits)
     today = datetime.now().date()
     start_date = today - timedelta(weeks=52)
     future_date = today + timedelta(weeks=12)
-    
-    # Get all orders with fit dates in the range (past 52 weeks + future 12 weeks)
-    orders_in_range = Order.objects.filter(
+
+    # Get all AnthillSale records with fit dates in the range
+    sales_in_range = AnthillSale.objects.filter(
         fit_date__gte=start_date,
-        fit_date__lte=future_date
-    )
+        fit_date__lte=future_date,
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        sales_in_range = sales_in_range.filter(contract_number__istartswith=contract_prefix)
+    sales_in_range = sales_in_range.values('fit_date', 'sale_value')
     
     # Create a dictionary of all weeks with default data
     weeks_data = {}
@@ -194,12 +200,12 @@ def dashboard(request):
         weeks_data[week_start] = {'fits': 0, 'sales': Decimal('0.00')}
         current_date += timedelta(weeks=1)
     
-    # Fill in actual data by iterating through orders
-    for order in orders_in_range:
-        week_start = order.fit_date - timedelta(days=order.fit_date.weekday())
+    # Fill in actual data by iterating through AnthillSale records
+    for sale in sales_in_range:
+        week_start = sale['fit_date'] - timedelta(days=sale['fit_date'].weekday())
         if week_start in weeks_data:
             weeks_data[week_start]['fits'] += 1
-            weeks_data[week_start]['sales'] += order.total_value_exc_vat or Decimal('0.00')
+            weeks_data[week_start]['sales'] += sale['sale_value'] or Decimal('0.00')
     
     # Convert to lists for Chart.js (sorted by week)
     sorted_weeks = sorted(weeks_data.items())
@@ -227,19 +233,27 @@ def dashboard(request):
             current_week_index = i
             break
     
-    # This week's sale value
+    # This week's fits scheduled (AnthillSale by fit_date — full Mon–Sun week)
     this_week_start = today - timedelta(days=today.weekday())
-    this_week_sales = Order.objects.filter(
+    this_week_end = this_week_start + timedelta(days=6)
+    this_week_sales_qs = AnthillSale.objects.filter(
         fit_date__gte=this_week_start,
-        fit_date__lte=today
-    ).aggregate(total=Sum('total_value_exc_vat'))['total'] or Decimal('0.00')
+        fit_date__lte=this_week_end,
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        this_week_sales_qs = this_week_sales_qs.filter(contract_number__istartswith=contract_prefix)
+    this_week_sales = this_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
     
-    # Sales after today (future pipeline)
-    sales_after = Order.objects.filter(
+    # Sales after today (future pipeline — from AnthillSale.fit_date)
+    sales_after_qs = AnthillSale.objects.filter(
         fit_date__gte=today,
-        total_value_exc_vat__gt=0,
-    ).aggregate(
-        total=Sum('total_value_exc_vat'),
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        sales_after_qs = sales_after_qs.filter(contract_number__istartswith=contract_prefix)
+    sales_after = sales_after_qs.aggregate(
+        total=Sum('sale_value'),
         count=Count('id'),
     )
 
@@ -268,6 +282,13 @@ def dashboard(request):
     # Monthly board costs - aggregate materials_cost by month (past 12 months + future 3 months)
     twelve_months_ago = today.replace(day=1) - timedelta(days=365)
     twelve_months_ago = twelve_months_ago.replace(day=1)  # Start of that month
+    # Sales chart looks back 36 months to show meaningful historical data
+    thirty_six_months_ago = today.replace(day=1)
+    for _ in range(36):
+        if thirty_six_months_ago.month == 1:
+            thirty_six_months_ago = thirty_six_months_ago.replace(year=thirty_six_months_ago.year - 1, month=12)
+        else:
+            thirty_six_months_ago = thirty_six_months_ago.replace(month=thirty_six_months_ago.month - 1)
     three_months_ahead = today.replace(day=1)
     for _ in range(3):
         if three_months_ahead.month == 12:
@@ -320,21 +341,27 @@ def dashboard(request):
             current_month_board_index = i
             break
 
-    # Monthly sales totals - aggregate total_value_exc_vat by month (past 12 months + future 3 months)
+    # Monthly sales totals from AnthillSale - aggregate sale_value by activity_date month
+    # Use 36-month window and __date lookups for correct Europe/Dublin timezone handling
+    import pytz
+    dublin_tz = pytz.timezone('Europe/Dublin')
+    monthly_sales_qs = AnthillSale.objects.filter(
+        activity_date__date__gte=thirty_six_months_ago,
+        activity_date__date__lte=three_months_ahead,
+        sale_value__gt=0,
+    ).exclude(status='cancelled')
+    if contract_prefix:
+        monthly_sales_qs = monthly_sales_qs.filter(contract_number__istartswith=contract_prefix)
     monthly_sales_data = (
-        Order.objects.filter(
-            fit_date__gte=twelve_months_ago,
-            fit_date__lte=three_months_ahead,
-            total_value_exc_vat__gt=0,
-        )
-        .annotate(month=TruncMonth('fit_date'))
+        monthly_sales_qs
+        .annotate(month=TruncMonth('activity_date', tzinfo=dublin_tz))
         .values('month')
-        .annotate(total_sales=Sum('total_value_exc_vat'))
+        .annotate(total_sales=Sum('sale_value'))
         .order_by('month')
     )
 
     monthly_sales_months = {}
-    temp_month = twelve_months_ago
+    temp_month = thirty_six_months_ago
     while temp_month <= three_months_ahead:
         monthly_sales_months[temp_month] = Decimal('0.00')
         if temp_month.month == 12:
@@ -362,15 +389,24 @@ def dashboard(request):
             current_month_sales_index = i
             break
 
-    # Current month sales data
-    current_month_sales = _get_monthly_sales_data(today.year, today.month)
+    # Current month sales data (by fit_date)
+    current_month_sales = _get_monthly_sales_data(today.year, today.month, contract_prefix)
+
+    # Average daily sale value — last 365 days total / 365
+    one_year_ago = today - timedelta(days=365)
+    avg_12m_qs = AnthillSale.objects.filter(
+        fit_date__gte=one_year_ago,
+        fit_date__lte=today,
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        avg_12m_qs = avg_12m_qs.filter(contract_number__istartswith=contract_prefix)
+    avg_12m_total = avg_12m_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0')
+    avg_daily_sale = avg_12m_total / 365
 
     # Total outstanding balance: sum balance_payable directly from Anthill.
     # Filter by contract number prefix (authoritative) rather than the location
     # field which contains dirty data for some historic records.
-    profile = getattr(request.user, 'profile', None)
-    selected_location = profile.selected_location if profile else ''
-    contract_prefix = _contract_prefix_for_location(selected_location)
 
     # Compute real outstanding dynamically: sale_value - sum(all payments)
     payments_subquery = Subquery(
@@ -383,6 +419,7 @@ def dashboard(request):
     outstanding_qs = (
         AnthillSale.objects
         .filter(sale_value__gt=0)
+        .exclude(status='cancelled')
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .values('sale_value', 'total_paid')
     )
@@ -422,8 +459,8 @@ def dashboard(request):
         'stock_value_7day_delta_str': '{:,.0f}'.format(abs(stock_value_7day_delta)),
         'this_week_sales': '{:,.0f}'.format(this_week_sales),
         'monthly_sales_total': '{:,.0f}'.format(Decimal(str(current_month_sales['total']))),
-        'monthly_sales_avg': '{:,.0f}'.format(Decimal(str(current_month_sales['avg']))),
         'monthly_sales_count': current_month_sales['count'],
+        'avg_daily_sale': '{:,.0f}'.format(avg_daily_sale),
         'current_year': today.year,
         'current_month': today.month,
         'today_str': today.strftime('%Y-%m-%d'),
@@ -437,6 +474,14 @@ def dashboard(request):
 @login_required
 def dashboard_stock_report(request):
     """JSON endpoint — returns recent stock changes and current stock levels."""
+    date_str = request.GET.get('date', '')
+    as_of_date = None
+    if date_str:
+        try:
+            as_of_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            pass
+
     CHANGE_TYPE_LABELS = {
         'stock_take': 'Stock Take',
         'purchase': 'Purchase',
@@ -471,24 +516,55 @@ def dashboard_stock_report(request):
             'notes': h.notes or '',
         })
 
-    stock_qs = (
-        StockItem.objects
-        .filter(tracking_type='stock', quantity__gt=0)
-        .select_related('category')
-    )
-    current_stock = []
-    for item in stock_qs:
-        current_stock.append({
-            'sku': item.sku,
-            'name': item.name,
-            'category': item.category.name if item.category else '—',
-            'location': item.location or '—',
-            'unit_cost': float(item.cost),
-            'quantity': item.quantity,
-            'total_value': float(item.cost * item.quantity),
-        })
-    current_stock.sort(key=lambda i: i['total_value'], reverse=True)
+    if as_of_date:
+        # Reconstruct by taking current quantity and subtracting all changes that
+        # occurred AFTER the target date.  This is reliable even for items that
+        # have no StockHistory records before the target date.
+        changes_after = (
+            StockHistory.objects
+            .filter(stock_item__tracking_type='stock', created_at__date__gt=as_of_date)
+            .values('stock_item_id')
+            .annotate(total_change=Sum('change_amount'))
+        )
+        change_map = {c['stock_item_id']: c['total_change'] for c in changes_after}
+        stock_qs = (
+            StockItem.objects
+            .filter(tracking_type='stock')
+            .select_related('category')
+        )
+        current_stock = []
+        for item in stock_qs:
+            qty = item.quantity - change_map.get(item.pk, 0)
+            if qty <= 0:
+                continue
+            current_stock.append({
+                'sku': item.sku,
+                'name': item.name,
+                'category': item.category.name if item.category else '—',
+                'location': item.location or '—',
+                'unit_cost': float(item.cost),
+                'quantity': qty,
+                'total_value': float(item.cost) * qty,
+            })
+    else:
+        stock_qs = (
+            StockItem.objects
+            .filter(tracking_type='stock', quantity__gt=0)
+            .select_related('category')
+        )
+        current_stock = []
+        for item in stock_qs:
+            current_stock.append({
+                'sku': item.sku,
+                'name': item.name,
+                'category': item.category.name if item.category else '—',
+                'location': item.location or '—',
+                'unit_cost': float(item.cost),
+                'quantity': item.quantity,
+                'total_value': float(item.cost * item.quantity),
+            })
 
+    current_stock.sort(key=lambda i: i['total_value'], reverse=True)
     total_value = sum(i['total_value'] for i in current_stock)
     return JsonResponse({
         'success': True,
@@ -496,6 +572,7 @@ def dashboard_stock_report(request):
         'current_stock': current_stock,
         'total_value': total_value,
         'stock_count': len(current_stock),
+        'as_of_date': as_of_date.strftime('%d %b %Y') if as_of_date else None,
     })
 
 
@@ -504,6 +581,14 @@ def dashboard_stock_pdf(request):
     """Download the stock report as a PDF."""
     from .pdf_generator import generate_stock_report_pdf
     from datetime import date as date_type
+
+    date_str = request.GET.get('date', '')
+    as_of_date = None
+    if date_str:
+        try:
+            as_of_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            pass
 
     CHANGE_TYPE_LABELS = {
         'stock_take': 'Stock Take',
@@ -537,26 +622,55 @@ def dashboard_stock_pdf(request):
             'reference': h.reference or '',
         })
 
-    stock_qs = (
-        StockItem.objects
-        .filter(tracking_type='stock', quantity__gt=0)
-        .select_related('category')
-    )
-    current_stock = []
-    for item in stock_qs:
-        current_stock.append({
-            'sku': item.sku,
-            'name': item.name,
-            'category': item.category.name if item.category else '—',
-            'location': item.location or '—',
-            'unit_cost': float(item.cost),
-            'quantity': item.quantity,
-            'total_value': float(item.cost * item.quantity),
-        })
+    if as_of_date:
+        changes_after = (
+            StockHistory.objects
+            .filter(stock_item__tracking_type='stock', created_at__date__gt=as_of_date)
+            .values('stock_item_id')
+            .annotate(total_change=Sum('change_amount'))
+        )
+        change_map = {c['stock_item_id']: c['total_change'] for c in changes_after}
+        stock_qs = (
+            StockItem.objects
+            .filter(tracking_type='stock')
+            .select_related('category')
+        )
+        current_stock = []
+        for item in stock_qs:
+            qty = item.quantity - change_map.get(item.pk, 0)
+            if qty <= 0:
+                continue
+            current_stock.append({
+                'sku': item.sku,
+                'name': item.name,
+                'category': item.category.name if item.category else '—',
+                'location': item.location or '—',
+                'unit_cost': float(item.cost),
+                'quantity': qty,
+                'total_value': float(item.cost) * qty,
+            })
+    else:
+        stock_qs = (
+            StockItem.objects
+            .filter(tracking_type='stock', quantity__gt=0)
+            .select_related('category')
+        )
+        current_stock = []
+        for item in stock_qs:
+            current_stock.append({
+                'sku': item.sku,
+                'name': item.name,
+                'category': item.category.name if item.category else '—',
+                'location': item.location or '—',
+                'unit_cost': float(item.cost),
+                'quantity': item.quantity,
+                'total_value': float(item.cost * item.quantity),
+            })
     current_stock.sort(key=lambda i: i['total_value'], reverse=True)
 
-    buffer = generate_stock_report_pdf(recent_changes, current_stock)
-    filename = f'Stock_Report_{date_type.today().strftime("%Y%m%d")}.pdf'
+    buffer = generate_stock_report_pdf(recent_changes, current_stock, as_of_date=as_of_date)
+    date_suffix = as_of_date.strftime('%Y%m%d') if as_of_date else date_type.today().strftime('%Y%m%d')
+    filename = f'Stock_Report_{date_suffix}.pdf'
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
@@ -578,6 +692,7 @@ def dashboard_outstanding_report(request):
     qs = (
         AnthillSale.objects
         .filter(sale_value__gt=0)
+        .exclude(status='cancelled')
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .order_by('-activity_date')
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
@@ -662,6 +777,235 @@ def dashboard_outstanding_pdf(request):
     from datetime import date
     buffer = generate_outstanding_report_pdf(rows, location_label=location_label)
     filename = f'Outstanding_Balance_{location_label}_{date.today().strftime("%Y%m%d")}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _build_fit_sales_rows(qs):
+    """Shared row builder for fit-date-based sales reports (week / monthly)."""
+    rows = []
+    for s in qs.values('pk', 'anthill_activity_id', 'contract_number', 'customer_name',
+                        'fit_date', 'activity_date', 'sale_value', 'assigned_to_name'):
+        sv = float(s['sale_value'] or 0)
+        rows.append({
+            'pk': s['pk'],
+            'customer': s['customer_name'] or '-',
+            'sale_number': s['contract_number'] or s['anthill_activity_id'] or '',
+            'order_date': s['activity_date'].strftime('%d/%m/%Y') if s['activity_date'] else '',
+            'fit_date': s['fit_date'].strftime('%d/%m/%Y') if s['fit_date'] else '',
+            'sale_value': sv,
+            'designer': s['assigned_to_name'] or '-',
+        })
+    return rows
+
+
+@login_required
+def dashboard_week_report(request):
+    """JSON endpoint — sales with fit_date in the current Mon–Sun week."""
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=week_start, fit_date__lte=week_end, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    rows = _build_fit_sales_rows(qs)
+    total = sum(r['sale_value'] for r in rows)
+    return JsonResponse({
+        'success': True,
+        'rows': rows,
+        'count': len(rows),
+        'total': total,
+        'week_start': week_start.strftime('%d %b %Y'),
+        'week_end': week_end.strftime('%d %b %Y'),
+    })
+
+
+@login_required
+def dashboard_week_pdf(request):
+    """Download the current week fits as a PDF."""
+    from .pdf_generator import generate_fit_sales_pdf
+    from datetime import date as date_type
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=week_start, fit_date__lte=week_end, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    rows = _build_fit_sales_rows(qs)
+    title = f"This Week\u2019s Fits  {week_start.strftime('%d %b')} \u2013 {week_end.strftime('%d %b %Y')}"
+    buffer = generate_fit_sales_pdf(rows, title=title)
+    filename = f'Fits_Week_{week_start.strftime("%Y%m%d")}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+def dashboard_monthly_report(request):
+    """JSON endpoint — sales with fit_date in the selected month/year."""
+    from calendar import monthrange
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    try:
+        year = int(request.GET.get('year', datetime.now().year))
+        month = int(request.GET.get('month', datetime.now().month))
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid year/month'}, status=400)
+    first_day = datetime(year, month, 1).date()
+    last_day = datetime(year, month, monthrange(year, month)[1]).date()
+    qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=first_day, fit_date__lte=last_day, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    rows = _build_fit_sales_rows(qs)
+    total = sum(r['sale_value'] for r in rows)
+    return JsonResponse({
+        'success': True,
+        'rows': rows,
+        'count': len(rows),
+        'total': total,
+        'month_label': first_day.strftime('%B %Y'),
+    })
+
+
+@login_required
+def dashboard_monthly_pdf(request):
+    """Download a monthly fits report as a PDF."""
+    from .pdf_generator import generate_fit_sales_pdf
+    from calendar import monthrange
+    from datetime import date as date_type
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    try:
+        year = int(request.GET.get('year', datetime.now().year))
+        month = int(request.GET.get('month', datetime.now().month))
+    except (ValueError, TypeError):
+        year, month = datetime.now().year, datetime.now().month
+    first_day = datetime(year, month, 1).date()
+    last_day = datetime(year, month, monthrange(year, month)[1]).date()
+    qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=first_day, fit_date__lte=last_day, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    rows = _build_fit_sales_rows(qs)
+    title = f'Monthly Fits \u2014 {first_day.strftime("%B %Y")}'
+    buffer = generate_fit_sales_pdf(rows, title=title)
+    filename = f'Fits_{first_day.strftime("%Y_%m")}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+def dashboard_avg_report(request):
+    """JSON endpoint — last 365-day monthly breakdown for the average sale value card."""
+    from django.db.models.functions import TruncMonth
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    today = datetime.now().date()
+    one_year_ago = today - timedelta(days=365)
+    qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=one_year_ago, fit_date__lte=today, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    monthly = (
+        qs.annotate(month=TruncMonth('fit_date'))
+        .values('month')
+        .annotate(count=Count('id'), total=Sum('sale_value'))
+        .order_by('month')
+    )
+    rows = []
+    for m in monthly:
+        month_dt = m['month']
+        if hasattr(month_dt, 'date'):
+            month_dt = month_dt.date()
+        total = float(m['total'] or 0)
+        count = m['count'] or 0
+        rows.append({
+            'month': month_dt.strftime('%B %Y'),
+            'count': count,
+            'total': total,
+            'avg': round(total / count, 0) if count else 0,
+        })
+    grand_total = sum(r['total'] for r in rows)
+    grand_count = sum(r['count'] for r in rows)
+    return JsonResponse({
+        'success': True,
+        'rows': rows,
+        'grand_total': grand_total,
+        'grand_count': grand_count,
+        'daily_avg': round(grand_total / 365, 0),
+        'period': f'{one_year_ago.strftime("%d %b %Y")} \u2013 {today.strftime("%d %b %Y")}',
+    })
+
+
+@login_required
+def dashboard_avg_pdf(request):
+    """Download the 12-month average sale breakdown as a PDF."""
+    from .pdf_generator import generate_avg_sales_pdf
+    from django.db.models.functions import TruncMonth
+    from datetime import date as date_type
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    today = datetime.now().date()
+    one_year_ago = today - timedelta(days=365)
+    qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=one_year_ago, fit_date__lte=today, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    monthly = (
+        qs.annotate(month=TruncMonth('fit_date'))
+        .values('month')
+        .annotate(count=Count('id'), total=Sum('sale_value'))
+        .order_by('month')
+    )
+    rows = []
+    for m in monthly:
+        month_dt = m['month']
+        if hasattr(month_dt, 'date'):
+            month_dt = month_dt.date()
+        total = float(m['total'] or 0)
+        count = m['count'] or 0
+        rows.append({
+            'month': month_dt.strftime('%B %Y'),
+            'count': count,
+            'total': total,
+            'avg': round(total / count, 0) if count else 0,
+        })
+    grand_total = sum(r['total'] for r in rows)
+    grand_count = sum(r['count'] for r in rows)
+    period = f'{one_year_ago.strftime("%d %b %Y")} \u2013 {today.strftime("%d %b %Y")}'
+    buffer = generate_avg_sales_pdf(rows, grand_total=grand_total, grand_count=grand_count, period=period)
+    filename = f'Avg_Sale_Value_12m_{date_type.today().strftime("%Y%m%d")}.pdf'
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response

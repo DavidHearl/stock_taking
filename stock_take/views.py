@@ -4905,7 +4905,7 @@ def stock_list(request):
     
     # Get last modification time for cache invalidation
     last_import = ImportHistory.objects.aggregate(Max('imported_at'))['imported_at__max']
-    last_update = StockItem.objects.aggregate(Max('id'))['id__max'] or 0
+    last_update = StockItem.objects.aggregate(Max('last_checked'))['last_checked__max'] or 0
     cache_version = f"{last_import}_{last_update}"
     
     cache_key = f"stock_list_{search}_{category_filter}_{stock_take_group_filter}_{tracking_type_filter}_{cache_version}"

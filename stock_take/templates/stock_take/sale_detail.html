@@ -8,7 +8,7 @@
 {% block page_title %}
 <span class="page-title-row">
     <a href="{% url 'sales_list' %}" class="back-link" title="Back to Sales"><i class="bi bi-arrow-left"></i></a>
-    Sale Detail: {{ sale.customer_name|default:sale.anthill_activity_id }}{% if sale.contract_number %} <span class="sale-number-suffix">({{ sale.contract_number }})</span>{% endif %}
+    Sale Detail{% if sale.contract_number %}: <span class="sale-number-suffix">{{ sale.contract_number }}</span>{% else %}: {{ sale.anthill_activity_id }}{% endif %}
 </span>
 {% endblock %}
 
@@ -141,8 +141,8 @@ a.field-link:hover { text-decoration: underline; }
             <!-- Sale Information Card -->
             <div class="card">
                 <div class="card-header">
-                    <h3><i class="bi bi-bag-check"></i> Sale Information</h3>
-                    <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                    <h3>Sale Information</h3>
+                    <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
                         {{ sale.status|default:"Unknown" }}
                     </span>
                 </div>
@@ -157,19 +157,11 @@ a.field-link:hover { text-decoration: underline; }
                             <div class="info-display">
                                 <div>
                                     <div class="field-label">Contract Number</div>
-                                    <div class="field-value field-value-large customer-mono">{{ sale.contract_number|default:"-" }}</div>
+                                    <div class="field-value field-value-large">{{ sale.contract_number|default:"-" }}</div>
                                 </div>
                                 <div>
                                     <div class="field-label">Activity ID</div>
-                                    <div class="field-value customer-mono">{{ sale.anthill_activity_id }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Type</div>
-                                    <div class="field-value">{{ sale.activity_type|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Category</div>
-                                    <div class="field-value">{{ sale.category|default:"-" }}</div>
+                                    <div class="field-value">{{ sale.anthill_activity_id }}</div>
                                 </div>
                                 <div>
                                     <div class="field-label">Date</div>
@@ -257,7 +249,7 @@ a.field-link:hover { text-decoration: underline; }
             <!-- Payment History Card -->
             <div class="card">
                 <div class="card-header">
-                    <h3><i class="bi bi-cash-stack"></i> Payment History</h3>
+                    <h3>Payment History</h3>
                     <div style="display:flex; align-items:center; gap:8px;">
                         {% if payments %}<span class="tab-count">{{ payments|length }}</span>{% endif %}
                         <button type="button" class="btn btn-sm btn-outline-success" onclick="openScrapeAnthillModal()">
@@ -764,7 +756,7 @@ a.field-link:hover { text-decoration: underline; }
             {% if related_sales %}
             <div class="card">
                 <div class="card-header">
-                    <h3><i class="bi bi-clock-history"></i> Other Sales for this Customer</h3>
+                    <h3>Other Sales for this Customer</h3>
                     <span class="tab-count" style="margin-left: 6px;">{{ related_sales|length }}</span>
                 </div>
                 <table class="table orders-table">
@@ -837,7 +829,7 @@ a.field-link:hover { text-decoration: underline; }
                             <div class="field-row-with-button">
                                 <div class="field-value customer-mono">{{ sale.anthill_customer_id|default:"-" }}</div>
                                 {% if sale.anthill_customer_id %}
-                                <a href="https://sliderobes.anthillcrm.com/customers/{{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
                                     <i class="bi bi-box-arrow-up-right"></i>
                                 </a>
                                 {% endif %}
@@ -854,7 +846,7 @@ a.field-link:hover { text-decoration: underline; }
                         </div>
                         {% endif %}
                         <div style="margin-top: 10px;">
-                            <a href="https://sliderobes.anthillcrm.com/customers/{{ sale.anthill_customer_id }}/activities/{{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success" style="width:100%; text-align:center; display:block;">
+                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success" style="width:100%; text-align:center; display:block;">
                                 <i class="bi bi-box-arrow-up-right"></i> Open in Anthill CRM
                             </a>
                         </div>
@@ -914,11 +906,11 @@ a.field-link:hover { text-decoration: underline; }
                     <div class="info-display">
                         <div>
                             <div class="field-label">Activity ID</div>
-                            <div class="field-value customer-mono">{{ sale.anthill_activity_id }}</div>
+                            <div class="field-value">{{ sale.anthill_activity_id }}</div>
                         </div>
                         <div>
                             <div class="field-label">Anthill Customer ID</div>
-                            <div class="field-value customer-mono">{{ sale.anthill_customer_id|default:"-" }}</div>
+                            <div class="field-value">{{ sale.anthill_customer_id|default:"-" }}</div>
                         </div>
                         <div>
                             <div class="field-label">Created</div>

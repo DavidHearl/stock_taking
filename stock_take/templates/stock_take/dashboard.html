@@ -19,70 +19,82 @@
     <div class="dashboard-grid dashboard-grid-6">
         <div class="dashboard-card accent-danger">
             <div class="card-label">
-                <i class="bi bi-exclamation-circle" style="color:#dc3545;"></i>
-                Outstanding Balance
+                <h3 class="card-label">Outstanding Balance</h3>
             </div>
             <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
             <div class="card-subtext">Total remaining to collect</div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openOutstandingReport()">
-                    <i class="bi bi-table"></i> View Report
+                    View Report
                 </button>
             </div>
         </div>
         <div class="dashboard-card accent-danger">
+            <h3 class="card-label">Sales After</h3>
+            <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
+            <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
             <div class="card-label">
-                <i class="bi bi-calendar-check" style="color:#dc3545;"></i>
-                Sales After
                 <input type="date" id="salesAfterDate" class="dash-date-input"
                        value="{{ today_str }}" onchange="fetchSalesAfter()">
             </div>
-            <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
-            <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openSalesAfterReport()">
-                    <i class="bi bi-table"></i> View Report
+                    View Report
                 </button>
             </div>
         </div>
         <div class="dashboard-card">
-            <div class="card-label"><i class="bi bi-box-seam"></i> Stock Value</div>
+            <h3 class="card-label">
+                Stock Value
+                {% if stock_value_7day_delta > 0 %}
+                <div class="card-subtext" style="color:#28a745;font-weight:600;">&#9650; &pound; {{ stock_value_7day_delta_str }}</div>
+                {% elif stock_value_7day_delta < 0 %}
+                <div class="card-subtext" style="color:#dc3545;font-weight:600;">&#9660; &pound; {{ stock_value_7day_delta_str }}</div>
+                {% endif %}
+            </h3>
+
+
             <div class="card-value">&pound;{{ total_stock_value }}</div>
             <div class="card-subtext">{{ stock_item_count }} items in stock</div>
-            {% if stock_value_7day_delta > 0 %}
-            <div class="card-subtext" style="color:#28a745;font-weight:600;">&#9650; &pound;{{ stock_value_7day_delta_str }} past 7 days</div>
-            {% elif stock_value_7day_delta < 0 %}
-            <div class="card-subtext" style="color:#dc3545;font-weight:600;">&#9660; &pound;{{ stock_value_7day_delta_str }} past 7 days</div>
-            {% else %}
-            <div class="card-subtext" style="color:var(--text-secondary);">No change in past 7 days</div>
-            {% endif %}
+            <div style="margin:6px 0 0;">
+                <input type="date" id="stockReportDate" class="dash-date-input"
+                       value="{{ today_str }}">
+            </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openStockReport()">
-                    <i class="bi bi-table"></i> View Report
+                    View Report
                 </button>
             </div>
         </div>
         <div class="dashboard-card">
-            <div class="card-label"><i class="bi bi-cash-stack"></i> This Week's Sales</div>
+            <h3 class="card-label">This Week's Sales</h3>
             <div class="card-value">&pound;{{ this_week_sales }}</div>
-            <div class="card-subtext">Sales value this week</div>
+            <div class="card-subtext">Fits scheduled this week</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openWeekReport()">View Report</button>
+            </div>
         </div>
         <div class="dashboard-card accent-success">
             <div class="card-label">
-                <i class="bi bi-graph-up-arrow" style="color:#28a745;"></i>
-                <span class="month-switcher-inline">
+                <div class="month-switcher-inline">
                     <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
                     <span id="monthLabel"></span>
                     <button class="month-arrow" id="nextMonthBtn" onclick="changeMonth(1)" title="Next month"><i class="bi bi-chevron-right"></i></button>
-                </span>
+                </div>
             </div>
             <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
             <div class="card-subtext">Total monthly sales</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openMonthlyReport()">View Report</button>
+            </div>
         </div>
         <div class="dashboard-card">
-            <div class="card-label"><i class="bi bi-calculator"></i> Average Sale Value</div>
-            <div class="card-value" id="monthlySalesAvg">&pound;{{ monthly_sales_avg }}</div>
-            <div class="card-subtext" id="monthlySalesCount">{{ monthly_sales_count }} sales this month</div>
+            <h3 class="card-label">Average Sale Value</h3>
+            <div class="card-value">&pound;{{ avg_daily_sale }}</div>
+            <div class="card-subtext">Avg daily revenue &mdash; last 12 months</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openAvgReport()">View Report</button>
+            </div>
         </div>
     </div>
     <div class="charts-row">
@@ -155,7 +167,7 @@ function changeMonth(delta) {
 }
 
 function fetchMonthlySales() {
-    const els = [document.getElementById('monthlySalesTotal'), document.getElementById('monthlySalesAvg'), document.getElementById('monthlySalesCount')];
+    const els = [document.getElementById('monthlySalesTotal'), document.getElementById('monthlySalesCount')];
     els.forEach(c => { if (c) c.style.opacity = '0.4'; });
 
     fetch(`{% url 'dashboard_monthly_sales' %}?year=${currentYear}&month=${currentMonth}`)
@@ -163,8 +175,7 @@ function fetchMonthlySales() {
         .then(data => {
             if (data.success) {
                 document.getElementById('monthlySalesTotal').textContent = '£' + Math.round(data.total).toLocaleString();
-                document.getElementById('monthlySalesAvg').textContent = '£' + Math.round(data.avg).toLocaleString();
-                document.getElementById('monthlySalesCount').textContent = data.count.toLocaleString() + ' sales this month';
+                document.getElementById('monthlySalesCount').textContent = data.count.toLocaleString() + ' fits this month';
             }
             els.forEach(c => { if (c) c.style.opacity = '1'; });
         })
@@ -1046,7 +1057,11 @@ function openStockReport() {
     document.getElementById('stockReportMeta').textContent = '';
     modal.showModal();
 
-    fetch('{% url "dashboard_stock_report" %}')
+    const stockDate = document.getElementById('stockReportDate').value || '{{ today_str }}';
+    const pdfBase = '{% url "dashboard_stock_pdf" %}';
+    document.getElementById('stockReportPdfBtn').href = pdfBase + '?date=' + stockDate;
+
+    fetch('{% url "dashboard_stock_report" %}' + '?date=' + stockDate)
         .then(r => r.json())
         .then(data => {
             if (!data.success) {
@@ -1054,24 +1069,25 @@ function openStockReport() {
                 return;
             }
             const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            const dateLabel = data.as_of_date || 'Today';
             document.getElementById('stockReportMeta').innerHTML =
-                '&nbsp;&mdash;&nbsp;' + data.stock_count.toLocaleString() + ' items &nbsp;|&nbsp; ' + fmt(data.total_value);
+                '&nbsp;&mdash;&nbsp;' + dateLabel + ' &nbsp;|&nbsp; ' + data.stock_count.toLocaleString() + ' items &nbsp;|&nbsp; ' + fmt(data.total_value);
 
             let html = '';
 
             // ── Section 1: Recent Changes ────────────────────────
-            html += '<h4 style="margin:0 0 8px;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' +
-                '<i class="bi bi-clock-history"></i> Stock Changes (past 3 days)</h4>';
+            html += '<h4 style="margin:8px 16px;font-size:1rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' +
+                'Stock Changes (past 3 days)</h4>';
 
             if (data.recent_changes.length) {
-                html += '<div style="border:1px solid var(--border-color);border-radius:6px;overflow:hidden;margin-bottom:20px;">';
+                html += '<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden">';
                 data.recent_changes.forEach((c, idx) => {
                     const qtyColor = c.change_amount > 0 ? '#28a745' : '#dc3545';
                     const valColor = c.value_change > 0 ? '#28a745' : '#dc3545';
                     const qtySign = c.change_amount > 0 ? '+' : '';
                     const valSign = c.value_change > 0 ? '+' : '';
                     const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
-                    html += '<div style="display:flex;align-items:center;padding:10px 14px;gap:14px;' + border + '">' +
+                    html += '<div style="display:flex;align-items:center;padding:4px 16px;gap:8px;' + border + '">' +
                         // Left: SKU + name
                         '<div style="flex:1;min-width:0;">' +
                             '<div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.sku + '</div>' +
@@ -1096,32 +1112,33 @@ function openStockReport() {
                 html += '<p style="color:var(--text-secondary);padding:8px 0 16px;">No stock changes recorded.</p>';
             }
 
-            // ── Section 2: Current Stock ─────────────────────────
-            html += '<h4 style="margin:0 0 8px;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' +
-                '<i class="bi bi-boxes"></i> Current Stock (' + data.stock_count.toLocaleString() + ' items)</h4>';
+            // ── Section 2: Current Stock (≥£500) ─────────────
+            const displayed = data.current_stock.filter(i => i.total_value >= 500);
+            const hiddenCount = data.stock_count - displayed.length;
+            let section2Title = 'Current Stock (' + displayed.length.toLocaleString() + ' of ' + data.stock_count.toLocaleString() + ' items, ≥£500)';
+            html += '<h4 style="margin:8px 16px;font-size:1rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' + section2Title + '</h4>';
 
-            if (data.current_stock.length) {
+            if (displayed.length) {
                 const grandQty = data.current_stock.reduce(function(s, i) { return s + i.quantity; }, 0);
-                html += '<div style="border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">';
-                data.current_stock.forEach((i, idx) => {
+                html += '<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden;">';
+                displayed.forEach((i, idx) => {
                     const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
                     const meta = [i.category, i.location].filter(Boolean).join(' · ');
-                    html += '<div style="display:flex;align-items:center;padding:10px 14px;gap:14px;' + border + '">' +
-                        // Left: SKU + name
+                    html += '<div style="display:flex;align-items:center;padding:4px 16px;gap:12px;' + border + '">' +
                         '<div style="flex:1;min-width:0;">' +
                             '<div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.sku + '</div>' +
                             '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.name + (meta ? ' &nbsp;·&nbsp; ' + meta : '') + '</div>' +
                         '</div>' +
-                        // Right: qty × cost | total
                         '<div style="text-align:right;white-space:nowrap;">' +
                             '<div style="font-weight:600;font-size:0.88rem;">' + fmt(i.total_value) + '</div>' +
                             '<div style="font-size:0.75rem;color:var(--text-secondary);">' + i.quantity.toLocaleString() + ' &times; \u00a3' + i.unit_cost.toFixed(2) + '</div>' +
                         '</div>' +
                     '</div>';
                 });
-                // Totals row
-                html += '<div style="display:flex;align-items:center;padding:10px 14px;gap:14px;border-top:2px solid var(--border-color);background:var(--card-bg);">' +
-                    '<div style="flex:1;font-weight:600;font-size:0.85rem;">' + data.stock_count.toLocaleString() + ' items total &nbsp;&bull;&nbsp; ' + grandQty.toLocaleString() + ' units</div>' +
+                // Totals row — always shows full all-items total
+                let hiddenInfo = hiddenCount > 0 ? ' &nbsp;&bull;&nbsp; ' + hiddenCount + ' items <£500 not shown' : '';
+                html += '<div style="display:flex;align-items:center;padding:12px 16px;gap:16px;border-top:2px solid var(--border-color);background:var(--card-bg);">' +
+                    '<div style="flex:1;font-weight:600;font-size:0.85rem;">' + data.stock_count.toLocaleString() + ' items total &nbsp;&bull;&nbsp; ' + grandQty.toLocaleString() + ' units' + hiddenInfo + '</div>' +
                     '<div style="font-weight:700;font-size:0.95rem;">' + fmt(data.total_value) + '</div>' +
                 '</div>';
                 html += '</div>';
@@ -1129,6 +1146,259 @@ function openStockReport() {
                 html += '<p style="color:var(--text-secondary);padding:8px 0;">No stock items found.</p>';
             }
 
+            
+            body.innerHTML = html;
+        })
+        .catch(function() {
+            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        });
+}
+</script>
+
+<!-- This Week Fits Report Modal -->
+<dialog id="weekReportModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-calendar-week" style="color:#4f8cff;"></i>
+            <span>This Week&rsquo;s Fits</span>
+            <span id="weekReportMeta" class="dash-report-meta"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a id="weekReportPdfBtn"
+               href="{% url 'dashboard_week_pdf' %}"
+               class="dash-report-pdf-btn"
+               title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="dash-report-close" onclick="document.getElementById('weekReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body" id="weekReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+</dialog>
+
+<script>
+document.getElementById('weekReportModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+function openWeekReport() {
+    const modal = document.getElementById('weekReportModal');
+    const body = document.getElementById('weekReportBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('weekReportMeta').textContent = '';
+    modal.showModal();
+
+    fetch('{% url "dashboard_week_report" %}')
+        .then(r => r.json())
+        .then(data => {
+            const meta = document.getElementById('weekReportMeta');
+            if (!data.success || !data.rows.length) {
+                meta.textContent = '';
+                body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">No fits scheduled this week.</p>';
+                return;
+            }
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            meta.innerHTML = '&nbsp;&mdash;&nbsp;' + data.count + ' fit' + (data.count !== 1 ? 's' : '') +
+                ' &nbsp;|&nbsp; ' + fmt(data.total) +
+                ' &nbsp;|&nbsp; ' + data.week_start + ' \u2013 ' + data.week_end;
+
+            let html = '<table class="dash-report-table"><thead><tr>';
+            html += '<th>Customer</th><th>Sale #</th><th>Order Date</th><th>Fit Date</th><th>Designer</th><th class="text-right">Sale Value</th>';
+            html += '</tr></thead><tbody>';
+            data.rows.forEach(r => {
+                html += '<tr>' +
+                    '<td><a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.customer + '</a></td>' +
+                    '<td>' + (r.sale_number || '-') + '</td>' +
+                    '<td>' + (r.order_date || '-') + '</td>' +
+                    '<td>' + (r.fit_date || '-') + '</td>' +
+                    '<td>' + r.designer + '</td>' +
+                    '<td class="text-right">' + fmt(r.sale_value) + '</td>' +
+                    '</tr>';
+            });
+            const grandTotal = data.rows.reduce(function(s, r) { return s + r.sale_value; }, 0);
+            html += '<tr class="dash-report-year-sep">' +
+                '<td colspan="5"><strong>' + data.count + ' fit' + (data.count !== 1 ? 's' : '') + '</strong>' +
+                '<span class="dash-report-year-total">' + fmt(grandTotal) + ' total</span></td>' +
+                '<td class="text-right" style="font-weight:600;">' + fmt(grandTotal) + '</td>' +
+                '</tr>';
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        })
+        .catch(function() {
+            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        });
+}
+</script>
+
+<!-- Monthly Fits Report Modal -->
+<dialog id="monthlyReportModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-calendar-month" style="color:#28a745;"></i>
+            <span id="monthlyReportTitle">Monthly Fits</span>
+            <span id="monthlyReportMeta" class="dash-report-meta"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a id="monthlyReportPdfBtn"
+               href="{% url 'dashboard_monthly_pdf' %}"
+               class="dash-report-pdf-btn"
+               title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="dash-report-close" onclick="document.getElementById('monthlyReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body" id="monthlyReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+</dialog>
+
+<script>
+document.getElementById('monthlyReportModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+function openMonthlyReport() {
+    const modal = document.getElementById('monthlyReportModal');
+    const body = document.getElementById('monthlyReportBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('monthlyReportMeta').textContent = '';
+    modal.showModal();
+
+    const _baseUrl = '{% url "dashboard_monthly_report" %}';
+    const _pdfBase = '{% url "dashboard_monthly_pdf" %}';
+    const _params = '?year=' + currentYear + '&month=' + currentMonth;
+    document.getElementById('monthlyReportPdfBtn').href = _pdfBase + _params;
+
+    fetch(_baseUrl + _params)
+        .then(r => r.json())
+        .then(data => {
+            const meta = document.getElementById('monthlyReportMeta');
+            if (!data.success) {
+                body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load data.</p>';
+                return;
+            }
+            document.getElementById('monthlyReportTitle').textContent = 'Monthly Fits \u2014 ' + data.month_label;
+            if (!data.rows.length) {
+                meta.textContent = '';
+                body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">No fits found for ' + data.month_label + '.</p>';
+                return;
+            }
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            meta.innerHTML = '&nbsp;&mdash;&nbsp;' + data.count + ' fit' + (data.count !== 1 ? 's' : '') +
+                ' &nbsp;|&nbsp; ' + fmt(data.total);
+
+            let html = '<table class="dash-report-table"><thead><tr>';
+            html += '<th>Customer</th><th>Sale #</th><th>Order Date</th><th>Fit Date</th><th>Designer</th><th class="text-right">Sale Value</th>';
+            html += '</tr></thead><tbody>';
+            data.rows.forEach(r => {
+                html += '<tr>' +
+                    '<td><a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.customer + '</a></td>' +
+                    '<td>' + (r.sale_number || '-') + '</td>' +
+                    '<td>' + (r.order_date || '-') + '</td>' +
+                    '<td>' + (r.fit_date || '-') + '</td>' +
+                    '<td>' + r.designer + '</td>' +
+                    '<td class="text-right">' + fmt(r.sale_value) + '</td>' +
+                    '</tr>';
+            });
+            const grandTotal = data.rows.reduce(function(s, r) { return s + r.sale_value; }, 0);
+            html += '<tr class="dash-report-year-sep">' +
+                '<td colspan="5"><strong>' + data.count + ' fit' + (data.count !== 1 ? 's' : '') + '</strong>' +
+                '<span class="dash-report-year-total">' + fmt(grandTotal) + ' total</span></td>' +
+                '<td class="text-right" style="font-weight:600;">' + fmt(grandTotal) + '</td>' +
+                '</tr>';
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        })
+        .catch(function() {
+            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        });
+}
+</script>
+
+<!-- Average Sale Value (12-Month) Report Modal -->
+<dialog id="avgReportModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-graph-up"></i>
+            <span>Average Sale Value &mdash; Last 12 Months</span>
+            <span id="avgReportMeta" class="dash-report-meta"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a href="{% url 'dashboard_avg_pdf' %}"
+               class="dash-report-pdf-btn"
+               title="Download PDF">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <button class="dash-report-close" onclick="document.getElementById('avgReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body" id="avgReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+</dialog>
+
+<script>
+document.getElementById('avgReportModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+function openAvgReport() {
+    const modal = document.getElementById('avgReportModal');
+    const body = document.getElementById('avgReportBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('avgReportMeta').textContent = '';
+    modal.showModal();
+
+    fetch('{% url "dashboard_avg_report" %}')
+        .then(r => r.json())
+        .then(data => {
+            const meta = document.getElementById('avgReportMeta');
+            if (!data.success || !data.rows.length) {
+                meta.textContent = '';
+                body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">No data available.</p>';
+                return;
+            }
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            meta.innerHTML = '&nbsp;&mdash;&nbsp;' + data.period +
+                ' &nbsp;|&nbsp; ' + data.grand_count.toLocaleString() + ' fits' +
+                ' &nbsp;|&nbsp; ' + fmt(data.grand_total) + ' total';
+
+            let html = '<table class="dash-report-table"><thead><tr>';
+            html += '<th>Month</th><th class="text-center">Fits</th><th class="text-right">Total Value</th><th class="text-right">Avg Sale Value</th>';
+            html += '</tr></thead><tbody>';
+            data.rows.forEach(r => {
+                html += '<tr>' +
+                    '<td>' + r.month + '</td>' +
+                    '<td class="text-center">' + r.count.toLocaleString() + '</td>' +
+                    '<td class="text-right">' + fmt(r.total) + '</td>' +
+                    '<td class="text-right">' + fmt(r.avg) + '</td>' +
+                    '</tr>';
+            });
+            const avgPerSale = data.grand_count ? Math.round(data.grand_total / data.grand_count) : 0;
+            html += '<tr class="dash-report-year-sep">' +
+                '<td><strong>Total / Avg</strong></td>' +
+                '<td class="text-center" style="font-weight:600;">' + data.grand_count.toLocaleString() + '</td>' +
+                '<td class="text-right" style="font-weight:600;">' + fmt(data.grand_total) + '</td>' +
+                '<td class="text-right" style="font-weight:600;">' + fmt(avgPerSale) + '</td>' +
+                '</tr>';
+            html += '</tbody></table>';
+            html += '<div style="margin-top:16px;padding:12px 16px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;display:flex;gap:32px;flex-wrap:wrap;">' +
+                '<div><div style="font-size:0.75rem;color:var(--text-secondary);">Daily Avg Revenue (total \u00f7 365)</div>' +
+                '<div style="font-size:1.25rem;font-weight:700;">' + fmt(data.daily_avg) + '</div></div>' +
+                '<div><div style="font-size:0.75rem;color:var(--text-secondary);">Avg Sale Value (total \u00f7 fits)</div>' +
+                '<div style="font-size:1.25rem;font-weight:700;">' + fmt(avgPerSale) + '</div></div>' +
+                '<div><div style="font-size:0.75rem;color:var(--text-secondary);">Period</div>' +
+                '<div style="font-size:0.85rem;font-weight:500;">' + data.period + '</div></div>' +
+                '</div>';
             body.innerHTML = html;
         })
         .catch(function() {

@@ -3,7 +3,7 @@ from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
-from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_outstanding_report, dashboard_outstanding_pdf
+from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_outstanding_report, dashboard_outstanding_pdf, dashboard_week_report, dashboard_week_pdf, dashboard_monthly_report, dashboard_monthly_pdf, dashboard_avg_report, dashboard_avg_pdf
 from .product_view import product_detail, add_product, upload_product_image
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, add_manual_payment, delete_manual_payment, scrape_anthill_payments
@@ -34,6 +34,12 @@ urlpatterns = [
     path('dashboard/stock-report/pdf/', dashboard_stock_pdf, name='dashboard_stock_pdf'),
     path('dashboard/outstanding-report/', dashboard_outstanding_report, name='dashboard_outstanding_report'),
     path('dashboard/outstanding-report/pdf/', dashboard_outstanding_pdf, name='dashboard_outstanding_pdf'),
+    path('dashboard/week-report/', dashboard_week_report, name='dashboard_week_report'),
+    path('dashboard/week-report/pdf/', dashboard_week_pdf, name='dashboard_week_pdf'),
+    path('dashboard/monthly-report/', dashboard_monthly_report, name='dashboard_monthly_report'),
+    path('dashboard/monthly-report/pdf/', dashboard_monthly_pdf, name='dashboard_monthly_pdf'),
+    path('dashboard/avg-report/', dashboard_avg_report, name='dashboard_avg_report'),
+    path('dashboard/avg-report/pdf/', dashboard_avg_pdf, name='dashboard_avg_pdf'),
 
     # User Profile
     path('profile/', user_profile, name='user_profile'),

@@ -192,7 +192,8 @@ class AnthillSale(models.Model):
 
     # Dates
     activity_date = models.DateTimeField(null=True, blank=True, help_text='When this activity was created in Anthill')
-    fit_from_date = models.CharField(max_length=50, blank=True, help_text='Fit From Date from Anthill (text field)')
+    fit_date = models.DateField(null=True, blank=True, help_text='Confirmed installation/fit date (from Anthill appointments or copied from linked Order)')
+    fit_from_date = models.CharField(max_length=50, blank=True, help_text='Fit From Date from Anthill custom field (text)')
     goods_due_in = models.CharField(max_length=50, blank=True, help_text='Goods Due In date from Anthill (text field)')
 
     # Metadata

@@ -555,14 +555,16 @@ def generate_outstanding_report_pdf(rows, location_label='All Locations'):
     return buffer
 
 
-def generate_stock_report_pdf(recent_changes, current_stock):
+def generate_stock_report_pdf(recent_changes, current_stock, as_of_date=None):
     """
     Generate a Stock Report PDF.
 
     `recent_changes` — list of dicts: date, sku, name, change_type, change_amount,
                        unit_cost, value_change, reference
     `current_stock`  — list of dicts: sku, name, category, location, unit_cost,
-                       quantity, total_value
+                       quantity, total_value  (ALL items; items <£500 are excluded
+                       from the detail table but included in the total)
+    `as_of_date`     — optional date object for historical stock reports
     Returns a BytesIO buffer.
     """
     buffer = io.BytesIO()
@@ -581,6 +583,14 @@ def generate_stock_report_pdf(recent_changes, current_stock):
     elements = []
     page_width = A4[0] - 30 * mm
 
+    # Items to display (>= £500) vs full total
+    all_items_total = sum(i['total_value'] for i in current_stock)
+    displayed_stock = [i for i in current_stock if i['total_value'] >= 500]
+    hidden_count = len(current_stock) - len(displayed_stock)
+    hidden_value = all_items_total - sum(i['total_value'] for i in displayed_stock)
+
+    date_label = as_of_date.strftime('%d %b %Y') if as_of_date else 'Current'
+
     # ── HEADER ──────────────────────────────────────────────────
     logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
     if os.path.exists(logo_path):
@@ -590,7 +600,7 @@ def generate_stock_report_pdf(recent_changes, current_stock):
         logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
 
     title_para = Paragraph(
-        '<font size="16" color="#1a1a2e"><b>Stock Report</b></font>',
+        f'<font size="16" color="#1a1a2e"><b>Stock Report</b></font><br/><font size="9" color="#6b7280">As of: {date_label}</font>',
         styles['Normal'],
     )
     header_table = Table(
@@ -605,10 +615,10 @@ def generate_stock_report_pdf(recent_changes, current_stock):
     elements.append(Spacer(1, 5 * mm))
 
     # ── SUMMARY BLOCK ───────────────────────────────────────────
-    total_stock_value = sum(i['total_value'] for i in current_stock)
+    total_stock_value = all_items_total
     info_data = [
         ['Items in Stock', f'{len(current_stock):,}', 'Total Stock Value', f'£{total_stock_value:,.0f}'],
-        ['Recent Changes', f'{len(recent_changes):,}', 'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
+        ['Shown (≥£500)', f'{len(displayed_stock):,}', 'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
     ]
     info_table = Table(info_data, colWidths=[
         page_width * 0.18, page_width * 0.32,
@@ -677,17 +687,18 @@ def generate_stock_report_pdf(recent_changes, current_stock):
     elements.append(Spacer(1, 6 * mm))
 
     # ── SECTION 2: CURRENT STOCK ─────────────────────────────────
-    elements.append(_section_header(f'Current Stock ({len(current_stock)} items)', styles))
+    section_title = f'Current Stock — {date_label} ({len(displayed_stock)} of {len(current_stock)} items shown, ≥£500)'
+    elements.append(_section_header(section_title, styles))
 
-    if current_stock:
+    if displayed_stock:
         stock_col_widths = [
-            page_width * 0.52,  # Item (SKU + Name + Category + Location)
-            page_width * 0.24,  # Qty × Unit Cost
-            page_width * 0.24,  # Total Value
+            page_width * 0.52,
+            page_width * 0.24,
+            page_width * 0.24,
         ]
         stock_headers = ['Item', 'Qty × Unit Cost', 'Total Value']
         stock_data = [stock_headers]
-        for i in current_stock:
+        for i in displayed_stock:
             meta_parts = [p for p in [i['category'], i['location']] if p]
             meta_str = ' · '.join(meta_parts)
             item_html = f'<b>{i["sku"]}</b><br/><font size="7" color="#888888">{i["name"]}'
@@ -705,12 +716,13 @@ def generate_stock_report_pdf(recent_changes, current_stock):
                     styles['CellText']
                 ),
             ])
-        # Totals row
+        # Totals row — always shows full all-items total
         grand_qty = sum(i['quantity'] for i in current_stock)
+        hidden_note = f' &nbsp;·&nbsp; +£{hidden_value:,.0f} in {hidden_count} items <£500' if hidden_count else ''
         stock_data.append([
-            Paragraph(f'<b>{len(current_stock):,} items &nbsp;·&nbsp; {grand_qty:,} units total</b>', styles['CellText']),
+            Paragraph(f'<b>{len(current_stock):,} items total &nbsp;·&nbsp; {grand_qty:,} units{hidden_note}</b>', styles['CellText']),
             '',
-            Paragraph(f'<b>£{total_stock_value:,.0f}</b>', styles['CellText']),
+            Paragraph(f'<b>£{all_items_total:,.0f}</b>', styles['CellText']),
         ])
         elements.append(_build_table(stock_data, stock_col_widths, has_total_row=True))
     else:
@@ -840,6 +852,213 @@ def generate_sales_after_pdf(rows, cutoff_date=None):
 
     elements.append(_build_table(table_data, col_widths, has_total_row=True))
 
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_fit_sales_pdf(rows, title='Fits Report'):
+    """
+    Generate a Fits report PDF (weekly or monthly).
+
+    `rows` is a list of dicts with keys: pk, customer, sale_number, order_date,
+    fit_date, sale_value, designer.
+    Returns a BytesIO buffer.
+    """
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title=title,
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ── HEADER ─────────────────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=12 * mm)
+        logo.hAlign = 'LEFT'
+    else:
+        logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
+
+    title_para = Paragraph(
+        f'<font size="14" color="#1a1a2e"><b>{title}</b></font>',
+        styles['Normal'],
+    )
+    header_table = Table(
+        [[logo, title_para]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # ── SUMMARY BLOCK ───────────────────────────────────────────────
+    total_value = sum(r['sale_value'] for r in rows)
+    info_data = [
+        ['Fits', f'{len(rows):,}', 'Total Value', f'\u00a3{total_value:,.0f}'],
+        ['Generated', datetime.now().strftime('%d %b %Y at %H:%M'), '', ''],
+    ]
+    info_table = Table(info_data, colWidths=[
+        page_width * 0.15, page_width * 0.35,
+        page_width * 0.20, page_width * 0.30,
+    ])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (2, 0), (2, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TEXTCOLOR', (3, 0), (3, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── FITS TABLE ────────────────────────────────────────────────────
+    col_widths = [
+        page_width * 0.26,  # Customer
+        page_width * 0.10,  # Sale #
+        page_width * 0.12,  # Order Date
+        page_width * 0.12,  # Fit Date
+        page_width * 0.22,  # Designer
+        page_width * 0.18,  # Sale Value
+    ]
+    headers = ['Customer', 'Sale #', 'Order Date', 'Fit Date', 'Designer', 'Sale Value']
+    table_data = [headers]
+    for r in rows:
+        table_data.append([
+            Paragraph(r['customer'], styles['CellText']),
+            r['sale_number'] or '\u2014',
+            r['order_date'] or '\u2014',
+            r['fit_date'] or '\u2014',
+            r['designer'] or '\u2014',
+            f'\u00a3{r["sale_value"]:,.0f}',
+        ])
+    table_data.append([
+        Paragraph(f'<b>{len(rows)} fits</b>', styles['CellText']),
+        '', '', '', 'Total',
+        f'\u00a3{total_value:,.0f}',
+    ])
+
+    elements.append(_build_table(table_data, col_widths, has_total_row=True))
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_avg_sales_pdf(rows, grand_total=0, grand_count=0, period=''):
+    """
+    Generate a 12-Month Average Sale Value breakdown PDF.
+
+    `rows` is a list of dicts: month, count, total, avg.
+    Returns a BytesIO buffer.
+    """
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title='Average Sale Value \u2014 Last 12 Months',
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ── HEADER ─────────────────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=12 * mm)
+        logo.hAlign = 'LEFT'
+    else:
+        logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
+
+    title_para = Paragraph(
+        '<font size="14" color="#1a1a2e"><b>Average Sale Value \u2014 Last 12 Months</b></font>',
+        styles['Normal'],
+    )
+    header_table = Table(
+        [[logo, title_para]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # ── SUMMARY BLOCK ───────────────────────────────────────────────
+    daily_avg = round(grand_total / 365, 0) if grand_total else 0
+    info_data = [
+        ['Period', period, 'Total Value', f'\u00a3{grand_total:,.0f}'],
+        ['Total Fits', f'{grand_count:,}', 'Daily Avg Revenue', f'\u00a3{daily_avg:,.0f}'],
+    ]
+    info_table = Table(info_data, colWidths=[
+        page_width * 0.15, page_width * 0.35,
+        page_width * 0.20, page_width * 0.30,
+    ])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (2, 0), (2, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TEXTCOLOR', (3, 0), (3, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── MONTHLY TABLE ──────────────────────────────────────────────────
+    col_widths = [
+        page_width * 0.30,  # Month
+        page_width * 0.15,  # Fits
+        page_width * 0.30,  # Total Value
+        page_width * 0.25,  # Avg Sale
+    ]
+    headers = ['Month', 'Fits', 'Total Value', 'Avg Sale Value']
+    table_data = [headers]
+    for r in rows:
+        table_data.append([
+            r['month'],
+            f'{r["count"]:,}',
+            f'\u00a3{r["total"]:,.0f}',
+            f'\u00a3{r["avg"]:,.0f}',
+        ])
+    avg_per_sale = round(grand_total / grand_count, 0) if grand_count else 0
+    table_data.append([
+        Paragraph('<b>Total</b>', styles['CellText']),
+        Paragraph(f'<b>{grand_count:,}</b>', styles['CellText']),
+        Paragraph(f'<b>\u00a3{grand_total:,.0f}</b>', styles['CellText']),
+        Paragraph(f'<b>\u00a3{avg_per_sale:,.0f}</b>', styles['CellText']),
+    ])
+
+    elements.append(_build_table(table_data, col_widths, has_total_row=True))
     doc.build(elements)
     buffer.seek(0)
     return buffer

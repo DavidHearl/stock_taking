@@ -307,6 +307,25 @@ def sync_workflow(dry_run: bool = False, days: int = None):
         update_field('fit_from_date', cf.get('Fit From Date', ''))
         update_field('goods_due_in', cf.get('Goods Due In', ''))
 
+        # --- Parse fit_from_date text into fit_date ---
+        # The Anthill "Fit From Date" custom field (DD/MM/YYYY) is the source of
+        # truth for installation dates. Parse it into the proper date field.
+        raw_fit = cf.get('Fit From Date', '').strip()
+        if raw_fit:
+            from datetime import datetime as _dt
+            _DATE_FMTS = ('%d/%m/%Y', '%d/%m/%y', '%Y-%m-%d', '%d-%m-%Y')
+            parsed_fit = None
+            for _fmt in _DATE_FMTS:
+                try:
+                    parsed_fit = _dt.strptime(raw_fit, _fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if parsed_fit is not None and parsed_fit != sale.fit_date:
+                sale.fit_date = parsed_fit
+                changed_fields.append('fit_date')
+                logger.debug(f'    fit_date (from Fit From Date): {parsed_fit}')
+
         if changed_fields:
             if not dry_run:
                 sale.save(update_fields=changed_fields + ['updated_at'])

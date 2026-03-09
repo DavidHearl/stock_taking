@@ -200,15 +200,45 @@ def customer_detail(request, pk):
     # Get linked orders
     orders = Order.objects.filter(customer=customer).order_by('-order_date')
 
-    # Get Anthill sales for this customer — annotated with payment totals
-    anthill_sales = (
+    # Get Anthill sales for this customer — annotated with payment totals, prefetch linked order
+    from datetime import datetime, timezone as dt_timezone
+    all_anthill_sales = list(
         customer.anthill_sales
+        .select_related('order', 'order__designer')
         .annotate(
             payments_total=Sum('payments__amount'),
             payments_count=Count('payments'),
         )
-        .order_by('-activity_date')
+        .order_by('activity_date')  # ascending for lead-matching; reversed later
     )
+
+    # Separate "lead-type" activities (e.g. "Product Lead") from regular sales
+    lead_type_sales = [s for s in all_anthill_sales if 'lead' in (s.activity_type or '').lower()]
+    non_lead_sales  = [s for s in all_anthill_sales if 'lead' not in (s.activity_type or '').lower()]
+
+    # Match each lead activity to the most recent preceding sale (greedy, oldest sale first)
+    _min_dt = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
+    used_lead_pks = set()
+    sales_data = []
+    for sale in non_lead_sales:  # already sorted ascending
+        best_lead = None
+        for lead_act in lead_type_sales:
+            if lead_act.pk in used_lead_pks:
+                continue
+            if lead_act.activity_date and sale.activity_date and lead_act.activity_date <= sale.activity_date:
+                if best_lead is None or lead_act.activity_date > best_lead.activity_date:
+                    best_lead = lead_act
+        if best_lead:
+            used_lead_pks.add(best_lead.pk)
+        sales_data.append({'sale': sale, 'lead_activity': best_lead})
+
+    # Any unmatched lead activities appear as standalone top-level entries
+    for lead_act in lead_type_sales:
+        if lead_act.pk not in used_lead_pks:
+            sales_data.append({'sale': lead_act, 'lead_activity': None})
+
+    # Sort descending by date for display
+    sales_data.sort(key=lambda x: x['sale'].activity_date or _min_dt, reverse=True)
 
     # Get invoices linked to this customer
     invoices = Invoice.objects.filter(customer=customer).order_by('-date')
@@ -218,15 +248,24 @@ def customer_detail(request, pk):
     if customer.raw_data and isinstance(customer.raw_data, dict):
         contacts = customer.raw_data.get('contacts', [])
 
+    # Find associated lead — first by anthill_customer_id match, then by converted_to_customer FK
+    from .models import Lead
+    lead = None
+    if customer.anthill_customer_id:
+        lead = Lead.objects.filter(anthill_customer_id=customer.anthill_customer_id).first()
+    if lead is None:
+        lead = customer.source_leads.first()
+
     context = {
         'customer': customer,
         'orders': orders,
         'order_count': orders.count(),
         'contacts': contacts,
-        'anthill_sales': anthill_sales,
-        'anthill_sales_count': anthill_sales.count(),
+        'sales_data': sales_data,
+        'anthill_sales_count': len(all_anthill_sales),
         'invoices': invoices,
         'invoice_count': invoices.count(),
+        'lead': lead,
     }
 
     return render(request, 'stock_take/customer_detail.html', context)
@@ -761,6 +800,7 @@ def add_manual_payment(request, pk):
 
     from decimal import Decimal, InvalidOperation
     from datetime import datetime
+    from django.utils import timezone
 
     created_ids = []
     errors = []
@@ -770,7 +810,7 @@ def add_manual_payment(request, pk):
         raw_date = str(p.get('date', '')).strip()
         for fmt in ('%d/%m/%y %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%y', '%d/%m/%Y'):
             try:
-                date_val = datetime.strptime(raw_date, fmt)
+                date_val = timezone.make_aware(datetime.strptime(raw_date, fmt))
                 break
             except ValueError:
                 continue
