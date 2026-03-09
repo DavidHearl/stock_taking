@@ -284,11 +284,21 @@
                                 </div>
                                 <div>
                                     <label class="form-label">Order Date</label>
-                                    <input type="date" class="form-input" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
+                                    <div class="flex-row-gap">
+                                        <input type="date" class="form-input flex-1" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
+                                        <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('order-date-input').value=''" title="Clear order date">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div>
                                     <label class="form-label">Fit Date</label>
-                                    <input type="date" class="form-input" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
+                                    <div class="flex-row-gap">
+                                        <input type="date" class="form-input flex-1" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
+                                        <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('fit-date-input').value=''" title="Clear fit date">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div>
                                     <label class="form-label">Total Value (Inc VAT)</label>
@@ -343,18 +353,26 @@
 
                                     </div>
                                     
-                                    <!-- Boards Ordered Checkbox -->
-                                    {% if order.boards_po %}
+                                    <!-- Boards Not Required Checkbox -->
                                     <div class="job-checkbox-container">
-                                        <input class="job-checkbox" type="checkbox" id="boardsOrdered" 
-                                               {% if order.boards_po.boards_ordered %}checked{% endif %}
-                                               onchange="updateBoardsOrdered({{ order.boards_po.id }}, this.checked)">
-                                        <label class="job-checkbox-label" for="boardsOrdered">
-                                            <i class="bi bi-box"></i> Boards Ordered
+                                        <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
+                                               {% if order.boards_not_required %}checked{% endif %}
+                                               onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
+                                        <label class="job-checkbox-label" for="boardsNotRequired">
+                                            <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required
                                         </label>
                                     </div>
-                                    {% endif %}
-                                    
+
+                                    <!-- Accessories Not Required Checkbox -->
+                                    <div class="job-checkbox-container">
+                                        <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
+                                               {% if order.accessories_not_required %}checked{% endif %}
+                                               onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
+                                        <label class="job-checkbox-label" for="accessoriesNotRequired">
+                                            <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required
+                                        </label>
+                                    </div>
+
                                     <!-- All Items Ordered Checkbox -->
                                     <div class="job-checkbox-container">
                                         <input class="job-checkbox" type="checkbox" id="allItemsOrdered" 
@@ -650,7 +668,7 @@
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} <span class="badge badge-info badge-ml">Additional</span>{% endif %}{% if bpo_data.purchase_order.email_sent_at %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
+                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} <span class="badge badge-info badge-ml">Additional</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
                 </div>
                 <div class="header-actions">
                     <!-- File status indicators -->
@@ -2345,13 +2363,6 @@
                         <small class="form-help">Must start with "PO"</small>
                     </div>
                     <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="boards_ordered" id="boards-ordered-input">
-                            <span>Boards Ordered</span>
-                        </label>
-                        <small class="form-help">Check if boards have already been ordered</small>
-                    </div>
-                    <div class="form-group">
                         <label for="po-file-input">Attach File (Optional)</label>
                         <input type="file" id="po-file-input" name="file" class="form-input">
                     </div>
@@ -2612,10 +2623,14 @@ function saveSaleInfo(orderId) {
             document.getElementById('designer-display').textContent = designerId ? designerName : 'Not assigned';
             
             // Format dates for display
-            const orderDate = new Date(data.order_date);
-            const fitDate = new Date(data.fit_date);
-            document.getElementById('order-date-display').textContent = orderDate.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
-            document.getElementById('fit-date-display').textContent = fitDate.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
+            const orderDateVal = data.order_date;
+            const fitDateVal = data.fit_date;
+            document.getElementById('order-date-display').textContent = orderDateVal
+                ? new Date(orderDateVal).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})
+                : 'Not set';
+            document.getElementById('fit-date-display').textContent = fitDateVal
+                ? new Date(fitDateVal).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})
+                : 'Not set';
             
             // Update total value displays
             const totalValue = parseFloat(data.total_value_inc_vat) || 0;
@@ -2872,29 +2887,6 @@ function confirmJobFinished() {
 function cancelJobFinished() {
     document.getElementById('jobFinished').checked = false;
     closeModal('jobFinishedModal');
-}
-
-// Update Boards Ordered Checkbox
-function updateBoardsOrdered(boardsPoId, value) {
-    fetch(`/stock-take/boards-po/${boardsPoId}/update-boards-ordered/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({ boards_ordered: value })
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            showAlert('Boards Ordered updated successfully!', 'success');
-        } else {
-            showAlert('Error updating Boards Ordered', 'danger');
-        }
-    })
-    .catch(error => {
-        showAlert('Error updating Boards Ordered', 'danger');
-    });
 }
 
 // Auto-dismiss alerts after 5 seconds

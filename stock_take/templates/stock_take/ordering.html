@@ -8,6 +8,64 @@
 {% block extra_css %}
 <link href="{% static 'css/ordering.css' %}" rel="stylesheet">
 <link href="{% static 'css/ordering_modal.css' %}" rel="stylesheet">
+<style>
+.pfp-divider-cell {
+    background: rgba(240,173,78,0.08);
+    border-top: 2px dashed rgba(240,173,78,0.5);
+    border-bottom: 2px dashed rgba(240,173,78,0.5);
+    text-align: center;
+    padding: 6px 16px;
+    color: #f0ad4e;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+.pfp-row > td {
+    background-color: rgba(240,173,78,0.04) !important;
+}
+.badge-pfp {
+    display: inline-block;
+    padding: 1px 7px;
+    background: rgba(240,173,78,0.18);
+    border: 1px solid #f0ad4e;
+    border-radius: 4px;
+    color: #f0ad4e;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+.badge-acc {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.badge-acc-nr {
+    background: rgba(150,150,150,0.1);
+    border: 1px solid rgba(150,150,150,0.25);
+    color: rgba(150,150,150,0.6);
+}
+.badge-acc-added {
+    background: rgba(240,173,78,0.15);
+    border: 1px solid rgba(240,173,78,0.5);
+    color: #f0ad4e;
+}
+.badge-acc-ordered {
+    background: rgba(16,185,129,0.12);
+    border: 1px solid rgba(16,185,129,0.4);
+    color: #10b981;
+}
+#togglePfpBtn { white-space: nowrap; }
+/* Override global left-align on th so text-center class works */
+.table thead th.text-center { text-align: center !important; }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -55,6 +113,9 @@
         <i class="bi bi-search"></i>
         <input type="text" id="orderSearch" placeholder="Search orders..." autocomplete="off">
     </div>
+    <button type="button" id="togglePfpBtn" class="btn btn-sm btn-outline-warning" onclick="togglePfp()" title="Toggle PFP orders">
+        <i class="bi bi-clock"></i> Hide PFP
+    </button>
 </div>
 
 <div class="card">
@@ -100,9 +161,9 @@
             </tr>
         </thead>
         <tbody>
-            {% for order in orders %}
-            <tr 
-                class="clickable-row {% if order.job_finished %}row-finished{% endif %} {% if order.order_type == 'remedial' %}row-remedial{% endif %}" 
+            {% for order in pfp_orders %}
+            <tr
+                class="clickable-row pfp-row {% if order.job_finished %}row-finished{% endif %} {% if order.order_type == 'remedial' %}row-remedial{% endif %}"
                 onclick="toggleDetails('details-{{ order.sale_number }}', this)"
                 id="main-{{ order.sale_number }}"
                 data-sale-number="{{ order.sale_number }}"
@@ -110,13 +171,15 @@
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
                 <td>{{ order.sale_number }}</td>
-                <td>{{ order.fit_date|date:"d F"|default:"-" }}</td>
+                <td><span class="badge-pfp">PFP</span></td>
                 <td>{{ order.time_allowance|default:"-" }}</td>
 
                 <!-- Boards -->
                 <td>
                     {% if not order.job_finished %}
-                        {% if order.boards_po %}
+                        {% if order.boards_not_required %}
+                            <span class="status-icon warning" title="Boards Not Required">&ndash;</span>
+                        {% elif order.boards_po %}
                             <div class="status-cell">
                                 <a class="po-link" href="{% url 'order_details' order.id %}">
                                     {{ order.boards_po.po_number }}
@@ -160,8 +223,120 @@
                     {% endif %}
                 </td>
                 <!-- Accessories Check -->
-                <td data-indicator="accessories">
-                    <!-- Loaded via AJAX -->
+                <td data-indicator="accessories" data-accessories-not-required="{% if order.accessories_not_required %}1{% else %}0{% endif %}" style="text-align:center;">
+                    {% if order.accessories_not_required %}<span class="badge-acc badge-acc-nr">N/R</span>{% endif %}
+                </td>
+                <!-- Items ordered Check -->
+                <td>
+                    {% if order.all_items_ordered %}
+                        <span class="status-icon success" title="All Materials Ordered">✓</span>
+                    {% endif %}
+                </td>
+                <td onclick="event.stopPropagation();">
+                    {% if order.anthill_id %}
+                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"
+                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Customer">
+                            <i class="bi bi-person-fill"></i> Customer
+                        </a>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td onclick="event.stopPropagation();">
+                    {% if order.sale_number %}
+                        <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}"
+                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Sale">
+                            <i class="bi bi-receipt"></i> Sale
+                        </a>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td onclick="event.stopPropagation();">
+                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="width: 100%; display: block; text-align: center;">Details</a>
+                </td>
+            </tr>
+
+            <tr class="detail-row hidden pfp-row" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
+                <td colspan="12" class="detail-cell">
+                    <div class="loading-spinner">Loading order details...</div>
+                </td>
+            </tr>
+            {% endfor %}
+
+            {% if pfp_orders %}
+            <tr id="pfp-divider" class="pfp-divider-row">
+                <td colspan="12" class="pfp-divider-cell">
+                    <i class="bi bi-clock"></i>
+                    PFP &mdash; Pending Fit Planning &nbsp;&middot;&nbsp; {{ pfp_orders|length }} order{{ pfp_orders|length|pluralize }} with no dates &nbsp;|&nbsp; dated orders below &darr;
+                </td>
+            </tr>
+            {% endif %}
+
+            {% for order in regular_orders %}
+            <tr
+                class="clickable-row {% if order.job_finished %}row-finished{% endif %} {% if order.order_type == 'remedial' %}row-remedial{% endif %}"
+                onclick="toggleDetails('details-{{ order.sale_number }}', this)"
+                id="main-{{ order.sale_number }}"
+                data-sale-number="{{ order.sale_number }}"
+            >
+                <td>{{ order.first_name }}</td>
+                <td>{{ order.last_name }}</td>
+                <td>{{ order.sale_number }}</td>
+                <td>{{ order.fit_date|date:"d F"|default:"-" }}</td>
+                <td>{{ order.time_allowance|default:"-" }}</td>
+
+                <!-- Boards -->
+                <td>
+                    {% if not order.job_finished %}
+                        {% if order.boards_not_required %}
+                            <span class="status-icon warning" title="Boards Not Required">&ndash;</span>
+                        {% elif order.boards_po %}
+                            <div class="status-cell">
+                                <a class="po-link" href="{% url 'order_details' order.id %}">
+                                    {{ order.boards_po.po_number }}
+                                </a>
+                                {% if order.boards_po.boards_ordered %}
+                                    <span class="status-icon success" title="Ordered">✓</span>
+                                {% else %}
+                                    <span class="status-icon danger" title="Not Ordered">✗</span>
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <a href="{% url 'order_details' order.id %}" class="text-muted">
+                                Not assigned
+                            </a>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <!-- OS Doors -->
+                <td>
+                    {% if order.os_doors.exists or order.os_doors_required %}
+                        <div class="status-cell">
+                            <a class="po-link" href="{% url 'order_details' order.id %}">
+                                {% if order.os_doors_po %}
+                                    {{ order.os_doors_po }}
+                                {% elif order.os_doors_required %}
+                                    Required
+                                {% else %}
+                                    No PO
+                                {% endif %}
+                            </a>
+                            {% if order.os_doors_po %}
+                                <span class="status-icon success" title="OS Doors Ordered">✓</span>
+                            {% else %}
+                                <span class="status-icon danger" title="OS Doors Not Ordered">✗</span>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <!-- Accessories Check -->
+                <td data-indicator="accessories" data-accessories-not-required="{% if order.accessories_not_required %}1{% else %}0{% endif %}" style="text-align:center;">
+                    {% if order.accessories_not_required %}<span class="badge-acc badge-acc-nr">N/R</span>{% endif %}
                 </td>
                 <!-- Items ordered Check -->
                 <td>
@@ -199,7 +374,7 @@
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
-        {% endfor %}
+            {% endfor %}
         </tbody>
     </table>
 </div>
@@ -504,28 +679,28 @@
             const rows = tableBody.querySelectorAll('tr');
 
             rows.forEach(row => {
-                // Skip detail rows (they're handled with their main rows)
-                if (row.classList.contains('detail-row')) return;
+                // Skip detail rows and the PFP divider row
+                if (row.classList.contains('detail-row') || row.classList.contains('pfp-divider-row')) return;
 
                 const text = row.textContent.toLowerCase();
                 const shouldShow = text.includes(searchTerm);
-                
+                const isPfpRow = row.classList.contains('pfp-row');
+
                 // Find the corresponding detail row
                 const saleNumber = row.id.replace('main-', '');
                 const detailRow = document.getElementById('details-' + saleNumber);
-                
+
                 if (shouldShow) {
-                    // Show the main row
-                    row.style.display = '';
-                    // Reset detail row to its proper state (clear inline style, use CSS class only)
-                    if (detailRow) {
-                        detailRow.style.display = ''; // Always clear inline style
-                        if (row.classList.contains('expanded')) {
-                            // If row was expanded, keep it expanded
-                            detailRow.classList.remove('hidden');
-                        } else {
-                            // If row was collapsed, keep it collapsed
-                            detailRow.classList.add('hidden');
+                    // Respect pfpHidden: don't re-show PFP rows if they're toggled off
+                    if (!pfpHidden || !isPfpRow) {
+                        row.style.display = '';
+                        if (detailRow) {
+                            detailRow.style.display = '';
+                            if (row.classList.contains('expanded')) {
+                                detailRow.classList.remove('hidden');
+                            } else {
+                                detailRow.classList.add('hidden');
+                            }
                         }
                     }
                 } else {
@@ -533,7 +708,7 @@
                     row.style.display = 'none';
                     // Always hide and collapse detail row when main row is hidden
                     if (detailRow) {
-                        detailRow.style.display = 'none'; // Use inline style for filtered-out rows
+                        detailRow.style.display = 'none';
                         detailRow.classList.add('hidden');
                         row.classList.remove('expanded');
                     }
@@ -541,6 +716,25 @@
             });
         });
     });
+
+    // PFP toggle
+    let pfpHidden = false;
+    function togglePfp() {
+        pfpHidden = !pfpHidden;
+        document.querySelectorAll('#order-table .pfp-row, #pfp-divider').forEach(function(el) {
+            el.style.display = pfpHidden ? 'none' : '';
+        });
+        const btn = document.getElementById('togglePfpBtn');
+        if (pfpHidden) {
+            btn.innerHTML = '<i class="bi bi-clock"></i> Show PFP';
+            btn.classList.remove('btn-outline-warning');
+            btn.classList.add('btn-warning');
+        } else {
+            btn.innerHTML = '<i class="bi bi-clock"></i> Hide PFP';
+            btn.classList.remove('btn-warning');
+            btn.classList.add('btn-outline-warning');
+        }
+    }
 
     // Modal functions
     function openModal(modalId) {
@@ -652,8 +846,15 @@
                     
                     // Update accessories cell
                     const accessoriesCell = row.querySelector('[data-indicator="accessories"]');
-                    if (accessoriesCell && indicators.has_accessories) {
-                        accessoriesCell.innerHTML = '<span class="status-icon success" title="Has Accessories">✓</span>';
+                    if (accessoriesCell && accessoriesCell.dataset.accessoriesNotRequired !== '1') {
+                        if (indicators.has_accessories) {
+                            if (indicators.all_items_ordered || !indicators.has_unordered_accessories) {
+                                accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-ordered" title="All accessories ordered">Ordered</span>';
+                            } else {
+                                accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-added" title="Accessories added, not all ordered">Added</span>';
+                            }
+                        }
+                        // No accessories and not N/R — leave cell empty (no data)
                     }
                     
                     loadedIndicators.add(saleNumber);
@@ -704,8 +905,14 @@
                                 
                                 // Update accessories cell
                                 const accessoriesCell = row.querySelector('[data-indicator="accessories"]');
-                                if (accessoriesCell && indicators.has_accessories) {
-                                    accessoriesCell.innerHTML = '<span class="status-icon success" title="Has Accessories">✓</span>';
+                                if (accessoriesCell && accessoriesCell.dataset.accessoriesNotRequired !== '1') {
+                                    if (indicators.has_accessories) {
+                                        if (indicators.all_items_ordered || !indicators.has_unordered_accessories) {
+                                            accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-ordered" title="All accessories ordered">Ordered</span>';
+                                        } else {
+                                            accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-added" title="Accessories added, not all ordered">Added</span>';
+                                        }
+                                    }
                                 }
                                 
                                 loadedIndicators.add(saleNumber);

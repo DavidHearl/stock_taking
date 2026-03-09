@@ -95,12 +95,21 @@ def ordering(request):
             ordering = ['job_finished', f'-{order_field}', 'last_name', 'first_name', models.F('boards_po__po_number').asc(nulls_last=True)]
     
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by selected field
+    # Insert boards_is_ordered as second priority so un-ordered boards float to the top
+    ordering.insert(1, 'boards_is_ordered')
     # OPTIMIZATION: Don't load PNX items upfront - they'll be loaded via AJAX when row is clicked
     # OPTIMIZATION: Removed prefetch and annotations - will lazy load indicators via AJAX
     from django.db.models import Exists, OuterRef, Q
     
     # Get all orders for statistics
-    all_orders = Order.objects.select_related('boards_po').all()
+    from django.db.models import Case, When, Value, BooleanField as BF
+    all_orders = Order.objects.select_related('boards_po').annotate(
+        boards_is_ordered=Case(
+            When(boards_po__boards_ordered=True, then=Value(True)),
+            default=Value(False),
+            output_field=BF(),
+        )
+    )
     total_orders = all_orders.count()
     completed_orders = all_orders.filter(job_finished=True).count()
     wip_orders = all_orders.filter(job_finished=False).count()
@@ -156,6 +165,8 @@ def ordering(request):
 
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
+        'pfp_orders': orders.filter(order_date__isnull=True, fit_date__isnull=True),
+        'regular_orders': orders.filter(models.Q(order_date__isnull=False) | models.Q(fit_date__isnull=False)),
         'boards_pos': boards_pos,
         'accessories_csvs': accessories_csvs,
         'form': form,
@@ -324,10 +335,14 @@ def load_order_indicators_ajax(request):
         has_accessories=Exists(
             Accessory.objects.filter(order_id=OuterRef('pk'))
         ),
+        has_unordered_accessories=Exists(
+            Accessory.objects.filter(order_id=OuterRef('pk'), ordered=False)
+        ),
         has_remedials=Exists(
             Remedial.objects.filter(original_order_id=OuterRef('pk'))
         )
-    ).values('sale_number', 'has_missing', 'has_accessories', 'has_remedials')
+    ).values('sale_number', 'has_missing', 'has_accessories', 'has_unordered_accessories',
+             'has_remedials', 'boards_not_required', 'accessories_not_required', 'all_items_ordered')
     
     indicators = {order['sale_number']: order for order in orders}
     
@@ -3691,11 +3706,15 @@ def update_sale_info(request, order_id):
         else:
             order.designer = None
         
-        # Parse dates
+        # Parse dates — an empty string explicitly clears the date
         if data.get('order_date'):
             order.order_date = datetime.strptime(data['order_date'], '%Y-%m-%d').date()
+        else:
+            order.order_date = None
         if data.get('fit_date'):
             order.fit_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
+        else:
+            order.fit_date = None
         
         # Update total value inc VAT
         if data.get('total_value_inc_vat'):
@@ -3974,6 +3993,10 @@ def update_job_checkbox(request, order_id):
         
         if 'all_items_ordered' in data:
             order.all_items_ordered = bool(data['all_items_ordered'])
+        if 'boards_not_required' in data:
+            order.boards_not_required = bool(data['boards_not_required'])
+        if 'accessories_not_required' in data:
+            order.accessories_not_required = bool(data['accessories_not_required'])
         if 'job_finished' in data:
             was_finished = order.job_finished
             order.job_finished = bool(data['job_finished'])

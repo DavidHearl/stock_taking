@@ -343,6 +343,8 @@ class Order(models.Model):
     designer = models.ForeignKey('Designer', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders', help_text='Assigned designer')
     os_doors_required = models.BooleanField(default=False, help_text='True if OS Doors are required for this order')
     os_doors_po = models.CharField(max_length=50, blank=True, help_text='PO number when OS Doors are ordered')
+    boards_not_required = models.BooleanField(default=False, help_text='Boards are not required for this order')
+    accessories_not_required = models.BooleanField(default=False, help_text='Accessories are not required for this order')
     all_items_ordered = models.BooleanField(default=False, help_text='Manual confirmation that all items have been ordered')
     workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
     original_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Original uploaded CSV file')

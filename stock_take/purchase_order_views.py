@@ -868,6 +868,11 @@ def purchase_order_receive(request, po_id):
     po.received_date = today
     po.save(update_fields=['status', 'received_date'])
 
+    # Mark the linked BoardsPO as ordered (Approved or Received both mean it was ordered)
+    if po.display_number:
+        from .models import BoardsPO
+        BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=True)
+
     return JsonResponse({
         'success': True,
         'received_items': received_items,
@@ -1082,6 +1087,8 @@ def purchase_order_delete_board_items(request, po_id):
     # Handle Carnehill (boards) POs — mark PNX items as received
     boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
     if boards_po:
+        boards_po.boards_ordered = True
+        boards_po.save(update_fields=['boards_ordered'])
         for pnx_item in boards_po.pnx_items.all():
             if not pnx_item.is_fully_received:
                 pnx_item.received = True
@@ -1513,6 +1520,11 @@ def purchase_order_send_email(request, po_id):
             po.approved_date = datetime.now().strftime('%d-%m-%Y')
             update_fields += ['status', 'approved_by_name', 'approved_date']
 
+            # Mark boards as ordered on the linked BoardsPO (if any)
+            if po.display_number:
+                from .models import BoardsPO
+                BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=True)
+
         po.save(update_fields=update_fields)
         
         logger.info(f'PO {po.display_number} emailed to {recipient} by {request.user}')
@@ -1546,11 +1558,19 @@ def purchase_order_update_status(request, po_id):
         po.approved_by_name = request.user.get_full_name() or request.user.username
         po.approved_date = datetime.now().strftime('%d-%m-%Y')
         po.save(update_fields=['status', 'approved_by_name', 'approved_date'])
+        # Mark boards as ordered on the linked BoardsPO (if any)
+        if po.display_number:
+            from .models import BoardsPO
+            BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=True)
     elif new_status == 'Draft':
         po.status = 'Draft'
         po.approved_by_name = None
         po.approved_date = None
         po.save(update_fields=['status', 'approved_by_name', 'approved_date'])
+        # Revert boards_ordered when un-approving
+        if po.display_number:
+            from .models import BoardsPO
+            BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=False)
     else:
         return JsonResponse({'error': f'Invalid status: {new_status}'}, status=400)
 
