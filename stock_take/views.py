@@ -321,7 +321,7 @@ def load_order_details_ajax(request, sale_number):
 def load_order_indicators_ajax(request):
     """AJAX endpoint to load order indicators (has_missing, has_accessories, has_remedials) in background"""
     from django.http import JsonResponse
-    from django.db.models import Exists, OuterRef
+    from django.db.models import Exists, OuterRef, Sum
     
     sale_numbers = request.GET.get('sale_numbers', '').split(',')
     if not sale_numbers or sale_numbers == ['']:
@@ -345,6 +345,53 @@ def load_order_indicators_ajax(request):
              'has_remedials', 'boards_not_required', 'accessories_not_required', 'all_items_ordered')
     
     indicators = {order['sale_number']: order for order in orders}
+
+    # ---------- Stock shortage computation ----------
+    # Find all non-allocated, non-missing accessories with a stock link for this batch
+    batch_accs = list(
+        Accessory.objects.filter(
+            order__sale_number__in=sale_numbers,
+            is_allocated=False,
+            missing=False,
+            stock_item__isnull=False,
+        ).values('order__sale_number', 'sku', 'quantity')
+    )
+    if batch_accs:
+        unique_skus = {a['sku'] for a in batch_accs}
+
+        # Current stock levels
+        stock_qtys = dict(
+            StockItem.objects.filter(sku__in=unique_skus).values_list('sku', 'quantity')
+        )
+
+        # Incoming quantities on Approved (not yet received) POs
+        incoming_rows = (
+            PurchaseOrderProduct.objects
+            .filter(sku__in=unique_skus, purchase_order__status='Approved')
+            .values('sku').annotate(total=Sum('order_quantity'))
+        )
+        incoming_qtys = {r['sku']: float(r['total'] or 0) for r in incoming_rows}
+
+        # Total demand for those SKUs across ALL active non-allocated accessories
+        demand_rows = (
+            Accessory.objects
+            .filter(sku__in=unique_skus, order__job_finished=False, is_allocated=False, missing=False)
+            .values('sku').annotate(total=Sum('quantity'))
+        )
+        total_demand = {r['sku']: float(r['total'] or 0) for r in demand_rows}
+
+        # SKUs where stock + incoming < total demand
+        short_skus = {
+            sku for sku in unique_skus
+            if (stock_qtys.get(sku, 0) or 0) + incoming_qtys.get(sku, 0) - total_demand.get(sku, 0) < 0
+        }
+
+        # Tag orders that have at least one short accessory
+        for acc in batch_accs:
+            sn = acc['order__sale_number']
+            if acc['sku'] in short_skus and sn in indicators:
+                indicators[sn]['has_short'] = True
+    # ------------------------------------------------
     
     return JsonResponse({'success': True, 'indicators': indicators})
 
@@ -679,7 +726,7 @@ def shortages(request):
         VAT_RATE = Decimal('1.19')
         
         upcoming_orders = Order.objects.filter(
-            job_finished=False, fit_date__gte=today
+            job_finished=False
         ).prefetch_related('accessories__stock_item').order_by('fit_date')
         
         upcoming_requirements = defaultdict(lambda: {
@@ -1136,7 +1183,7 @@ def shortages(request):
                 search_result = list(search_data.values())
         
         upcoming_orders = Order.objects.filter(
-            job_finished=False, fit_date__gte=today
+            job_finished=False
         ).prefetch_related('accessories__stock_item').order_by('fit_date')
         
         upcoming_requirements = defaultdict(lambda: {
@@ -1488,7 +1535,6 @@ def material_shortage(request):
     # Get upcoming orders with prefetched accessories and stock items (OPTIMIZATION)
     upcoming_orders = Order.objects.filter(
         job_finished=False,
-        fit_date__gte=today
     ).prefetch_related(
         'accessories__stock_item'
     ).order_by('fit_date')
@@ -6580,6 +6626,7 @@ def allocate_accessories(request, order_id):
         data = json.loads(request.body)
         allocate = data.get('allocate', True)
         qty_overrides = data.get('quantities', {})  # {str(accessory_id): int}
+        skip_stock_adjustment = data.get('skip_stock_adjustment', False)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
@@ -6613,7 +6660,7 @@ def allocate_accessories(request, order_id):
 
                 count += 1
 
-                if acc.stock_item_id and acc.quantity > 0:
+                if not skip_stock_adjustment and acc.stock_item_id and acc.quantity > 0:
                     qty = int(acc.quantity)
                     # Use F() expression to atomically update stock, avoiding stale reads
                     # when multiple accessories share the same stock item

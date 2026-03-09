@@ -2416,6 +2416,9 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('allocationModal')">Cancel</button>
+                <button type="button" class="btn btn-outline-warning" id="confirm-allocation-nostock-btn" onclick="confirmAllocationNoStock()" title="Mark all items as allocated without deducting stock levels">
+                    <i class="bi bi-tag"></i> Mark Allocated (No Stock Change)
+                </button>
                 <button type="button" class="btn btn-success" id="confirm-allocation-btn" onclick="confirmAllocation()">
                     <i class="bi bi-check-lg"></i> Confirm Allocation
                 </button>
@@ -3693,17 +3696,28 @@ function confirmAllocation() {
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Allocating...';
 
-    doAllocation(orderId, true, {}, checkbox);
+    doAllocation(orderId, true, {}, checkbox, false);
 }
 
-function doAllocation(orderId, allocate, quantities, checkbox) {
+function confirmAllocationNoStock() {
+    const orderId = window._allocOrderId;
+    const checkbox = window._allocCheckbox;
+
+    const btn = document.getElementById('confirm-allocation-nostock-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Marking...';
+
+    doAllocation(orderId, true, {}, checkbox, true);
+}
+
+function doAllocation(orderId, allocate, quantities, checkbox, skipStock) {
     fetch('{% url "allocate_accessories" order.id %}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
-        body: JSON.stringify({ allocate: allocate, quantities: quantities })
+        body: JSON.stringify({ allocate: allocate, quantities: quantities, skip_stock_adjustment: !!skipStock })
     })
     .then(res => {
         if (!res.ok) console.error('Allocate response not OK:', res.status);
@@ -3720,6 +3734,8 @@ function doAllocation(orderId, allocate, quantities, checkbox) {
             checkbox.checked = !allocate;
             const btn = document.getElementById('confirm-allocation-btn');
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
+            const btnNS = document.getElementById('confirm-allocation-nostock-btn');
+            if (btnNS) { btnNS.disabled = false; btnNS.innerHTML = '<i class="bi bi-tag"></i> Mark Allocated (No Stock Change)'; }
         }
     })
     .catch(err => {
@@ -3728,6 +3744,8 @@ function doAllocation(orderId, allocate, quantities, checkbox) {
         checkbox.checked = !allocate;
         const btn = document.getElementById('confirm-allocation-btn');
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm Allocation'; }
+        const btnNS = document.getElementById('confirm-allocation-nostock-btn');
+        if (btnNS) { btnNS.disabled = false; btnNS.innerHTML = '<i class="bi bi-tag"></i> Mark Allocated (No Stock Change)'; }
     });
 }
 

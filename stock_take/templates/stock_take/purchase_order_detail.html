@@ -2394,6 +2394,55 @@ function attachMediaFile(btn, source, field, orderId) {
             btn.classList.remove('btn-primary');
             btn.classList.add('btn-secondary');
             showNotification(`${data.attachment.filename} attached`, 'success');
+
+            const att = data.attachment;
+
+            // --- Update main attachments table ---
+            let tbody = document.getElementById('attachments-tbody');
+            if (!tbody) {
+                // Table didn't exist — replace the "no attachments" message
+                const list = document.getElementById('attachments-list');
+                list.innerHTML = `
+                    <div class="po-table-container">
+                        <table class="po-products-table">
+                            <thead><tr>
+                                <th>File</th><th>Description</th>
+                                <th>Uploaded By</th><th>Date</th>
+                                <th style="width:80px;"></th>
+                            </tr></thead>
+                            <tbody id="attachments-tbody"></tbody>
+                        </table>
+                    </div>`;
+                tbody = document.getElementById('attachments-tbody');
+            }
+            const noMsg = document.getElementById('no-attachments-msg');
+            if (noMsg) noMsg.style.display = 'none';
+
+            const tr = document.createElement('tr');
+            tr.id = `attachment-row-${att.id}`;
+            tr.innerHTML = `
+                <td><a href="${att.url}" download class="po-boards-file-link">
+                    <i class="bi bi-file-earmark-arrow-down"></i> ${att.filename}
+                </a></td>
+                <td>${att.description}</td>
+                <td>${att.uploaded_by}</td>
+                <td>${att.uploaded_at}</td>
+                <td><button class="btn btn-sm btn-danger" onclick="deleteAttachment(${att.id})" title="Delete">
+                    <i class="bi bi-trash"></i>
+                </button></td>`;
+            tbody.appendChild(tr);
+
+            // --- Add checkbox to send modal ---
+            const emailAttList = document.querySelector('#send-modal .email-attachments-list');
+            if (emailAttList) {
+                const label = document.createElement('label');
+                label.className = 'email-attachment-item';
+                label.innerHTML = `
+                    <input type="checkbox" class="email-att-checkbox" value="${att.id}">
+                    <i class="bi bi-file-earmark-arrow-down"></i>
+                    <span>${att.filename}</span>`;
+                emailAttList.appendChild(label);
+            }
         } else {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach';
@@ -2600,7 +2649,6 @@ function autoCalcExpectedDate() {
 
 function syncCurrencyFromSupplier(supplierCurrency) {
     if (!supplierCurrency) return;
-    if (!confirm('Set PO currency to ' + supplierCurrency + ' (synced from supplier)?')) return;
 
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
         || '{{ csrf_token }}';

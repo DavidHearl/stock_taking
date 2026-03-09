@@ -62,6 +62,30 @@
     border: 1px solid rgba(16,185,129,0.4);
     color: #10b981;
 }
+.badge-acc-short {
+    background: rgba(220,53,69,0.12);
+    border: 1px solid rgba(220,53,69,0.45);
+    color: #dc3545;
+}
+/* Payment column */
+.badge-paid {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: rgba(16,185,129,0.18);
+    border: 1px solid rgba(16,185,129,0.55);
+    color: #10b981;
+    white-space: nowrap;
+}
+.payment-partial {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
 #togglePfpBtn { white-space: nowrap; }
 /* Override global left-align on th so text-center class works */
 .table thead th.text-center { text-align: center !important; }
@@ -146,18 +170,19 @@
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
-                <th class="text-center">Days</th>
-                <th class="sortable text-center" data-sort="boards_po">
+                <th>Days</th>
+                <th class="sortable" data-sort="boards_po">
                     Boards PO 
                     {% if current_sort == 'boards_po' %}
                         {% if current_order == 'asc' %}↑{% else %}↓{% endif %}
                     {% endif %}
                 </th>
                 <th>OS Doors</th>
-                <th class="text-center">Accessories</th>
-                <th class="text-center">Ordered</th>
-                <th class="text-center" colspan="2">Anthill</th>
-                <th class="text-center">Actions</th>
+                <th>Accessories</th>
+                <th>Ordered</th>
+                <th class="text-center">Payment</th>
+                <th colspan="2">Anthill</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -223,7 +248,7 @@
                     {% endif %}
                 </td>
                 <!-- Accessories Check -->
-                <td data-indicator="accessories" data-accessories-not-required="{% if order.accessories_not_required %}1{% else %}0{% endif %}" style="text-align:center;">
+                <td data-indicator="accessories" data-accessories-not-required="{% if order.accessories_not_required %}1{% else %}0{% endif %}">
                     {% if order.accessories_not_required %}<span class="badge-acc badge-acc-nr">N/R</span>{% endif %}
                 </td>
                 <!-- Items ordered Check -->
@@ -232,6 +257,18 @@
                         <span class="status-icon success" title="All Materials Ordered">✓</span>
                     {% endif %}
                 </td>
+                <!-- Payment -->
+                {% with fin=financial_map|get_item:order.sale_number %}
+                <td style="text-align:center; vertical-align:middle;">
+                    {% if fin and fin.sale_value %}
+                        {% if fin.outstanding <= 0 %}
+                            <span class="badge-paid" title="Paid: £{{ fin.payments_total|floatformat:0 }} / £{{ fin.sale_value|floatformat:0 }}">Paid</span>
+                        {% else %}
+                            <span class="payment-partial" title="£{{ fin.outstanding|floatformat:0 }} outstanding">£{{ fin.payments_total|floatformat:0 }}</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                {% endwith %}
                 <td onclick="event.stopPropagation();">
                     {% if order.anthill_id %}
                         <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"
@@ -253,12 +290,12 @@
                     {% endif %}
                 </td>
                 <td onclick="event.stopPropagation();">
-                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="width: 100%; display: block; text-align: center;">Details</a>
+                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="width: 100%; display: block;">Details</a>
                 </td>
             </tr>
 
             <tr class="detail-row hidden pfp-row" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="12" class="detail-cell">
+                <td colspan="13" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
@@ -266,7 +303,7 @@
 
             {% if pfp_orders %}
             <tr id="pfp-divider" class="pfp-divider-row">
-                <td colspan="12" class="pfp-divider-cell">
+                <td colspan="13" class="pfp-divider-cell">
                     <i class="bi bi-clock"></i>
                     PFP &mdash; Pending Fit Planning &nbsp;&middot;&nbsp; {{ pfp_orders|length }} order{{ pfp_orders|length|pluralize }} with no dates &nbsp;|&nbsp; dated orders below &darr;
                 </td>
@@ -335,7 +372,7 @@
                     {% endif %}
                 </td>
                 <!-- Accessories Check -->
-                <td data-indicator="accessories" data-accessories-not-required="{% if order.accessories_not_required %}1{% else %}0{% endif %}" style="text-align:center;">
+                <td data-indicator="accessories" data-accessories-not-required="{% if order.accessories_not_required %}1{% else %}0{% endif %}">
                     {% if order.accessories_not_required %}<span class="badge-acc badge-acc-nr">N/R</span>{% endif %}
                 </td>
                 <!-- Items ordered Check -->
@@ -344,6 +381,18 @@
                         <span class="status-icon success" title="All Materials Ordered">✓</span>
                     {% endif %}
                 </td>
+                <!-- Payment -->
+                {% with fin=financial_map|get_item:order.sale_number %}
+                <td style="text-align:center; vertical-align:middle;">
+                    {% if fin and fin.sale_value %}
+                        {% if fin.outstanding <= 0 %}
+                            <span class="badge-paid" title="Paid: £{{ fin.payments_total|floatformat:0 }} / £{{ fin.sale_value|floatformat:0 }}">Paid</span>
+                        {% else %}
+                            <span class="payment-partial" title="£{{ fin.outstanding|floatformat:0 }} outstanding">£{{ fin.payments_total|floatformat:0 }}</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                {% endwith %}
                 <td onclick="event.stopPropagation();">
                     {% if order.anthill_id %}
                         <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"
@@ -370,7 +419,7 @@
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="12" class="detail-cell">
+                <td colspan="13" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
@@ -856,6 +905,10 @@
                         }
                         // No accessories and not N/R — leave cell empty (no data)
                     }
+                    if (indicators.has_short) {
+                        const cell = row.querySelector('[data-indicator="accessories"]');
+                        if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories are predicted to be short on stock">⚠ Short</span>');
+                    }
                     
                     loadedIndicators.add(saleNumber);
                 }
@@ -913,6 +966,10 @@
                                             accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-added" title="Accessories added, not all ordered">Added</span>';
                                         }
                                     }
+                                }
+                                if (indicators.has_short) {
+                                    const cell = row.querySelector('[data-indicator="accessories"]');
+                                    if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories are predicted to be short on stock">⚠ Short</span>');
                                 }
                                 
                                 loadedIndicators.add(saleNumber);
