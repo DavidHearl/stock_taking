@@ -555,7 +555,7 @@ def dashboard_stock_report(request):
     history_qs = (
         StockHistory.objects
         .filter(
-            stock_item__tracking_type='stock',
+            stock_item__tracking_type__in=['stock', 'non-stock'],
             created_at__gte=three_days_ago,
         )
         .exclude(change_type__in=['sale', 'purchase'])
@@ -583,14 +583,14 @@ def dashboard_stock_report(request):
         # have no StockHistory records before the target date.
         changes_after = (
             StockHistory.objects
-            .filter(stock_item__tracking_type='stock', created_at__date__gt=as_of_date)
+            .filter(stock_item__tracking_type__in=['stock', 'non-stock'], created_at__date__gt=as_of_date)
             .values('stock_item_id')
             .annotate(total_change=Sum('change_amount'))
         )
         change_map = {c['stock_item_id']: c['total_change'] for c in changes_after}
         stock_qs = (
             StockItem.objects
-            .filter(tracking_type='stock')
+            .filter(tracking_type__in=['stock', 'non-stock'])
             .select_related('category')
         )
         current_stock = []
@@ -610,7 +610,7 @@ def dashboard_stock_report(request):
     else:
         stock_qs = (
             StockItem.objects
-            .filter(tracking_type='stock', quantity__gt=0)
+            .filter(tracking_type__in=['stock', 'non-stock'], quantity__gt=0)
             .select_related('category')
         )
         current_stock = []
@@ -663,7 +663,7 @@ def dashboard_stock_pdf(request):
     history_qs = (
         StockHistory.objects
         .filter(
-            stock_item__tracking_type='stock',
+            stock_item__tracking_type__in=['stock', 'non-stock'],
             created_at__gte=three_days_ago,
         )
         .exclude(change_type__in=['sale', 'purchase'])
@@ -686,14 +686,14 @@ def dashboard_stock_pdf(request):
     if as_of_date:
         changes_after = (
             StockHistory.objects
-            .filter(stock_item__tracking_type='stock', created_at__date__gt=as_of_date)
+            .filter(stock_item__tracking_type__in=['stock', 'non-stock'], created_at__date__gt=as_of_date)
             .values('stock_item_id')
             .annotate(total_change=Sum('change_amount'))
         )
         change_map = {c['stock_item_id']: c['total_change'] for c in changes_after}
         stock_qs = (
             StockItem.objects
-            .filter(tracking_type='stock')
+            .filter(tracking_type__in=['stock', 'non-stock'])
             .select_related('category')
         )
         current_stock = []
@@ -713,7 +713,7 @@ def dashboard_stock_pdf(request):
     else:
         stock_qs = (
             StockItem.objects
-            .filter(tracking_type='stock', quantity__gt=0)
+            .filter(tracking_type__in=['stock', 'non-stock'], quantity__gt=0)
             .select_related('category')
         )
         current_stock = []
@@ -735,6 +735,78 @@ def dashboard_stock_pdf(request):
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
+@login_required
+def dashboard_monthly_stock_history(request):
+    """JSON endpoint — returns total stock value reconstructed for the 1st of each month, starting from the earliest StockHistory record."""
+    from datetime import date as date_type
+
+    today = datetime.now().date()
+
+    # Find the earliest StockHistory record to determine where to start
+    earliest_record = (
+        StockHistory.objects
+        .filter(stock_item__tracking_type__in=['stock', 'non-stock'])
+        .order_by('created_at')
+        .values_list('created_at', flat=True)
+        .first()
+    )
+    if earliest_record:
+        start_y, start_m = earliest_record.year, earliest_record.month
+    else:
+        start_y, start_m = today.year, today.month
+
+    # Build list of 1st-of-month dates from start month up to current month
+    months = []
+    y, m = start_y, start_m
+    while (y, m) <= (today.year, today.month):
+        months.append(date_type(y, m, 1))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+    # Current quantities and costs for all stock/non-stock items
+    all_items = list(
+        StockItem.objects
+        .filter(tracking_type__in=['stock', 'non-stock'])
+        .values('pk', 'quantity', 'cost')
+    )
+
+    # All StockHistory changes (we need to reconstruct backwards)
+    # Fetch all changes after the earliest month start so we can slice per month
+    earliest = months[0]
+    all_changes = list(
+        StockHistory.objects
+        .filter(
+            stock_item__tracking_type__in=['stock', 'non-stock'],
+            created_at__date__gte=earliest,
+        )
+        .values('stock_item_id', 'change_amount', 'created_at')
+    )
+
+    result = []
+    for month_start in months:
+        # changes that occurred AFTER this month's 1st
+        change_map = {}
+        for c in all_changes:
+            if c['created_at'].date() > month_start:
+                pk = c['stock_item_id']
+                change_map[pk] = change_map.get(pk, 0) + c['change_amount']
+
+        total_value = 0.0
+        for item in all_items:
+            qty = item['quantity'] - change_map.get(item['pk'], 0)
+            if qty > 0:
+                total_value += float(item['cost']) * qty
+
+        result.append({
+            'label': month_start.strftime('%b %Y'),
+            'value': round(total_value, 2),
+        })
+
+    return JsonResponse({'success': True, 'months': result})
 
 
 @login_required

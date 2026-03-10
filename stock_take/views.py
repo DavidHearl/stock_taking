@@ -6627,8 +6627,17 @@ def allocate_accessories(request, order_id):
         allocate = data.get('allocate', True)
         qty_overrides = data.get('quantities', {})  # {str(accessory_id): int}
         skip_stock_adjustment = data.get('skip_stock_adjustment', False)
+        allocated_date_str = data.get('allocated_date', '')
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    from datetime import datetime as _dt, date as _date, time as _time
+    allocated_date = None
+    if allocated_date_str:
+        try:
+            allocated_date = _dt.strptime(allocated_date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            pass
 
     try:
         user = request.user if request.user.is_authenticated else None
@@ -6639,19 +6648,20 @@ def allocate_accessories(request, order_id):
             # Allocate: mark all unallocated as allocated and deduct stock
             accessories = list(order.accessories.filter(is_allocated=False).select_related('stock_item'))
             for acc in accessories:
+                acc.allocated_date = allocated_date
                 # Apply quantity override if provided
                 override_key = str(acc.id)
                 if override_key in qty_overrides:
                     new_qty = max(int(qty_overrides[override_key]), 0)
                     if new_qty != int(acc.quantity):
                         acc.quantity = new_qty
-                        acc.save(update_fields=['quantity', 'is_allocated'])
+                        acc.save(update_fields=['quantity', 'is_allocated', 'allocated_date'])
                     else:
                         acc.is_allocated = True
-                        acc.save(update_fields=['is_allocated'])
+                        acc.save(update_fields=['is_allocated', 'allocated_date'])
                 else:
                     acc.is_allocated = True
-                    acc.save(update_fields=['is_allocated'])
+                    acc.save(update_fields=['is_allocated', 'allocated_date'])
 
                 # Ensure is_allocated is set
                 if not acc.is_allocated:
@@ -6671,7 +6681,7 @@ def allocate_accessories(request, order_id):
                     stock_item = StockItem.objects.get(pk=acc.stock_item_id)
                     stock_changes += 1
 
-                    StockHistory.objects.create(
+                    history_kwargs = dict(
                         stock_item=stock_item,
                         quantity=stock_item.quantity,
                         change_amount=-qty,
@@ -6680,6 +6690,9 @@ def allocate_accessories(request, order_id):
                         notes=f'Allocated for order {order.sale_number} ({acc.name})',
                         created_by=user,
                     )
+                    if allocated_date:
+                        history_kwargs['created_at'] = _dt.combine(allocated_date, _time.min)
+                    StockHistory.objects.create(**history_kwargs)
         else:
             # Unallocate: mark all allocated as unallocated and add stock back
             accessories = list(order.accessories.filter(is_allocated=True).select_related('stock_item'))

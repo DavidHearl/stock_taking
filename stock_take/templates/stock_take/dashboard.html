@@ -61,7 +61,7 @@
                 {% elif stock_value_7day_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ stock_value_7day_delta_str }}</span>{% endif %}
             </div>
             <div class="card-action">
-                <button class="card-action-btn" onclick="openStockReport()">
+                <button class="card-action-btn" onclick="openStockReport('report')">
                     <i class="bi bi-bar-chart-line-fill"></i> View Report
                 </button>
             </div>
@@ -1201,25 +1201,25 @@ function openSalesAfterReport() {
 
 <!-- Stock Report Modal -->
 <dialog id="stockReportModal" class="dash-report-modal">
-    <div class="dash-report-header">
-        <div class="dash-report-title">
-            <i class="bi bi-box-seam"></i>
-            <span>Stock Report</span>
-            <span id="stockReportMeta" class="dash-report-meta"></span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-            <a id="stockReportPdfBtn"
-               href="{% url 'dashboard_stock_pdf' %}"
-               class="dash-report-pdf-btn"
-               title="Download PDF">
-                <i class="bi bi-file-earmark-pdf"></i> PDF
-            </a>
-            <button class="dash-report-close" onclick="document.getElementById('stockReportModal').close()">
-                <i class="bi bi-x-lg"></i>
-            </button>
-        </div>
+    <div style="display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border-color);padding:4px 12px 0 0;">
+        <button id="stockTabBtnReport" onclick="switchStockTab('report')" style="background:none;border:none;padding:8px 16px 10px;font-size:0.85rem;font-weight:600;cursor:pointer;color:var(--text-primary);border-bottom:2px solid #29e8eb;margin-bottom:-1px;flex-shrink:0;"><i class="bi bi-box-seam"></i> Stock Report</button>
+        <button id="stockTabBtnHistory" onclick="switchStockTab('history')" style="background:none;border:none;padding:8px 16px 10px;font-size:0.85rem;font-weight:600;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-1px;flex-shrink:0;"><i class="bi bi-graph-up"></i> Monthly History</button>
+        <span id="stockReportMeta" class="dash-report-meta" style="flex:1;padding:0 8px;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+        <a id="stockReportPdfBtn"
+           href="{% url 'dashboard_stock_pdf' %}"
+           class="dash-report-pdf-btn"
+           title="Download PDF"
+           style="flex-shrink:0;">
+            <i class="bi bi-file-earmark-pdf"></i> PDF
+        </a>
+        <button class="dash-report-close" onclick="document.getElementById('stockReportModal').close()" style="flex-shrink:0;">
+            <i class="bi bi-x-lg"></i>
+        </button>
     </div>
     <div class="dash-report-body" id="stockReportBody">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
+    <div class="dash-report-body" id="stockHistoryBody" style="display:none;">
         <p class="text-muted">Loading&hellip;</p>
     </div>
 </dialog>
@@ -1229,12 +1229,125 @@ document.getElementById('stockReportModal').addEventListener('click', function(e
     if (e.target === this) this.close();
 });
 
-function openStockReport() {
+let _stockHistoryLoaded = false;
+
+function switchStockTab(tab) {
+    const reportBody = document.getElementById('stockReportBody');
+    const historyBody = document.getElementById('stockHistoryBody');
+    const tabReport = document.getElementById('stockTabBtnReport');
+    const tabHistory = document.getElementById('stockTabBtnHistory');
+    const pdfBtn = document.getElementById('stockReportPdfBtn');
+    const meta = document.getElementById('stockReportMeta');
+
+    if (tab === 'report') {
+        reportBody.style.display = '';
+        historyBody.style.display = 'none';
+        tabReport.style.color = 'var(--text-primary)';
+        tabReport.style.borderBottomColor = '#29e8eb';
+        tabHistory.style.color = 'var(--text-secondary)';
+        tabHistory.style.borderBottomColor = 'transparent';
+        pdfBtn.style.display = '';
+    } else {
+        reportBody.style.display = 'none';
+        historyBody.style.display = '';
+        tabReport.style.color = 'var(--text-secondary)';
+        tabReport.style.borderBottomColor = 'transparent';
+        tabHistory.style.color = 'var(--text-primary)';
+        tabHistory.style.borderBottomColor = '#29e8eb';
+        pdfBtn.style.display = 'none';
+        meta.textContent = '';
+        if (!_stockHistoryLoaded) loadStockHistory();
+    }
+}
+
+function loadStockHistory() {
+    const body = document.getElementById('stockHistoryBody');
+    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    fetch('{% url "dashboard_monthly_stock_history" %}')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load data.</p>';
+                return;
+            }
+            _stockHistoryLoaded = true;
+            const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            const months = data.months;
+
+            const canvasId = 'monthlyStockChart';
+            let html = '<canvas id="' + canvasId + '" style="width:100%;max-height:260px;margin-bottom:16px;"></canvas>';
+
+            html += '<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden;">';
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 16px;background:var(--card-bg);border-bottom:2px solid var(--border-color);font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">' +
+                '<span>Month</span><span style="text-align:right;">Stock Value</span><span style="text-align:right;">Change</span></div>';
+            months.forEach((row, idx) => {
+                const prev = idx > 0 ? months[idx - 1].value : null;
+                let changeHtml = '<span style="color:var(--text-secondary);">&mdash;</span>';
+                if (prev !== null) {
+                    const diff = row.value - prev;
+                    const pct = prev > 0 ? ((diff / prev) * 100).toFixed(1) : '&mdash;';
+                    const color = diff >= 0 ? '#28a745' : '#dc3545';
+                    const sign = diff >= 0 ? '+' : '';
+                    changeHtml = '<span style="color:' + color + ';">' + sign + fmt(diff) + ' (' + sign + pct + '%)</span>';
+                }
+                const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
+                html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 16px;' + border + '">' +
+                    '<span style="font-weight:600;">' + row.label + '</span>' +
+                    '<span style="text-align:right;">' + fmt(row.value) + '</span>' +
+                    '<span style="text-align:right;">' + changeHtml + '</span>' +
+                    '</div>';
+            });
+            html += '</div>';
+
+            body.innerHTML = html;
+
+            const labels = months.map(m => m.label);
+            const values = months.map(m => m.value);
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Stock Value',
+                        data: values,
+                        borderColor: '#29e8eb',
+                        backgroundColor: 'rgba(41,232,235,0.1)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#29e8eb',
+                        fill: true,
+                        tension: 0.3,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            ticks: { callback: v => '\u00a3' + Math.round(v).toLocaleString() },
+                            grid: { color: 'rgba(128,128,128,0.12)' }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        })
+        .catch(() => {
+            document.getElementById('stockHistoryBody').innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load data.</p>';
+        });
+}
+
+function openStockReport(tab) {
+    tab = tab || 'report';
     const modal = document.getElementById('stockReportModal');
+    modal.showModal();
+    switchStockTab(tab);
+    if (tab !== 'report') return;
+
     const body = document.getElementById('stockReportBody');
     body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
     document.getElementById('stockReportMeta').textContent = '';
-    modal.showModal();
 
     const stockDate = document.getElementById('stockReportDate').value || '{{ today_str }}';
     const pdfBase = '{% url "dashboard_stock_pdf" %}';

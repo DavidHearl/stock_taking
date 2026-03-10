@@ -593,6 +593,7 @@ class Accessory(models.Model):
     ordered = models.BooleanField(default=False, help_text='Ordered for OS Doors')
     missing = models.BooleanField(default=False, help_text='True if SKU not found in stock')
     is_allocated = models.BooleanField(default=False, help_text='True if stock has been physically used/deducted')
+    allocated_date = models.DateField(null=True, blank=True, help_text='Date when materials were physically taken from stock')
     
     # Cut-to-size dimensions (for glass items)
     cut_width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Cut-to-size width in mm')
@@ -791,7 +792,7 @@ class StockHistory(models.Model):
     ], default='adjustment')
     reference = models.CharField(max_length=100, blank=True, help_text='PO number, order number, etc.')
     notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
     created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
     
     class Meta:
