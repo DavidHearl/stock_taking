@@ -1002,7 +1002,7 @@
             <div id="receive-product-list" class="receive-product-list">
                 <!-- Populated by receivePO() -->
             </div>
-            <p class="receive-modal-hint">Untick items that have <em>not</em> arrived. The PO will be marked <strong>Partially Received</strong> if some items are skipped.</p>
+            <p class="receive-modal-hint">Adjust quantities to record a partial delivery. Untick items that have <em>not</em> arrived at all. The PO will be marked <strong>Partially Received</strong> until all quantities are fulfilled.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn-cancel" onclick="closeReceiveModal()">Cancel</button>
@@ -1374,15 +1374,33 @@ function receivePO() {
             const sku = row.dataset.sku || '';
             const name = row.dataset.name || '(no name)';
             const isFullyReceived = orderQty > 0 && receivedQty >= orderQty;
+            const remaining = orderQty - receivedQty;
 
-            const item = document.createElement('label');
+            const item = document.createElement('div');
             item.className = 'receive-product-item' + (isFullyReceived ? ' already-received' : '');
-            item.innerHTML =
-                `<input type="checkbox" class="receive-product-cb" value="${productId}" ${!isFullyReceived ? 'checked' : 'disabled checked'}>` +
-                `<span class="receive-product-sku">${sku || '—'}</span>` +
-                `<span class="receive-product-name">${name}</span>` +
-                `<span class="receive-product-qty">${receivedQty} / ${orderQty}</span>` +
-                (isFullyReceived ? '<span class="receive-already-badge"><i class="bi bi-check-circle-fill"></i> Already received</span>' : '');
+            if (isFullyReceived) {
+                item.innerHTML =
+                    `<input type="checkbox" class="receive-product-cb" value="${productId}" disabled checked>` +
+                    `<span class="receive-product-sku">${sku || '—'}</span>` +
+                    `<span class="receive-product-name">${name}</span>` +
+                    `<span class="receive-already-badge"><i class="bi bi-check-circle-fill"></i> Already received</span>`;
+            } else {
+                item.innerHTML =
+                    `<input type="checkbox" class="receive-product-cb" value="${productId}" checked onchange="receiveQtyToggle(this)">` +
+                    `<span class="receive-product-sku">${sku || '—'}</span>` +
+                    `<span class="receive-product-name">${name}</span>` +
+                    `<span class="receive-qty-group">` +
+                    `<input type="number" class="receive-qty-input" data-product-id="${productId}" data-max="${remaining}" min="1" max="${remaining}" step="1" value="${remaining}" onclick="event.stopPropagation()">` +
+                    `<span class="receive-qty-of">of ${remaining} remaining</span>` +
+                    `</span>`;
+                // Click anywhere on the row (except qty input) toggles the checkbox
+                item.addEventListener('click', e => {
+                    if (e.target.classList.contains('receive-qty-input') || e.target.closest('.receive-qty-input')) return;
+                    if (e.target.type === 'checkbox') return;
+                    const cb = item.querySelector('.receive-product-cb');
+                    if (cb) { cb.checked = !cb.checked; receiveQtyToggle(cb); }
+                });
+            }
             listEl.appendChild(item);
         });
     }
@@ -1393,7 +1411,17 @@ function receivePO() {
 function receiveSelectAll(checked) {
     document.querySelectorAll('.receive-product-cb:not(:disabled)').forEach(cb => {
         cb.checked = checked;
+        receiveQtyToggle(cb);
     });
+}
+
+function receiveQtyToggle(cb) {
+    const item = cb.closest('.receive-product-item');
+    const qtyInput = item && item.querySelector('.receive-qty-input');
+    if (qtyInput) {
+        qtyInput.disabled = !cb.checked;
+        if (cb.checked) qtyInput.value = qtyInput.dataset.max;
+    }
 }
 
 function closeReceiveModal(event) {
@@ -1404,12 +1432,24 @@ function closeReceiveModal(event) {
 function confirmReceivePO() {
     const receivedDate = document.getElementById('receive-date').value;
 
-    // Collect selected (and not-yet-fully-received) product IDs
+    // Build quantities dict: productId -> qty for each checked (not disabled) item
     const activeCheckboxes = document.querySelectorAll('.receive-product-cb:not(:disabled)');
-    const checkedIds = Array.from(document.querySelectorAll('.receive-product-cb:not(:disabled):checked'))
-                           .map(cb => parseInt(cb.value));
+    const quantities = {};
+    document.querySelectorAll('.receive-product-cb:not(:disabled):checked').forEach(cb => {
+        const productId = parseInt(cb.value);
+        const item = cb.closest('.receive-product-item');
+        const qtyInput = item && item.querySelector('.receive-qty-input');
+        if (qtyInput) {
+            const max = parseFloat(qtyInput.dataset.max) || 0;
+            const val = Math.min(Math.max(parseFloat(qtyInput.value) || 0, 0), max);
+            if (val > 0) quantities[productId] = val;
+        } else {
+            // No qty input (shouldn't happen for active items, but safe fallback)
+            quantities[productId] = null;
+        }
+    });
 
-    if (activeCheckboxes.length > 0 && checkedIds.length === 0) {
+    if (activeCheckboxes.length > 0 && Object.keys(quantities).length === 0) {
         showNotification('Please select at least one item to receive.', 'error');
         return;
     }
@@ -1419,10 +1459,9 @@ function confirmReceivePO() {
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Receiving...';
 
-    // Only send product_ids when there are selectable lines (selective mode)
     const body = { received_date: receivedDate };
     if (activeCheckboxes.length > 0) {
-        body.product_ids = checkedIds;
+        body.quantities = quantities;
     }
 
     fetch('{% url "purchase_order_receive" purchase_order.workguru_id %}', {

@@ -31,7 +31,7 @@ class Command(BaseCommand):
         dry_run = options['dry_run']
 
         if dry_run:
-            self.stdout.write(self.style.WARNING('DRY RUN — no changes will be saved\n'))
+            self.stdout.write(self.style.WARNING('DRY RUN - no changes will be saved\n'))
 
         # Check Xero connection
         access_token, tenant_id = xero_api.get_valid_access_token()

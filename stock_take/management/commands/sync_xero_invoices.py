@@ -42,7 +42,7 @@ class Command(BaseCommand):
         customer_pk = options['customer']
 
         if dry_run:
-            self.stdout.write(self.style.WARNING('DRY RUN — no changes will be saved\n'))
+            self.stdout.write(self.style.WARNING('DRY RUN - no changes will be saved\n'))
 
         # Check Xero connection
         access_token, tenant_id = xero_api.get_valid_access_token()
@@ -168,7 +168,7 @@ class Command(BaseCommand):
                         existing.synced_at = timezone.now()
                         existing.save()
                     total_updated += 1
-                    self.stdout.write(f'    ↻ Updated: {invoice_number} — {local_status} ({payment_status})')
+                    self.stdout.write(f'    [updated] {invoice_number} - {local_status} ({payment_status})')
                 else:
                     # Create new invoice from Xero data
                     if not dry_run:

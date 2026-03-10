@@ -302,17 +302,22 @@ SCRIPT_GROUPS = [
                 'log_name': 'sync_recent_customers',
                 'label': 'Recent Customer Sync',
                 'description': (
-                    'Syncs customers from Anthill CRM created within the last 7 days. '
-                    'Customers with a completed sale activity are saved as Customer; '
-                    'all others are saved as Contact (Lead). '
-                    'Runs automatically via the scheduler Docker service.'
+                    'Two-pass sync that runs automatically twice a day (Anthill is the source of truth). '
+                    'Pass 1 — scans Anthill for customers created within the last 7 days and '
+                    'saves them as Customer (if they have a sale activity) or Lead. '
+                    'Pass 2 — iterates every Lead in the database with an Anthill ID and re-checks '
+                    'Anthill for a qualifying sale; promotes the Lead to Customer if one is found. '
+                    'This catches leads that were created months ago but have only recently received '
+                    'a sale in Anthill (they never re-appear in the scan window). '
+                    'Use --skip-upgrade to run Pass 1 only.'
                 ),
                 'file': 'stock_take/management/commands/sync_recent_customers.py',
                 'schedule': 'Automated — daily at 08:00 & 12:00 (Docker scheduler)',
                 'commands': [
-                    {'cmd': 'python manage.py sync_recent_customers', 'note': 'Sync last 7 days (default)'},
-                    {'cmd': 'python manage.py sync_recent_customers --days 14', 'note': 'Sync last 14 days'},
+                    {'cmd': 'python manage.py sync_recent_customers', 'note': 'Scan 7 days + upgrade all leads (default)'},
                     {'cmd': 'python manage.py sync_recent_customers --dry-run', 'note': 'Preview without saving'},
+                    {'cmd': 'python manage.py sync_recent_customers --skip-upgrade', 'note': 'Scan only — skip lead upgrade pass'},
+                    {'cmd': 'python manage.py sync_recent_customers --days 14', 'note': 'Extend scan window to 14 days'},
                 ],
             },
             {
@@ -403,6 +408,24 @@ SCRIPT_GROUPS = [
                 'schedule': 'N/A — API does not support reading payments',
                 'commands': [
                     {'cmd': 'python manage.py sync_anthill_payments', 'note': '⚠️ Will exit immediately with API limitation notice'},
+                ],
+            },
+            {
+                'log_name': 'upgrade_leads',
+                'label': 'Upgrade Leads → Customers',
+                'description': (
+                    'Re-checks every Lead that has an Anthill Customer ID and promotes it to a Customer '
+                    'if Anthill now reports a qualifying sale activity (any non-cancelled sale type). '
+                    'For each promotion the command creates a Customer record, saves Anthill sale activities, '
+                    'links any pre-existing AnthillSale records, and marks the Lead as converted. '
+                    'Safe to run repeatedly — leads already converted are skipped.'
+                ),
+                'file': 'stock_take/management/commands/upgrade_leads.py',
+                'schedule': 'Manual / as needed',
+                'commands': [
+                    {'cmd': 'python manage.py upgrade_leads --dry-run', 'note': 'Preview which leads would be promoted'},
+                    {'cmd': 'python manage.py upgrade_leads', 'note': 'Promote all qualifying leads to Customer'},
+                    {'cmd': 'python manage.py upgrade_leads --limit 10', 'note': 'Process first 10 matches only (for testing)'},
                 ],
             },
         ],
@@ -533,6 +556,29 @@ SCRIPT_GROUPS = [
                 'commands': [
                     {'cmd': 'python manage.py set_legacy_completion_dates', 'note': 'Set completion dates'},
                     {'cmd': 'python manage.py set_legacy_completion_dates --days-ago 35 --dry-run', 'note': 'Preview with custom offset'},
+                ],
+            },
+        ],
+    },
+    {
+        'group': 'Tests',
+        'icon': 'bi-check2-circle',
+        'scripts': [
+            {
+                'log_name': None,
+                'label': 'Run Unit Tests (stock_take app)',
+                'description': (
+                    'Runs the full Django test suite for the stock_take application — currently 77 tests '
+                    'covering models, RBAC, forms, dashboard helpers, views, stock history, Anthill '
+                    'payments, and order workflow. Uses --keepdb to reuse the existing test database '
+                    'and speed up repeated runs. Exit code 0 = all pass; any failures are shown inline.'
+                ),
+                'file': 'stock_take/tests.py',
+                'schedule': 'Manual / before deployments',
+                'commands': [
+                    {'cmd': 'python manage.py test stock_take --keepdb', 'note': 'Run all tests (reuse test DB)'},
+                    {'cmd': 'python manage.py test stock_take', 'note': 'Run all tests (recreate test DB from scratch)'},
+                    {'cmd': 'python manage.py test stock_take --keepdb --verbosity=2', 'note': 'Verbose output — shows each test name'},
                 ],
             },
         ],

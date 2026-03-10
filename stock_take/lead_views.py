@@ -267,7 +267,7 @@ def lead_convert(request, pk):
     if lead.status == 'converted' and lead.converted_to_customer:
         return JsonResponse({'error': 'Lead already converted', 'customer_id': lead.converted_to_customer.pk})
 
-    from .models import Customer
+    from .models import Customer, AnthillSale
 
     # Generate a unique workguru_id for manually created customers
     max_id = Customer.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
@@ -285,11 +285,19 @@ def lead_convert(request, pk):
         state=lead.state,
         postcode=lead.postcode,
         country=lead.country,
+        anthill_customer_id=lead.anthill_customer_id or '',
         is_active=True,
     )
 
     lead.status = 'converted'
     lead.converted_to_customer = customer
     lead.save(update_fields=['status', 'converted_to_customer'])
+
+    # Link any existing AnthillSale records that belong to this Anthill customer
+    if lead.anthill_customer_id:
+        AnthillSale.objects.filter(
+            anthill_customer_id=lead.anthill_customer_id,
+            customer__isnull=True,
+        ).update(customer=customer)
 
     return JsonResponse({'success': True, 'customer_id': customer.pk, 'customer_name': customer.name})

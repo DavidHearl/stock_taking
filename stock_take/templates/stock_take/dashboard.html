@@ -25,7 +25,7 @@
             <div class="card-subtext">Total remaining to collect</div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openOutstandingReport()">
-                    View Report
+                    <i class="bi bi-bar-chart-line-fill"></i> View Report
                 </button>
             </div>
         </div>
@@ -33,13 +33,15 @@
             <h3 class="card-label">Sales After</h3>
             <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
             <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
-            <div class="card-label">
-                <input type="date" id="salesAfterDate" class="dash-date-input"
-                       value="{{ today_str }}" onchange="fetchSalesAfter()">
+            <div class="dash-cal-wrap">
+                <i class="bi bi-calendar3"></i>
+                <span id="salesAfterDateLabel"></span>
+                <input type="date" id="salesAfterDate" class="dash-date-overlay"
+                       value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalLabel('salesAfterDate','salesAfterDateLabel')">
             </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openSalesAfterReport()">
-                    View Report
+                    <i class="bi bi-bar-chart-line-fill"></i> View Report
                 </button>
             </div>
         </div>
@@ -52,17 +54,17 @@
                 <div class="card-subtext" style="color:#dc3545;font-weight:600;">&#9660; &pound; {{ stock_value_7day_delta_str }}</div>
                 {% endif %}
             </h3>
-
-
             <div class="card-value">&pound;{{ total_stock_value }}</div>
             <div class="card-subtext">{{ stock_item_count }} items in stock</div>
-            <div style="margin:6px 0 0;">
-                <input type="date" id="stockReportDate" class="dash-date-input"
-                       value="{{ today_str }}">
+            <div class="dash-cal-wrap">
+                <i class="bi bi-calendar3"></i>
+                <span id="stockReportDateLabel"></span>
+                <input type="date" id="stockReportDate" class="dash-date-overlay"
+                       value="{{ today_str }}" onchange="updateCalLabel('stockReportDate','stockReportDateLabel')">
             </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openStockReport()">
-                    View Report
+                    <i class="bi bi-bar-chart-line-fill"></i> View Report
                 </button>
             </div>
         </div>
@@ -71,7 +73,7 @@
             <div class="card-value">&pound;{{ this_week_sales }}</div>
             <div class="card-subtext">Fits scheduled this week</div>
             <div class="card-action">
-                <button class="card-action-btn" onclick="openWeekReport()">View Report</button>
+                <button class="card-action-btn" onclick="openWeekReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
         </div>
         <div class="dashboard-card accent-success">
@@ -85,15 +87,15 @@
             <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
             <div class="card-subtext">Total monthly sales</div>
             <div class="card-action">
-                <button class="card-action-btn" onclick="openMonthlyReport()">View Report</button>
+                <button class="card-action-btn" onclick="openMonthlyReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
         </div>
         <div class="dashboard-card">
             <h3 class="card-label">Average Sale Value</h3>
             <div class="card-value">&pound;{{ avg_daily_sale }}</div>
-            <div class="card-subtext">Avg daily revenue &mdash; last 12 months</div>
+            <div class="card-subtext">Avg daily revenue</div>
             <div class="card-action">
-                <button class="card-action-btn" onclick="openAvgReport()">View Report</button>
+                <button class="card-action-btn" onclick="openAvgReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
         </div>
     </div>
@@ -188,7 +190,22 @@ function fetchMonthlySales() {
 document.addEventListener('DOMContentLoaded', function() {
     updateMonthLabel();
     fetchSalesAfter();
+    updateCalLabel('salesAfterDate', 'salesAfterDateLabel');
+    updateCalLabel('stockReportDate', 'stockReportDateLabel');
 });
+
+function formatCalDate(val) {
+    if (!val) return 'Pick date';
+    const [y, m, d] = val.split('-');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d + ' ' + months[+m - 1] + ' ' + y;
+}
+
+function updateCalLabel(inputId, labelId) {
+    const v = document.getElementById(inputId);
+    const l = document.getElementById(labelId);
+    if (v && l) l.textContent = formatCalDate(v.value);
+}
 
 function fetchSalesAfter() {
     const dateInput = document.getElementById('salesAfterDate');
@@ -774,6 +791,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <span id="outstandingReportMeta" class="dash-report-meta"></span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
+            <input id="outstandingSearchInput" type="search" class="dash-report-search"
+                   placeholder="Search customer..." oninput="filterOutstandingRows()">
             <button id="outstandingHidePaymentsBtn" class="dash-report-filter-btn" onclick="toggleHidePayments()" title="Only show sales with no payment records">
                 <i class="bi bi-funnel"></i> Hide Paid
             </button>
@@ -807,46 +826,16 @@ function toggleHidePayments() {
     btn.innerHTML = outstandingHidePayments
         ? '<i class="bi bi-funnel-fill"></i> Show All'
         : '<i class="bi bi-funnel"></i> Hide Paid';
-    document.querySelectorAll('#outstandingReportBody tr[data-has-payments]').forEach(tr => {
-        if (outstandingHidePayments) {
-            tr.style.display = tr.dataset.hasPayments === '1' ? 'none' : '';
-        } else {
-            tr.style.display = '';
-        }
-    });
-    // Recalculate counts and totals for each year separator
-    const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
-    document.querySelectorAll('#outstandingReportBody tr[data-year-sep]').forEach(sepRow => {
-        const yr = sepRow.dataset.yearSep;
-        let visibleCount = 0, visibleTotal = 0;
-        document.querySelectorAll(`#outstandingReportBody tr[data-year="${yr}"]`).forEach(tr => {
-            if (tr.style.display !== 'none') {
-                visibleCount++;
-                visibleTotal += parseFloat(tr.dataset.outstanding || 0);
-            }
-        });
-        const span = sepRow.querySelector('.dash-report-year-total');
-        if (span) span.textContent = `${fmt(visibleTotal)} outstanding \u2014 ${visibleCount} customer${visibleCount !== 1 ? 's' : ''}`;
-    });
-    // Recalculate the header meta
-    let totalVisible = 0, totalOutstandingVisible = 0;
-    document.querySelectorAll('#outstandingReportBody tr[data-outstanding]').forEach(tr => {
-        if (tr.style.display !== 'none') {
-            totalVisible++;
-            totalOutstandingVisible += parseFloat(tr.dataset.outstanding || 0);
-        }
-    });
-    const meta = document.getElementById('outstandingReportMeta');
-    if (meta) {
-        const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
-        meta.innerHTML = `&nbsp;&mdash;&nbsp;${totalVisible} customer${totalVisible !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstandingVisible)} &nbsp;|&nbsp; ${locLabel}`;
-    }
+    // Re-run the unified filter so search + paid filter stay in sync
+    filterOutstandingRows();
 }
 
 function openOutstandingReport() {
     outstandingHidePayments = false;
     const btn = document.getElementById('outstandingHidePaymentsBtn');
     if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="bi bi-funnel"></i> Hide Paid'; }
+    const searchInput = document.getElementById('outstandingSearchInput');
+    if (searchInput) searchInput.value = '';
     const modal = document.getElementById('outstandingReportModal');
     const body = document.getElementById('outstandingReportBody');
     body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
@@ -918,6 +907,50 @@ function openOutstandingReport() {
         .catch(() => {
             body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
         });
+}
+
+function _recalcOutstandingMeta() {
+    const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+    // Recalculate year separator rows
+    document.querySelectorAll('#outstandingReportBody tr[data-year-sep]').forEach(sepRow => {
+        const yr = sepRow.dataset.yearSep;
+        let visibleCount = 0, visibleTotal = 0;
+        document.querySelectorAll(`#outstandingReportBody tr[data-year="${yr}"]`).forEach(tr => {
+            if (tr.style.display !== 'none') {
+                visibleCount++;
+                visibleTotal += parseFloat(tr.dataset.outstanding || 0);
+            }
+        });
+        // Hide separator itself if all rows in this year are hidden
+        sepRow.style.display = visibleCount === 0 ? 'none' : '';
+        const span = sepRow.querySelector('.dash-report-year-total');
+        if (span) span.textContent = `${fmt(visibleTotal)} outstanding \u2014 ${visibleCount} customer${visibleCount !== 1 ? 's' : ''}`;
+    });
+    // Recalculate header meta
+    let totalVisible = 0, totalOutstandingVisible = 0;
+    document.querySelectorAll('#outstandingReportBody tr[data-outstanding]').forEach(tr => {
+        if (tr.style.display !== 'none') {
+            totalVisible++;
+            totalOutstandingVisible += parseFloat(tr.dataset.outstanding || 0);
+        }
+    });
+    const meta = document.getElementById('outstandingReportMeta');
+    if (meta) {
+        const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
+        meta.innerHTML = `&nbsp;&mdash;&nbsp;${totalVisible} customer${totalVisible !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstandingVisible)} &nbsp;|&nbsp; ${locLabel}`;
+    }
+}
+
+function filterOutstandingRows() {
+    const q = (document.getElementById('outstandingSearchInput').value || '').toLowerCase().trim();
+    document.querySelectorAll('#outstandingReportBody tr[data-outstanding]').forEach(tr => {
+        const customerCell = tr.querySelector('td:first-child');
+        const name = customerCell ? customerCell.textContent.toLowerCase() : '';
+        const matchesSearch = !q || name.includes(q);
+        const matchesPaid = !outstandingHidePayments || tr.dataset.hasPayments !== '1';
+        tr.style.display = (matchesSearch && matchesPaid) ? '' : 'none';
+    });
+    _recalcOutstandingMeta();
 }
 </script>
 
@@ -1327,7 +1360,7 @@ function openMonthlyReport() {
     <div class="dash-report-header">
         <div class="dash-report-title">
             <i class="bi bi-graph-up"></i>
-            <span>Average Sale Value &mdash; Last 12 Months</span>
+            <span>Average Sale Value</span>
             <span id="avgReportMeta" class="dash-report-meta"></span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">

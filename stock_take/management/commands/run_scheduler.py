@@ -53,7 +53,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(f'Schedule (UTC):')
         for h, m, cmd, _ in SCHEDULE:
-            self.stdout.write(f'  {h:02d}:{m:02d}  →  {cmd}')
+            self.stdout.write(f'  {h:02d}:{m:02d}  ->  {cmd}')
         self.stdout.write('')
 
         while True:

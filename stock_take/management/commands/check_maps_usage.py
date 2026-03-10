@@ -80,7 +80,7 @@ class Command(BaseCommand):
         self.stdout.write('='*60)
         self.stdout.write('1. Set up billing alerts in Google Cloud Console:')
         self.stdout.write('   https://console.cloud.google.com/billing')
-        self.stdout.write('   → Select your project → Billing → Budgets & alerts')
+        self.stdout.write('   -> Select your project -> Billing -> Budgets & alerts')
         self.stdout.write('')
         self.stdout.write('2. Monitor usage in real-time:')
         self.stdout.write('   https://console.cloud.google.com/apis/dashboard')

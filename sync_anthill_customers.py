@@ -12,7 +12,7 @@ Two-phase sync:
             customers/leads not yet in the database.
 
 Classification:
-  • Customers with a completed "Sale" activity are saved as Customer (sale).
+  • Customers with any non-cancelled/lost "Sale" activity are saved as Customer.
   • All others are saved as Lead.
 
 Usage
@@ -64,9 +64,10 @@ BASE_URL = f'https://{SUBDOMAIN}.anthillcrm.com/api/v1.asmx'
 NAMESPACE = 'http://www.anthill.co.uk/'
 NS = {'ah': NAMESPACE}
 
-# Activity statuses / types that indicate a completed sale
-SALE_ACTIVITY_STATUSES = {'complete', 'completed', 'sold', 'won'}
+# Activity types that indicate a sale (any status counts — open, booked, completed, etc.)
 SALE_ACTIVITY_TYPES_KEYWORDS = {'sale'}
+# Statuses that should NOT count as a sale (explicitly lost/cancelled)
+SALE_EXCLUDE_STATUSES = {'cancelled', 'canceled', 'lost', 'deleted'}
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -110,17 +111,17 @@ def soap_request(action: str, body_xml: str) -> str:
                 return resp.text
             if resp.status_code >= 500 and attempt < MAX_RETRIES - 1:
                 wait = RETRY_DELAYS[attempt]
-                print(f'  ⚠ Server error {resp.status_code} (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait}s …')
+                print(f'  [WARN] Server error {resp.status_code} (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait}s...')
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
         except requests.exceptions.Timeout:
             if attempt < MAX_RETRIES - 1:
                 wait = RETRY_DELAYS[attempt]
-                print(f'  ⚠ Timeout (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait}s …')
+                print(f'  [WARN] Timeout (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait}s...')
                 time.sleep(wait)
             else:
-                print(f'  ✗ Timeout after {MAX_RETRIES} attempts, giving up.')
+                print(f'  [ERROR] Timeout after {MAX_RETRIES} attempts, giving up.')
                 raise
     return ''
 
@@ -225,12 +226,18 @@ def _text(node, path: str) -> str:
 # ════════════════════════════════════════════════════════════════════════
 
 def is_sale(detail: dict) -> bool:
-    """Determine if a customer detail represents a sale (vs lead)."""
-    # Has an activity whose status indicates a completed sale
+    """Determine if a customer detail represents a sale (vs lead).
+
+    Returns True if any activity has a sale-type keyword in its type and is
+    not explicitly cancelled/lost.  An 'open' or 'booked' sale still counts—
+    only explicitly cancelled/lost/deleted activities are excluded.
+    """
     for act in detail.get('activities', []):
         status = (act.get('status') or '').lower()
         act_type = (act.get('type') or '').lower()
-        if status in SALE_ACTIVITY_STATUSES and any(kw in act_type for kw in SALE_ACTIVITY_TYPES_KEYWORDS):
+        if status in SALE_EXCLUDE_STATUSES:
+            continue
+        if any(kw in act_type for kw in SALE_ACTIVITY_TYPES_KEYWORDS):
             return True
 
     return False
@@ -427,6 +434,10 @@ Examples:
                         help='Skip Phase 1 (sales sync) and go straight to new customers')
     parser.add_argument('--sales-only', action='store_true',
                         help='Only run Phase 1 (sales sync), skip new customer import')
+    parser.add_argument('--upgrade-leads', action='store_true',
+                        help='Run Phase 1.5: re-check existing Leads and promote any with a sale to Customer')
+    parser.add_argument('--skip-upgrade', action='store_true',
+                        help='Skip Phase 1.5 (lead upgrade check) — faster when you only want new imports')
     args = parser.parse_args()
 
     # ── Validate credentials ──
@@ -449,24 +460,24 @@ Examples:
         to_dt = None
 
     # ── Initial scan ──
-    print('═' * 65)
-    print('  Anthill CRM → Local Database Sync')
-    print('═' * 65)
+    print('=' * 65)
+    print('  Anthill CRM -> Local Database Sync')
+    print('=' * 65)
     print(f'  API URL   : {BASE_URL}')
     print(f'  Lookback  : {days} days')
     if from_dt:
-        print(f'  Date range: {from_dt.strftime("%Y-%m-%d")} → {(to_dt or datetime.now()).strftime("%Y-%m-%d")}')
+        print(f'  Date range: {from_dt.strftime("%Y-%m-%d")} -> {(to_dt or datetime.now()).strftime("%Y-%m-%d")}')
     print(f'  Page size : {args.page_size}')
     print(f'  Dry run   : {"Yes" if args.dry_run else "No"}')
-    print('─' * 65)
+    print('-' * 65)
 
-    print('\nScanning Anthill for customers …')
+    print('\nScanning Anthill for customers...')
     total_records, total_pages, first_page = find_customers(1, args.page_size, days)
     print(f'  Total records : {total_records:,}')
     print(f'  Total pages   : {total_pages:,} (at {args.page_size}/page)')
 
     # ── Pre-load existing Anthill IDs for fast duplicate checking ──
-    print('\nLoading existing records from database …')
+    print('\nLoading existing records from database...')
     existing_customer_ids = set(
         Customer.objects.exclude(anthill_customer_id='')
         .exclude(anthill_customer_id__isnull=True)
@@ -491,6 +502,7 @@ Examples:
         'customers_updated': 0,
         'leads_created': 0,
         'leads_updated': 0,
+        'leads_upgraded': 0,
         'sales_created': 0,
         'errors': 0,
     }
@@ -506,9 +518,9 @@ Examples:
     # PHASE 1 — Sync sales for existing customers
     # ════════════════════════════════════════════════════════════════════
     if not args.skip_sales:
-        print(f'\n╔═══════════════════════════════════════════════════════════════╗')
-        print(f'║  PHASE 1 — Syncing sales for {len(existing_customer_ids):,} known customers')
-        print(f'╚═══════════════════════════════════════════════════════════════╝')
+        print(f'\n' + '=' * 65)
+        print(f'  PHASE 1 - Syncing sales for {len(existing_customer_ids):,} known customers')
+        print('=' * 65)
         print(f'  Pages {page_range_label}\n')
 
         phase1_scanned = 0
@@ -565,7 +577,7 @@ Examples:
                     phase1_processed += 1
                 except Exception as e:
                     stats['errors'] += 1
-                    print(f'  ✗ Error fetching sales for {anthill_id}: {e}')
+                    print(f'  [ERROR] Error fetching sales for {anthill_id}: {e}')
 
             # ── Page progress (only log every page since Phase 1 is usually smaller) ──
             elapsed = time.time() - start_time
@@ -586,13 +598,71 @@ Examples:
         print(f'  Sales created: {stats["sales_created"]:,}')
 
     # ════════════════════════════════════════════════════════════════════
+    # PHASE 1.5 — Upgrade Leads that now have a qualifying sale activity
+    # ════════════════════════════════════════════════════════════════════
+    run_upgrade = args.upgrade_leads or (not args.skip_upgrade and not args.sales_only)
+    if run_upgrade and not args.dry_run:
+        phase15_start = time.time()
+        leads_with_anthill_id = list(
+            Lead.objects
+            .exclude(anthill_customer_id='')
+            .exclude(anthill_customer_id__isnull=True)
+            .exclude(status='converted')
+            .values_list('pk', 'anthill_customer_id', 'name')
+        )
+        print(f'\n' + '=' * 65)
+        print(f'  PHASE 1.5 - Checking {len(leads_with_anthill_id):,} Leads for promotion to Customer')
+        print('=' * 65 + '\n')
+
+        for lead_pk, anthill_id, lead_name in leads_with_anthill_id:
+            try:
+                detail = get_customer_detail(int(anthill_id))
+            except Exception as e:
+                stats['errors'] += 1
+                print(f'  [ERROR] Error fetching lead {anthill_id}: {e}')
+                continue
+
+            if not detail or not is_sale(detail):
+                continue
+
+            # Promote lead → customer
+            customer_result = save_as_customer(detail, {'id': anthill_id, 'location': '', 'created': '', 'name': lead_name})
+            new_customer = Customer.objects.filter(anthill_customer_id=anthill_id).first()
+
+            if new_customer:
+                # Save sale activities linked to the new customer
+                created_count = save_sales_from_activities(detail, {'id': anthill_id, 'location': '', 'name': lead_name}, new_customer)
+                stats['sales_created'] += created_count
+
+                # Mark the lead as converted
+                Lead.objects.filter(pk=lead_pk).update(
+                    status='converted',
+                    converted_to_customer=new_customer,
+                )
+                # Link any pre-existing AnthillSale records
+                from stock_take.models import AnthillSale as _AS
+                _AS.objects.filter(
+                    anthill_customer_id=anthill_id,
+                    customer__isnull=True,
+                ).update(customer=new_customer)
+
+                stats['leads_upgraded'] += 1
+                existing_customer_ids.add(anthill_id)
+                existing_lead_ids.discard(anthill_id)
+                print(f'  [PROMOTED] Lead -> Customer: {lead_name} (#{anthill_id})')
+
+        phase15_elapsed = time.time() - phase15_start
+        print(f'\n  Phase 1.5 complete in {_format_time(phase15_elapsed)}')
+        print(f'  Leads upgraded: {stats["leads_upgraded"]:,}')
+
+    # ════════════════════════════════════════════════════════════════════
     # PHASE 2 — Import new customers / leads
     # ════════════════════════════════════════════════════════════════════
     if not args.sales_only:
         phase2_start = time.time()
-        print(f'\n╔═══════════════════════════════════════════════════════════════╗')
-        print(f'║  PHASE 2 — Importing new customers & leads')
-        print(f'╚═══════════════════════════════════════════════════════════════╝')
+        print(f'\n' + '=' * 65)
+        print(f'  PHASE 2 - Importing new customers & leads')
+        print('=' * 65)
         print(f'  Pages {page_range_label}\n')
 
         phase2_scanned = 0
@@ -686,7 +756,7 @@ Examples:
 
                 except Exception as e:
                     stats['errors'] += 1
-                    print(f'  ✗ Error on customer {anthill_id}: {e}')
+                    print(f'  [ERROR] Error on customer {anthill_id}: {e}')
 
             # ── Throttled progress logging ──
             phase2_batch_new += page_new
@@ -714,9 +784,9 @@ Examples:
 
     # ── Summary ──
     total_elapsed = time.time() - start_time
-    print('\n' + '═' * 65)
+    print('\n' + '=' * 65)
     print('  SYNC COMPLETE')
-    print('═' * 65)
+    print('=' * 65)
     print(f'  Time elapsed       : {_format_time(total_elapsed)}')
     print(f'  Records scanned    : {stats["scanned"]:,}')
     print(f'  Skipped (existing) : {stats["skipped_existing"]:,}')
@@ -726,10 +796,12 @@ Examples:
     print(f'  Customers updated  : {stats["customers_updated"]:,}')
     print(f'  Leads created      : {stats["leads_created"]:,}')
     print(f'  Leads updated      : {stats["leads_updated"]:,}')
+    if stats['leads_upgraded']:
+        print(f'  Leads upgraded     : {stats["leads_upgraded"]:,}')
     print(f'  Sales created      : {stats["sales_created"]:,}')
     if stats['errors']:
         print(f'  Errors             : {stats["errors"]:,}')
-    print('═' * 65)
+    print('=' * 65)
 
     if args.dry_run:
         new_count = stats['scanned'] - stats['skipped_existing'] - stats['skipped_date']
@@ -744,6 +816,7 @@ Examples:
             f"Scanned {stats['scanned']}, "
             f"customers created {stats['customers_created']}, updated {stats['customers_updated']}, "
             f"leads created {stats['leads_created']}, updated {stats['leads_updated']}, "
+            f"leads upgraded {stats['leads_upgraded']}, "
             f"sales created {stats['sales_created']}, errors {stats['errors']}."
         )
         SyncLog.objects.create(
@@ -754,7 +827,7 @@ Examples:
             errors=stats['errors'],
             notes=notes_text,
         )
-        print('\n  ✓ SyncLog entry written.')
+        print('\n  [OK] SyncLog entry written.')
 
 
 def _format_time(seconds: float) -> str:

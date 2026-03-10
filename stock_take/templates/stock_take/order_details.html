@@ -2378,12 +2378,12 @@
 
 <!-- Modal for Stock Allocation Confirmation -->
 <div class="modal" id="allocationModal">
-    <div class="modal-overlay" onclick="closeModal('allocationModal')"></div>
+    <div class="modal-overlay" onclick="cancelAllocation()"></div>
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="bi bi-box-arrow-in-down"></i> Confirm Stock Allocation</h3>
-                <button type="button" class="modal-close" onclick="closeModal('allocationModal')">✕</button>
+                <button type="button" class="modal-close" onclick="cancelAllocation()">✕</button>
             </div>
             <div class="modal-body">
                 <div style="padding: 12px 16px; background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; margin-bottom: 16px;">
@@ -2415,12 +2415,49 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('allocationModal')">Cancel</button>
+                <button type="button" class="btn btn-secondary" onclick="cancelAllocation()">Cancel</button>
                 <button type="button" class="btn btn-outline-warning" id="confirm-allocation-nostock-btn" onclick="confirmAllocationNoStock()" title="Mark all items as allocated without deducting stock levels">
                     <i class="bi bi-tag"></i> Mark Allocated (No Stock Change)
                 </button>
                 <button type="button" class="btn btn-success" id="confirm-allocation-btn" onclick="confirmAllocation()">
                     <i class="bi bi-check-lg"></i> Confirm Allocation
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Stock Unallocation Confirmation -->
+<div class="modal" id="unallocationModal">
+    <div class="modal-overlay" onclick="cancelUnallocation()"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-box-arrow-up"></i> Unallocate Materials</h3>
+                <button type="button" class="modal-close" onclick="cancelUnallocation()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin: 0 0 16px 0; color: var(--text-secondary); font-size: 0.9rem;">
+                    Were the materials from this order actually taken from stock?
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <div style="padding: 12px 16px; background: rgba(220,53,69,0.08); border: 1px solid rgba(220,53,69,0.25); border-radius: 8px;">
+                        <strong style="color: var(--text-primary); font-size: 0.9rem;"><i class="bi bi-arrow-return-left" style="color:#dc3545;"></i> Yes &mdash; return quantities to stock</strong>
+                        <p style="margin: 4px 0 0 0; color: var(--text-secondary); font-size: 0.82rem;">Use this if the order was cancelled or materials were put back. Quantities will be added back to stock.</p>
+                    </div>
+                    <div style="padding: 12px 16px; background: rgba(255,193,7,0.08); border: 1px solid rgba(255,193,7,0.25); border-radius: 8px;">
+                        <strong style="color: var(--text-primary); font-size: 0.9rem;"><i class="bi bi-tag" style="color:#ffc107;"></i> No &mdash; just uncheck (no stock change)</strong>
+                        <p style="margin: 4px 0 0 0; color: var(--text-secondary); font-size: 0.82rem;">Use this if the box was ticked by mistake and materials were never taken from stock.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="cancelUnallocation()">Cancel</button>
+                <button type="button" class="btn btn-outline-warning" id="confirm-unalloc-nostock-btn" onclick="confirmUnallocationNoStock()" title="Uncheck without affecting stock levels">
+                    <i class="bi bi-tag"></i> Just Uncheck
+                </button>
+                <button type="button" class="btn btn-danger" id="confirm-unalloc-btn" onclick="confirmUnallocationWithStock()">
+                    <i class="bi bi-arrow-return-left"></i> Return to Stock
                 </button>
             </div>
         </div>
@@ -3634,12 +3671,10 @@ document.addEventListener('DOMContentLoaded', function() {
 // ─── Toggle materials allocation (Job Info checkbox) ────────────────────
 function toggleMaterialsAllocated(orderId, allocate, checkbox) {
     if (!allocate) {
-        const msg = 'Unallocate all materials?\n\nThis will add quantities back to stock.';
-        if (!confirm(msg)) {
-            checkbox.checked = true;
-            return;
-        }
-        doAllocation(orderId, false, {}, checkbox);
+        // Show unallocate modal instead of native confirm
+        window._allocOrderId = orderId;
+        window._allocCheckbox = checkbox;
+        openModal('unallocationModal');
         return;
     }
 
@@ -3708,6 +3743,36 @@ function confirmAllocationNoStock() {
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Marking...';
 
     doAllocation(orderId, true, {}, checkbox, true);
+}
+
+function cancelAllocation() {
+    // Revert the checkbox — nothing was saved
+    if (window._allocCheckbox) window._allocCheckbox.checked = false;
+    closeModal('allocationModal');
+}
+
+function cancelUnallocation() {
+    // Revert the checkbox — nothing was saved
+    if (window._allocCheckbox) window._allocCheckbox.checked = true;
+    closeModal('unallocationModal');
+}
+
+function confirmUnallocationWithStock() {
+    const orderId = window._allocOrderId;
+    const checkbox = window._allocCheckbox;
+    const btn = document.getElementById('confirm-unalloc-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Returning...';
+    doAllocation(orderId, false, {}, checkbox, false);
+}
+
+function confirmUnallocationNoStock() {
+    const orderId = window._allocOrderId;
+    const checkbox = window._allocCheckbox;
+    const btn = document.getElementById('confirm-unalloc-nostock-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Unchecking...';
+    doAllocation(orderId, false, {}, checkbox, true);
 }
 
 function doAllocation(orderId, allocate, quantities, checkbox, skipStock) {

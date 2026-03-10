@@ -802,6 +802,14 @@ def purchase_order_receive(request, po_id):
     selected_ids = data.get('product_ids', None)  # None = receive all
     selective = selected_ids is not None
 
+    # Optional per-product quantities: {product_id -> qty_to_receive}
+    # Keys may arrive as ints (from JSON) or strings; normalise to int.
+    raw_quantities = data.get('quantities', None)
+    if raw_quantities is not None:
+        quantities: dict | None = {int(k): float(v) for k, v in raw_quantities.items() if v is not None}
+    else:
+        quantities = None
+
     received_items = 0
     is_carnehill = (po.supplier_name or '').lower().find('carnehill') >= 0
 
@@ -829,26 +837,41 @@ def purchase_order_receive(request, po_id):
     if not is_carnehill:
         all_products = list(po.products.select_related('stock_item').all())
         for product in all_products:
-            # If selective mode, skip products not in the requested list
-            if selective and product.id not in selected_ids:
+            # Determine if this product is selected and how much to receive
+            if quantities is not None:
+                if product.id not in quantities:
+                    continue  # not ticked in the receive modal
+                qty_to_receive = quantities[product.id]
+            elif selective and product.id not in selected_ids:
                 continue
-            if product.received_quantity < product.order_quantity:
-                delta = float(product.order_quantity) - float(product.received_quantity)
-                product.received_quantity = product.order_quantity
-                product.save(update_fields=['received_quantity'])
-                if delta > 0 and product.stock_item:
-                    product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
-                    product.stock_item.save(update_fields=['quantity'])
-                    StockHistory.objects.create(
-                        stock_item=product.stock_item,
-                        quantity=product.stock_item.quantity,
-                        change_amount=int(delta),
-                        change_type='purchase',
-                        reference=po.display_number,
-                        notes=f'Received {int(delta)} via {po.display_number} ({product.sku})',
-                        created_by=request.user,
-                    )
-                received_items += 1
+            else:
+                qty_to_receive = None  # receive all remaining
+
+            if product.received_quantity >= product.order_quantity:
+                continue  # already fully received
+
+            remaining = float(product.order_quantity) - float(product.received_quantity)
+            delta = min(float(qty_to_receive), remaining) if qty_to_receive is not None else remaining
+
+            if delta <= 0:
+                continue
+
+            from decimal import Decimal
+            product.received_quantity = Decimal(str(float(product.received_quantity) + delta))
+            product.save(update_fields=['received_quantity'])
+            if product.stock_item:
+                product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
+                product.stock_item.save(update_fields=['quantity'])
+                StockHistory.objects.create(
+                    stock_item=product.stock_item,
+                    quantity=product.stock_item.quantity,
+                    change_amount=int(delta),
+                    change_type='purchase',
+                    reference=po.display_number,
+                    notes=f'Received {int(delta)} via {po.display_number} ({product.sku})',
+                    created_by=request.user,
+                )
+            received_items += 1
 
     # ── Determine new status ────────────────────────────────────────────────
     # Refresh products from DB to get updated received quantities

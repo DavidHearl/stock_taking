@@ -6688,7 +6688,7 @@ def allocate_accessories(request, order_id):
                 acc.save(update_fields=['is_allocated'])
                 count += 1
 
-                if acc.stock_item_id and acc.quantity > 0:
+                if not skip_stock_adjustment and acc.stock_item_id and acc.quantity > 0:
                     qty = int(acc.quantity)
                     StockItem.objects.filter(pk=acc.stock_item_id).update(
                         quantity=F('quantity') + qty

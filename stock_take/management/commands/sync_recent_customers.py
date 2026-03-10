@@ -1,18 +1,39 @@
 """
 Management command to sync new/updated customers from Anthill CRM
-created within the last 7 days.
+created within the last 7 days, and to promote any existing Leads
+that have acquired a qualifying sale activity since they were first synced.
+
+Anthill is the source of truth.  Two passes run on every execution:
+
+  Pass 1 — Recent scan
+    Fetches all customers created within the lookback window from Anthill.
+    New customers with a sale activity are saved as Customer; others as Lead.
+    Customers already in the database are passed to _update_existing() for a
+    location update (+ promotion if they appeared in Anthill recently).
+
+  Pass 2 — Lead upgrade
+    Iterates every Lead in the database that has an Anthill Customer ID and
+    has not yet been converted.  Re-fetches the full Anthill detail for each
+    and promotes the Lead to a Customer if a qualifying sale activity is found.
+    This catches the common case where a Lead was created months ago but has
+    only recently received a sale in Anthill — those records never re-appear
+    in the recent scan window.
 
 Designed to be run on a schedule (08:00 & 12:00 daily) to keep the
-local database up to date with recent Anthill additions.
+local database up to date with Anthill.
 
 Usage:
-    python manage.py sync_recent_customers                # Sync last 7 days
-    python manage.py sync_recent_customers --days 14      # Sync last 14 days
-    python manage.py sync_recent_customers --dry-run      # Preview without saving
+    python manage.py sync_recent_customers                          # Scan 7 days + upgrade leads (last 90 days)
+    python manage.py sync_recent_customers --days 14                # Scan last 14 days + upgrade leads
+    python manage.py sync_recent_customers --upgrade-days 180       # Upgrade leads from last 180 days
+    python manage.py sync_recent_customers --upgrade-days 0         # Upgrade ALL leads (slow — use sparingly)
+    python manage.py sync_recent_customers --skip-upgrade           # Scan only, skip lead upgrade
+    python manage.py sync_recent_customers --dry-run                # Preview without saving
 """
 
 import time
 import logging
+from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from stock_take.services.anthill_api import AnthillAPI, AnthillAPIError
@@ -41,10 +62,23 @@ class Command(BaseCommand):
             action='store_true',
             help='Preview what would be synced without saving to database',
         )
+        parser.add_argument(
+            '--skip-upgrade',
+            action='store_true',
+            help='Skip Pass 2 (lead upgrade check) — only scan for new records',
+        )
+        parser.add_argument(
+            '--upgrade-days',
+            type=int,
+            default=90,
+            help='Pass 2: only check leads created within this many days (default: 90). Use 0 for all leads.',
+        )
 
     def handle(self, *args, **options):
         days = options['days']
         dry_run = options['dry_run']
+        skip_upgrade = options['skip_upgrade']
+        upgrade_days = options['upgrade_days']
         start_time = time.time()
 
         self.stdout.write(f'\n{"=" * 60}')
@@ -85,6 +119,7 @@ class Command(BaseCommand):
             'customers_updated': 0,
             'leads_created': 0,
             'leads_updated': 0,
+            'leads_upgraded': 0,
             'sales_created': 0,
             'errors': 0,
         }
@@ -188,6 +223,96 @@ class Command(BaseCommand):
                 break
             page += 1
 
+        # ════════════════════════════════════════════════════════
+        # Pass 2 — Upgrade existing Leads that now have a sale
+        # Runs over ALL leads regardless of when they were created,
+        # catching records that fall outside the scan window above.
+        # ════════════════════════════════════════════════════════
+        if not skip_upgrade:
+            leads_qs = (
+                Lead.objects
+                .exclude(anthill_customer_id='')
+                .exclude(anthill_customer_id__isnull=True)
+                .exclude(status='converted')
+            )
+            if upgrade_days > 0:
+                cutoff = timezone.now() - timedelta(days=upgrade_days)
+                leads_qs = leads_qs.filter(anthill_created_date__gte=cutoff)
+            leads_to_check = list(leads_qs.values_list('pk', 'anthill_customer_id', 'name'))
+
+            upgrade_window = f'last {upgrade_days} days' if upgrade_days > 0 else 'all time'
+            self.stdout.write(f'\nPass 2 - checking {len(leads_to_check):,} leads for promotion ({upgrade_window})...')
+
+            pass2_checked = 0
+            pass2_start = time.time()
+
+            for lead_pk, anthill_id, lead_name in leads_to_check:
+                pass2_checked += 1
+
+                # Progress heartbeat every 500 leads
+                if pass2_checked % 500 == 0 or pass2_checked == len(leads_to_check):
+                    elapsed2 = time.time() - pass2_start
+                    rate = pass2_checked / elapsed2 if elapsed2 > 0 else 0
+                    remaining = (len(leads_to_check) - pass2_checked) / rate if rate > 0 else 0
+                    eta_str = f'{int(remaining // 60)}m {int(remaining % 60)}s' if remaining > 0 else '--'
+                    self.stdout.write(
+                        f'  [{pass2_checked:,}/{len(leads_to_check):,}] '
+                        f'upgraded={stats["leads_upgraded"]} '
+                        f'rate={rate:.0f}/s eta={eta_str}'
+                    )
+
+                try:
+                    details = api.get_customer_details(int(anthill_id), include_activity=True)
+                    time.sleep(0.05)
+                except AnthillAPIError as e:
+                    stats['errors'] += 1
+                    self.stderr.write(f'  [ERROR] API error for lead #{anthill_id}: {e}')
+                    continue
+                except Exception as e:
+                    stats['errors'] += 1
+                    self.stderr.write(self.style.ERROR(f'  [ERROR] Error for lead #{anthill_id}: {e}'))
+                    continue
+
+                if not details or not self._is_sale(details):
+                    continue
+
+                self.stdout.write(
+                    self.style.SUCCESS(f'  [PROMOTED] Lead -> Customer: {lead_name} (#{anthill_id})')
+                )
+
+                if dry_run:
+                    stats['leads_upgraded'] += 1
+                    continue
+
+                result_action = self._save_customer(
+                    details,
+                    {'id': anthill_id, 'name': lead_name, 'location': '', 'created': ''},
+                )
+                new_customer = Customer.objects.filter(anthill_customer_id=anthill_id).first()
+                if not new_customer:
+                    continue
+
+                # Save Anthill sale activities
+                sales_count = self._save_sales(
+                    details,
+                    {'id': anthill_id, 'name': lead_name, 'location': ''},
+                    new_customer,
+                )
+                stats['sales_created'] += sales_count
+
+                # Link any pre-existing AnthillSale records (customer=None)
+                AnthillSale.objects.filter(
+                    anthill_customer_id=anthill_id,
+                    customer__isnull=True,
+                ).update(customer=new_customer)
+
+                # Mark lead as converted
+                Lead.objects.filter(pk=lead_pk).update(
+                    status='converted',
+                    converted_to_customer=new_customer,
+                )
+                stats['leads_upgraded'] += 1
+
         # Summary
         elapsed = time.time() - start_time
         self.stdout.write(f'\n{"=" * 60}')
@@ -200,6 +325,8 @@ class Command(BaseCommand):
         self.stdout.write(f'  Customers updated  : {stats["customers_updated"]:,}')
         self.stdout.write(f'  Leads created      : {stats["leads_created"]:,}')
         self.stdout.write(f'  Leads updated      : {stats["leads_updated"]:,}')
+        if stats['leads_upgraded']:
+            self.stdout.write(self.style.SUCCESS(f'  Leads upgraded     : {stats["leads_upgraded"]:,}'))
         self.stdout.write(f'  Sales created      : {stats["sales_created"]:,}')
         if stats['errors']:
             self.stdout.write(self.style.ERROR(f'  Errors             : {stats["errors"]:,}'))
@@ -209,19 +336,26 @@ class Command(BaseCommand):
         if not dry_run:
             log_status = 'success'
             if stats['errors'] > 0:
-                total_created = stats['customers_created'] + stats['leads_created'] + stats['sales_created']
+                total_created = (
+                    stats['customers_created'] + stats['leads_created']
+                    + stats['leads_upgraded'] + stats['sales_created']
+                )
                 log_status = 'warning' if total_created > 0 else 'error'
             notes_text = (
                 f"Scanned {stats['scanned']}, "
                 f"customers created {stats['customers_created']}, updated {stats['customers_updated']}, "
                 f"leads created {stats['leads_created']}, updated {stats['leads_updated']}, "
+                f"leads upgraded {stats['leads_upgraded']}, "
                 f"sales created {stats['sales_created']}, errors {stats['errors']}. "
                 f"Lookback: {days} days."
             )
             SyncLog.objects.create(
                 script_name='sync_recent_customers',
                 status=log_status,
-                records_created=stats['customers_created'] + stats['leads_created'] + stats['sales_created'],
+                records_created=(
+                    stats['customers_created'] + stats['leads_created']
+                    + stats['leads_upgraded'] + stats['sales_created']
+                ),
                 records_updated=stats['customers_updated'] + stats['leads_updated'],
                 errors=stats['errors'],
                 notes=notes_text,
@@ -231,7 +365,8 @@ class Command(BaseCommand):
         if dry_run:
             new_count = stats['scanned'] - stats['skipped_existing']
             self.stdout.write(self.style.WARNING(
-                f'  DRY RUN: {new_count:,} new records would be imported.'
+                f'  DRY RUN: {new_count:,} new records would be imported, '
+                f'{stats["leads_upgraded"]} leads would be promoted.'
             ))
 
     @staticmethod
@@ -405,13 +540,18 @@ class Command(BaseCommand):
             if result_action == 'created':
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f'  ↑ Promoted Lead → Customer: {lead.name} (#{anthill_id})'
+                        f'  [PROMOTED] Lead -> Customer: {lead.name} (#{anthill_id})'
                     )
                 )
                 new_customer = Customer.objects.filter(
                     anthill_customer_id=anthill_id
                 ).first()
                 self._save_sales(details, summary, new_customer)
+                # Link any pre-existing AnthillSale records (customer=None)
+                AnthillSale.objects.filter(
+                    anthill_customer_id=anthill_id,
+                    customer__isnull=True,
+                ).update(customer=new_customer)
                 # Mark lead as converted
                 lead.status = 'converted'
                 lead.converted_to_customer = new_customer
