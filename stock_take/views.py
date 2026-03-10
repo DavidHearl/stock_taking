@@ -45,7 +45,7 @@ def ordering(request):
     tab = request.GET.get('tab', 'wip')  # 'all', 'wip', 'completed'
     
     # Handle sorting
-    sort_by = request.GET.get('sort', 'order_date')
+    sort_by = request.GET.get('sort', 'fit_date')
     sort_order = request.GET.get('order', 'desc')
     
     # Define valid sort fields
@@ -72,11 +72,11 @@ def ordering(request):
     from django.db.models import Max
     
     if sort_by == 'fit_date':
-        # Primary sort by fit_date, but keep same names together
+        # Primary sort by fit_date; nulls pushed to the bottom regardless of direction
         if sort_order == 'asc':
-            ordering = ['job_finished', 'last_name', 'first_name', 'fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+            ordering = ['job_finished', models.F('fit_date').asc(nulls_last=True), 'last_name', 'first_name', models.F('boards_po__po_number').asc(nulls_last=True)]
         else:
-            ordering = ['job_finished', 'last_name', 'first_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
+            ordering = ['job_finished', models.F('fit_date').desc(nulls_last=True), 'last_name', 'first_name', models.F('boards_po__po_number').asc(nulls_last=True)]
     elif sort_by == 'last_name':
         if sort_order == 'asc':
             ordering = ['job_finished', 'last_name', 'first_name', '-fit_date', models.F('boards_po__po_number').asc(nulls_last=True)]
@@ -95,8 +95,10 @@ def ordering(request):
             ordering = ['job_finished', f'-{order_field}', 'last_name', 'first_name', models.F('boards_po__po_number').asc(nulls_last=True)]
     
     # Sort by job_finished first (incomplete first), then by boards_po.po_number (nulls last), then by selected field
-    # Insert boards_is_ordered as second priority so un-ordered boards float to the top
-    ordering.insert(1, 'boards_is_ordered')
+    # Insert boards_is_ordered as second priority so un-ordered boards float to the top,
+    # but NOT for fit_date sort — there fit_date must remain the primary key.
+    if sort_by != 'fit_date':
+        ordering.insert(1, 'boards_is_ordered')
     # OPTIMIZATION: Don't load PNX items upfront - they'll be loaded via AJAX when row is clicked
     # OPTIMIZATION: Removed prefetch and annotations - will lazy load indicators via AJAX
     from django.db.models import Exists, OuterRef, Q
@@ -386,11 +388,60 @@ def load_order_indicators_ajax(request):
             if (stock_qtys.get(sku, 0) or 0) + incoming_qtys.get(sku, 0) - total_demand.get(sku, 0) < 0
         }
 
-        # Tag orders that have at least one short accessory
-        for acc in batch_accs:
-            sn = acc['order__sale_number']
-            if acc['sku'] in short_skus and sn in indicators:
-                indicators[sn]['has_short'] = True
+        # For short SKUs, determine WHICH specific orders are short by allocating
+        # stock in fit_date order (earliest date = highest priority). Orders with
+        # the furthest-away fit date bear the shortage rather than all orders.
+        if short_skus:
+            from collections import defaultdict
+
+            # Fetch ALL active non-allocated accessories for short SKUs globally,
+            # including their order's fit_date so we can sort by priority.
+            short_accs_global = list(
+                Accessory.objects.filter(
+                    sku__in=short_skus,
+                    order__job_finished=False,
+                    is_allocated=False,
+                    missing=False,
+                ).values('order__sale_number', 'order__fit_date', 'sku', 'quantity')
+            )
+
+            # Aggregate demand per (sku, sale_number) — an order may have
+            # multiple accessory lines for the same SKU.
+            order_sku_demand = defaultdict(float)
+            order_fit_dates = {}
+            for acc in short_accs_global:
+                key = (acc['sku'], acc['order__sale_number'])
+                order_sku_demand[key] += float(acc['quantity'])
+                order_fit_dates[key] = acc['order__fit_date']
+
+            # Group entries by SKU ready for sequential allocation.
+            sku_orders = defaultdict(list)
+            for (sku, sn), qty in order_sku_demand.items():
+                sku_orders[sku].append((sn, qty, order_fit_dates[(sku, sn)]))
+
+            # Walk orders in fit_date order; allocate stock greedily and record
+            # the exact unit shortfall for each order that can't be fully covered.
+            short_order_qtys = {}  # (sku, sale_number) -> units short
+            for sku, orders_list in sku_orders.items():
+                available = (stock_qtys.get(sku, 0) or 0) + incoming_qtys.get(sku, 0)
+                # Sort: earliest fit_date first; no date means lowest priority (last).
+                orders_sorted = sorted(
+                    orders_list,
+                    key=lambda x: (x[2] is None, x[2] if x[2] is not None else datetime.date.max, x[0])
+                )
+                remaining = available
+                for sn, qty, fit_date in orders_sorted:
+                    if remaining < qty:
+                        shortage = qty - max(0.0, remaining)
+                        short_order_qtys[(sku, sn)] = shortage
+                    remaining = max(0.0, remaining - qty)
+
+            # Tag orders in this batch that are short for at least one SKU.
+            for acc in batch_accs:
+                sn = acc['order__sale_number']
+                key = (acc['sku'], sn)
+                if key in short_order_qtys and sn in indicators:
+                    indicators[sn]['has_short'] = True
     # ------------------------------------------------
     
     return JsonResponse({'success': True, 'indicators': indicators})

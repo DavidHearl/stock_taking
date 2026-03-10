@@ -20,6 +20,17 @@
     font-weight: 600;
     letter-spacing: 0.04em;
 }
+.today-divider-cell {
+    background: rgba(13,110,253,0.08);
+    border-top: 2px dashed rgba(13,110,253,0.45);
+    border-bottom: 2px dashed rgba(13,110,253,0.45);
+    text-align: center;
+    padding: 6px 16px;
+    color: #4d94ff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
 .pfp-row > td {
     background-color: rgba(240,173,78,0.04) !important;
 }
@@ -316,6 +327,7 @@
                 onclick="toggleDetails('details-{{ order.sale_number }}', this)"
                 id="main-{{ order.sale_number }}"
                 data-sale-number="{{ order.sale_number }}"
+                data-fit-date="{{ order.fit_date|date:'Y-m-d'|default:'' }}"
             >
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
@@ -907,7 +919,7 @@
                     }
                     if (indicators.has_short) {
                         const cell = row.querySelector('[data-indicator="accessories"]');
-                        if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories are predicted to be short on stock">⚠ Short</span>');
+                        if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories cannot be covered by current stock + incoming — this order has the furthest fit date">⚠ Short</span>');
                     }
                     
                     loadedIndicators.add(saleNumber);
@@ -969,7 +981,7 @@
                                 }
                                 if (indicators.has_short) {
                                     const cell = row.querySelector('[data-indicator="accessories"]');
-                                    if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories are predicted to be short on stock">⚠ Short</span>');
+                                    if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories cannot be covered by current stock + incoming — this order has the furthest fit date">⚠ Short</span>');
                                 }
                                 
                                 loadedIndicators.add(saleNumber);
@@ -1032,6 +1044,33 @@
     
     // Load indicators and details after a short delay to let page render first
     setTimeout(loadOrderIndicators, 500);
+
+    // Insert a "Today" divider row between future and past fit dates
+    function insertTodayDivider() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayStr = today.toISOString().split('T')[0];
+        const todayLabel = today.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        // Only insert once
+        if (document.getElementById('today-divider')) return;
+
+        const rows = document.querySelectorAll('#order-table tbody tr.clickable-row:not(.pfp-row)');
+        for (const row of rows) {
+            const fitDate = row.dataset.fitDate;
+            if (!fitDate) continue;
+            // List is sorted desc (furthest first); first row where date < today = past order
+            if (fitDate < todayStr) {
+                const divider = document.createElement('tr');
+                divider.id = 'today-divider';
+                divider.className = 'today-divider-row';
+                divider.innerHTML = `<td colspan="13" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
+                row.parentNode.insertBefore(divider, row);
+                break;
+            }
+        }
+    }
+    insertTodayDivider();
 
     // Replace file modal functionality
     let currentReplacePOId = null;
