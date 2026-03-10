@@ -343,8 +343,8 @@ def dashboard(request):
 
     # Monthly sales totals from AnthillSale - aggregate sale_value by activity_date month
     # Use 36-month window and __date lookups for correct Europe/Dublin timezone handling
-    import pytz
-    dublin_tz = pytz.timezone('Europe/Dublin')
+    from zoneinfo import ZoneInfo
+    dublin_tz = ZoneInfo('Europe/Dublin')
     monthly_sales_qs = AnthillSale.objects.filter(
         activity_date__date__gte=thirty_six_months_ago,
         activity_date__date__lte=three_months_ahead,
