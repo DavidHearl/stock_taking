@@ -785,6 +785,15 @@ def purchase_order_receive(request, po_id):
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
+    try:
+        return _do_receive_po(request, po, data)
+    except Exception as exc:
+        import traceback
+        logger.error('purchase_order_receive error for po_id=%s: %s', po_id, traceback.format_exc())
+        return JsonResponse({'error': str(exc)}, status=500)
+
+
+def _do_receive_po(request, po, data):
     from django.utils import timezone
 
     # Parse the received date (defaults to today)
@@ -893,7 +902,6 @@ def purchase_order_receive(request, po_id):
 
     # Mark the linked BoardsPO as ordered (Approved or Received both mean it was ordered)
     if po.display_number:
-        from .models import BoardsPO
         BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=True)
 
     return JsonResponse({

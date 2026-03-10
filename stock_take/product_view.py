@@ -147,7 +147,7 @@ def product_detail(request, item_id):
     # Orders/projects using this product (via accessories)
     order_accessories = Accessory.objects.filter(
         stock_item=product
-    ).select_related('order', 'order__customer').order_by('-order__order_date')
+    ).select_related('order', 'order__customer').order_by('-order__fit_date', '-order__order_date')
     
     # Stock change history for the Last Modified tab
     stock_changes = StockHistory.objects.filter(

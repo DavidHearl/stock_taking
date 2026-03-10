@@ -432,57 +432,60 @@
 
     <!-- Projects Tab -->
     <div class="tab-content" id="projects" style="display: none;">
-        <div class="info-group">
-            <h3>Projects Using This Product</h3>
-            {% if order_accessories %}
-            <div class="po-table-container" style="margin-top: 16px;">
-                <table class="linked-table">
-                    <thead>
-                        <tr>
-                            <th>Sale Number</th>
-                            <th>Customer</th>
-                            <th>Order Date</th>
-                            <th>Fit Date</th>
-                            <th class="text-right">Qty Used</th>
-                            <th class="text-right">Cost</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for acc in order_accessories %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'order_details' acc.order.id %}" class="link-highlight">
-                                    {{ acc.order.sale_number }}
-                                </a>
-                            </td>
-                            <td>
-                                {% if acc.order.customer %}
-                                    {{ acc.order.customer.name|default:acc.order.first_name }}
-                                {% else %}
-                                    {{ acc.order.first_name }} {{ acc.order.last_name }}
-                                {% endif %}
-                            </td>
-                            <td>{{ acc.order.order_date|date:"d/m/Y" }}</td>
-                            <td>{{ acc.order.fit_date|date:"d/m/Y" }}</td>
-                            <td class="text-right">{{ acc.quantity|floatformat:0 }}</td>
-                            <td class="text-right">£{{ acc.cost_price|floatformat:2 }}</td>
-                            <td>
-                                {% if acc.order.job_finished %}
-                                <span class="status-badge received">Completed</span>
-                                {% else %}
-                                <span class="status-badge approved">Active</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="text-muted">This product has not been used in any projects.</p>
-            {% endif %}
+        {% if order_accessories %}
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Sale Number</th>
+                        <th>Customer</th>
+                        <th>Fit Date</th>
+                        <th>Order Date</th>
+                        <th class="text-right">Qty Used</th>
+                        <th>Allocated</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for acc in order_accessories %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'order_details' acc.order.id %}" class="link-highlight">
+                                {{ acc.order.sale_number }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if acc.order.customer %}
+                                {{ acc.order.customer.name|default:acc.order.first_name }}
+                            {% else %}
+                                {{ acc.order.first_name }} {{ acc.order.last_name }}
+                            {% endif %}
+                        </td>
+                        <td>{{ acc.order.fit_date|date:"d/m/Y"|default:"-" }}</td>
+                        <td>{{ acc.order.order_date|date:"d/m/Y"|default:"-" }}</td>
+                        <td class="text-right">{{ acc.quantity|floatformat:0 }}</td>
+                        <td>
+                            {% if acc.is_allocated %}
+                                <span class="status-badge received">Yes{% if acc.allocated_date %} &mdash; {{ acc.allocated_date|date:"d/m/Y" }}{% endif %}</span>
+                            {% else %}
+                                <span class="status-badge draft">No</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if acc.order.job_finished %}
+                            <span class="status-badge received">Completed</span>
+                            {% else %}
+                            <span class="status-badge approved">Active</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
+        {% else %}
+        <p class="text-muted" style="padding: 16px 0;">This product has not been used in any projects.</p>
+        {% endif %}
     </div>
 </div>
 

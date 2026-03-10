@@ -1084,7 +1084,7 @@ def shortages(request):
                     'shortage': data['shortage'],
                     'surplus': max(0, data['current_stock'] + incoming - data['required_qty']),
                     'order_count': len(data['orders']),
-                    'orders': sorted(data['orders'], key=lambda o: (o['fit_date'] or '9999-99-99')),
+                    'orders': sorted(data['orders'], key=lambda o: (o['fit_date'] if o['fit_date'] is not None else datetime.date.max)),
                     'stock_item_id': data.get('stock_item_id'),
                     'cost': data['cost'],
                 })
