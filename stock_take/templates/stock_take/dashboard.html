@@ -18,11 +18,11 @@
     <!-- Stats Cards -->
     <div class="dashboard-grid dashboard-grid-6">
         <div class="dashboard-card accent-danger">
-            <div class="card-label">
-                <h3 class="card-label">Outstanding Balance</h3>
-            </div>
+            <h3 class="card-label">Outstanding Balance</h3>
             <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
-            <div class="card-subtext">Total remaining to collect</div>
+            <div class="card-subtext">{{ outstanding_debtor_count }} debtors remaining
+                <span class="card-delta">Expected this week: <strong>&pound;{{ expected_this_week }}</strong></span>
+            </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openOutstandingReport()">
                     <i class="bi bi-bar-chart-line-fill"></i> View Report
@@ -30,15 +30,16 @@
             </div>
         </div>
         <div class="dashboard-card accent-danger">
-            <h3 class="card-label">Sales After</h3>
+            <div class="card-label">
+                Sales After
+                <div class="dash-cal-wrap" id="salesAfterCalWrap" title="" onclick="this.querySelector('input').showPicker()">
+                    <i class="bi bi-calendar3"></i>
+                    <input type="date" id="salesAfterDate" class="dash-date-overlay"
+                           value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalTitle('salesAfterDate','salesAfterCalWrap')">
+                </div>
+            </div>
             <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
             <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
-            <div class="dash-cal-wrap">
-                <i class="bi bi-calendar3"></i>
-                <span id="salesAfterDateLabel"></span>
-                <input type="date" id="salesAfterDate" class="dash-date-overlay"
-                       value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalLabel('salesAfterDate','salesAfterDateLabel')">
-            </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openSalesAfterReport()">
                     <i class="bi bi-bar-chart-line-fill"></i> View Report
@@ -46,21 +47,18 @@
             </div>
         </div>
         <div class="dashboard-card">
-            <h3 class="card-label">
+            <div class="card-label">
                 Stock Value
-                {% if stock_value_7day_delta > 0 %}
-                <div class="card-subtext" style="color:#28a745;font-weight:600;">&#9650; &pound; {{ stock_value_7day_delta_str }}</div>
-                {% elif stock_value_7day_delta < 0 %}
-                <div class="card-subtext" style="color:#dc3545;font-weight:600;">&#9660; &pound; {{ stock_value_7day_delta_str }}</div>
-                {% endif %}
-            </h3>
+                <div class="dash-cal-wrap" id="stockReportCalWrap" title="" onclick="this.querySelector('input').showPicker()">
+                    <i class="bi bi-calendar3"></i>
+                    <input type="date" id="stockReportDate" class="dash-date-overlay"
+                           value="{{ today_str }}" onchange="updateCalTitle('stockReportDate','stockReportCalWrap')">
+                </div>
+            </div>
             <div class="card-value">&pound;{{ total_stock_value }}</div>
-            <div class="card-subtext">{{ stock_item_count }} items in stock</div>
-            <div class="dash-cal-wrap">
-                <i class="bi bi-calendar3"></i>
-                <span id="stockReportDateLabel"></span>
-                <input type="date" id="stockReportDate" class="dash-date-overlay"
-                       value="{{ today_str }}" onchange="updateCalLabel('stockReportDate','stockReportDateLabel')">
+            <div class="card-subtext">{{ stock_item_count }} items in stock
+                {% if stock_value_7day_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ stock_value_7day_delta_str }}</span>
+                {% elif stock_value_7day_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ stock_value_7day_delta_str }}</span>{% endif %}
             </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openStockReport()">
@@ -71,7 +69,10 @@
         <div class="dashboard-card">
             <h3 class="card-label">This Week's Sales</h3>
             <div class="card-value">&pound;{{ this_week_sales }}</div>
-            <div class="card-subtext">Fits scheduled this week</div>
+            <div class="card-subtext">Fits scheduled this week
+                {% if week_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ week_delta_str }} vs last week</span>
+                {% elif week_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ week_delta_str }} vs last week</span>{% endif %}
+            </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openWeekReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
@@ -85,7 +86,11 @@
                 </div>
             </div>
             <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
-            <div class="card-subtext">Total monthly sales</div>
+            <div class="card-subtext" id="monthlySalesCount">Total monthly sales
+                {% if month_delta > 0 %}<span class="card-delta card-delta-positive" id="monthlyDelta">&#9650; &pound;{{ month_delta_str }} vs prev month</span>
+                {% elif month_delta < 0 %}<span class="card-delta card-delta-negative" id="monthlyDelta">&#9660; &pound;{{ month_delta_str }} vs prev month</span>
+                {% else %}<span class="card-delta" id="monthlyDelta"></span>{% endif %}
+            </div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openMonthlyReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
@@ -102,7 +107,7 @@
     <div class="charts-row">
         <!-- Fits Per Week Chart -->
         <div class="chart-container">
-            <h3><i class="bi bi-calendar-week"></i> Fits Per Week</h3>
+            <h3 id="fitsChartTitle">Fits Per Week</h3>
             <div class="chart-wrapper">
                 <canvas id="fitsPerWeekChart"></canvas>
             </div>
@@ -110,7 +115,7 @@
 
         <!-- Sales Per Week Chart -->
         <div class="chart-container">
-            <h3><i class="bi bi-currency-pound"></i> Sales Per Week</h3>
+            <h3 id="salesChartTitle">Sales Per Week</h3>
             <div class="chart-wrapper">
                 <canvas id="salesPerWeekChart"></canvas>
             </div>
@@ -133,6 +138,14 @@
             <div class="chart-wrapper">
                 <canvas id="boardCostsChart"></canvas>
             </div>
+        </div>
+    </div>
+
+    <!-- Weighted Average Sale Value Per Fit Chart -->
+    <div class="chart-container">
+        <h3 id="weightedAvgChartTitle">Avg Sale Value Per Fit</h3>
+        <div class="chart-wrapper">
+            <canvas id="weightedAvgChart"></canvas>
         </div>
     </div>
 
@@ -177,7 +190,19 @@ function fetchMonthlySales() {
         .then(data => {
             if (data.success) {
                 document.getElementById('monthlySalesTotal').textContent = '£' + Math.round(data.total).toLocaleString();
-                document.getElementById('monthlySalesCount').textContent = data.count.toLocaleString() + ' fits this month';
+                const deltaEl = document.getElementById('monthlyDelta');
+                if (deltaEl) {
+                    if (data.delta_sign > 0) {
+                        deltaEl.className = 'card-delta card-delta-positive';
+                        deltaEl.innerHTML = '&#9650; &pound;' + data.delta_str + ' vs prev month';
+                    } else if (data.delta_sign < 0) {
+                        deltaEl.className = 'card-delta card-delta-negative';
+                        deltaEl.innerHTML = '&#9660; &pound;' + data.delta_str + ' vs prev month';
+                    } else {
+                        deltaEl.className = 'card-delta';
+                        deltaEl.textContent = '';
+                    }
+                }
             }
             els.forEach(c => { if (c) c.style.opacity = '1'; });
         })
@@ -190,8 +215,8 @@ function fetchMonthlySales() {
 document.addEventListener('DOMContentLoaded', function() {
     updateMonthLabel();
     fetchSalesAfter();
-    updateCalLabel('salesAfterDate', 'salesAfterDateLabel');
-    updateCalLabel('stockReportDate', 'stockReportDateLabel');
+    updateCalTitle('salesAfterDate', 'salesAfterCalWrap');
+    updateCalTitle('stockReportDate', 'stockReportCalWrap');
 });
 
 function formatCalDate(val) {
@@ -201,10 +226,10 @@ function formatCalDate(val) {
     return d + ' ' + months[+m - 1] + ' ' + y;
 }
 
-function updateCalLabel(inputId, labelId) {
+function updateCalTitle(inputId, wrapId) {
     const v = document.getElementById(inputId);
-    const l = document.getElementById(labelId);
-    if (v && l) l.textContent = formatCalDate(v.value);
+    const w = document.getElementById(wrapId);
+    if (v && w) w.title = formatCalDate(v.value);
 }
 
 function fetchSalesAfter() {
@@ -246,6 +271,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const fitsCurrentWeekIndex = {{ current_week_index|default_if_none:"null" }};
     const fitsNonZero = fitsChartData.values.filter(v => v > 0);
     const fitsAvg = fitsNonZero.length ? fitsNonZero.reduce((a, b) => a + b, 0) / fitsNonZero.length : 0;
+    document.getElementById('fitsChartTitle').textContent = 'Fits Per Week — Avg: ' + fitsAvg.toFixed(1);
     
     new Chart(fitsCtx, {
         type: 'line',
@@ -259,14 +285,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 borderWidth: 3,
                 fill: true,
                 tension: 0.4,
-                pointBackgroundColor: '#17a2b8',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                pointRadius: 5,
-                pointHoverRadius: 7,
+                pointBackgroundColor: 'rgba(23, 162, 184, 0.5)',
+                pointBorderColor: 'rgba(23, 162, 184, 0.8)',
+                pointBorderWidth: 1,
+                pointRadius: 3,
+                pointHoverRadius: 6,
                 pointHoverBackgroundColor: '#17a2b8',
                 pointHoverBorderColor: '#fff',
-                pointHoverBorderWidth: 3,
+                pointHoverBorderWidth: 2,
                 segment: fitsCurrentWeekIndex !== null ? {
                     borderDash: function(ctx) {
                         return ctx.p0DataIndex >= fitsCurrentWeekIndex ? [6, 3] : undefined;
@@ -313,16 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             borderColor: 'rgba(23, 162, 184, 0.25)',
                             borderWidth: 1,
                             borderDash: [4, 4],
-                            label: {
-                                display: true,
-                                content: 'Avg: ' + fitsAvg.toFixed(1),
-                                position: 'start',
-                                backgroundColor: 'rgba(23, 162, 184, 0.2)',
-                                color: 'rgba(23, 162, 184, 0.6)',
-                                font: { size: 9 },
-                                padding: 3,
-                                borderRadius: 3,
-                            }
+                            label: { display: false }
                         }
                     }
                 },
@@ -390,6 +407,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const salesCurrentWeekIndex = {{ current_week_index|default_if_none:"null" }};
     const salesNonZero = salesChartData.values.filter(v => v > 0);
     const salesAvg = salesNonZero.length ? salesNonZero.reduce((a, b) => a + b, 0) / salesNonZero.length : 0;
+    document.getElementById('salesChartTitle').textContent = 'Sales Per Week — Avg: £' + Math.round(salesAvg).toLocaleString();
     
     // Create gradient for sales
     const salesGradient = salesCtx.createLinearGradient(0, 0, 0, 400);
@@ -408,14 +426,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 borderWidth: 3,
                 fill: true,
                 tension: 0.4,
-                pointBackgroundColor: '#28a745',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                pointRadius: 5,
-                pointHoverRadius: 7,
+                pointBackgroundColor: 'rgba(40, 167, 69, 0.5)',
+                pointBorderColor: 'rgba(40, 167, 69, 0.8)',
+                pointBorderWidth: 1,
+                pointRadius: 3,
+                pointHoverRadius: 6,
                 pointHoverBackgroundColor: '#28a745',
                 pointHoverBorderColor: '#fff',
-                pointHoverBorderWidth: 3,
+                pointHoverBorderWidth: 2,
                 segment: salesCurrentWeekIndex !== null ? {
                     borderDash: function(ctx) {
                         return ctx.p0DataIndex >= salesCurrentWeekIndex ? [6, 3] : undefined;
@@ -462,16 +480,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             borderColor: 'rgba(40, 167, 69, 0.25)',
                             borderWidth: 1,
                             borderDash: [4, 4],
-                            label: {
-                                display: true,
-                                content: 'Avg: £' + Math.round(salesAvg).toLocaleString(),
-                                position: 'start',
-                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
-                                color: 'rgba(40, 167, 69, 0.6)',
-                                font: { size: 9 },
-                                padding: 3,
-                                borderRadius: 3,
-                            }
+                            label: { display: false }
                         }
                     }
                 },
@@ -777,6 +786,143 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             }
+        }
+    });
+
+    // ── Weighted Average Sale Value Per Fit Chart ─────────────────────────
+    // 5-week centred moving average — naturally fills zero-fit gaps by borrowing
+    // from adjacent weeks, producing a smooth curve with no holes.
+    const WA_WINDOW = 5;
+    const waHalf = Math.floor(WA_WINDOW / 2);
+    let waTotalFits = 0, waTotalSales = 0;
+    fitsChartData.values.forEach((f, i) => { waTotalFits += f; waTotalSales += salesChartData.values[i]; });
+    const waOverallAvg = waTotalFits > 0 ? waTotalSales / waTotalFits : 0;
+
+    const waSmoothed = fitsChartData.values.map((_, i) => {
+        let windowFits = 0, windowSales = 0;
+        for (let j = Math.max(0, i - waHalf); j <= Math.min(fitsChartData.values.length - 1, i + waHalf); j++) {
+            windowFits  += fitsChartData.values[j];
+            windowSales += salesChartData.values[j];
+        }
+        return windowFits > 0 ? windowSales / windowFits : null;
+    });
+
+    document.getElementById('weightedAvgChartTitle').textContent =
+        'Avg Sale Value Per Fit (5-wk avg)' + (waOverallAvg > 0 ? ' \u2014 Overall: \u00a3' + Math.round(waOverallAvg).toLocaleString() : '');
+
+    const waCtx = document.getElementById('weightedAvgChart').getContext('2d');
+    const waGradient = waCtx.createLinearGradient(0, 0, 0, 350);
+    waGradient.addColorStop(0, 'rgba(153, 102, 255, 0.35)');
+    waGradient.addColorStop(1, 'rgba(153, 102, 255, 0.03)');
+
+    new Chart(waCtx, {
+        type: 'line',
+        data: {
+            labels: fitsChartData.labels,
+            datasets: [{
+                label: 'Avg £/fit',
+                data: waSmoothed,
+                borderColor: '#9966ff',
+                backgroundColor: waGradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                spanGaps: true,
+                pointBackgroundColor: 'rgba(153, 102, 255, 0.5)',
+                pointBorderColor: 'rgba(153, 102, 255, 0.8)',
+                pointBorderWidth: 1,
+                pointRadius: 3,
+                pointHoverRadius: 6,
+                pointHoverBackgroundColor: '#9966ff',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2,
+                segment: fitsCurrentWeekIndex !== null ? {
+                    borderDash: function(ctx) {
+                        return ctx.p0DataIndex >= fitsCurrentWeekIndex ? [6, 3] : undefined;
+                    },
+                    borderColor: function(ctx) {
+                        return ctx.p0DataIndex >= fitsCurrentWeekIndex ? 'rgba(153, 102, 255, 0.45)' : undefined;
+                    }
+                } : {},
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                annotation: {
+                    annotations: {
+                        ...(fitsCurrentWeekIndex !== null ? {
+                            currentWeekLine: {
+                                type: 'line',
+                                xMin: fitsCurrentWeekIndex,
+                                xMax: fitsCurrentWeekIndex,
+                                borderColor: 'rgba(255, 99, 132, 0.8)',
+                                borderWidth: 2,
+                                borderDash: [6, 3],
+                                label: {
+                                    display: true,
+                                    content: 'This Week',
+                                    position: 'start',
+                                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                                    color: '#fff',
+                                    font: { size: 10, weight: 'bold' },
+                                    padding: 4,
+                                    borderRadius: 3,
+                                }
+                            }
+                        } : {}),
+                        avgLine: {
+                            type: 'line',
+                            yMin: waOverallAvg,
+                            yMax: waOverallAvg,
+                            borderColor: 'rgba(153, 102, 255, 0.25)',
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            label: { display: false }
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#9966ff',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            const v = context.parsed.y;
+                            return v != null ? 'Avg: \u00a3' + Math.round(v).toLocaleString() + ' / fit' : 'No fits';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        color: '#6c757d',
+                        font: { size: 11 },
+                        callback: function(value) { return '\u00a3' + value.toLocaleString(); }
+                    },
+                    grid: { color: 'rgba(108, 117, 125, 0.1)', drawBorder: false },
+                    border: { display: false }
+                },
+                x: {
+                    ticks: {
+                        color: '#6c757d',
+                        font: { size: 10 },
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: { display: false, drawBorder: false },
+                    border: { display: false }
+                }
+            },
+            interaction: { intersect: false, mode: 'index' }
         }
     });
 });

@@ -161,7 +161,24 @@ def dashboard_monthly_sales(request):
     profile = getattr(request.user, 'profile', None)
     contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
     data = _get_monthly_sales_data(year, month, contract_prefix)
-    return JsonResponse({'success': True, 'total': data['total'], 'count': data['count']})
+
+    # Previous month for delta
+    if month == 1:
+        prev_year, prev_month = year - 1, 12
+    else:
+        prev_year, prev_month = year, month - 1
+    prev_data = _get_monthly_sales_data(prev_year, prev_month, contract_prefix)
+    delta = data['total'] - prev_data['total']
+
+    return JsonResponse({
+        'success': True,
+        'total': data['total'],
+        'count': data['count'],
+        'prev_total': prev_data['total'],
+        'delta': delta,
+        'delta_str': '{:,.0f}'.format(abs(delta)),
+        'delta_sign': 1 if delta > 0 else (-1 if delta < 0 else 0),
+    })
 
 
 @login_required
@@ -244,6 +261,19 @@ def dashboard(request):
     if contract_prefix:
         this_week_sales_qs = this_week_sales_qs.filter(contract_number__istartswith=contract_prefix)
     this_week_sales = this_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
+
+    # Last week for week-on-week comparison
+    last_week_start = this_week_start - timedelta(days=7)
+    last_week_end = last_week_start + timedelta(days=6)
+    last_week_sales_qs = AnthillSale.objects.filter(
+        fit_date__gte=last_week_start,
+        fit_date__lte=last_week_end,
+        sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        last_week_sales_qs = last_week_sales_qs.filter(contract_number__istartswith=contract_prefix)
+    last_week_sales = last_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
+    week_delta = this_week_sales - last_week_sales
     
     # Sales after today (future pipeline — from AnthillSale.fit_date)
     sales_after_qs = AnthillSale.objects.filter(
@@ -264,8 +294,9 @@ def dashboard(request):
         status__in=['Received', 'Invoiced', 'Cancelled', 'Closed']
     ).count()
     
-    # Total stock value
-    stock_items = StockItem.objects.filter(tracking_type='stock', quantity__gt=0)
+    # Total stock value — includes both 'stock' and 'non-stock' items with quantity > 0
+    # Non-stock items are still physical warehouse stock and count for accounting purposes
+    stock_items = StockItem.objects.filter(tracking_type__in=['stock', 'non-stock'], quantity__gt=0)
     total_stock_value = sum(item.cost * item.quantity for item in stock_items) or Decimal('0.00')
     stock_item_count = stock_items.count()
 
@@ -273,7 +304,7 @@ def dashboard(request):
     seven_days_ago = today - timedelta(days=7)
     recent_history = (
         StockHistory.objects
-        .filter(created_at__date__gte=seven_days_ago, stock_item__tracking_type='stock')
+        .filter(created_at__date__gte=seven_days_ago, stock_item__tracking_type__in=['stock', 'non-stock'])
         .exclude(change_type__in=['sale', 'purchase'])
         .select_related('stock_item')
     )
@@ -341,20 +372,18 @@ def dashboard(request):
             current_month_board_index = i
             break
 
-    # Monthly sales totals from AnthillSale - aggregate sale_value by activity_date month
-    # Use 36-month window and __date lookups for correct Europe/Dublin timezone handling
-    from zoneinfo import ZoneInfo
-    dublin_tz = ZoneInfo('Europe/Dublin')
+    # Monthly sales totals from AnthillSale - aggregate sale_value by fit_date month
+    # Using fit_date (not activity_date) so future scheduled fits appear in upcoming months
     monthly_sales_qs = AnthillSale.objects.filter(
-        activity_date__date__gte=thirty_six_months_ago,
-        activity_date__date__lte=three_months_ahead,
+        fit_date__gte=thirty_six_months_ago,
+        fit_date__lte=three_months_ahead,
         sale_value__gt=0,
-    ).exclude(status='cancelled')
+    ).exclude(status__in=['cancelled', 'dead'])
     if contract_prefix:
         monthly_sales_qs = monthly_sales_qs.filter(contract_number__istartswith=contract_prefix)
     monthly_sales_data = (
         monthly_sales_qs
-        .annotate(month=TruncMonth('activity_date', tzinfo=dublin_tz))
+        .annotate(month=TruncMonth('fit_date'))
         .values('month')
         .annotate(total_sales=Sum('sale_value'))
         .order_by('month')
@@ -392,6 +421,12 @@ def dashboard(request):
     # Current month sales data (by fit_date)
     current_month_sales = _get_monthly_sales_data(today.year, today.month, contract_prefix)
 
+    # Previous month for initial month-on-month delta
+    prev_month_num = today.month - 1 if today.month > 1 else 12
+    prev_month_year = today.year if today.month > 1 else today.year - 1
+    prev_month_sales = _get_monthly_sales_data(prev_month_year, prev_month_num, contract_prefix)
+    month_delta = Decimal(str(current_month_sales['total'])) - Decimal(str(prev_month_sales['total']))
+
     # Average daily sale value — last 365 days total / 365
     one_year_ago = today - timedelta(days=365)
     avg_12m_qs = AnthillSale.objects.filter(
@@ -426,10 +461,30 @@ def dashboard(request):
     if contract_prefix:
         outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
 
+    outstanding_rows = list(outstanding_qs)
     total_outstanding_balance = sum(
         max((row['sale_value'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
-        for row in outstanding_qs
+        for row in outstanding_rows
         if (row['sale_value'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
+    ) or Decimal('0')
+    outstanding_debtor_count = sum(
+        1 for row in outstanding_rows
+        if (row['sale_value'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
+    )
+
+    # Remaining balance of fits scheduled this week
+    this_week_qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
+        .values('sale_value', 'total_paid')
+    )
+    if contract_prefix:
+        this_week_qs = this_week_qs.filter(contract_number__istartswith=contract_prefix)
+    expected_this_week = sum(
+        max((row['sale_value'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
+        for row in this_week_qs
     ) or Decimal('0')
     
     context = {
@@ -458,8 +513,12 @@ def dashboard(request):
         'stock_value_7day_delta': float(stock_value_7day_delta),
         'stock_value_7day_delta_str': '{:,.0f}'.format(abs(stock_value_7day_delta)),
         'this_week_sales': '{:,.0f}'.format(this_week_sales),
+        'week_delta': float(week_delta),
+        'week_delta_str': '{:,.0f}'.format(abs(week_delta)),
         'monthly_sales_total': '{:,.0f}'.format(Decimal(str(current_month_sales['total']))),
         'monthly_sales_count': current_month_sales['count'],
+        'month_delta': float(month_delta),
+        'month_delta_str': '{:,.0f}'.format(abs(month_delta)),
         'avg_daily_sale': '{:,.0f}'.format(avg_daily_sale),
         'current_year': today.year,
         'current_month': today.month,
@@ -467,6 +526,8 @@ def dashboard(request):
         'sales_after_total': '{:,.0f}'.format(sales_after['total'] or Decimal('0.00')),
         'sales_after_count': sales_after['count'] or 0,
         'total_outstanding_balance': '{:,.0f}'.format(total_outstanding_balance),
+        'outstanding_debtor_count': outstanding_debtor_count,
+        'expected_this_week': '{:,.0f}'.format(expected_this_week),
     }
     return render(request, 'stock_take/dashboard.html', context)
 
