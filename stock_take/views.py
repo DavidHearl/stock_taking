@@ -6814,14 +6814,18 @@ def search_stock_items(request):
     from django.db.models import Q
     
     query = request.GET.get('q', '').strip()
+    rau_only = request.GET.get('rau_only', '0') == '1'
     
     if len(query) < 2:
         return JsonResponse({'results': []})
     
     # Search in both SKU and name fields
-    stock_items = StockItem.objects.filter(
+    qs = StockItem.objects.filter(
         Q(sku__icontains=query) | Q(name__icontains=query)
-    ).order_by('sku')[:20]  # Limit to 20 results
+    )
+    if rau_only:
+        qs = qs.filter(sku__icontains='RAU')
+    stock_items = qs.order_by('sku')[:20]
     
     results = [
         {
@@ -6829,6 +6833,8 @@ def search_stock_items(request):
             'sku': item.sku,
             'name': item.name,
             'quantity': item.quantity,
+            'cost': float(item.cost) if item.cost else 0,
+            'min_order_qty': item.min_order_qty or 1,
         }
         for item in stock_items
     ]

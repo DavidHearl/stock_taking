@@ -5,6 +5,7 @@ from django.contrib import messages
 import io
 import zipfile
 import logging
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 
@@ -19,6 +20,14 @@ PRODUCTS_DB_PATH = BASE_DIR / 'order_generator_files' / 'src' / 'products.db'
 
 # Storage path for CAD DB in DigitalOcean Spaces (same as cad_views.py)
 CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
+
+
+def _open_cad_db():
+    """Read the CAD database from cloud storage and return an in-memory SQLite connection."""
+    db_bytes = default_storage.open(CAD_DB_STORAGE_PATH, 'rb').read()
+    conn = sqlite3.connect(':memory:')
+    conn.deserialize(db_bytes)
+    return conn
 
 # Global variables to cache imports
 _board_logic = None
@@ -129,9 +138,9 @@ def generate_pnx(request):
         messages.error(request, 'System Numbers are required')
         return JsonResponse({'error': 'System Numbers are required'}, status=400)
     
-    # Check if database exists
-    if not DATABASE_PATH.exists():
-        logger.error(f"PNX Generation failed: Database not found at {DATABASE_PATH}")
+    # Check if database exists in cloud storage
+    if not default_storage.exists(CAD_DB_STORAGE_PATH):
+        logger.error(f"PNX Generation failed: CAD database not found in cloud storage")
         messages.error(request, 'CAD database not found. Please sync the database first.')
         return JsonResponse({'error': 'Database not found'}, status=500)
     
@@ -143,8 +152,11 @@ def generate_pnx(request):
         return JsonResponse({'error': 'Module not loaded'}, status=500)
     
     try:
+        # Open CAD database from cloud storage into memory
+        conn = _open_cad_db()
         logger.info("Calling generate_board_order_file function")
-        pnx_content = board_logic.generate_board_order_file(system_numbers, str(DATABASE_PATH))
+        pnx_content = board_logic.generate_board_order_file(system_numbers, conn)
+        conn.close()
         logger.info(f"PNX file generated successfully, size: {len(pnx_content)} bytes")
         
         # Prepare the file for download
@@ -182,8 +194,8 @@ def generate_csv(request):
         return JsonResponse({'error': 'System Numbers are required'}, status=400)
     
     # Check if databases exist
-    if not DATABASE_PATH.exists():
-        logger.error(f"CSV Generation failed: CAD database not found at {DATABASE_PATH}")
+    if not default_storage.exists(CAD_DB_STORAGE_PATH):
+        logger.error(f"CSV Generation failed: CAD database not found in cloud storage")
         messages.error(request, 'CAD database not found. Please sync the database first.')
         return JsonResponse({'error': 'CAD database not found'}, status=500)
     
@@ -200,6 +212,9 @@ def generate_csv(request):
         return JsonResponse({'error': 'Module not loaded'}, status=500)
     
     try:
+        # Open CAD database from cloud storage into memory
+        conn = _open_cad_db()
+
         # Parse system numbers
         numList = [int(n.strip()) for n in system_numbers_str.splitlines() if n.strip()]
         logger.info(f"Parsed {len(numList)} system numbers: {numList}")
@@ -214,7 +229,7 @@ def generate_csv(request):
             sysNum = numList[0]
             logger.info(f"Generating single CSV for system number: {sysNum}")
             
-            csv_content = workguru_logic.generate_workguru_csv(sysNum, str(DATABASE_PATH), str(PRODUCTS_DB_PATH))
+            csv_content = workguru_logic.generate_workguru_csv(sysNum, conn, str(PRODUCTS_DB_PATH))
             logger.info(f"CSV generated successfully for {sysNum}, size: {len(csv_content)} bytes")
             
             response = HttpResponse(csv_content, content_type='text/csv')
@@ -222,7 +237,7 @@ def generate_csv(request):
             
             logger.info(f"Single CSV file download initiated for system {sysNum}")
             messages.success(request, f'CSV file generated successfully for system {sysNum}')
-            
+            conn.close()
             return response
         
         else:
@@ -233,7 +248,7 @@ def generate_csv(request):
             with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for sysNum in numList:
                     logger.info(f"Generating CSV for system number: {sysNum}")
-                    csv_content = workguru_logic.generate_workguru_csv(sysNum, str(DATABASE_PATH), str(PRODUCTS_DB_PATH))
+                    csv_content = workguru_logic.generate_workguru_csv(sysNum, conn, str(PRODUCTS_DB_PATH))
                     file_name = f"WG_Products_Import_{sysNum}.csv"
                     zf.writestr(file_name, csv_content)
                     logger.info(f"Added {file_name} to zip archive, size: {len(csv_content)} bytes")
@@ -245,7 +260,7 @@ def generate_csv(request):
             
             logger.info(f"Zip archive created successfully with {len(numList)} files")
             messages.success(request, f'ZIP file generated successfully with {len(numList)} CSV files')
-            
+            conn.close()
             return response
         
     except ValueError as e:

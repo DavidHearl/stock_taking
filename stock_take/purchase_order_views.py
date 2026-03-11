@@ -2434,6 +2434,104 @@ def add_additional_os_doors_po(request, order_id):
 
 
 @login_required
+def create_raumplus_po(request):
+    """Create a Purchase Order from the Raumplus shortage modal (JSON POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    items = data.get('items', [])
+    if not items:
+        return JsonResponse({'error': 'No items provided'}, status=400)
+
+    # Find the Raumplus supplier
+    supplier = Supplier.objects.filter(name__icontains='Raumplus').first()
+
+    # Generate a unique local workguru_id
+    max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 800000)
+
+    # Generate sequential PO display number
+    import re as _re
+    last_num = 0
+    for po_obj in PurchaseOrder.objects.filter(display_number__startswith='PO').order_by('-display_number'):
+        m = _re.match(r'^PO(\d+)$', po_obj.display_number or '')
+        if m:
+            last_num = max(last_num, int(m.group(1)))
+    display_number = f'PO{last_num + 1}'
+
+    import datetime as _dt
+    description = f'Raumplus stock order — generated {_dt.date.today().strftime("%d %B %Y")}'
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_id,
+        number=display_number,
+        display_number=display_number,
+        description=description,
+        supplier_id=supplier.workguru_id if supplier else None,
+        supplier_name=supplier.name if supplier else 'Raumplus',
+        delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        status='Draft',
+        currency='GBP',
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
+
+    total = 0
+    for sort_idx, item in enumerate(items, start=1):
+        try:
+            qty = float(item.get('order_qty', 0) or 0)
+            unit_cost = float(item.get('cost', 0) or 0)
+        except (ValueError, TypeError):
+            qty, unit_cost = 0, 0
+
+        line_total = round(qty * unit_cost, 2)
+        total += line_total
+
+        # Strip our internal prefix so the supplier code is just their number
+        sku = item.get('sku', '')
+        rau_idx = sku.upper().find('RAU_')
+        supplier_code = sku[rau_idx + 4:] if rau_idx != -1 else sku
+
+        # Link to the local StockItem if we can find it
+        stock_item = StockItem.objects.filter(sku=sku).first()
+
+        PurchaseOrderProduct.objects.create(
+            purchase_order=po,
+            sku=sku,
+            supplier_code=supplier_code,
+            name=item.get('name', ''),
+            order_price=unit_cost,
+            order_quantity=qty,
+            line_total=line_total,
+            minimum_order_quantity=item.get('min_order_qty', 1),
+            sort_order=sort_idx,
+            stock_item=stock_item,
+        )
+
+    po.total = round(total, 2)
+    po.save(update_fields=['total'])
+
+    log_activity(
+        user=request.user,
+        event_type='po_created',
+        description=(
+            f'{request.user.get_full_name() or request.user.username} created Raumplus purchase order '
+            f'{display_number} with {len(items)} line item(s) totalling £{total:.2f}.'
+        ),
+    )
+
+    return JsonResponse({
+        'success': True,
+        'display_number': display_number,
+        'po_url': f'/purchase-order/{po.workguru_id}/',
+    })
+
+
+@login_required
 def sync_os_doors_po(request, order_id):
     """Save current cost/qty from the frontend, then re-sync the linked PurchaseOrder's
     product lines.  Accepts optional ``door_values`` dict and optional

@@ -2,14 +2,14 @@ import sqlite3
 import csv
 import io
 import logging
+import contextlib
 
 logger = logging.getLogger(__name__)
 
 
-def generate_board_order_file(system_numbers_str, DATABASE_PATH):
+def generate_board_order_file(system_numbers_str, conn):
     """Generate PNX board order file from system numbers"""
     logger.info(f"Starting board order file generation")
-    logger.info(f"Database path: {DATABASE_PATH}")
     logger.info(f"Raw system numbers input: {system_numbers_str}")
     
     # Use io.StringIO to build the CSV in memory instead of writing to a file
@@ -21,9 +21,9 @@ def generate_board_order_file(system_numbers_str, DATABASE_PATH):
     logger.info(f"Parsed system numbers: {numList}")
     logger.info(f"Total system numbers to process: {len(numList)}")
 
-    # 2. Connect to the database
+    # 2. Use the provided in-memory connection
     try:
-        with sqlite3.connect(DATABASE_PATH) as conn:
+        with contextlib.nullcontext(conn):
             logger.info("Database connection established")
             conn.row_factory = sqlite3.Row 
 

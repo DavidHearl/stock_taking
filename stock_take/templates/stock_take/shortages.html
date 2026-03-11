@@ -156,6 +156,19 @@
 {% else %}
 <!-- ============ RAUMPLUS TAB ============ -->
 
+<!-- Order Action Bar -->
+<div class="rau-action-bar">
+    <div class="rau-order-badges">
+        <span class="meta-badge">{{ critical_items|length }} critical</span>
+        <span class="meta-badge">{{ predicted_shortages|length }} predicted</span>
+        <span class="meta-badge">{{ suggested_items|length }} suggested</span>
+        <span class="meta-badge highlight">Order Value (ex VAT): £{{ current_order_value|floatformat:2 }}</span>
+    </div>
+    <button class="btn btn-primary" onclick="openRauplusOrderModal()">
+        <i class="bi bi-cart3"></i> View Raumplus Order
+    </button>
+</div>
+
 <!-- All RAU Requirements -->
 <div class="content-card">
     <div class="section-header collapsible-header collapsed" onclick="toggleCardCollapse('rau-requirements-body', this)">
@@ -491,6 +504,76 @@
 {% endif %}
 
 {% if active_tab == 'raumplus' %}
+
+<!-- ── JSON data for the order modal ─────────────────────────────────── -->
+<script id="rau-order-data" type="application/json">
+{
+    "critical": [{% for item in critical_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
+    "predicted": [{% for item in predicted_shortages %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
+    "suggested": [{% for item in suggested_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.suggested_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}]
+}
+</script>
+
+<!-- ── Raumplus Order Modal ───────────────────────────────────────────── -->
+<div id="rau-order-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRauplusOrderModal(event)">
+    <div class="rau-order-modal" onclick="event.stopPropagation()">
+        <div class="rau-order-modal-header">
+            <h3><i class="bi bi-cart3"></i> Raumplus Order</h3>
+            <button class="pred-modal-close" onclick="closeRauplusOrderModal()">&times;</button>
+        </div>
+        <div class="rau-order-modal-body">
+            <table class="rau-order-tbl" id="rau-order-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:30px"><input type="checkbox" id="rau-select-all" title="Select all" onchange="toggleAllRows(this)" checked></th>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th class="text-right">Suggested</th>
+                        <th class="text-right" style="width:110px">Order Qty</th>
+                        <th class="text-right">Change</th>
+                        <th class="text-right">Unit Cost</th>
+                        <th class="text-right">Line Cost</th>
+                    </tr>
+                </thead>
+                <tbody id="rau-order-tbody">
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+        </div>
+        <!-- Add Item Bar -->
+        <div class="rau-add-bar">
+            <label for="rau-search-input"><i class="bi bi-plus-circle"></i> Add item:</label>
+            <input type="text" id="rau-search-input" class="rau-search-input"
+                   placeholder="Search by SKU or name…"
+                   oninput="rauSearchInput(this)"
+                   onblur="setTimeout(() => document.getElementById('rau-search-results').style.display='none', 200)"
+                   autocomplete="off">
+            <div id="rau-search-results" class="rau-search-results"></div>
+        </div>
+        <div class="rau-order-modal-footer">
+            <div class="order-totals">
+                <span>Items: <strong id="rau-order-item-count">0</strong></span>
+                <span>Total (exc VAT): <strong id="rau-order-total">£0.00</strong></span>
+                <span>Inc VAT (20%): <strong id="rau-order-total-vat">£0.00</strong></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm" onclick="resetRauplusOrder()">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="printRauplusReport()">
+                    <i class="bi bi-printer"></i> Print Report
+                </button>
+                <button class="btn btn-success btn-sm" onclick="downloadRauplusCsv()">
+                    <i class="bi bi-download"></i> Download CSV
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="createRauplusPO()">
+                    <i class="bi bi-file-earmark-plus"></i> Create PO
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Prediction Comparison Modal -->
 <div id="prediction-compare-modal" class="pred-modal-backdrop" style="display:none;" onclick="closeCompareModal(event)">
     <div class="pred-modal">
@@ -540,6 +623,379 @@
 
 {% block extra_js %}
 <script>
+    // ── Raumplus Order Modal ─────────────────────────────────────────────
+    // orderRows: array of {sku, name, suggested_qty, order_qty, cost, section, included}
+    let RAU_ORDER_ROWS = [];
+
+    function openRauplusOrderModal() {
+        const raw = JSON.parse(document.getElementById('rau-order-data').textContent);
+        RAU_ORDER_ROWS = [];
+
+        ['critical','predicted','suggested'].forEach(section => {
+            (raw[section] || []).forEach(item => {
+                // Deduplicate: if already added (same SKU from a different section), skip
+                if (!RAU_ORDER_ROWS.find(r => r.sku === item.sku)) {
+                    RAU_ORDER_ROWS.push({
+                        sku: item.sku,
+                        name: item.name,
+                        suggested_qty: item.suggested_qty,
+                        order_qty: item.suggested_qty,
+                        cost: item.cost,
+                        min_order_qty: item.min_order_qty || 1,
+                        section: section,
+                        included: true,
+                    });
+                }
+            });
+        });
+
+        renderRauplusOrderTable();
+        document.getElementById('rau-order-modal').style.display = 'flex';
+    }
+
+    function closeRauplusOrderModal(e) {
+        if (!e || e.target === document.getElementById('rau-order-modal')) {
+            document.getElementById('rau-order-modal').style.display = 'none';
+        }
+    }
+
+    function renderRauplusOrderTable() {
+        const tbody = document.getElementById('rau-order-tbody');
+        tbody.innerHTML = '';
+
+        const sections = [
+            { key: 'critical',  label: 'Critical Items',   cls: 'critical' },
+            { key: 'predicted', label: 'Predicted Items',  cls: 'predicted' },
+            { key: 'suggested', label: 'Suggested Items',  cls: 'suggested' },
+            { key: 'manual',    label: 'Manually Added',   cls: 'manual' },
+        ];
+
+        sections.forEach(({ key, label, cls }) => {
+            const rows = RAU_ORDER_ROWS.filter(r => r.section === key);
+            if (!rows.length) return;
+
+            // Section header row
+            const hdr = document.createElement('tr');
+            hdr.className = `rau-section-row ${cls}`;
+            hdr.innerHTML = `<td colspan="8">${label} (${rows.length})</td>`;
+            tbody.appendChild(hdr);
+
+            rows.forEach((row, idx) => {
+                const globalIdx = RAU_ORDER_ROWS.indexOf(row);
+                const tr = document.createElement('tr');
+                tr.dataset.idx = globalIdx;
+                if (!row.included) tr.classList.add('excluded-row');
+
+                const lineCost = row.included ? (row.order_qty * row.cost) : 0;
+                const delta = row.order_qty - row.suggested_qty;
+                const deltaBadge = buildDeltaBadge(delta);
+
+                tr.innerHTML = `
+                    <td><input type="checkbox" class="rau-exclude-cb" ${row.included ? 'checked' : ''} onchange="toggleRowIncluded(${globalIdx}, this)"></td>
+                    <td><code>${escHtml(row.sku)}</code></td>
+                    <td>${escHtml(row.name)}</td>
+                    <td class="text-right">${row.suggested_qty}</td>
+                    <td class="text-right">
+                        <input type="number" class="rau-qty-input ${delta !== 0 ? 'modified' : ''}"
+                               value="${row.order_qty}" min="0" step="${row.min_order_qty}"
+                               onchange="updateRowQty(${globalIdx}, this.value)"
+                               ${!row.included ? 'disabled' : ''}>
+                    </td>
+                    <td class="text-right">${deltaBadge}</td>
+                    <td class="text-right">£${row.cost.toFixed(2)}</td>
+                    <td class="text-right">£${lineCost.toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        });
+
+        updateRauplusOrderTotals();
+    }
+
+    function buildDeltaBadge(delta) {
+        if (delta === 0) return '<span class="rau-delta-badge delta-same">—</span>';
+        if (delta > 0)  return `<span class="rau-delta-badge delta-up">+${delta}</span>`;
+        return `<span class="rau-delta-badge delta-down">${delta}</span>`;
+    }
+
+    function updateRowQty(idx, rawVal) {
+        const step = RAU_ORDER_ROWS[idx].min_order_qty || 1;
+        const raw = Math.max(0, parseInt(rawVal, 10) || 0);
+        // Snap to nearest multiple of min_order_qty
+        const qty = raw === 0 ? 0 : Math.round(raw / step) * step;
+        RAU_ORDER_ROWS[idx].order_qty = qty;
+        // Re-render only that row's delta/cost cells without full table rebuild
+        const tr = document.querySelector(`tr[data-idx="${idx}"]`);
+        if (!tr) return;
+        const delta = qty - RAU_ORDER_ROWS[idx].suggested_qty;
+        tr.querySelector('.rau-qty-input').value = qty;
+        tr.querySelector('.rau-qty-input').classList.toggle('modified', delta !== 0);
+        tr.cells[5].innerHTML = buildDeltaBadge(delta);
+        const lineCost = RAU_ORDER_ROWS[idx].included ? qty * RAU_ORDER_ROWS[idx].cost : 0;
+        tr.cells[7].textContent = '£' + lineCost.toFixed(2);
+        updateRauplusOrderTotals();
+    }
+
+    function toggleRowIncluded(idx, cb) {
+        RAU_ORDER_ROWS[idx].included = cb.checked;
+        const tr = document.querySelector(`tr[data-idx="${idx}"]`);
+        if (!tr) return;
+        tr.classList.toggle('excluded-row', !cb.checked);
+        tr.querySelector('.rau-qty-input').disabled = !cb.checked;
+        const lineCost = cb.checked ? RAU_ORDER_ROWS[idx].order_qty * RAU_ORDER_ROWS[idx].cost : 0;
+        tr.cells[7].textContent = '£' + lineCost.toFixed(2);
+        updateRauplusOrderTotals();
+        // Update select-all state
+        const allCbs = document.querySelectorAll('.rau-exclude-cb');
+        const checkedCount = [...allCbs].filter(c => c.checked).length;
+        const selAll = document.getElementById('rau-select-all');
+        selAll.checked = checkedCount === allCbs.length;
+        selAll.indeterminate = checkedCount > 0 && checkedCount < allCbs.length;
+    }
+
+    function toggleAllRows(masterCb) {
+        RAU_ORDER_ROWS.forEach((row, idx) => {
+            row.included = masterCb.checked;
+            const tr = document.querySelector(`tr[data-idx="${idx}"]`);
+            if (!tr) return;
+            tr.classList.toggle('excluded-row', !masterCb.checked);
+            const qtyInput = tr.querySelector('.rau-qty-input');
+            if (qtyInput) qtyInput.disabled = !masterCb.checked;
+            const lineCost = masterCb.checked ? row.order_qty * row.cost : 0;
+            tr.cells[7].textContent = '£' + lineCost.toFixed(2);
+        });
+        document.querySelectorAll('.rau-exclude-cb').forEach(cb => cb.checked = masterCb.checked);
+        updateRauplusOrderTotals();
+    }
+
+    function updateRauplusOrderTotals() {
+        const included = RAU_ORDER_ROWS.filter(r => r.included && r.order_qty > 0);
+        const total = included.reduce((sum, r) => sum + (r.order_qty * r.cost), 0);
+        document.getElementById('rau-order-item-count').textContent = included.length;
+        document.getElementById('rau-order-total').textContent = '£' + total.toFixed(2);
+        document.getElementById('rau-order-total-vat').textContent = '£' + (total * 1.20).toFixed(2);
+    }
+
+    function resetRauplusOrder() {
+        RAU_ORDER_ROWS.forEach(r => {
+            r.order_qty = r.suggested_qty;
+            r.included = true;
+        });
+        document.getElementById('rau-select-all').checked = true;
+        document.getElementById('rau-select-all').indeterminate = false;
+        renderRauplusOrderTable();
+    }
+
+    // ── Create PO ─────────────────────────────────────────────────────
+    function createRauplusPO() {
+        const items = RAU_ORDER_ROWS.filter(r => r.included && r.order_qty > 0);
+        if (!items.length) {
+            alert('No items selected.');
+            return;
+        }
+        const btn = document.querySelector('#rau-order-modal .btn-primary');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating…';
+
+        const payload = items.map(r => ({
+            sku: r.sku,
+            name: r.name,
+            order_qty: r.order_qty,
+            cost: r.cost,
+            min_order_qty: r.min_order_qty,
+        }));
+
+        fetch('{% url "create_raumplus_po" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
+            },
+            body: JSON.stringify({ items: payload }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = data.po_url;
+            } else {
+                alert('Error creating PO: ' + (data.error || 'Unknown error'));
+                btn.disabled = false;
+                btn.innerHTML = origText;
+            }
+        })
+        .catch(err => {
+            alert('Network error creating PO.');
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        });
+    }
+
+    function downloadRauplusCsv() {
+        const lines = [];
+        RAU_ORDER_ROWS.forEach(r => {
+            if (r.included && r.order_qty > 0) {
+                const rauIdx = r.sku.toUpperCase().indexOf('RAU_');
+                const supplierSku = rauIdx !== -1 ? r.sku.substring(rauIdx + 4) : r.sku;
+                lines.push(`"${supplierSku}";${r.order_qty}`);
+            }
+        });
+        if (!lines.length) {
+            alert('No items selected to download.');
+            return;
+        }
+        const content = lines.join('\n');
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'raumplus_order.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Add Item Search ──────────────────────────────────────────────────
+    let _rauSearchTimer = null;
+
+    function rauSearchInput(input) {
+        clearTimeout(_rauSearchTimer);
+        const q = input.value.trim();
+        if (q.length < 2) {
+            document.getElementById('rau-search-results').style.display = 'none';
+            return;
+        }
+        _rauSearchTimer = setTimeout(() => _fetchRauResults(q), 300);
+    }
+
+    function _fetchRauResults(q) {
+        fetch(`/stock-take/search-stock-items/?q=${encodeURIComponent(q)}&rau_only=1`)
+            .then(r => r.json())
+            .then(data => {
+                const box = document.getElementById('rau-search-results');
+                const existingSkus = new Set(RAU_ORDER_ROWS.map(r => r.sku));
+                const filtered = (data.results || []).filter(r => !existingSkus.has(r.sku));
+                if (!filtered.length) {
+                    box.innerHTML = '<div class="rau-search-no-results">No matching items (or already in order)</div>';
+                } else {
+                    box.innerHTML = filtered.map(item => {
+                        const rauIdx = item.sku.toUpperCase().indexOf('RAU_');
+                        const supplierSku = rauIdx !== -1 ? item.sku.substring(rauIdx + 4) : item.sku;
+                        const safeItem = escHtml(JSON.stringify(item));
+                        return `<div class="rau-search-result-item" onmousedown="selectRauSearchResult(${safeItem})">
+                            <code>${escHtml(supplierSku)}</code>
+                            <span class="rsr-name">${escHtml(item.name)}</span>
+                            <span class="rsr-stock">stock: ${item.quantity}</span>
+                        </div>`;
+                    }).join('');
+                }
+                box.style.display = 'block';
+            })
+            .catch(() => {});
+    }
+
+    function selectRauSearchResult(item) {
+        const step = item.min_order_qty || 1;
+        RAU_ORDER_ROWS.push({
+            sku: item.sku,
+            name: item.name,
+            suggested_qty: step,
+            order_qty: step,
+            cost: item.cost || 0,
+            min_order_qty: step,
+            section: 'manual',
+            included: true,
+        });
+        document.getElementById('rau-search-input').value = '';
+        document.getElementById('rau-search-results').style.display = 'none';
+        renderRauplusOrderTable();
+        // Scroll to bottom so the newly added row is visible
+        const body = document.querySelector('#rau-order-modal .rau-order-modal-body');
+        if (body) body.scrollTop = body.scrollHeight;
+    }
+
+    // ── Print Report ─────────────────────────────────────────────────────
+    function printRauplusReport() {
+        const date = new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'long', year:'numeric'});
+        const sections = [
+            { key: 'critical',  label: 'Critical Items',  color: '#c0392b' },
+            { key: 'predicted', label: 'Predicted Items', color: '#b7770d' },
+            { key: 'suggested', label: 'Suggested Items', color: '#555' },
+            { key: 'manual',    label: 'Manually Added',  color: '#1a56db' },
+        ];
+
+        let totalEx = 0;
+        let includedCount = 0;
+
+        const bodyRows = sections.map(sec => {
+            const rows = RAU_ORDER_ROWS.filter(r => r.section === sec.key && r.included && r.order_qty > 0);
+            if (!rows.length) return '';
+            const dataRows = rows.map(r => {
+                const rauIdx = r.sku.toUpperCase().indexOf('RAU_');
+                const supplierSku = rauIdx !== -1 ? r.sku.substring(rauIdx + 4) : r.sku;
+                const delta = r.order_qty - r.suggested_qty;
+                const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : '\u2014';
+                const lineCost = (r.order_qty * r.cost).toFixed(2);
+                totalEx += r.order_qty * r.cost;
+                includedCount++;
+                return `<tr>
+                    <td>${escHtml(supplierSku)}</td>
+                    <td>${escHtml(r.name)}</td>
+                    <td class="n">${r.suggested_qty}</td>
+                    <td class="n"><strong>${r.order_qty}</strong></td>
+                    <td class="n">${deltaStr}</td>
+                    <td class="n">&pound;${parseFloat(r.cost).toFixed(2)}</td>
+                    <td class="n">&pound;${lineCost}</td>
+                </tr>`;
+            }).join('');
+            return `<tr class="sh" style="color:${sec.color}"><td colspan="7">${sec.label}</td></tr>${dataRows}`;
+        }).join('');
+
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Raumplus Order &mdash; ${date}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:28px 32px;line-height:1.45}
+  h1{font-size:17px;font-weight:700;margin-bottom:3px}
+  .sub{color:#666;font-size:10.5px;margin-bottom:20px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  th{background:#f0f0f0;padding:6px 9px;text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #ccc}
+  th.n,td.n{text-align:right}
+  td{padding:5px 9px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
+  tr.sh td{background:#f7f7f7;font-weight:700;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:5px 9px;border-bottom:1px solid #ddd}
+  .totals{border-top:2px solid #333;padding-top:12px;display:flex;gap:28px;justify-content:flex-end;font-size:11.5px}
+  @media print{body{padding:0}}
+</style></head><body>
+<h1>Raumplus Order</h1>
+<div class="sub">Generated: ${date}&nbsp;&nbsp;&middot;&nbsp;&nbsp;${includedCount} line item${includedCount !== 1 ? 's' : ''}&nbsp;&nbsp;&middot;&nbsp;&nbsp;For factory discussion</div>
+<table>
+  <thead><tr>
+    <th>Art No.</th><th>Description</th>
+    <th class="n">Suggested</th><th class="n">Order Qty</th>
+    <th class="n">Change</th><th class="n">Unit Cost</th><th class="n">Line Cost</th>
+  </tr></thead>
+  <tbody>${bodyRows}</tbody>
+</table>
+<div class="totals">
+  <span>Items: <strong>${includedCount}</strong></span>
+  <span>Total (exc VAT): <strong>&pound;${totalEx.toFixed(2)}</strong></span>
+  <span>Total (inc 20% VAT): <strong>&pound;${(totalEx * 1.20).toFixed(2)}</strong></span>
+</div>
+</body></html>`;
+
+        const w = window.open('', '_blank', 'width=960,height=720');
+        if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        w.print();
+    }
+
     function toggleExpand(rowId) {
         const row = document.getElementById(rowId);
         if (!row) return;

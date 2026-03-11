@@ -2,15 +2,16 @@ import sqlite3
 import csv
 import io
 import math
+import contextlib
 
-def generate_workguru_csv(system_number, cad_db_path, products_db_path):
+def generate_workguru_csv(system_number, conn, products_db_path):
     """
     Generates the CSV content for a single system number for WorkGuru import.
     This now includes Accessories, Glass, and Raumplus components.
 
     Args:
         system_number (int): The job number to process.
-        cad_db_path (str): The file path to the main CAD data SQLite database.
+        conn: An open SQLite connection to the CAD data database.
         products_db_path (str): The file path to the products SQLite database.
 
     Returns:
@@ -21,7 +22,7 @@ def generate_workguru_csv(system_number, cad_db_path, products_db_path):
     csvwriter.writerow(["Sku", "Name", "Description", "CostPrice", "SellPrice", "Quantity", "Billable"])
 
     try:
-        with sqlite3.connect(cad_db_path) as conn:
+        with contextlib.nullcontext(conn):
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
