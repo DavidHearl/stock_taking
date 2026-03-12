@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier
+from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, log_activity
 import json
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -249,6 +249,12 @@ def add_product(request):
             
             product.save()
             
+            log_activity(
+                request.user,
+                'product_created',
+                f'Product created: {product.sku} — {product.name} (qty: {product.quantity})',
+            )
+
             # Create initial stock history entry
             if product.quantity != 0:
                 StockHistory.objects.create(

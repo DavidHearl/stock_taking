@@ -37,6 +37,7 @@
         <table class="shortage-tbl">
             <thead>
                 <tr>
+                    <th style="width:32px;"><input type="checkbox" class="shortage-select-all" onchange="toggleAllShortageCheckboxes(this)" title="Select all"></th>
                     <th>SKU</th>
                     <th>Material</th>
                     <th class="text-right">In Stock</th>
@@ -49,6 +50,16 @@
             <tbody>
                 {% for item in actual_shortages %}
                 <tr class="expandable-row" onclick="toggleExpand('actual-{{ forloop.counter }}')">
+                    <td onclick="event.stopPropagation()" style="text-align:center;">
+                        <input type="checkbox" class="shortage-cb"
+                               data-sku="{{ item.sku }}"
+                               data-name="{{ item.name }}"
+                               data-shortage="{{ item.shortage|floatformat:0 }}"
+                               data-cost="{{ item.cost|default:0 }}"
+                               data-min-order-qty="{{ item.min_order_qty|default:1 }}"
+                               data-table="current"
+                               onchange="syncCheckboxBySku(this); updateSelectionBar();">
+                    </td>
                     <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
@@ -58,7 +69,7 @@
                     <td class="text-right">{{ item.order_count }} <i class="bi bi-chevron-down expand-icon"></i></td>
                 </tr>
                 <tr class="expand-row" id="actual-{{ forloop.counter }}">
-                    <td colspan="7">
+                    <td colspan="8">
                         <table class="shortage-tbl nested">
                             <thead>
                                 <tr>
@@ -116,10 +127,12 @@
         <table class="shortage-tbl">
             <thead>
                 <tr>
+                    <th style="width:32px;"><input type="checkbox" class="shortage-select-all" onchange="toggleAllShortageCheckboxes(this)" title="Select all predicted"></th>
                     <th>SKU</th>
                     <th>Material</th>
                     <th class="text-right">Monthly Avg</th>
                     <th class="text-right">In Stock</th>
+                    <th class="text-right">Incoming</th>
                     <th class="text-right">{{ prediction_months }}-Month Need</th>
                     <th class="text-right">Short By</th>
                 </tr>
@@ -127,10 +140,21 @@
             <tbody>
                 {% for item in predicted_shortages %}
                 <tr>
+                    <td onclick="event.stopPropagation()" style="text-align:center;">
+                        <input type="checkbox" class="shortage-cb"
+                               data-sku="{{ item.sku }}"
+                               data-name="{{ item.name }}"
+                               data-shortage="{{ item.predicted_shortage|floatformat:0 }}"
+                               data-cost="{{ item.cost|default:0 }}"
+                               data-min-order-qty="{{ item.min_order_qty|default:1 }}"
+                               data-table="predicted"
+                               onchange="syncCheckboxBySku(this); updateSelectionBar();">
+                    </td>
                     <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td class="text-right">{{ item.monthly_average|floatformat:0 }}</td>
                     <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{% if item.incoming_qty %}<span class="badge-incoming">{{ item.incoming_qty|floatformat:0 }}</span>{% else %}0{% endif %}</td>
                     <td class="text-right">{{ item.predicted_need|floatformat:0 }}</td>
                     <td class="text-right">
                         {% if item.predicted_shortage > 100 %}
@@ -259,6 +283,7 @@
         <table class="shortage-tbl">
             <thead>
                 <tr>
+                    <th style="width:32px;"><input type="checkbox" class="shortage-select-all" onchange="toggleAllShortageCheckboxes(this)" title="Select all"></th>
                     <th>SKU</th>
                     <th>Material</th>
                     <th class="text-right">In Stock</th>
@@ -273,6 +298,15 @@
             <tbody>
                 {% for item in actual_shortages %}
                 <tr class="expandable-row" onclick="toggleExpand('rau-actual-{{ forloop.counter }}')">
+                    <td onclick="event.stopPropagation()" style="text-align:center;">
+                        <input type="checkbox" class="shortage-cb"
+                               data-sku="{{ item.sku }}"
+                               data-name="{{ item.name }}"
+                               data-shortage="{{ item.shortage|floatformat:0 }}"
+                               data-cost="{{ item.cost|default:0 }}"
+                               data-min-order-qty="{{ item.min_order_qty|default:1 }}"
+                               onchange="updateSelectionBar()">
+                    </td>
                     <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
@@ -284,7 +318,7 @@
                     <td class="text-right">£{{ item.line_cost|floatformat:2 }}</td>
                 </tr>
                 <tr class="expand-row" id="rau-actual-{{ forloop.counter }}">
-                    <td colspan="9">
+                    <td colspan="10">
                         <table class="shortage-tbl nested">
                             <thead>
                                 <tr>
@@ -501,9 +535,54 @@
     </div>
 </div>
 
+<!-- Previous Raumplus Orders -->
+{% if raumplus_previous_pos %}
+<div class="content-card">
+    <div class="section-header">
+        <h2>Previous Raumplus Purchase Orders</h2>
+        <span class="badge bg-secondary">{{ raumplus_previous_pos|length }} shown</span>
+    </div>
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>PO Number</th>
+                    <th>Date</th>
+                    <th class="text-right">Total</th>
+                    <th>Status</th>
+                    <th style="width:180px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for po in raumplus_previous_pos %}
+                <tr>
+                    <td><strong>{{ po.display_number }}</strong></td>
+                    <td>{{ po.created_at|date:"d M Y" }}</td>
+                    <td class="text-right">£{{ po.total|floatformat:2 }}</td>
+                    <td>{{ po.status }}</td>
+                    <td style="white-space:nowrap;">
+                        <button onclick="copyFromPOAndOpen({{ po.workguru_id }}, '{{ po.display_number|escapejs }}')"
+                                class="btn btn-outline-info btn-xs" style="font-size:12px;padding:2px 8px;">
+                            <i class="bi bi-copy"></i> Copy to Order
+                        </button>
+                        <a href="{% url 'purchase_order_download_pdf' po.workguru_id %}" target="_blank"
+                           class="btn btn-outline-secondary btn-xs" style="font-size:12px;padding:2px 8px;">
+                            <i class="bi bi-file-pdf"></i> PDF
+                        </a>
+                        <a href="/purchase-order/{{ po.workguru_id }}/" target="_blank"
+                           class="btn btn-outline-primary btn-xs" style="font-size:12px;padding:2px 8px;">
+                            <i class="bi bi-box-arrow-up-right"></i> View PO
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 {% endif %}
 
-{% if active_tab == 'raumplus' %}
+{% endif %}
 
 <!-- ── JSON data for the order modal ─────────────────────────────────── -->
 <script id="rau-order-data" type="application/json">
@@ -519,6 +598,17 @@
     <div class="rau-order-modal" onclick="event.stopPropagation()">
         <div class="rau-order-modal-header">
             <h3><i class="bi bi-cart3"></i> Raumplus Order</h3>
+            <div class="rau-header-search" style="position:relative;">
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <input type="text" id="rau-search-input" class="rau-search-input"
+                           placeholder="Add item by SKU or name…"
+                           oninput="rauSearchInput(this)"
+                           onblur="setTimeout(() => document.getElementById('rau-search-results').style.display='none', 200)"
+                           autocomplete="off"
+                           style="width:260px;">
+                </div>
+                <div id="rau-search-results" class="rau-search-results" style="top:100%;left:0;right:auto;"></div>
+            </div>
             <button class="pred-modal-close" onclick="closeRauplusOrderModal()">&times;</button>
         </div>
         <div class="rau-order-modal-body">
@@ -540,34 +630,73 @@
                 </tbody>
             </table>
         </div>
-        <!-- Add Item Bar -->
-        <div class="rau-add-bar">
-            <label for="rau-search-input"><i class="bi bi-plus-circle"></i> Add item:</label>
-            <input type="text" id="rau-search-input" class="rau-search-input"
-                   placeholder="Search by SKU or name…"
-                   oninput="rauSearchInput(this)"
-                   onblur="setTimeout(() => document.getElementById('rau-search-results').style.display='none', 200)"
-                   autocomplete="off">
-            <div id="rau-search-results" class="rau-search-results"></div>
-        </div>
         <div class="rau-order-modal-footer">
             <div class="order-totals">
                 <span>Items: <strong id="rau-order-item-count">0</strong></span>
                 <span>Total (exc VAT): <strong id="rau-order-total">£0.00</strong></span>
-                <span>Inc VAT (20%): <strong id="rau-order-total-vat">£0.00</strong></span>
+                <span>Inc VAT (19%): <strong id="rau-order-total-vat">£0.00</strong></span>
             </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto;">
                 <button class="btn btn-secondary btn-sm" onclick="resetRauplusOrder()">
                     <i class="bi bi-arrow-counterclockwise"></i> Reset
                 </button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="printRauplusReport()">
-                    <i class="bi bi-printer"></i> Print Report
+                <button class="btn btn-outline-danger btn-sm" onclick="downloadRauplusPdf()">
+                    <i class="bi bi-file-pdf"></i> Download PDF
                 </button>
                 <button class="btn btn-success btn-sm" onclick="downloadRauplusCsv()">
                     <i class="bi bi-download"></i> Download CSV
                 </button>
+                <div class="dropdown" style="position:relative;display:inline-block;">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="toggleCopyPoMenu()">
+                        <i class="bi bi-copy"></i> Copy from PO <i class="bi bi-caret-down-fill" style="font-size:10px;"></i>
+                    </button>
+                    <ul id="rau-copy-po-menu" style="display:none;position:absolute;bottom:100%;right:0;left:auto;min-width:260px;z-index:9999;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;padding:4px 0;list-style:none;margin:0 0 4px;box-shadow:0 -4px 16px rgba(0,0,0,.18);max-height:260px;overflow-y:auto;">
+                        <!-- Populated by JS from RAU_PREVIOUS_POS -->
+                    </ul>
+                </div>
                 <button class="btn btn-primary btn-sm" onclick="createRauplusPO()">
                     <i class="bi bi-file-earmark-plus"></i> Create PO
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stock Shortage PO Modal -->
+<div id="stock-po-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeStockPoModal(event)">
+    <div class="rau-order-modal" onclick="event.stopPropagation()">
+        <div class="rau-order-modal-header">
+            <h3><i class="bi bi-cart-plus"></i> Create Purchase Order</h3>
+            <button class="pred-modal-close" onclick="closeStockPoModal()">&times;</button>
+        </div>
+        <div class="rau-order-modal-body">
+            <table class="rau-order-tbl" id="stock-po-tbl">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Material</th>
+                        <th class="text-right">Short By</th>
+                        <th class="text-right" style="width:110px">Order Qty</th>
+                        <th class="text-right">Unit Cost</th>
+                        <th class="text-right">Line Cost</th>
+                    </tr>
+                </thead>
+                <tbody id="stock-po-tbody">
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+        </div>
+        <div class="rau-order-modal-footer">
+            <div class="order-totals">
+                <span>Items: <strong id="stock-po-item-count">0</strong></span>
+                <span>Est. Total: <strong id="stock-po-total">£0.00</strong></span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+                <button class="btn btn-secondary btn-sm" onclick="closeStockPoModal()">
+                    <i class="bi bi-x"></i> Cancel
+                </button>
+                <button class="btn btn-primary btn-sm" id="stock-po-create-btn" onclick="submitStockPo()">
+                    <i class="bi bi-file-earmark-plus"></i> Create Draft PO
                 </button>
             </div>
         </div>
@@ -617,7 +746,35 @@
         </div>
     </div>
 </div>
-{% endif %}
+
+<!-- Copy from PO Confirmation Modal -->
+<div id="copy-po-confirm-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeCopyPoConfirmModal(event)">
+    <div style="background:var(--bg-secondary);border-radius:8px;padding:24px 28px;max-width:400px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.35);" onclick="event.stopPropagation()">
+        <h4 style="margin:0 0 10px;font-size:1rem;font-weight:600;"><i class="bi bi-copy"></i> Copy from PO</h4>
+        <p id="copy-po-confirm-text" style="margin:0 0 20px;font-size:0.875rem;color:var(--text-secondary);line-height:1.5;"></p>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="closeCopyPoConfirmModal()">Cancel</button>
+            <button class="btn btn-primary btn-sm" onclick="confirmCopyFromPO()">OK</button>
+        </div>
+    </div>
+</div>
+
+<!-- Shortage Selection Bar -->
+<div id="shortage-selection-bar" style="display:none;">
+    <div style="display:flex;align-items:center;gap:12px;max-width:1400px;margin:0 auto;">
+        <i class="bi bi-cart-check" style="font-size:1.1rem;color:var(--accent-color,#3b82f6);"></i>
+        <span id="shortage-selection-count" style="font-size:0.875rem;font-weight:600;"></span>
+        <span id="shortage-selection-note" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" onclick="clearShortageSelection()">
+                <i class="bi bi-x-lg"></i> Clear
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="sendSelectedToOrder()">
+                <i class="bi bi-cart-plus"></i> Add to Order
+            </button>
+        </div>
+    </div>
+</div>
 
 {% endblock %}
 
@@ -773,7 +930,7 @@
         const total = included.reduce((sum, r) => sum + (r.order_qty * r.cost), 0);
         document.getElementById('rau-order-item-count').textContent = included.length;
         document.getElementById('rau-order-total').textContent = '£' + total.toFixed(2);
-        document.getElementById('rau-order-total-vat').textContent = '£' + (total * 1.20).toFixed(2);
+        document.getElementById('rau-order-total-vat').textContent = '£' + (total * 1.19).toFixed(2);
     }
 
     function resetRauplusOrder() {
@@ -810,7 +967,7 @@
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
+                'X-CSRFToken': '{{ csrf_token }}',
             },
             body: JSON.stringify({ items: payload }),
         })
@@ -919,81 +1076,297 @@
         if (body) body.scrollTop = body.scrollHeight;
     }
 
-    // ── Print Report ─────────────────────────────────────────────────────
-    function printRauplusReport() {
-        const date = new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'long', year:'numeric'});
-        const sections = [
-            { key: 'critical',  label: 'Critical Items',  color: '#c0392b' },
-            { key: 'predicted', label: 'Predicted Items', color: '#b7770d' },
-            { key: 'suggested', label: 'Suggested Items', color: '#555' },
-            { key: 'manual',    label: 'Manually Added',  color: '#1a56db' },
-        ];
+    // ── Download PDF ──────────────────────────────────────────────────────
+    function downloadRauplusPdf() {
+        const items = RAU_ORDER_ROWS.filter(r => r.included && r.order_qty > 0);
+        if (!items.length) { alert('No items selected.'); return; }
 
-        let totalEx = 0;
-        let includedCount = 0;
+        const payload = items.map(r => ({
+            sku: r.sku, name: r.name, order_qty: r.order_qty,
+            suggested_qty: r.suggested_qty, cost: r.cost,
+            min_order_qty: r.min_order_qty, section: r.section, included: true,
+        }));
 
-        const bodyRows = sections.map(sec => {
-            const rows = RAU_ORDER_ROWS.filter(r => r.section === sec.key && r.included && r.order_qty > 0);
-            if (!rows.length) return '';
-            const dataRows = rows.map(r => {
-                const rauIdx = r.sku.toUpperCase().indexOf('RAU_');
-                const supplierSku = rauIdx !== -1 ? r.sku.substring(rauIdx + 4) : r.sku;
-                const delta = r.order_qty - r.suggested_qty;
-                const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : '\u2014';
-                const lineCost = (r.order_qty * r.cost).toFixed(2);
-                totalEx += r.order_qty * r.cost;
-                includedCount++;
-                return `<tr>
-                    <td>${escHtml(supplierSku)}</td>
-                    <td>${escHtml(r.name)}</td>
-                    <td class="n">${r.suggested_qty}</td>
-                    <td class="n"><strong>${r.order_qty}</strong></td>
-                    <td class="n">${deltaStr}</td>
-                    <td class="n">&pound;${parseFloat(r.cost).toFixed(2)}</td>
-                    <td class="n">&pound;${lineCost}</td>
-                </tr>`;
-            }).join('');
-            return `<tr class="sh" style="color:${sec.color}"><td colspan="7">${sec.label}</td></tr>${dataRows}`;
+        fetch('{% url "raumplus_order_pdf" %}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify({ items: payload }),
+        })
+        .then(resp => {
+            if (!resp.ok) throw new Error('PDF generation failed (status ' + resp.status + ')');
+            return resp.blob();
+        })
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+            a.href = url;
+            a.download = `Raumplus_Order_${today}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        })
+        .catch(err => alert('Error generating PDF: ' + err.message));
+    }
+
+    // ── Draft Save / Load ─────────────────────────────────────────────────
+    // ── Previous POs list (for Copy from PO dropdown) ───────────────────
+    const RAU_PREVIOUS_POS = [
+        {% for po in raumplus_previous_pos %}
+        { id: {{ po.workguru_id }}, label: "{{ po.display_number|escapejs }} — {{ po.created_at|date:'d M Y'|escapejs }}" }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    function toggleCopyPoMenu() {
+        const menu = document.getElementById('rau-copy-po-menu');
+        const isVisible = menu.style.display !== 'none';
+        if (isVisible) { menu.style.display = 'none'; return; }
+
+        if (!RAU_PREVIOUS_POS.length) {
+            menu.innerHTML = '<li style="padding:8px 12px;color:var(--text-secondary);font-size:13px;">No previous Raumplus POs</li>';
+        } else {
+            menu.innerHTML = RAU_PREVIOUS_POS.map(po => `
+                <li>
+                    <button onclick="copyFromPO(${po.id}, '${escHtml(po.label)}')"
+                            style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font-size:13px;padding:7px 14px;color:var(--text-primary);white-space:nowrap;">
+                        <i class="bi bi-copy" style="margin-right:6px;color:var(--text-secondary);"></i>${escHtml(po.label)}
+                    </button>
+                </li>`).join('');
+        }
+        menu.style.display = 'block';
+
+        setTimeout(() => {
+            document.addEventListener('click', function _closeCopyPo(e) {
+                if (!document.getElementById('rau-copy-po-menu').contains(e.target)) {
+                    document.getElementById('rau-copy-po-menu').style.display = 'none';
+                    document.removeEventListener('click', _closeCopyPo);
+                }
+            });
+        }, 50);
+    }
+
+    // ── Copy from PO (confirmation modal replaces browser confirm()) ──────
+    let _pendingCopyPoId = null;
+    let _pendingCopyPoLabel = null;
+
+    function copyFromPO(poId, poLabel) {
+        document.getElementById('rau-copy-po-menu').style.display = 'none';
+        if (RAU_ORDER_ROWS.length) {
+            _pendingCopyPoId = poId;
+            _pendingCopyPoLabel = poLabel;
+            document.getElementById('copy-po-confirm-text').textContent =
+                'Copy items from ' + poLabel + '? This will replace the current order.';
+            document.getElementById('copy-po-confirm-modal').style.display = 'flex';
+            return;
+        }
+        _doCopyFromPO(poId, poLabel);
+    }
+
+    function confirmCopyFromPO() {
+        closeCopyPoConfirmModal();
+        if (_pendingCopyPoId !== null) {
+            _doCopyFromPO(_pendingCopyPoId, _pendingCopyPoLabel);
+            _pendingCopyPoId = null;
+            _pendingCopyPoLabel = null;
+        }
+    }
+
+    function closeCopyPoConfirmModal(event) {
+        if (event && event.target !== document.getElementById('copy-po-confirm-modal')) return;
+        document.getElementById('copy-po-confirm-modal').style.display = 'none';
+        _pendingCopyPoId = null;
+        _pendingCopyPoLabel = null;
+    }
+
+    function _doCopyFromPO(poId, poLabel) {
+        fetch('{% url "raumplus_copy_po_items" 0 %}'.replace('/0/', '/' + poId + '/'))
+            .then(r => { if (!r.ok) throw new Error('Server error ' + r.status); return r.json(); })
+            .then(data => {
+                if (!data.success || !data.items || !data.items.length) {
+                    alert('No items found on PO ' + poLabel);
+                    return;
+                }
+                RAU_ORDER_ROWS = data.items.map(item => ({
+                    sku: item.sku || '',
+                    name: item.name || '',
+                    suggested_qty: parseInt(item.suggested_qty, 10) || 0,
+                    order_qty: parseInt(item.order_qty, 10) || 0,
+                    cost: parseFloat(item.cost) || 0,
+                    min_order_qty: parseInt(item.min_order_qty, 10) || 1,
+                    section: item.section || 'manual',
+                    included: item.included !== false,
+                }));
+                renderRauplusOrderTable();
+            })
+            .catch(err => alert('Error copying PO: ' + err.message));
+    }
+
+    // Also called from the "Copy to Order" button in the Previous POs table
+    function copyFromPOAndOpen(poId, poLabel) {
+        document.getElementById('rau-order-modal').style.display = 'flex';
+        copyFromPO(poId, poLabel);
+    }
+
+    // ── Shortage multi-select & Add to Order ──────────────────────────────
+    // Build predicted-shortage lookup from current tab's predicted_shortages context
+    const PRED_LOOKUP = (function () {
+        const map = {};
+        {% for item in predicted_shortages %}
+        map["{{ item.sku|escapejs }}"] = {
+            predicted_shortage: {{ item.predicted_shortage|default:0 }},
+            cost: {{ item.cost|default:0 }},
+            min_order_qty: {{ item.min_order_qty|default:1 }},
+        };
+        {% endfor %}
+        return map;
+    })();
+
+    function syncCheckboxBySku(changedCb) {
+        if (changedCb.dataset.table !== 'current') return;
+        const sku = changedCb.dataset.sku;
+        document.querySelectorAll('.shortage-cb[data-table="predicted"][data-sku="' + CSS.escape(sku) + '"]').forEach(function(cb) {
+            cb.checked = changedCb.checked;
+        });
+    }
+
+    function toggleAllShortageCheckboxes(masterCb) {
+        const table = masterCb.closest('table');
+        table.querySelectorAll('.shortage-cb').forEach(cb => {
+            cb.checked = masterCb.checked;
+            syncCheckboxBySku(cb);
+        });
+        updateSelectionBar();
+    }
+
+    function updateSelectionBar() {
+        const checked = document.querySelectorAll('.shortage-cb:checked');
+        const bar = document.getElementById('shortage-selection-bar');
+        if (!checked.length) { bar.style.display = 'none'; return; }
+        bar.style.display = '';
+        const uniqueSkus = new Set([...checked].map(cb => cb.dataset.sku));
+        const n = uniqueSkus.size;
+        document.getElementById('shortage-selection-count').textContent =
+            n + ' item' + (n === 1 ? '' : 's') + ' selected';
+        document.getElementById('shortage-selection-note').textContent = '';
+    }
+
+    function clearShortageSelection() {
+        document.querySelectorAll('.shortage-cb, .shortage-select-all').forEach(cb => { cb.checked = false; });
+        document.getElementById('shortage-selection-bar').style.display = 'none';
+    }
+
+    let STOCK_PO_ROWS = [];
+
+    function sendSelectedToOrder() {
+        const checked = [...document.querySelectorAll('.shortage-cb:checked')];
+        if (!checked.length) return;
+
+        // Group checked boxes by SKU, accumulating qty from both tables
+        const skuMap = new Map();
+        checked.forEach(cb => {
+            const sku = cb.dataset.sku;
+            const qty = parseFloat(cb.dataset.shortage) || 0;
+            const cost = parseFloat(cb.dataset.cost) || 0;
+            if (!skuMap.has(sku)) {
+                skuMap.set(sku, {
+                    sku,
+                    name: cb.dataset.name,
+                    totalShortage: 0,
+                    cost: 0,
+                    minOQ: parseInt(cb.dataset.minOrderQty, 10) || 1,
+                });
+            }
+            const entry = skuMap.get(sku);
+            entry.totalShortage += qty;
+            // Use whichever table has a real cost
+            if (cost > 0) entry.cost = cost;
+        });
+
+        STOCK_PO_ROWS = [];
+        skuMap.forEach(entry => {
+            let totalQty = Math.ceil(entry.totalShortage);
+            if (entry.minOQ > 1) totalQty = Math.ceil(totalQty / entry.minOQ) * entry.minOQ;
+            if (totalQty < entry.minOQ) totalQty = entry.minOQ;
+            STOCK_PO_ROWS.push({ sku: entry.sku, name: entry.name, shortage: entry.totalShortage, order_qty: totalQty, cost: entry.cost, min_order_qty: entry.minOQ });
+        });
+
+        clearShortageSelection();
+        renderStockPoTable();
+        document.getElementById('stock-po-modal').style.display = 'flex';
+    }
+
+    function renderStockPoTable() {
+        const tbody = document.getElementById('stock-po-tbody');
+        let total = 0;
+        tbody.innerHTML = STOCK_PO_ROWS.map((row, i) => {
+            const lineCost = row.order_qty * row.cost;
+            total += lineCost;
+            return `<tr>
+                <td>${row.sku}</td>
+                <td>${row.name}</td>
+                <td class="text-right">${row.shortage}</td>
+                <td class="text-right">
+                    <input type="number" class="rau-qty-input" value="${row.order_qty}" min="1"
+                           oninput="updateStockPoRow(${i}, this.value)" style="width:80px;text-align:left;">
+                </td>
+                <td class="text-right">£${row.cost.toFixed(2)}</td>
+                <td class="text-right stock-po-line-cost">£${lineCost.toFixed(2)}</td>
+            </tr>`;
         }).join('');
+        document.getElementById('stock-po-item-count').textContent = STOCK_PO_ROWS.length;
+        document.getElementById('stock-po-total').textContent = '£' + total.toFixed(2);
+    }
 
-        const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Raumplus Order &mdash; ${date}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:28px 32px;line-height:1.45}
-  h1{font-size:17px;font-weight:700;margin-bottom:3px}
-  .sub{color:#666;font-size:10.5px;margin-bottom:20px}
-  table{width:100%;border-collapse:collapse;margin-bottom:16px}
-  th{background:#f0f0f0;padding:6px 9px;text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #ccc}
-  th.n,td.n{text-align:right}
-  td{padding:5px 9px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
-  tr.sh td{background:#f7f7f7;font-weight:700;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:5px 9px;border-bottom:1px solid #ddd}
-  .totals{border-top:2px solid #333;padding-top:12px;display:flex;gap:28px;justify-content:flex-end;font-size:11.5px}
-  @media print{body{padding:0}}
-</style></head><body>
-<h1>Raumplus Order</h1>
-<div class="sub">Generated: ${date}&nbsp;&nbsp;&middot;&nbsp;&nbsp;${includedCount} line item${includedCount !== 1 ? 's' : ''}&nbsp;&nbsp;&middot;&nbsp;&nbsp;For factory discussion</div>
-<table>
-  <thead><tr>
-    <th>Art No.</th><th>Description</th>
-    <th class="n">Suggested</th><th class="n">Order Qty</th>
-    <th class="n">Change</th><th class="n">Unit Cost</th><th class="n">Line Cost</th>
-  </tr></thead>
-  <tbody>${bodyRows}</tbody>
-</table>
-<div class="totals">
-  <span>Items: <strong>${includedCount}</strong></span>
-  <span>Total (exc VAT): <strong>&pound;${totalEx.toFixed(2)}</strong></span>
-  <span>Total (inc 20% VAT): <strong>&pound;${(totalEx * 1.20).toFixed(2)}</strong></span>
-</div>
-</body></html>`;
+    function updateStockPoRow(index, value) {
+        const qty = parseFloat(value) || 1;
+        STOCK_PO_ROWS[index].order_qty = qty;
+        const rows = document.querySelectorAll('#stock-po-tbody tr');
+        const lineCost = qty * STOCK_PO_ROWS[index].cost;
+        rows[index].querySelector('.stock-po-line-cost').textContent = '£' + lineCost.toFixed(2);
+        let total = STOCK_PO_ROWS.reduce((s, r) => s + (r.order_qty * r.cost), 0);
+        document.getElementById('stock-po-total').textContent = '£' + total.toFixed(2);
+    }
 
-        const w = window.open('', '_blank', 'width=960,height=720');
-        if (!w) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
-        w.document.write(html);
-        w.document.close();
-        w.focus();
-        w.print();
+    function closeStockPoModal(e) {
+        if (!e || e.target === document.getElementById('stock-po-modal')) {
+            document.getElementById('stock-po-modal').style.display = 'none';
+        }
+    }
+
+    function submitStockPo() {
+        const btn = document.getElementById('stock-po-create-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating…';
+
+        const items = STOCK_PO_ROWS.map(r => ({
+            sku: r.sku,
+            name: r.name,
+            order_qty: r.order_qty,
+            cost: r.cost,
+        }));
+
+        fetch('{% url "create_stock_shortage_po" %}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify({ items }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = data.po_url;
+            } else {
+                alert('Error creating PO: ' + (data.error || 'Unknown error'));
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-file-earmark-plus"></i> Create Draft PO';
+            }
+        })
+        .catch(() => {
+            alert('Network error, please try again.');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-file-earmark-plus"></i> Create Draft PO';
+        });
     }
 
     function toggleExpand(rowId) {
@@ -1053,27 +1426,35 @@
         document.getElementById('compare-loading').style.display = 'block';
         document.getElementById('compare-header-new').textContent = months + '-Mo Qty';
 
-        fetch('/api/rau-prediction-compare/?months=' + months)
-            .then(r => r.json())
+        fetch('{% url "rau_prediction_compare" %}?months=' + months)
+            .then(r => {
+                if (!r.ok) throw new Error('Server error ' + r.status);
+                return r.json();
+            })
             .then(data => {
                 document.getElementById('compare-loading').style.display = 'none';
-                if (!data.success || !data.items.length) {
+                if (!data.success || !data.items || !data.items.length) {
                     document.getElementById('compare-empty').style.display = 'block';
                     return;
                 }
-                renderComparison(data.items, data.total_cost, parseInt(months));
+                renderComparison(data.items, data.total_cost, parseInt(months, 10));
             })
-            .catch(() => {
+            .catch(err => {
+                console.error('Comparison load failed:', err);
                 document.getElementById('compare-loading').style.display = 'none';
                 const el = document.getElementById('compare-empty');
-                el.innerHTML = '<i class="bi bi-exclamation-circle"></i> Error loading data.';
-                el.style.display = 'block';
+                if (el) {
+                    el.innerHTML = '<i class="bi bi-exclamation-circle"></i> Error loading data: ' + err.message;
+                    el.style.display = 'block';
+                }
             });
     }
 
     function renderComparison(newItems, totalCost, newMonths) {
         const tbody = document.getElementById('compare-tbody');
+        if (!tbody) { console.error('compare-tbody element not found'); return; }
         tbody.innerHTML = '';
+
         const newMap = {};
         newItems.forEach(item => { newMap[item.sku] = item; });
 
@@ -1084,10 +1465,12 @@
         allSkus.forEach(sku => {
             const cur = CURRENT_PRED[sku];
             const nw = newMap[sku];
+            if (!cur && !nw) return;  // safety guard
             rows.push({
-                sku, name: (cur || nw).name,
-                curQty: cur ? cur.order_qty : 0,
-                nwQty: nw ? nw.order_qty : 0,
+                sku,
+                name: (cur || nw).name || sku,
+                curQty: cur ? (parseInt(cur.order_qty, 10) || 0) : 0,
+                nwQty:  nw  ? (parseInt(nw.order_qty,  10) || 0) : 0,
             });
         });
 
@@ -1101,29 +1484,35 @@
         rows.forEach(({ sku, name, curQty, nwQty }) => {
             const delta = nwQty - curQty;
             let badge = '';
-            if (curQty === 0)        { newCount++;  badge = '<span class="compare-badge badge-new">NEW</span>'; }
-            else if (nwQty === 0)    { removed++;   badge = '<span class="compare-badge badge-removed">REMOVED</span>'; }
-            else if (delta > 0)     { increased++; badge = '<span class="compare-badge badge-up">+' + delta + '</span>'; }
-            else if (delta < 0)     { decreased++; badge = '<span class="compare-badge badge-down">' + delta + '</span>'; }
-            else                    {              badge = '<span class="compare-badge badge-same">—</span>'; }
+            if (curQty === 0)    { newCount++;  badge = '<span class="compare-badge badge-new">NEW</span>'; }
+            else if (nwQty === 0){ removed++;   badge = '<span class="compare-badge badge-removed">REMOVED</span>'; }
+            else if (delta > 0)  { increased++; badge = '<span class="compare-badge badge-up">+' + delta + '</span>'; }
+            else if (delta < 0)  { decreased++; badge = '<span class="compare-badge badge-down">' + delta + '</span>'; }
+            else                 {              badge = '<span class="compare-badge badge-same">&mdash;</span>'; }
 
+            const safeSku  = sku.replace(/</g, '&lt;');
+            const safeName = String(name).replace(/</g, '&lt;');
             const tr = document.createElement('tr');
             if (nwQty === 0) tr.style.opacity = '0.45';
-            tr.innerHTML = `<td>${sku}</td><td>${name}</td>` +
-                `<td class="text-right">${curQty || '—'}</td>` +
-                `<td class="text-right">${nwQty || '—'}</td>` +
+            tr.innerHTML = `<td>${safeSku}</td><td>${safeName}</td>` +
+                `<td class="text-right">${curQty || '&mdash;'}</td>` +
+                `<td class="text-right">${nwQty || '&mdash;'}</td>` +
                 `<td class="text-right">${badge}</td>`;
             tbody.appendChild(tr);
         });
 
+        const cost = Number(totalCost) || 0;
         const parts = [];
         if (newCount)  parts.push(`<span class="compare-badge badge-new">${newCount} new</span>`);
         if (increased) parts.push(`<span class="compare-badge badge-up">${increased} increased</span>`);
         if (decreased) parts.push(`<span class="compare-badge badge-down">${decreased} decreased</span>`);
         if (removed)   parts.push(`<span class="compare-badge badge-removed">${removed} removed</span>`);
-        parts.push(`Total cost (${newMonths} mo): <strong>£${totalCost.toFixed(2)}</strong>`);
-        document.getElementById('compare-summary').innerHTML = parts.join(' &nbsp;&bull;&nbsp; ');
-        document.getElementById('compare-results').style.display = 'block';
+        parts.push(`Total cost (${newMonths} mo): <strong>£${cost.toFixed(2)}</strong>`);
+
+        const summary = document.getElementById('compare-summary');
+        if (summary) summary.innerHTML = parts.join(' &nbsp;&bull;&nbsp; ');
+        const results = document.getElementById('compare-results');
+        if (results) results.style.display = 'block';
     }
 </script>
 {% endblock %}

@@ -2156,6 +2156,9 @@ class ActivityLog(models.Model):
         ('invoice_deleted',    'Purchase Invoice Deleted'),
         ('timesheet_added',    'Timesheet Added'),
         ('timesheet_deleted',  'Timesheet Deleted'),
+        ('product_created',    'Product Created'),
+        ('product_updated',    'Product Updated'),
+        ('stock_adjusted',     'Stock Adjusted'),
         ('other',              'Other'),
     ]
 
@@ -2219,3 +2222,21 @@ class SyncLog(models.Model):
 
     def __str__(self):
         return f"{self.script_name} @ {self.ran_at.strftime('%Y-%m-%d %H:%M')} [{self.get_status_display()}]"
+
+
+class RaumplusDraftOrder(models.Model):
+    """A saved draft of a Raumplus order being built in the shortage modal."""
+    name = models.CharField(max_length=200, default='Draft Order', help_text='Descriptive name for this draft')
+    items = models.JSONField(default=list, help_text='Serialised list of order row dicts')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='raumplus_drafts',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.updated_at.strftime('%d/%m/%Y')})"

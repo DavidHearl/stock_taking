@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, StockItem, StockHistory, Supplier, SupplierContact, log_activity
+from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -2532,6 +2532,199 @@ def create_raumplus_po(request):
 
 
 @login_required
+def create_stock_shortage_po(request):
+    """Create a draft Purchase Order from selected stock shortage items (JSON POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    items = data.get('items', [])
+    if not items:
+        return JsonResponse({'error': 'No items provided'}, status=400)
+
+    # Generate a unique local workguru_id
+    max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 800000)
+
+    # Generate sequential PO display number
+    import re as _re
+    import datetime as _dt
+    last_num = 0
+    for po_obj in PurchaseOrder.objects.filter(display_number__startswith='PO').order_by('-display_number'):
+        m = _re.match(r'^PO(\d+)$', po_obj.display_number or '')
+        if m:
+            last_num = max(last_num, int(m.group(1)))
+    display_number = f'PO{last_num + 1}'
+
+    description = f'Stock shortage order — generated {_dt.date.today().strftime("%d %B %Y")}'
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_id,
+        number=display_number,
+        display_number=display_number,
+        description=description,
+        supplier_id=None,
+        supplier_name='',
+        delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        status='Draft',
+        currency='GBP',
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
+
+    total = 0
+    for sort_idx, item in enumerate(items, start=1):
+        try:
+            qty = float(item.get('order_qty', 0) or 0)
+            unit_cost = float(item.get('cost', 0) or 0)
+        except (ValueError, TypeError):
+            qty, unit_cost = 0, 0
+
+        line_total = round(qty * unit_cost, 2)
+        total += line_total
+        sku = item.get('sku', '')
+        stock_item = StockItem.objects.filter(sku=sku).first()
+
+        PurchaseOrderProduct.objects.create(
+            purchase_order=po,
+            sku=sku,
+            supplier_code=sku,
+            name=item.get('name', ''),
+            order_price=unit_cost,
+            order_quantity=qty,
+            line_total=line_total,
+            minimum_order_quantity=item.get('min_order_qty', 1),
+            sort_order=sort_idx,
+            stock_item=stock_item,
+        )
+
+    po.total = round(total, 2)
+    po.save(update_fields=['total'])
+
+    log_activity(
+        user=request.user,
+        event_type='po_created',
+        description=(
+            f'{request.user.get_full_name() or request.user.username} created stock shortage purchase order '
+            f'{display_number} with {len(items)} line item(s).'
+        ),
+    )
+
+    return JsonResponse({
+        'success': True,
+        'display_number': display_number,
+        'po_url': f'/purchase-order/{po.workguru_id}/',
+    })
+
+
+@login_required
+def raumplus_order_pdf(request):
+    """Generate a Raumplus order PDF from the modal items (JSON POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    items = data.get('items', [])
+    if not items:
+        return HttpResponse('No items provided', status=400)
+
+    from .raumplus_pdf_generator import generate_raumplus_order_pdf
+    import datetime as _dt
+    buf = generate_raumplus_order_pdf(items, request.user)
+    filename = f'Raumplus_Order_{_dt.date.today().strftime("%Y%m%d")}.pdf'
+    response = HttpResponse(buf.read(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+def save_raumplus_draft(request):
+    """Create or update a Raumplus draft order (JSON POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    items = data.get('items', [])
+    name = (data.get('name') or 'Draft Order').strip()[:200]
+    draft_id = data.get('draft_id')
+
+    if draft_id:
+        draft = get_object_or_404(RaumplusDraftOrder, id=draft_id, created_by=request.user)
+        draft.name = name
+        draft.items = items
+        draft.save(update_fields=['name', 'items', 'updated_at'])
+    else:
+        draft = RaumplusDraftOrder.objects.create(
+            name=name,
+            items=items,
+            created_by=request.user,
+        )
+
+    return JsonResponse({
+        'success': True,
+        'draft_id': draft.id,
+        'name': draft.name,
+        'updated_at': draft.updated_at.strftime('%d/%m/%Y %H:%M'),
+    })
+
+
+@login_required
+def delete_raumplus_draft(request, draft_id):
+    """Delete a saved Raumplus draft (DELETE or POST)."""
+    if request.method not in ('DELETE', 'POST'):
+        return JsonResponse({'error': 'DELETE or POST required'}, status=405)
+    draft = get_object_or_404(RaumplusDraftOrder, id=draft_id, created_by=request.user)
+    draft.delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def raumplus_copy_po_items(request, po_id):
+    """Return line items from a Raumplus PO formatted for the order modal."""
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    products = po.products.all().order_by('sort_order', 'id')
+
+    skus = [p.sku for p in products if p.sku]
+    stock_map = {si.sku: si for si in StockItem.objects.filter(sku__in=skus)}
+
+    items = []
+    for p in products:
+        if not p.sku:
+            continue
+        si = stock_map.get(p.sku)
+        qty = int(float(p.order_quantity or p.quantity or 0))
+        cost = float(si.cost) if si and si.cost else float(p.order_price or 0)
+        min_oq = int(si.min_order_qty) if si and si.min_order_qty else 1
+        items.append({
+            'sku': p.sku,
+            'name': p.name or (si.name if si else ''),
+            'order_qty': qty,
+            'suggested_qty': qty,
+            'cost': cost,
+            'min_order_qty': min_oq,
+            'section': 'manual',
+            'included': True,
+        })
+
+    return JsonResponse({
+        'success': True,
+        'items': items,
+        'po_number': po.display_number or str(po.workguru_id),
+    })
+
+
+@login_required
 def sync_os_doors_po(request, order_id):
     """Save current cost/qty from the frontend, then re-sync the linked PurchaseOrder's
     product lines.  Accepts optional ``door_values`` dict and optional
@@ -2691,12 +2884,14 @@ def product_delete_allocation(request, po_id, product_id, allocation_id):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
-    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
-    product = get_object_or_404(PurchaseOrderProduct, id=product_id, purchase_order=po)
-    allocation = get_object_or_404(ProductCustomerAllocation, id=allocation_id, product=product)
-    allocation.delete()
-
-    return JsonResponse({'success': True})
+    try:
+        po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+        product = get_object_or_404(PurchaseOrderProduct, id=product_id, purchase_order=po)
+        allocation = get_object_or_404(ProductCustomerAllocation, id=allocation_id, product=product)
+        allocation.delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @login_required

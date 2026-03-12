@@ -19,96 +19,116 @@
         {{ group.group }}
     </div>
 
-    {% for script in group.scripts %}
-    <div class="script-card" id="script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
-        <div class="script-card-header" onclick="toggleScript('script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}')">
-            <div class="script-card-left">
-                <div class="script-card-title-row">
-                    <h3>{{ script.label }}</h3>
-                    <span class="script-file-badge">{{ script.file }}</span>
-                </div>
-            </div>
-            <div class="script-card-meta">
+    <table class="scripts-table">
+        <thead>
+            <tr>
+                <th>Script</th>
+                <th>Schedule</th>
+                <th>Last Run</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for script in group.scripts %}
+        <tr class="script-row" id="script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}"
+            onclick="toggleScript('script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}')">
+            <td>
+                <div class="script-name">{{ script.label }}</div>
+                <div class="script-description-inline">{{ script.description }}</div>
+                <span class="script-file-badge">{{ script.file }}</span>
+            </td>
+            <td class="col-schedule">
+                <span class="script-schedule-text"><i class="bi bi-calendar3"></i> {{ script.schedule }}</span>
+            </td>
+            <td class="col-status">
                 {% if script.last_log %}
                     <span class="sync-badge sync-{{ script.last_log.status }}">
                         <i class="bi bi-circle-fill" style="font-size:0.5em;"></i>
                         {{ script.last_log.get_status_display }}
                     </span>
-                    <span class="script-schedule-text" title="{{ script.last_log.ran_at|date:'d/m/Y H:i' }}">
-                        Last run {{ script.last_log.ran_at|timesince }} ago
-                    </span>
+                    <div class="last-run-time" title="{{ script.last_log.ran_at|date:'d/m/Y H:i' }}">
+                        {{ script.last_log.ran_at|timesince }} ago
+                    </div>
                 {% elif script.log_name %}
                     <span class="sync-badge sync-never">Never run</span>
+                {% else %}
+                    <span class="script-schedule-text">—</span>
                 {% endif %}
-                <span class="script-schedule-text"><i class="bi bi-calendar3"></i> {{ script.schedule }}</span>
-            </div>
-            <i class="bi bi-chevron-down script-card-chevron"></i>
-        </div>
-        <div class="script-card-body">
-            <p class="script-description">{{ script.description }}</p>
+            </td>
+            <td class="col-expand">
+                <i class="bi bi-chevron-down script-row-chevron"></i>
+            </td>
+        </tr>
+        <tr class="script-detail-row" id="detail-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
+            <td colspan="4">
+                <div class="script-detail-content">
 
-            {% if script.commands %}
-            <div class="commands-label">Commands</div>
-            {% for c in script.commands %}
-            <div class="command-row" data-cmd="{{ c.cmd }}">
-                <button class="cmd-run-btn" onclick="runCommand(this, '{{ c.cmd|escapejs }}')" title="Run this command">
-                    <i class="bi bi-play-fill"></i> Run
-                </button>
-                <span class="command-snippet">{{ c.cmd }}</span>
-                {% if c.note %}<span class="command-note">— {{ c.note }}</span>{% endif %}
-            </div>
-            {% endfor %}
-            <!-- Terminal output area (hidden until a command is run) -->
-            <div class="script-terminal" id="terminal-{{ forloop.parentloop.counter }}-{{ forloop.counter }}" style="display:none;">
-                <div class="script-terminal-header">
-                    <span class="terminal-status">
-                        <span class="dot running"></span>
-                        <span class="terminal-cmd-label"></span>
-                    </span>
-                    <span>
-                        <button class="terminal-clear-btn" onclick="clearTerminal(this)" title="Clear"><i class="bi bi-x-lg"></i> Close</button>
-                    </span>
+                {% if script.commands %}
+                <div class="commands-label">Commands</div>
+                {% for c in script.commands %}
+                <div class="command-row" data-cmd="{{ c.cmd }}">
+                    <button class="cmd-run-btn" onclick="runCommand(this, '{{ c.cmd|escapejs }}')" title="Run this command">
+                        <i class="bi bi-play-fill"></i> Run
+                    </button>
+                    <span class="command-snippet">{{ c.cmd }}</span>
+                    {% if c.note %}<span class="command-note">— {{ c.note }}</span>{% endif %}
                 </div>
-                <div class="script-terminal-body"></div>
-            </div>
-            {% endif %}
+                {% endfor %}
+                <!-- Terminal output area (hidden until a command is run) -->
+                <div class="script-terminal" id="terminal-{{ forloop.parentloop.counter }}-{{ forloop.counter }}" style="display:none;">
+                    <div class="script-terminal-header">
+                        <span class="terminal-status">
+                            <span class="dot running"></span>
+                            <span class="terminal-cmd-label"></span>
+                        </span>
+                        <span>
+                            <button class="terminal-clear-btn" onclick="clearTerminal(this)" title="Clear"><i class="bi bi-x-lg"></i> Close</button>
+                        </span>
+                    </div>
+                    <div class="script-terminal-body"></div>
+                </div>
+                {% endif %}
 
-            {% if script.log_name %}
-            <div class="history-label">Recent Runs</div>
-            {% if script.recent_logs %}
-            <table class="run-history-table">
-                <thead>
-                    <tr>
-                        <th>Run At</th>
-                        <th>Status</th>
-                        <th>Stats</th>
-                        <th>Notes</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for log in script.recent_logs %}
-                    <tr>
-                        <td title="{{ log.ran_at|date:'d/m/Y H:i:s' }}">{{ log.ran_at|date:"d M Y H:i" }}</td>
-                        <td><span class="sync-badge sync-{{ log.status }}">{{ log.get_status_display }}</span></td>
-                        <td>
-                            <span class="stats-chip created"><i class="bi bi-plus-circle"></i> {{ log.records_created }}</span>
-                            <span class="stats-chip updated"><i class="bi bi-arrow-repeat"></i> {{ log.records_updated }}</span>
-                            {% if log.errors %}<span class="stats-chip errors"><i class="bi bi-exclamation-triangle"></i> {{ log.errors }}</span>{% endif %}
-                        </td>
-                        <td style="color:var(--text-muted,#888); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ log.notes }}">
-                            {{ log.notes|truncatechars:80 }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p class="no-history-note"><i class="bi bi-clock-history"></i> No run history recorded yet.</p>
-            {% endif %}
-            {% endif %}
-        </div>
-    </div>
-    {% endfor %}
+                {% if script.log_name %}
+                <div class="history-label">Recent Runs</div>
+                {% if script.recent_logs %}
+                <table class="run-history-table">
+                    <thead>
+                        <tr>
+                            <th>Run At</th>
+                            <th>Status</th>
+                            <th>Stats</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in script.recent_logs %}
+                        <tr>
+                            <td title="{{ log.ran_at|date:'d/m/Y H:i:s' }}">{{ log.ran_at|date:"d M Y H:i" }}</td>
+                            <td><span class="sync-badge sync-{{ log.status }}">{{ log.get_status_display }}</span></td>
+                            <td>
+                                <span class="stats-chip created"><i class="bi bi-plus-circle"></i> {{ log.records_created }}</span>
+                                <span class="stats-chip updated"><i class="bi bi-arrow-repeat"></i> {{ log.records_updated }}</span>
+                                {% if log.errors %}<span class="stats-chip errors"><i class="bi bi-exclamation-triangle"></i> {{ log.errors }}</span>{% endif %}
+                            </td>
+                            <td style="color:var(--text-muted,#888); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ log.notes }}">
+                                {{ log.notes|truncatechars:80 }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="no-history-note"><i class="bi bi-clock-history"></i> No run history recorded yet.</p>
+                {% endif %}
+                {% endif %}
+
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
     {% empty %}
     <p style="color:var(--text-muted,#888);">No scripts registered.</p>
     {% endfor %}
@@ -120,14 +140,17 @@ const csrfToken = '{{ csrf_token }}';
 const activeRuns = {};  // cmd -> { runId, eventSource, terminalEl, btnEl }
 
 function toggleScript(id) {
-    const card = document.getElementById(id);
-    if (card) card.classList.toggle('open');
+    const row = document.getElementById(id);
+    const detailId = 'detail-' + id.slice('script-'.length);
+    const detailRow = document.getElementById(detailId);
+    if (row) row.classList.toggle('open');
+    if (detailRow) detailRow.style.display = (row && row.classList.contains('open')) ? '' : 'none';
 }
 
 function getTerminalForBtn(btn) {
-    // Find the terminal element within the same script-card-body
-    const body = btn.closest('.script-card-body');
-    return body ? body.querySelector('.script-terminal') : null;
+    // Find the terminal element within the same script-detail-content
+    const content = btn.closest('.script-detail-content');
+    return content ? content.querySelector('.script-terminal') : null;
 }
 
 function runCommand(btn, cmd) {
@@ -155,7 +178,7 @@ function runCommand(btn, cmd) {
     btn.classList.add('running');
 
     // Disable other run buttons in this card
-    const body = btn.closest('.script-card-body');
+    const body = btn.closest('.script-detail-content');
     body.querySelectorAll('.cmd-run-btn').forEach(b => {
         if (b !== btn) b.disabled = true;
     });
@@ -248,7 +271,7 @@ function cancelCommand(cmd) {
         termBody.textContent += '\n⚠️ Script cancelled by user\n';
         dot.className = 'dot cancelled';
         if (run.eventSource) run.eventSource.close();
-        const body = run.btnEl.closest('.script-card-body');
+        const body = run.btnEl.closest('.script-detail-content');
         resetBtn(run.btnEl, body);
         run.status = 'cancelled';
     });
@@ -285,11 +308,19 @@ function clearTerminal(closeBtn) {
                     const termBody = terminal.querySelector('.script-terminal-body');
                     const termLabel = terminal.querySelector('.terminal-cmd-label');
                     const dot = terminal.querySelector('.dot');
-                    const body = btn.closest('.script-card-body');
+                    const body = btn.closest('.script-detail-content');
 
-                    // Open the card
-                    const card = btn.closest('.script-card');
-                    if (card && !card.classList.contains('open')) card.classList.add('open');
+                    // Open the detail row
+                    const detailContent = btn.closest('.script-detail-content');
+                    if (detailContent) {
+                        const detailRow = detailContent.closest('tr.script-detail-row');
+                        if (detailRow) {
+                            detailRow.style.display = '';
+                            const rowId = detailRow.id.replace('detail-', 'script-');
+                            const scriptRow = document.getElementById(rowId);
+                            if (scriptRow) scriptRow.classList.add('open');
+                        }
+                    }
 
                     // Show terminal
                     terminal.style.display = '';

@@ -1203,6 +1203,7 @@ function openSalesAfterReport() {
 <dialog id="stockReportModal" class="dash-report-modal">
     <div style="display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border-color);padding:4px 12px 0 0;">
         <button id="stockTabBtnReport" onclick="switchStockTab('report')" style="background:none;border:none;padding:8px 16px 10px;font-size:0.85rem;font-weight:600;cursor:pointer;color:var(--text-primary);border-bottom:2px solid #29e8eb;margin-bottom:-1px;flex-shrink:0;"><i class="bi bi-box-seam"></i> Stock Report</button>
+        <button id="stockTabBtnChanges" onclick="switchStockTab('changes')" style="background:none;border:none;padding:8px 16px 10px;font-size:0.85rem;font-weight:600;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-1px;flex-shrink:0;"><i class="bi bi-arrow-left-right"></i> Recent Changes</button>
         <button id="stockTabBtnHistory" onclick="switchStockTab('history')" style="background:none;border:none;padding:8px 16px 10px;font-size:0.85rem;font-weight:600;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent;margin-bottom:-1px;flex-shrink:0;"><i class="bi bi-graph-up"></i> Monthly History</button>
         <span id="stockReportMeta" class="dash-report-meta" style="flex:1;padding:0 8px;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
         <a id="stockReportPdfBtn"
@@ -1219,6 +1220,9 @@ function openSalesAfterReport() {
     <div class="dash-report-body" id="stockReportBody">
         <p class="text-muted">Loading&hellip;</p>
     </div>
+    <div class="dash-report-body" id="stockChangesBody" style="display:none;">
+        <p class="text-muted">Loading&hellip;</p>
+    </div>
     <div class="dash-report-body" id="stockHistoryBody" style="display:none;">
         <p class="text-muted">Loading&hellip;</p>
     </div>
@@ -1233,28 +1237,32 @@ let _stockHistoryLoaded = false;
 
 function switchStockTab(tab) {
     const reportBody = document.getElementById('stockReportBody');
+    const changesBody = document.getElementById('stockChangesBody');
     const historyBody = document.getElementById('stockHistoryBody');
     const tabReport = document.getElementById('stockTabBtnReport');
+    const tabChanges = document.getElementById('stockTabBtnChanges');
     const tabHistory = document.getElementById('stockTabBtnHistory');
     const pdfBtn = document.getElementById('stockReportPdfBtn');
     const meta = document.getElementById('stockReportMeta');
 
+    [reportBody, changesBody, historyBody].forEach(b => b.style.display = 'none');
+    [tabReport, tabChanges, tabHistory].forEach(b => { b.style.color = 'var(--text-secondary)'; b.style.borderBottomColor = 'transparent'; });
+    pdfBtn.style.display = 'none';
+
     if (tab === 'report') {
         reportBody.style.display = '';
-        historyBody.style.display = 'none';
         tabReport.style.color = 'var(--text-primary)';
         tabReport.style.borderBottomColor = '#29e8eb';
-        tabHistory.style.color = 'var(--text-secondary)';
-        tabHistory.style.borderBottomColor = 'transparent';
         pdfBtn.style.display = '';
+    } else if (tab === 'changes') {
+        changesBody.style.display = '';
+        tabChanges.style.color = 'var(--text-primary)';
+        tabChanges.style.borderBottomColor = '#29e8eb';
+        meta.textContent = '';
     } else {
-        reportBody.style.display = 'none';
         historyBody.style.display = '';
-        tabReport.style.color = 'var(--text-secondary)';
-        tabReport.style.borderBottomColor = 'transparent';
         tabHistory.style.color = 'var(--text-primary)';
         tabHistory.style.borderBottomColor = '#29e8eb';
-        pdfBtn.style.display = 'none';
         meta.textContent = '';
         if (!_stockHistoryLoaded) loadStockHistory();
     }
@@ -1338,26 +1346,31 @@ function loadStockHistory() {
         });
 }
 
+let _stockReportLoadedDate = null;
+
 function openStockReport(tab) {
     tab = tab || 'report';
     const modal = document.getElementById('stockReportModal');
     modal.showModal();
     switchStockTab(tab);
-    if (tab !== 'report') return;
-
-    const body = document.getElementById('stockReportBody');
-    body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
-    document.getElementById('stockReportMeta').textContent = '';
 
     const stockDate = document.getElementById('stockReportDate').value || '{{ today_str }}';
     const pdfBase = '{% url "dashboard_stock_pdf" %}';
     document.getElementById('stockReportPdfBtn').href = pdfBase + '?date=' + stockDate;
 
+    if (_stockReportLoadedDate === stockDate) return;
+    _stockReportLoadedDate = stockDate;
+
+    document.getElementById('stockReportBody').innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('stockChangesBody').innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+    document.getElementById('stockReportMeta').textContent = '';
+
     fetch('{% url "dashboard_stock_report" %}' + '?date=' + stockDate)
         .then(r => r.json())
         .then(data => {
             if (!data.success) {
-                body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load stock data.</p>';
+                document.getElementById('stockReportBody').innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load stock data.</p>';
+                document.getElementById('stockChangesBody').innerHTML = '';
                 return;
             }
             const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
@@ -1365,84 +1378,60 @@ function openStockReport(tab) {
             document.getElementById('stockReportMeta').innerHTML =
                 '&nbsp;&mdash;&nbsp;' + dateLabel + ' &nbsp;|&nbsp; ' + data.stock_count.toLocaleString() + ' items &nbsp;|&nbsp; ' + fmt(data.total_value);
 
-            let html = '';
-
-            // ── Section 1: Recent Changes ────────────────────────
-            html += '<h4 style="margin:8px 16px;font-size:1rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' +
-                'Stock Changes (past 3 days)</h4>';
-
+            // ── Changes tab ──────────────────────────────────────
+            let changesHtml = '';
             if (data.recent_changes.length) {
-                html += '<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden">';
-                data.recent_changes.forEach((c, idx) => {
+                changesHtml += '<table class="dash-report-table"><thead><tr>' +
+                    '<th>SKU</th><th>Material</th><th class="text-center">Type</th>' +
+                    '<th class="text-right">Qty Change</th><th class="text-right">Value Change</th><th class="text-right">Date</th>' +
+                    '</tr></thead><tbody>';
+                data.recent_changes.forEach(c => {
                     const qtyColor = c.change_amount > 0 ? '#28a745' : '#dc3545';
                     const valColor = c.value_change > 0 ? '#28a745' : '#dc3545';
                     const qtySign = c.change_amount > 0 ? '+' : '';
                     const valSign = c.value_change > 0 ? '+' : '';
-                    const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
-                    html += '<div style="display:flex;align-items:center;padding:4px 16px;gap:8px;' + border + '">' +
-                        // Left: SKU + name
-                        '<div style="flex:1;min-width:0;">' +
-                            '<div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.sku + '</div>' +
-                            '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.name + '</div>' +
-                        '</div>' +
-                        // Middle: type badge + reference
-                        '<div style="text-align:center;min-width:80px;">' +
-                            '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:600;background:var(--card-bg);border:1px solid var(--border-color);text-transform:capitalize;">' + c.change_type.replace('_', ' ') + '</span>' +
-                            '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">' + (c.reference || '—') + '</div>' +
-                        '</div>' +
-                        // Right: qty delta + value delta
-                        '<div style="text-align:right;min-width:72px;">' +
-                            '<div style="font-weight:600;font-size:0.88rem;color:' + qtyColor + ';">' + qtySign + c.change_amount.toLocaleString() + '</div>' +
-                            '<div style="font-size:0.75rem;color:' + valColor + ';">' + valSign + fmt(Math.abs(c.value_change)) + '</div>' +
-                        '</div>' +
-                        // Far right: date
-                        '<div style="text-align:right;min-width:78px;color:var(--text-secondary);font-size:0.72rem;white-space:nowrap;">' + c.date + '</div>' +
-                    '</div>';
+                    changesHtml += '<tr>' +
+                        '<td style="font-weight:600;">' + c.sku + '</td>' +
+                        '<td>' + c.name + '</td>' +
+                        '<td class="text-center"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:600;background:var(--bg-tertiary);border:1px solid var(--border-color);">' + c.change_type + '</span></td>' +
+                        '<td class="text-right" style="font-weight:600;color:' + qtyColor + ';">' + qtySign + c.change_amount.toLocaleString() + '</td>' +
+                        '<td class="text-right" style="color:' + valColor + ';">' + valSign + fmt(Math.abs(c.value_change)) + '</td>' +
+                        '<td class="text-right" style="color:var(--text-secondary);white-space:nowrap;">' + c.date + '</td>' +
+                    '</tr>';
                 });
-                html += '</div>';
+                changesHtml += '</tbody></table>';
             } else {
-                html += '<p style="color:var(--text-secondary);padding:8px 0 16px;">No stock changes recorded.</p>';
+                changesHtml = '<p style="padding:16px;color:var(--text-secondary);">No stock changes in the past 5 days.</p>';
             }
+            document.getElementById('stockChangesBody').innerHTML = changesHtml;
 
-            // ── Section 2: Current Stock (≥£500) ─────────────
-            const displayed = data.current_stock.filter(i => i.total_value >= 500);
-            const hiddenCount = data.stock_count - displayed.length;
-            let section2Title = 'Current Stock (' + displayed.length.toLocaleString() + ' of ' + data.stock_count.toLocaleString() + ' items, ≥£500)';
-            html += '<h4 style="margin:8px 16px;font-size:1rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;">' + section2Title + '</h4>';
-
-            if (displayed.length) {
-                const grandQty = data.current_stock.reduce(function(s, i) { return s + i.quantity; }, 0);
-                html += '<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden;">';
-                displayed.forEach((i, idx) => {
-                    const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
-                    const meta = [i.category, i.location].filter(Boolean).join(' · ');
-                    html += '<div style="display:flex;align-items:center;padding:4px 16px;gap:12px;' + border + '">' +
-                        '<div style="flex:1;min-width:0;">' +
-                            '<div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.sku + '</div>' +
-                            '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.name + (meta ? ' &nbsp;·&nbsp; ' + meta : '') + '</div>' +
-                        '</div>' +
-                        '<div style="text-align:right;white-space:nowrap;">' +
-                            '<div style="font-weight:600;font-size:0.88rem;">' + fmt(i.total_value) + '</div>' +
-                            '<div style="font-size:0.75rem;color:var(--text-secondary);">' + i.quantity.toLocaleString() + ' &times; \u00a3' + i.unit_cost.toFixed(2) + '</div>' +
-                        '</div>' +
-                    '</div>';
-                });
-                // Totals row — always shows full all-items total
-                let hiddenInfo = hiddenCount > 0 ? ' &nbsp;&bull;&nbsp; ' + hiddenCount + ' items <£500 not shown' : '';
-                html += '<div style="display:flex;align-items:center;padding:12px 16px;gap:16px;border-top:2px solid var(--border-color);background:var(--card-bg);">' +
-                    '<div style="flex:1;font-weight:600;font-size:0.85rem;">' + data.stock_count.toLocaleString() + ' items total &nbsp;&bull;&nbsp; ' + grandQty.toLocaleString() + ' units' + hiddenInfo + '</div>' +
-                    '<div style="font-weight:700;font-size:0.95rem;">' + fmt(data.total_value) + '</div>' +
-                '</div>';
-                html += '</div>';
-            } else {
-                html += '<p style="color:var(--text-secondary);padding:8px 0;">No stock items found.</p>';
-            }
-
-            
-            body.innerHTML = html;
+            // ── Stock Report tab ─────────────────────────────────
+            const grandQty = data.current_stock.reduce((s, i) => s + i.quantity, 0);
+            let reportHtml = '<table class="dash-report-table"><thead><tr>' +
+                '<th>SKU</th><th>Material</th><th>Category</th><th>Location</th>' +
+                '<th class="text-right">Qty</th><th class="text-right">Unit Cost</th><th class="text-right">Total Value</th>' +
+                '</tr></thead><tbody>';
+            data.current_stock.forEach(i => {
+                reportHtml += '<tr>' +
+                    '<td style="font-weight:600;">' + i.sku + '</td>' +
+                    '<td>' + i.name + '</td>' +
+                    '<td style="color:var(--text-secondary);">' + (i.category || '&mdash;') + '</td>' +
+                    '<td style="color:var(--text-secondary);">' + (i.location || '&mdash;') + '</td>' +
+                    '<td class="text-right">' + i.quantity.toLocaleString() + '</td>' +
+                    '<td class="text-right" style="color:var(--text-secondary);">\u00a3' + i.unit_cost.toFixed(2) + '</td>' +
+                    '<td class="text-right" style="font-weight:600;">' + fmt(i.total_value) + '</td>' +
+                '</tr>';
+            });
+            reportHtml += '<tr style="background:var(--bg-tertiary);font-weight:700;border-top:2px solid var(--border-color);">' +
+                '<td colspan="4">' + data.stock_count.toLocaleString() + ' items &nbsp;&bull;&nbsp; ' + grandQty.toLocaleString() + ' units total</td>' +
+                '<td></td><td></td><td class="text-right">' + fmt(data.total_value) + '</td>' +
+                '</tr>';
+            reportHtml += '</tbody></table>';
+            document.getElementById('stockReportBody').innerHTML = reportHtml;
         })
         .catch(function() {
-            body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+            document.getElementById('stockReportBody').innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+            document.getElementById('stockChangesBody').innerHTML = '';
         });
 }
 </script>

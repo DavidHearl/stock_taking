@@ -551,12 +551,12 @@ def dashboard_stock_report(request):
         'initial': 'Initial Stock',
     }
 
-    three_days_ago = datetime.now() - timedelta(days=3)
+    five_days_ago = datetime.now() - timedelta(days=5)
     history_qs = (
         StockHistory.objects
         .filter(
             stock_item__tracking_type__in=['stock', 'non-stock'],
-            created_at__gte=three_days_ago,
+            created_at__gte=five_days_ago,
         )
         .exclude(change_type__in=['sale', 'purchase'])
         .select_related('stock_item', 'stock_item__category')
@@ -564,9 +564,13 @@ def dashboard_stock_report(request):
     )
     recent_changes = []
     for h in history_qs:
+        if not h.change_amount:
+            continue
         value_change = float(h.change_amount * h.stock_item.cost)
+        if value_change == 0:
+            continue
         recent_changes.append({
-            'date': h.created_at.strftime('%d/%m/%Y %H:%M'),
+            'date': h.created_at.strftime('%d/%m/%Y'),
             'sku': h.stock_item.sku,
             'name': h.stock_item.name,
             'change_type': CHANGE_TYPE_LABELS.get(h.change_type, h.change_type),

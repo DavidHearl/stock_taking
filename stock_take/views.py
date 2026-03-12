@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, log_activity
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, log_activity
 
 import csv
 import io
@@ -776,7 +776,6 @@ def shortages(request):
         from datetime import timedelta
         from django.utils import timezone
         from collections import defaultdict
-        from decimal import Decimal
         
         today = timezone.now().date()
         MIN_ORDER_VALUE = Decimal('5000.00')
@@ -901,7 +900,23 @@ def shortages(request):
             else:
                 data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'])
             data['line_cost'] = Decimal(str(data['predicted_shortage'])) * data['cost']
-        
+
+        # Attach incoming stock quantities to predicted items
+        predicted_skus = list(historical_usage.keys())
+        predicted_incoming_data = PurchaseOrderProduct.objects.filter(
+            sku__in=predicted_skus,
+            purchase_order__status='Approved'
+        ).values('sku').annotate(total=Sum('order_quantity'))
+        predicted_incoming_map = {item['sku']: float(item['total'] or 0) for item in predicted_incoming_data}
+        for key, data in historical_usage.items():
+            data['incoming_qty'] = predicted_incoming_map.get(key, 0)
+            if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
+                target_stock = 800
+                data['predicted_shortage'] = max(0, max(data['predicted_need'], target_stock) - data['current_stock'] - data['incoming_qty'])
+            else:
+                data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'] - data['incoming_qty'])
+            data['line_cost'] = Decimal(str(data['predicted_shortage'])) * data['cost']
+
         upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
         upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
         predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] > 0]
@@ -1198,6 +1213,16 @@ def shortages(request):
             'style_stock_status': style_stock_status,
             'ordering_rules': ordering_rules,
         }
+        context['raumplus_previous_pos'] = list(
+            PurchaseOrder.objects.filter(supplier_name__icontains='Raumplus')
+            .order_by('-workguru_id')
+            .values('id', 'workguru_id', 'display_number', 'created_at', 'total', 'status')[:20]
+        )
+        context['raumplus_drafts'] = list(
+            RaumplusDraftOrder.objects.filter(created_by=request.user)
+            .order_by('-updated_at')
+            .values('id', 'name', 'updated_at', 'items')[:10]
+        )
     else:
         # Stock tab - reuse material_shortage logic
         from datetime import timedelta
@@ -1246,7 +1271,7 @@ def shortages(request):
         
         upcoming_requirements = defaultdict(lambda: {
             'name': '', 'sku': '', 'required_qty': 0, 'current_stock': 0,
-            'shortage': 0, 'orders': [], 'is_stock': True, 'stock_item_id': None
+            'shortage': 0, 'cost': 0, 'orders': [], 'is_stock': True, 'stock_item_id': None
         })
         for order in upcoming_orders:
             for accessory in order.accessories.all():
@@ -1261,6 +1286,7 @@ def shortages(request):
                     upcoming_requirements[key]['sku'] = accessory.sku
                     if accessory.stock_item:
                         upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
+                        upcoming_requirements[key]['cost'] = accessory.stock_item.cost or Decimal('0.00')
                         upcoming_requirements[key]['is_stock'] = accessory.stock_item.tracking_type == 'stock'
                         upcoming_requirements[key]['stock_item_id'] = accessory.stock_item.id
                 upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
@@ -1283,6 +1309,7 @@ def shortages(request):
         for key, data in upcoming_requirements.items():
             data['incoming_qty'] = incoming_map.get(key, 0)
             data['shortage'] = max(0, data['required_qty'] - data['current_stock'] - data['incoming_qty'])
+            data['line_cost'] = Decimal(str(data['shortage'])) * data['cost']
         
         three_months_ago = today - timedelta(days=90)
         recent_orders = Order.objects.filter(
@@ -1349,7 +1376,18 @@ def shortages(request):
                 data['weighted_monthly_avg'] = recent_monthly_avg
             data['predicted_need'] = data['weighted_monthly_avg'] * prediction_months
             data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'])
-        
+
+        # Attach incoming stock quantities to predicted items
+        stock_predicted_skus = list(historical_usage.keys())
+        stock_predicted_incoming_data = PurchaseOrderProduct.objects.filter(
+            sku__in=stock_predicted_skus,
+            purchase_order__status='Approved'
+        ).values('sku').annotate(total=Sum('order_quantity'))
+        stock_predicted_incoming_map = {row['sku']: float(row['total'] or 0) for row in stock_predicted_incoming_data}
+        for key, data in historical_usage.items():
+            data['incoming_qty'] = stock_predicted_incoming_map.get(key, 0)
+            data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'] - data['incoming_qty'])
+
         upcoming_list = [data for data in upcoming_requirements.values() if data['shortage'] > 0]
         upcoming_list.sort(key=lambda x: x['shortage'], reverse=True)
         predicted_list = [data for data in historical_usage.values() if data['predicted_shortage'] >= 1 and data['is_stock']]
@@ -1391,6 +1429,9 @@ def shortages(request):
                     'order_count': len(data['orders']),
                     'orders': data['orders'],
                     'stock_item_id': data['stock_item_id'],
+                    'cost': data['cost'],
+                    'line_cost': data['line_cost'],
+                    'min_order_qty': 1,
                 })
         actual_shortages.sort(key=lambda x: x['shortage'], reverse=True)
         
@@ -5921,6 +5962,13 @@ def update_stock_count(request):
                 notes=notes if notes else f'Counted {counted_quantity} (was {old_quantity})',
                 created_by=request.user if request.user.is_authenticated else None,
             )
+
+            if request.user.is_authenticated:
+                log_activity(
+                    request.user,
+                    'stock_adjusted',
+                    f'Stock take: {item.sku} — {item.name} adjusted from {old_quantity} to {counted_quantity} (variance: {variance:+d})',
+                )
             
             return JsonResponse({
                 'success': True, 
@@ -8983,32 +9031,24 @@ def generate_and_attach_pnx(request, order_id):
         return JsonResponse({'success': False, 'error': 'Order must have a Boards PO assigned to attach PNX file.'})
     
     try:
-        # Get database from Django storage (DigitalOcean Spaces) and write to a temp file
+        # Get database from Django storage (DigitalOcean Spaces) into an in-memory SQLite connection
         from django.core.files.storage import default_storage
-        import tempfile
+        import sqlite3 as _sqlite3
         
         CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
         
-        # Always fetch from DigitalOcean Spaces (no local fallback)
-        if default_storage.exists(CAD_DB_STORAGE_PATH):
-            tmp_file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
-            with default_storage.open(CAD_DB_STORAGE_PATH, 'rb') as remote_db:
-                tmp_file.write(remote_db.read())
-            tmp_file.close()
-            db_path = tmp_file.name
-        else:
+        if not default_storage.exists(CAD_DB_STORAGE_PATH):
             return JsonResponse({'success': False, 'error': 'CAD database not found in DigitalOcean Spaces. Please ensure the CAD sync has been run.'})
+        
+        db_bytes = default_storage.open(CAD_DB_STORAGE_PATH, 'rb').read()
+        conn = _sqlite3.connect(':memory:')
+        conn.deserialize(db_bytes)
         
         try:
             # Generate PNX content using customer number (CAD number)
-            pnx_content = generate_board_order_file(order.customer_number, db_path)
+            pnx_content = generate_board_order_file(order.customer_number, conn)
         finally:
-            # Clean up temp file if we downloaded from storage
-            if tmp_file:
-                try:
-                    os.unlink(tmp_file.name)
-                except OSError:
-                    pass
+            conn.close()
         
         if not pnx_content or pnx_content.strip() == '':
             return JsonResponse({'success': False, 'error': f'No board data found for CAD Number {order.customer_number}.'})

@@ -583,11 +583,8 @@ def generate_stock_report_pdf(recent_changes, current_stock, as_of_date=None):
     elements = []
     page_width = A4[0] - 30 * mm
 
-    # Items to display (>= £500) vs full total
     all_items_total = sum(i['total_value'] for i in current_stock)
-    displayed_stock = [i for i in current_stock if i['total_value'] >= 500]
-    hidden_count = len(current_stock) - len(displayed_stock)
-    hidden_value = all_items_total - sum(i['total_value'] for i in displayed_stock)
+    displayed_stock = current_stock
 
     date_label = as_of_date.strftime('%d %b %Y') if as_of_date else 'Current'
 
@@ -618,7 +615,7 @@ def generate_stock_report_pdf(recent_changes, current_stock, as_of_date=None):
     total_stock_value = all_items_total
     info_data = [
         ['Items in Stock', f'{len(current_stock):,}', 'Total Stock Value', f'£{total_stock_value:,.0f}'],
-        ['Shown (≥£500)', f'{len(displayed_stock):,}', 'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
+        ['Items Shown', f'{len(displayed_stock):,}', 'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
     ]
     info_table = Table(info_data, colWidths=[
         page_width * 0.18, page_width * 0.32,
@@ -687,7 +684,7 @@ def generate_stock_report_pdf(recent_changes, current_stock, as_of_date=None):
     elements.append(Spacer(1, 6 * mm))
 
     # ── SECTION 2: CURRENT STOCK ─────────────────────────────────
-    section_title = f'Current Stock — {date_label} ({len(displayed_stock)} of {len(current_stock)} items shown, ≥£500)'
+    section_title = f'Current Stock — {date_label} ({len(displayed_stock)} items)'
     elements.append(_section_header(section_title, styles))
 
     if displayed_stock:
@@ -716,11 +713,10 @@ def generate_stock_report_pdf(recent_changes, current_stock, as_of_date=None):
                     styles['CellText']
                 ),
             ])
-        # Totals row — always shows full all-items total
+        # Totals row
         grand_qty = sum(i['quantity'] for i in current_stock)
-        hidden_note = f' &nbsp;·&nbsp; +£{hidden_value:,.0f} in {hidden_count} items <£500' if hidden_count else ''
         stock_data.append([
-            Paragraph(f'<b>{len(current_stock):,} items total &nbsp;·&nbsp; {grand_qty:,} units{hidden_note}</b>', styles['CellText']),
+            Paragraph(f'<b>{len(current_stock):,} items total &nbsp;·&nbsp; {grand_qty:,} units</b>', styles['CellText']),
             '',
             Paragraph(f'<b>£{all_items_total:,.0f}</b>', styles['CellText']),
         ])

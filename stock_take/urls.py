@@ -5,9 +5,10 @@ from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_monthly_stock_history, dashboard_outstanding_report, dashboard_outstanding_pdf, dashboard_week_report, dashboard_week_pdf, dashboard_monthly_report, dashboard_monthly_pdf, dashboard_avg_report, dashboard_avg_pdf
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, add_manual_payment, delete_manual_payment, scrape_anthill_payments
-from .admin_views import admin_users, admin_templates, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log
+from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log
+from .about_views import about_page
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
@@ -195,6 +196,11 @@ urlpatterns = [
     path('raumplus-storage/', views.raumplus_storage, name='raumplus_storage'),
     path('shortages/', views.shortages, name='shortages'),
     path('shortages/create-raumplus-po/', create_raumplus_po, name='create_raumplus_po'),
+    path('shortages/create-stock-po/', create_stock_shortage_po, name='create_stock_shortage_po'),
+    path('shortages/raumplus-order-pdf/', raumplus_order_pdf, name='raumplus_order_pdf'),
+    path('shortages/save-raumplus-draft/', save_raumplus_draft, name='save_raumplus_draft'),
+    path('shortages/delete-raumplus-draft/<int:draft_id>/', delete_raumplus_draft, name='delete_raumplus_draft'),
+    path('api/raumplus-copy-po/<int:po_id>/', raumplus_copy_po_items, name='raumplus_copy_po_items'),
     path('costing-report/', views.costing_report, name='costing_report'),
     path('substitutions/', views.substitutions, name='substitutions'),
     path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),
@@ -349,7 +355,6 @@ urlpatterns = [
 
     # Admin pages
     path('admin-panel/users/', admin_users, name='admin_users'),
-    path('admin-panel/templates/', admin_templates, name='admin_templates'),
     path('admin-panel/roles/', admin_roles, name='admin_roles'),
     path('admin-panel/roles/<int:role_id>/edit/', admin_role_edit, name='admin_role_edit'),
     path('admin-panel/roles/<int:role_id>/toggle-all/', admin_role_toggle_all, name='admin_role_toggle_all'),
@@ -398,4 +403,7 @@ urlpatterns = [
     path('api/cad-db/upload/', cad_db_upload, name='cad_db_upload'),
     path('api/cad-db/download/', cad_db_download, name='cad_db_download'),
     path('api/cad-db/status/', cad_db_status, name='cad_db_status'),
+
+    # About page
+    path('about/', about_page, name='about'),
 ]
