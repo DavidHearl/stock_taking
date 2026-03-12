@@ -19,11 +19,12 @@ Prerequisites:
   - Sales must have a contract_number populated (run sync_anthill_workflow first)
 
 Usage:
-    python manage.py sync_xero_sale_payments                      # All Category 3 sales with contract numbers
-    python manage.py sync_xero_sale_payments --days 180           # Sales active within last 180 days
+    python manage.py sync_xero_sale_payments                      # All Category 3 outstanding sales
+    python manage.py sync_xero_sale_payments --days 180           # Outstanding sales active within last 180 days
     python manage.py sync_xero_sale_payments --sale-id 417437     # Single sale by Anthill activity ID
     python manage.py sync_xero_sale_payments --dry-run            # Preview without saving
     python manage.py sync_xero_sale_payments --no-name-check      # Skip contact name validation
+    python manage.py sync_xero_sale_payments --include-paid       # Also re-check fully-paid sales
 """
 
 import logging
@@ -33,7 +34,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Exists, OuterRef
 
 from stock_take.models import AnthillSale, AnthillPayment, SyncLog
 from stock_take.services import xero_api
@@ -69,12 +70,19 @@ class Command(BaseCommand):
             dest='no_name_check',
             help='Skip contact name cross-validation (match by reference only)',
         )
+        parser.add_argument(
+            '--include-paid',
+            action='store_true',
+            dest='include_paid',
+            help='Also re-check sales whose Xero invoice is already fully paid (default: skip them)',
+        )
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
         days = options['days']
         sale_id = options['sale_id']
         no_name_check = options['no_name_check']
+        include_paid = options['include_paid']
 
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN - no changes will be written.\n'))
@@ -111,6 +119,28 @@ class Command(BaseCommand):
                     Q(activity_date__gte=cutoff) | Q(updated_at__gte=cutoff)
                 )
 
+            # By default, skip sales that are already fully settled in Xero:
+            # a sale is considered fully paid when we have at least one Xero
+            # payment record for it and NONE of those records show an outstanding
+            # amount (invoice_amount_due > 0).  Sales with no Xero data yet are
+            # always included so we can discover new invoices.
+            if not include_paid:
+                has_outstanding = Exists(
+                    AnthillPayment.objects.filter(
+                        sale=OuterRef('pk'),
+                        source='xero',
+                        invoice_amount_due__gt=0,
+                    )
+                )
+                has_any_xero = Exists(
+                    AnthillPayment.objects.filter(
+                        sale=OuterRef('pk'),
+                        source='xero',
+                    )
+                )
+                # Keep: no Xero records yet  OR  at least one outstanding invoice
+                qs = qs.filter(~has_any_xero | has_outstanding)
+
         sales_list = list(
             qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
         )
@@ -120,7 +150,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(
                 'No sales match the criteria. '
                 'Make sure Category 3 sales with a BFS-* contract number exist '
-                '(run sync_anthill_workflow first if needed).'
+                '(run sync_anthill_workflow first if needed). '
+                + ('' if include_paid else 'All matching sales may already be fully paid — use --include-paid to re-check them.')
             ))
             return
 

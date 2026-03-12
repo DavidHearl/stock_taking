@@ -1,0 +1,302 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_filters %}
+
+{% block title %}Remedial {{ remedial.remedial_number }}{% endblock %}
+
+{% block page_title %}
+<span class="page-title-row">
+    <a href="{% url 'remedials' %}" class="back-link" title="Back to Remedials"><i class="bi bi-arrow-left"></i></a>
+    Remedial: {{ remedial.first_name }} {{ remedial.last_name }}
+    <span class="sale-number-suffix">({{ remedial.remedial_number }})</span>
+</span>
+{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/order_details.css' %}" rel="stylesheet">
+<style>
+.remedial-status-badge {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.remedial-status-open     { background: rgba(16, 185, 129, 0.18); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); }
+.remedial-status-complete { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);  }
+.remedial-badge-number    { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.35); font-size: 0.82rem; font-weight: 700; padding: 3px 12px; border-radius: 8px; }
+.info-row { display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 12px; }
+.info-col { flex: 1; min-width: 180px; }
+.field-label  { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); margin-bottom: 2px; }
+.field-value  { font-size: 0.9rem; color: var(--text-primary); }
+.field-value-large { font-size: 1.05rem; font-weight: 600; color: var(--text-primary); }
+.section-title-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+.section-title-bar h3 { margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+@media (max-width: 800px) { .detail-grid { grid-template-columns: 1fr; } }
+.reason-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.accessories-table { font-size: 0.85rem; }
+.accessories-table th { background: var(--bg-tertiary); }
+.badge-ordered   { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.35); }
+.badge-unordered { background: rgba(239,68,68,0.12);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3);  }
+.badge-small { display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.72rem; font-weight:600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <!-- Status bar -->
+    <div class="card" style="margin-bottom:16px; padding: 14px 20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span class="remedial-badge-number"><i class="bi bi-wrench"></i> {{ remedial.remedial_number }}</span>
+        <span class="remedial-status-badge {% if remedial.is_completed %}remedial-status-complete{% else %}remedial-status-open{% endif %}">
+            {% if remedial.is_completed %}Completed{% else %}In Progress{% endif %}
+        </span>
+        {% if remedial.is_overdue %}
+        <span class="remedial-status-badge" style="background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.3);">
+            <i class="bi bi-exclamation-triangle"></i> Overdue
+        </span>
+        {% endif %}
+        <span style="color:var(--text-secondary); font-size:0.82rem; margin-left: auto;">
+            Created {{ remedial.created_date|date:"d M Y" }} &middot; {{ remedial.days_since_created }} days open
+        </span>
+    </div>
+
+    <div class="detail-grid">
+        <!-- Left column -->
+        <div>
+            <!-- Original Order -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-header">
+                    <h3>Original Order</h3>
+                    <a href="{% url 'order_details' remedial.original_order.id %}" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-box-arrow-up-right"></i> Open Order
+                    </a>
+                </div>
+                <div class="card-body padded" style="padding: 16px;">
+                    <div class="info-row">
+                        <div class="info-col">
+                            <div class="field-label">Sale Number</div>
+                            <div class="field-value-large">{{ remedial.original_order.sale_number|default:"-" }}</div>
+                        </div>
+                        <div class="info-col">
+                            <div class="field-label">Fit Date</div>
+                            <div class="field-value">{{ remedial.original_order.fit_date|date:"d M Y"|default:"Not set" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Customer Info -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-header">
+                    <h3>Customer Info</h3>
+                </div>
+                <div class="card-body padded" style="padding: 16px;">
+                    <div class="info-row">
+                        <div class="info-col">
+                            <div class="field-label">Name</div>
+                            <div class="field-value-large">{{ remedial.first_name }} {{ remedial.last_name }}</div>
+                        </div>
+                        <div class="info-col">
+                            <div class="field-label">Customer #</div>
+                            <div class="field-value">{{ remedial.customer_number|default:"-" }}</div>
+                        </div>
+                    </div>
+                    {% if remedial.address %}
+                    <div style="margin-top: 8px;">
+                        <div class="field-label">Address</div>
+                        <div class="field-value">{{ remedial.address }}{% if remedial.postcode %}, {{ remedial.postcode }}{% endif %}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Reason & Notes -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Reason &amp; Notes</h3>
+                </div>
+                <div class="card-body padded" style="padding: 16px;">
+                    <div class="field-label" style="margin-bottom: 6px;">Reason</div>
+                    <div class="reason-box">{{ remedial.reason|default:"No reason provided." }}</div>
+                    {% if remedial.notes %}
+                    <div class="field-label" style="margin-top: 14px; margin-bottom: 6px;">Notes</div>
+                    <div class="reason-box">{{ remedial.notes }}</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right column -->
+        <div>
+            <!-- Scheduling -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-header">
+                    <h3>Scheduling</h3>
+                </div>
+                <div class="card-body padded" style="padding: 16px;">
+                    <div class="info-row">
+                        <div class="info-col">
+                            <div class="field-label">Scheduled Date</div>
+                            <div class="field-value">{{ remedial.scheduled_date|date:"d M Y"|default:"Not scheduled" }}</div>
+                        </div>
+                        <div class="info-col">
+                            <div class="field-label">Completed Date</div>
+                            <div class="field-value">{{ remedial.completed_date|date:"d M Y"|default:"-" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Materials -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-header">
+                    <h3>Materials</h3>
+                </div>
+                <div class="card-body padded" style="padding: 16px;">
+                    <!-- Boards PO -->
+                    <div style="margin-bottom: 12px;">
+                        <div class="field-label">Boards PO</div>
+                        {% if remedial.boards_po %}
+                        <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                            <span class="field-value">{{ remedial.boards_po.po_number }}</span>
+                            {% if remedial.boards_po.boards_ordered %}
+                            <span class="badge-small badge-ordered">Ordered</span>
+                            {% else %}
+                            <span class="badge-small badge-unordered">Not Ordered</span>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <div class="field-value" style="color:var(--text-secondary);">Not assigned</div>
+                        {% endif %}
+                    </div>
+
+                    <!-- OS Doors -->
+                    <div style="margin-bottom: 12px;">
+                        <div class="field-label">OS Doors</div>
+                        {% if remedial.os_doors_required %}
+                        <div style="margin-top:4px;">
+                            {% if remedial.os_doors_po %}
+                            <span class="field-value">{{ remedial.os_doors_po }}</span>
+                            <span class="badge-small badge-ordered" style="margin-left:6px;">PO Raised</span>
+                            {% else %}
+                            <span class="badge-small badge-unordered">Required &mdash; No PO</span>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <div class="field-value" style="color:var(--text-secondary);">Not required</div>
+                        {% endif %}
+                    </div>
+
+                    <!-- All Items Ordered -->
+                    <div>
+                        <div class="field-label">All Items Ordered</div>
+                        <div style="margin-top:4px;">
+                            {% if remedial.all_items_ordered %}
+                            <span class="badge-small badge-ordered"><i class="bi bi-check-lg"></i> Yes</span>
+                            {% else %}
+                            <span class="badge-small badge-unordered"><i class="bi bi-x-lg"></i> No</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- External IDs -->
+            {% if remedial.anthill_id or remedial.workguru_id %}
+            <div class="card">
+                <div class="card-header">
+                    <h3>External References</h3>
+                </div>
+                <div class="card-body padded" style="padding: 16px;">
+                    <div class="info-row">
+                        {% if remedial.anthill_id %}
+                        <div class="info-col">
+                            <div class="field-label">Anthill ID</div>
+                            <div class="field-value">
+                                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ remedial.anthill_id }}" target="_blank" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-box-arrow-up-right"></i> {{ remedial.anthill_id }}
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if remedial.workguru_id %}
+                        <div class="info-col">
+                            <div class="field-label">WorkGuru ID</div>
+                            <div class="field-value">{{ remedial.workguru_id }}</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Accessories -->
+    {% if accessories %}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-header">
+            <h3>Accessories ({{ accessories|length }})</h3>
+        </div>
+        <div style="overflow-x: auto;">
+            <table class="table orders-table accessories-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th>Qty</th>
+                        <th>Ordered</th>
+                        <th>Received</th>
+                        <th>Stock Available</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for acc in accessories %}
+                    <tr>
+                        <td><code style="font-size:0.8rem; color:var(--text-secondary);">{{ acc.sku }}</code></td>
+                        <td>{{ acc.name }}</td>
+                        <td>{{ acc.quantity }}</td>
+                        <td>
+                            {% if acc.ordered %}
+                            <span class="badge-small badge-ordered">Yes</span>
+                            {% else %}
+                            <span class="badge-small badge-unordered">No</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if acc.received %}
+                            <span class="badge-small badge-ordered">Yes</span>
+                            {% else %}
+                            <span class="badge-small badge-unordered">No</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if acc.stock_item %}
+                            {{ acc.available_quantity }}
+                            {% else %}
+                            <span style="color:var(--text-secondary);">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

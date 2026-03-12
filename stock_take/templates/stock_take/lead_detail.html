@@ -24,7 +24,7 @@
         </div>
         <div class="lead-detail-actions">
             {% if lead.status != 'converted' %}
-            <button class="btn-convert-lead" id="btn-convert" onclick="convertLead()"><i class="bi bi-arrow-right-circle"></i> Convert to Customer</button>
+            <button class="btn-convert-lead" id="btn-convert" onclick="openConvertModal()"><i class="bi bi-arrow-right-circle"></i> Convert to Customer</button>
             {% else %}
             <a href="{% url 'customer_detail' lead.converted_to_customer.pk %}" class="btn-view-customer"><i class="bi bi-person-check"></i> View Customer</a>
             {% endif %}
@@ -251,7 +251,7 @@ function saveLead() {
 }
 
 function convertLead() {
-    if (!confirm('Convert this contact to a customer? A new customer record will be created with this contact\'s details.')) return;
+    closeConvertModal();
 
     const btn = document.getElementById('btn-convert');
     btn.disabled = true;
@@ -284,5 +284,30 @@ function convertLead() {
         btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> Convert to Customer';
     });
 }
+
+function openConvertModal() {
+    document.getElementById('convert-modal').style.display = 'flex';
+}
+function closeConvertModal() {
+    document.getElementById('convert-modal').style.display = 'none';
+}
 </script>
+
+<!-- Convert to Customer confirmation modal -->
+<div class="modal-overlay" id="convert-modal" style="display:none;" onclick="if(event.target===this)closeConvertModal()">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-arrow-right-circle"></i> Convert to Customer</h2>
+            <button class="modal-close" onclick="closeConvertModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin:0;color:var(--text-primary);">Convert <strong>{{ lead.name|default:'this contact' }}</strong> to a customer?</p>
+            <p style="margin:0;font-size:0.88rem;color:var(--text-secondary);">A new customer record will be created using this contact&rsquo;s details. This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick="closeConvertModal()">Cancel</button>
+            <button class="btn-save" onclick="convertLead()"><i class="bi bi-arrow-right-circle"></i> Convert</button>
+        </div>
+    </div>
+</div>
 {% endblock %}

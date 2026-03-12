@@ -7,7 +7,6 @@
 {% block nav_remedials_active %}active{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/customers.css' %}">
 <link rel="stylesheet" href="{% static 'css/ordering.css' %}">
 <style>
     .sale-status-open     { background: rgba(16, 185, 129, 0.18); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 600; }
@@ -15,148 +14,149 @@
     .sale-status-complete { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);  font-weight: 600; }
     .sale-status-dead     { background: rgba(239, 68, 68, 0.15);   color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);   font-weight: 600; }
     .sale-status-default  { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color); font-weight: 600; }
+    .customer-name-link   { color: var(--primary-color); text-decoration: none; }
+    .customer-name-link:hover { text-decoration: underline; }
 </style>
 {% endblock %}
 
 {% block page_title %}Remedials ({{ filtered_count }}){% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <!-- Search & Filters -->
-    <div class="customers-controls">
-        <div class="customers-search">
-            <div class="search-input-wrapper">
-                <i class="bi bi-search"></i>
-                <input type="text" id="remedial-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type or assigned to..." autocomplete="off">
-            </div>
-        </div>
-        <div class="customers-filter-tabs">
-            <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'open' %}active{% endif %}">
-                Open ({{ count_open }})
-            </a>
-            <a href="?status=won{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'won' %}active{% endif %}">
-                Won ({{ count_won }})
-            </a>
-            <a href="?status=dead{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'dead' %}active{% endif %}">
-                Dead ({{ count_dead }})
-            </a>
-            <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">
-                All ({{ count_all }})
-            </a>
-        </div>
-        {% if location_filter %}
-        <div class="customers-location-badge">
-            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
-        </div>
-        {% endif %}
+<!-- Tabs -->
+<div class="tabs">
+    <div class="tab-nav">
+        <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'open' %}active{% endif %}">
+            OPEN ({{ count_open }})
+        </a>
+        <a href="?status=won{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'won' %}active{% endif %}">
+            WON ({{ count_won }})
+        </a>
+        <a href="?status=dead{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'dead' %}active{% endif %}">
+            DEAD ({{ count_dead }})
+        </a>
+        <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'all' %}active{% endif %}">
+            ALL ({{ count_all }})
+        </a>
     </div>
-
-    {% if anthill_remedials %}
-    <div class="card">
-        <table class="table orders-table">
-            <thead>
-                <tr>
-                    <th>Activity ID</th>
-                    <th>Customer</th>
-                    <th>Status</th>
-                    <th>Assigned To</th>
-                    <th>Date</th>
-                    <th>Location</th>
-                    <th>Linked Order</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for event in anthill_remedials %}
-                <tr>
-                    <td>
-                        <a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">
-                            {{ event.anthill_activity_id }}
-                        </a>
-                    </td>
-                    <td>
-                        {% if event.customer %}
-                        <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">
-                            {{ event.customer.name|default:event.customer_name }}
-                        </a>
-                        {% else %}
-                        {{ event.customer_name|default:"-" }}
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="customer-active-badge {% if event.status == 'open' %}sale-status-open{% elif event.status == 'complete' or event.status == 'completed' %}sale-status-complete{% elif event.status == 'won' %}sale-status-won{% elif event.status == 'dead' %}sale-status-dead{% else %}sale-status-default{% endif %}">
-                            {{ event.status|default:"-" }}
-                        </span>
-                    </td>
-                    <td>{{ event.assigned_to_name|default:"-" }}</td>
-                    <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
-                    <td>{{ event.location|default:"-" }}</td>
-                    <td>
-                        {% with linked_order=order_map|get_item:event.anthill_activity_id %}
-                        {% if event.order %}
-                        <a href="{% url 'order_details' event.order.id %}" class="btn btn-sm btn-outline-primary">
-                            {{ event.order.sale_number }}
-                        </a>
-                        {% elif linked_order %}
-                        <a href="{% url 'order_details' linked_order.id %}" class="btn btn-sm btn-outline-primary">
-                            {{ linked_order.sale_number }}
-                        </a>
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
-                        {% endwith %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="customers-empty-state">
-        <i class="bi bi-wrench"></i>
-        <p>No remedial events found.</p>
-    </div>
-    {% endif %}
-
-    <!-- Pagination -->
-    {% if page_obj.paginator.num_pages > 1 %}
-    <div class="customers-pagination">
-        <div class="pagination-info">
-            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} remedials
-        </div>
-        <div class="pagination-controls">
-            {% if page_obj.has_previous %}
-            <a href="?page=1&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-            <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
-            {% endif %}
-
-            {% for num in page_obj.paginator.page_range %}
-                {% if page_obj.number == num %}
-                    <span class="page-btn active">{{ num }}</span>
-                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
-                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-                {% elif num == 1 or num == page_obj.paginator.num_pages %}
-                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
-                    <span class="page-ellipsis">&hellip;</span>
-                {% endif %}
-            {% endfor %}
-
-            {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
-            <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
-            {% endif %}
-        </div>
-    </div>
+    {% if location_filter %}
+    <span style="font-size:0.8rem; color:var(--text-secondary);"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
     {% endif %}
 </div>
 
+<!-- Search Box -->
+<div class="search-box">
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="remedial-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type or assigned to..." autocomplete="off">
+    </div>
+</div>
+
+{% if anthill_remedials %}
+<div class="card">
+    <table class="table orders-table">
+        <thead>
+            <tr>
+                <th>Activity ID</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Assigned To</th>
+                <th>Date</th>
+                <th>Location</th>
+                <th>Linked Order</th>
+            </tr>
+        </thead>
+            <tbody>
+            {% for event in anthill_remedials %}
+            <tr>
+                <td>
+                    <a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">
+                        {{ event.anthill_activity_id }}
+                    </a>
+                </td>
+                <td>
+                    {% if event.customer %}
+                    <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">
+                        {{ event.customer.name|default:event.customer_name }}
+                    </a>
+                    {% else %}
+                    {{ event.customer_name|default:"-" }}
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="customer-active-badge {% if event.status == 'open' %}sale-status-open{% elif event.status == 'complete' or event.status == 'completed' %}sale-status-complete{% elif event.status == 'won' %}sale-status-won{% elif event.status == 'dead' %}sale-status-dead{% else %}sale-status-default{% endif %}">
+                        {{ event.status|default:"-" }}
+                    </span>
+                </td>
+                <td>{{ event.assigned_to_name|default:"-" }}</td>
+                <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                <td>{{ event.location|default:"-" }}</td>
+                <td>
+                    {% with linked_order=order_map|get_item:event.anthill_activity_id %}
+                    {% if event.order %}
+                    <a href="{% url 'order_details' event.order.id %}" class="btn btn-sm btn-outline-primary">
+                        {{ event.order.sale_number }}
+                    </a>
+                    {% elif linked_order %}
+                    <a href="{% url 'order_details' linked_order.id %}" class="btn btn-sm btn-outline-primary">
+                        {{ linked_order.sale_number }}
+                    </a>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                    {% endwith %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card" style="padding: 48px; text-align: center; color: var(--text-secondary);">
+    <i class="bi bi-wrench" style="font-size: 2rem; display: block; margin-bottom: 8px;"></i>
+    <p>No remedial events found.</p>
+</div>
+{% endif %}
+
+<!-- Pagination -->
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="customers-pagination" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 0;">
+    <div class="pagination-info" style="font-size:0.8rem; color:var(--text-secondary);">
+        Showing {{ page_obj.start_index }}&ndash;{{ page_obj.end_index }} of {{ page_obj.paginator.count }} remedials
+    </div>
+    <div class="pagination-controls" style="display:flex; gap:4px;">
+        {% if page_obj.has_previous %}
+        <a href="?page=1&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+        <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+        {% endif %}
+
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}
+                <span class="page-btn active">{{ num }}</span>
+            {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                <span class="page-ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+        <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 <!-- Local Remedial Orders -->
 {% if remedial_orders %}
-<div class="content-card" style="margin-top: 20px;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; cursor: pointer;" onclick="document.getElementById('local-remedials-section').style.display = document.getElementById('local-remedials-section').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-icon').classList.toggle('bi-chevron-down'); this.querySelector('.toggle-icon').classList.toggle('bi-chevron-right');">
-        <h3 style="margin: 0; font-size: 1rem; color: var(--text-primary);">
-            <i class="bi bi-chevron-right toggle-icon"></i> Local Remedial Orders ({{ remedial_orders|length }})
-        </h3>
+<div style="margin-top: 20px;">
+    <div class="tabs" style="margin-bottom: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px; cursor: pointer;" onclick="document.getElementById('local-remedials-section').style.display = document.getElementById('local-remedials-section').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-icon').classList.toggle('bi-chevron-down'); this.querySelector('.toggle-icon').classList.toggle('bi-chevron-right');">
+            <i class="bi bi-chevron-right toggle-icon" style="font-size:0.85rem; color:var(--text-secondary);"></i>
+            <span style="font-size:0.8rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary);">Local Remedial Orders ({{ remedial_orders|length }})</span>
+        </div>
     </div>
     <div id="local-remedials-section" style="display: none;">
         <div class="card">
@@ -170,12 +170,13 @@
                         <th>Scheduled</th>
                         <th>Status</th>
                         <th>Days Open</th>
+                        <th>Details</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for remedial in remedial_orders %}
                     <tr>
-                        <td><span class="sale-status-default">{{ remedial.remedial_number }}</span></td>
+                        <td><span class="sale-status-default" style="padding:2px 8px; border-radius:4px; font-size:0.78rem;">{{ remedial.remedial_number }}</span></td>
                         <td>
                             <a href="{% url 'order_details' remedial.original_order.id %}" class="customer-name-link">
                                 {{ remedial.original_order.sale_number }}
@@ -190,6 +191,9 @@
                             </span>
                         </td>
                         <td>{{ remedial.days_since_created }}</td>
+                        <td>
+                            <a href="{% url 'remedial_detail' remedial.pk %}" class="btn btn-sm btn-outline-primary">Details</a>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

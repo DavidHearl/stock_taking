@@ -271,6 +271,7 @@ urlpatterns = [
     path('os-doors-summary/', views.os_doors_summary, name='os_doors_summary'),
     path('remedials/', views.remedials, name='remedials'),
     path('remedial-report/', views.remedial_report, name='remedial_report'),
+    path('remedial/<int:pk>/', views.remedial_detail, name='remedial_detail'),
     
     # Stock items manager
     path('stock-items-manager/', views.stock_items_manager, name='stock_items_manager'),

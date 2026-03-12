@@ -11,8 +11,10 @@ Usage (docker-compose scheduler service):
     python manage.py run_scheduler
 
 Schedule (UTC):
-    08:00  — sync_recent_customers
-    12:00  — sync_recent_customers
+    07:00  — upgrade_leads          (promote leads with a qualifying sale, last 365 days)
+    08:00  — sync_recent_customers  (sync new/updated Anthill customers, last 7 days)
+    09:00  — sync_anthill_fit_dates (parse fit_from_date text into fit_date, last 365 days)
+    12:00  — sync_recent_customers  (midday re-sync)
 """
 
 import logging
@@ -30,8 +32,10 @@ logger = logging.getLogger(__name__)
 # Each entry: (hour, minute, command_name, kwargs_dict)
 # --------------------------------------------------------------------------- #
 SCHEDULE = [
-    (8,  0, 'sync_recent_customers', {}),
-    (12, 0, 'sync_recent_customers', {}),
+    (7,  0, 'upgrade_leads',          {'days': 365}),
+    (8,  0, 'sync_recent_customers',  {}),
+    (9,  0, 'sync_anthill_fit_dates', {'days': 365}),
+    (12, 0, 'sync_recent_customers',  {}),
 ]
 
 

@@ -268,26 +268,50 @@ def lead_convert(request, pk):
         return JsonResponse({'error': 'Lead already converted', 'customer_id': lead.converted_to_customer.pk})
 
     from .models import Customer, AnthillSale
+    from django.db import IntegrityError
 
-    # Generate a unique workguru_id for manually created customers
-    max_id = Customer.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
-    manual_id = max(max_id + 1, 700000)
+    # Generate a unique workguru_id. Start above the current max, retrying if
+    # the chosen value is already taken (guards against WorkGuru IDs landing in
+    # this range or concurrent conversions).
+    customer = None
+    for _attempt in range(20):
+        max_id = (
+            Customer.objects
+            .exclude(workguru_id__isnull=True)
+            .order_by('-workguru_id')
+            .values_list('workguru_id', flat=True)
+            .first() or 699999
+        )
+        manual_id = max(max_id + 1, 700000)
+        try:
+            customer = Customer.objects.create(
+                workguru_id=manual_id,
+                name=lead.name,
+                email=lead.email,
+                phone=lead.phone,
+                website=lead.website,
+                address_1=lead.address_1,
+                address_2=lead.address_2,
+                city=lead.city,
+                state=lead.state,
+                postcode=lead.postcode or '',
+                country=lead.country,
+                anthill_customer_id=lead.anthill_customer_id or '',
+                is_active=True,
+            )
+            break
+        except IntegrityError as exc:
+            if 'workguru_id' not in str(exc):
+                logger.exception('lead_convert: unexpected IntegrityError for lead %s', pk)
+                return JsonResponse({'error': str(exc)}, status=500)
+            # workguru_id clash — loop and pick the next available ID
+            continue
+        except Exception as exc:
+            logger.exception('lead_convert: failed to create customer from lead %s', pk)
+            return JsonResponse({'error': str(exc)}, status=500)
 
-    customer = Customer.objects.create(
-        workguru_id=manual_id,
-        name=lead.name,
-        email=lead.email,
-        phone=lead.phone,
-        website=lead.website,
-        address_1=lead.address_1,
-        address_2=lead.address_2,
-        city=lead.city,
-        state=lead.state,
-        postcode=lead.postcode,
-        country=lead.country,
-        anthill_customer_id=lead.anthill_customer_id or '',
-        is_active=True,
-    )
+    if customer is None:
+        return JsonResponse({'error': 'Could not generate a unique customer ID. Please try again.'}, status=500)
 
     lead.status = 'converted'
     lead.converted_to_customer = customer

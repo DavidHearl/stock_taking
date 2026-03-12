@@ -165,6 +165,12 @@ def ordering(request):
             'outstanding': sv - pt,
         }
 
+    # Build remedials map: original_order_id -> remedial.pk (only non-completed)
+    remedials_map = {
+        r['original_order_id']: r['id']
+        for r in Remedial.objects.filter(is_completed=False).values('id', 'original_order_id')
+    }
+
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'pfp_orders': orders.filter(order_date__isnull=True, fit_date__isnull=True),
@@ -182,6 +188,7 @@ def ordering(request):
         'completed_orders': completed_orders,
         'wip_orders': wip_orders,
         'financial_map': financial_map,
+        'remedials_map': remedials_map,
     })
 
 @login_required
@@ -8013,6 +8020,20 @@ def remedials(request):
         'order_map': order_map,
         'remedial_orders': remedial_orders,
         'available_orders': available_orders,
+    })
+
+@login_required
+def remedial_detail(request, pk):
+    """View details of a single local remedial order"""
+    from django.shortcuts import get_object_or_404
+    remedial = get_object_or_404(
+        Remedial.objects.select_related('original_order', 'boards_po'),
+        pk=pk
+    )
+    accessories = remedial.accessories.select_related('stock_item').all()
+    return render(request, 'stock_take/remedial_detail.html', {
+        'remedial': remedial,
+        'accessories': accessories,
     })
 
 @login_required

@@ -12,13 +12,16 @@ For each promoted lead the command will:
   - Mark the Lead as status='converted' and set converted_to_customer
 
 Usage:
-    python manage.py upgrade_leads                # Check & upgrade all eligible leads
+    python manage.py upgrade_leads                # Check leads from the last 365 days
+    python manage.py upgrade_leads --days 180     # Check leads from the last 180 days
+    python manage.py upgrade_leads --days 0       # Check ALL leads (slow — use sparingly)
     python manage.py upgrade_leads --dry-run      # Preview without saving
     python manage.py upgrade_leads --limit 50     # Process at most 50 leads (for testing)
 """
 
 import time
 import logging
+from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from stock_take.services.anthill_api import AnthillAPI, AnthillAPIError
@@ -47,15 +50,26 @@ class Command(BaseCommand):
             default=0,
             help='Maximum number of leads to check (0 = all)',
         )
+        parser.add_argument(
+            '--days',
+            type=int,
+            default=365,
+            help='Only check leads created or updated within this many days (default: 365). Use 0 for all leads.',
+        )
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
         limit = options['limit']
+        days = options['days']
         start_time = time.time()
 
         self.stdout.write(f'\n{"=" * 60}')
         self.stdout.write(f'  Anthill Lead -> Customer Upgrade')
         self.stdout.write(f'  Started: {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        if days > 0:
+            self.stdout.write(f'  Lookback window : {days} days')
+        else:
+            self.stdout.write('  Lookback window : ALL leads')
         if dry_run:
             self.stdout.write(self.style.WARNING('  Mode: DRY RUN'))
         self.stdout.write(f'{"=" * 60}\n')
@@ -74,6 +88,9 @@ class Command(BaseCommand):
             .exclude(status='converted')
             .order_by('pk')
         )
+        if days > 0:
+            cutoff = timezone.now() - timedelta(days=days)
+            leads_qs = leads_qs.filter(created_at__gte=cutoff)
         if limit > 0:
             leads_qs = leads_qs[:limit]
 

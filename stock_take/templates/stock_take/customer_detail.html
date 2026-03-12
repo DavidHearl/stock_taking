@@ -332,7 +332,22 @@
                         {% if customer.xero_id %}
                         <div>
                             <div class="field-label">Xero ID</div>
-                            <div class="field-value">{{ customer.xero_id }}</div>
+                            <div class="field-row-with-button">
+                                <div class="field-value">{{ customer.xero_id }}</div>
+                                <a href="https://go.xero.com/Contacts/View/{{ customer.xero_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div>
+                            <div class="field-label">Xero</div>
+                            <div class="field-value">
+                                <button class="btn btn-sm btn-outline-primary" id="btn-xero-export" onclick="exportToXero()">
+                                    <i class="bi bi-person-plus"></i> Export to Xero
+                                </button>
+                                <div id="xero-export-result" style="display:none;margin-top:6px;font-size:0.82rem;"></div>
+                            </div>
                         </div>
                         {% endif %}
                         {% if customer.workguru_id %}
@@ -424,6 +439,42 @@ function saveCustomer() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
         setTimeout(() => notification.style.display = 'none', 3000);
+    });
+}
+
+function exportToXero() {
+    const btn = document.getElementById('btn-xero-export');
+    const resultDiv = document.getElementById('xero-export-result');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Exporting...';
+    resultDiv.style.display = 'none';
+
+    fetch('{% url "xero_create_customer" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ customer_id: {{ customer.pk }} })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            resultDiv.style.color = 'var(--success-color)';
+            resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> Exported (Xero ID: ' + data.contact.id + ')';
+            resultDiv.style.display = 'block';
+            btn.innerHTML = '<i class="bi bi-check-circle"></i> Exported';
+        } else {
+            resultDiv.style.color = 'var(--danger-color)';
+            resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + (data.error || 'Unknown error');
+            resultDiv.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
+        }
+    })
+    .catch(err => {
+        resultDiv.style.color = 'var(--danger-color)';
+        resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error: ' + err.message;
+        resultDiv.style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
     });
 }
 </script>
