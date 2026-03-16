@@ -15,15 +15,24 @@ Schedule (UTC):
     08:00  — sync_recent_customers  (sync new/updated Anthill customers, last 7 days)
     09:00  — sync_anthill_fit_dates (parse fit_from_date text into fit_date, last 365 days)
     12:00  — sync_recent_customers  (midday re-sync)
+
+Design notes:
+  - Each job runs in its own daemon thread so a long-running job (e.g. upgrade_leads
+    can take 60+ minutes) never blocks the scheduler loop and causes later jobs to
+    be missed.
+  - A per-day "fired_today" set prevents double-firing if the loop ticks through
+    the same minute twice.
+  - A 10-minute catch-up window: if the container restarts within 10 minutes of
+    a scheduled time, the job still fires rather than being skipped entirely.
 """
 
 import logging
+import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -38,56 +47,65 @@ SCHEDULE = [
     (12, 0, 'sync_recent_customers',  {}),
 ]
 
+# How many seconds past the scheduled minute we will still fire a missed job.
+CATCHUP_WINDOW_SECONDS = 600  # 10 minutes
 
-def _next_run_time(hour: int, minute: int) -> datetime:
-    """Return the next UTC datetime for the given hour/minute."""
-    now = datetime.utcnow().replace(second=0, microsecond=0)
-    candidate = now.replace(hour=hour, minute=minute)
-    if candidate <= now:
-        candidate += timedelta(days=1)
-    return candidate
+
+def _run_job(command: str, kwargs: dict, stdout, style) -> None:
+    """Execute a management command in a background thread, logging outcome."""
+    def ts():
+        return datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+
+    stdout.write(style.NOTICE(f'[{ts()}] Running: {command}'))
+    try:
+        call_command(command, **kwargs)
+        stdout.write(style.SUCCESS(f'[{ts()}] {command} completed successfully.'))
+    except Exception as exc:
+        stdout.write(style.ERROR(f'[{ts()}] {command} FAILED: {exc}'))
+        logger.exception('Scheduler: %s failed', command)
 
 
 class Command(BaseCommand):
     help = 'Long-running scheduler process — replaces cron in Docker.'
 
     def handle(self, *args, **options):
-        self.stdout.write(
-            self.style.SUCCESS('Scheduler started. Waiting for scheduled jobs...')
-        )
-        self.stdout.write(f'Schedule (UTC):')
+        self.stdout.write(self.style.SUCCESS('Scheduler started. Schedule (UTC):'))
         for h, m, cmd, _ in SCHEDULE:
             self.stdout.write(f'  {h:02d}:{m:02d}  ->  {cmd}')
         self.stdout.write('')
 
+        # Keys: (hour, minute, command_name) — reset at midnight UTC.
+        fired_today: set = set()
+        last_date: date = datetime.utcnow().date()
+
         while True:
-            now = datetime.utcnow().replace(second=0, microsecond=0)
+            now = datetime.utcnow()
+            today = now.date()
+
+            # Reset the fired set at midnight UTC.
+            if today != last_date:
+                fired_today.clear()
+                last_date = today
 
             for hour, minute, command, kwargs in SCHEDULE:
-                if now.hour == hour and now.minute == minute:
-                    self.stdout.write(
-                        self.style.NOTICE(
-                            f'[{now.strftime("%Y-%m-%d %H:%M UTC")}] '
-                            f'Running: {command}'
-                        )
-                    )
-                    try:
-                        call_command(command, **kwargs)
-                        self.stdout.write(
-                            self.style.SUCCESS(
-                                f'[{datetime.utcnow().strftime("%H:%M UTC")}] '
-                                f'{command} completed successfully.'
-                            )
-                        )
-                    except Exception as exc:
-                        self.stderr.write(
-                            self.style.ERROR(
-                                f'[{datetime.utcnow().strftime("%H:%M UTC")}] '
-                                f'{command} FAILED: {exc}'
-                            )
-                        )
-                        logger.exception('Scheduler: %s failed', command)
+                key = (hour, minute, command)
+                if key in fired_today:
+                    continue
 
-            # Sleep until the top of the next minute
+                # scheduled_dt is the target time today (UTC).
+                scheduled_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                overdue = (now - scheduled_dt).total_seconds()
+
+                # Fire if we're at or within the catch-up window past the target.
+                if 0 <= overdue < CATCHUP_WINDOW_SECONDS:
+                    fired_today.add(key)
+                    thread = threading.Thread(
+                        target=_run_job,
+                        args=(command, kwargs, self.stdout, self.style),
+                        daemon=True,
+                    )
+                    thread.start()
+
+            # Sleep until the top of the next minute.
             sleep_seconds = 60 - datetime.utcnow().second
-            time.sleep(sleep_seconds)
+            time.sleep(max(sleep_seconds, 1))

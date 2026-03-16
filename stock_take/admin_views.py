@@ -281,13 +281,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_anthill_customers_management',
                 'label': 'Full Customer Sync',
-                'description': (
-                    'Pulls all customer records from Anthill CRM (~275k), fetches full details for each, '
-                    'and creates/updates local Customer records. '
-                    'Smart-skip: customers already in the database are skipped entirely — '
-                    'no API call, no DB write. Only genuinely new customers trigger detail queries, '
-                    'making repeat runs fast. Use --force to re-fetch every customer.'
-                ),
+                'bullets': [
+                    'Pulls all ~275k customer records from Anthill CRM and creates/updates local Customer records.',
+                    'Smart-skip: customers already in the database are ignored entirely — no API call, no DB write.',
+                    'Only genuinely new customers trigger detail queries, making repeat runs fast.',
+                    'Use --force to re-fetch every customer regardless.',
+                ],
                 'file': 'stock_take/management/commands/sync_anthill_customers.py',
                 'schedule': 'Manual',
                 'commands': [
@@ -301,16 +300,13 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_recent_customers',
                 'label': 'Recent Customer Sync',
-                'description': (
-                    'Two-pass sync that runs automatically twice a day (Anthill is the source of truth). '
-                    'Pass 1 — scans Anthill for customers created within the last 7 days and '
-                    'saves them as Customer (if they have a sale activity) or Lead. '
-                    'Pass 2 — iterates every Lead in the database with an Anthill ID and re-checks '
-                    'Anthill for a qualifying sale; promotes the Lead to Customer if one is found. '
-                    'This catches leads that were created months ago but have only recently received '
-                    'a sale in Anthill (they never re-appear in the scan window). '
-                    'Use --skip-upgrade to run Pass 1 only.'
-                ),
+                'bullets': [
+                    'Two-pass sync, runs automatically at 08:00 & 12:00 UTC.',
+                    'Pass 1: scans Anthill for customers created in the last 7 days, saves each as Customer or Lead.',
+                    'Pass 2: re-checks every Lead with an Anthill ID for a qualifying sale and promotes them to Customer.',
+                    'Catches leads created months ago that have only recently received a sale in Anthill.',
+                    'Use --skip-upgrade to run Pass 1 only.',
+                ],
                 'file': 'stock_take/management/commands/sync_recent_customers.py',
                 'schedule': 'Automated — daily at 08:00 & 12:00 (Docker scheduler)',
                 'commands': [
@@ -323,11 +319,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_anthill_customers',
                 'label': 'Standalone: Two-Phase Customer & Sales Import',
-                'description': (
-                    'Legacy standalone script (project root). Phase 1 syncs sale activities for '
-                    'customers already in the database. Phase 2 imports any new customers/leads. '
-                    'Writes a SyncLog entry on completion.'
-                ),
+                'bullets': [
+                    'Legacy standalone script at the project root (not a Django management command).',
+                    'Phase 1: syncs sale activities for customers already in the database.',
+                    'Phase 2: imports any new customers/leads from Anthill.',
+                    'Writes a SyncLog entry on completion.',
+                ],
                 'file': 'sync_anthill_customers.py',
                 'schedule': 'Manual',
                 'commands': [
@@ -341,12 +338,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_anthill_workflow',
                 'label': 'Standalone: Workflow Status Refresh',
-                'description': (
-                    'Refreshes the status, category, and activity_type fields on existing AnthillSale '
-                    'records by fetching the latest activity data from Anthill CRM. '
-                    'Groups requests by customer to minimise API calls. '
-                    'Writes a SyncLog entry on completion.'
-                ),
+                'bullets': [
+                    'Refreshes status, category, and activity_type on existing AnthillSale records.',
+                    'Fetches the latest activity data from Anthill CRM.',
+                    'Groups requests by customer to minimise API calls.',
+                    'Writes a SyncLog entry on completion.',
+                ],
                 'file': 'sync_anthill_workflow.py',
                 'schedule': 'Manual',
                 'commands': [
@@ -358,14 +355,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_anthill_fit_dates',
                 'label': 'Sync Installation (Fit) Dates from Anthill',
-                'description': (
-                    'Parses the "Fit From Date" custom field (synced from Anthill as text by '
-                    'sync_anthill_workflow) into AnthillSale.fit_date (a proper date field). '
-                    'The Anthill SOAP API does not expose appointments, so the fit date comes '
-                    'from this custom field (format: DD/MM/YYYY). '
-                    'Run this after sync_anthill_workflow to ensure all fit dates are populated. '
-                    'sync_anthill_workflow also parses fit dates automatically on each run.'
-                ),
+                'bullets': [
+                    'Parses the "Fit From Date" custom field (DD/MM/YYYY text) into AnthillSale.fit_date (a proper date field).',
+                    'The Anthill SOAP API does not expose appointments — fit dates come from this custom field.',
+                    'Run after sync_anthill_workflow to ensure all fit dates are populated.',
+                    'sync_anthill_workflow also parses fit dates automatically on each run.',
+                ],
                 'file': 'stock_take/management/commands/sync_anthill_fit_dates.py',
                 'schedule': 'Manual / after sync_anthill_workflow',
                 'commands': [
@@ -379,12 +374,11 @@ SCRIPT_GROUPS = [
             {
                 'log_name': None,
                 'label': 'Backfill Sale Fit Dates (from Orders — one-off)',
-                'description': (
-                    'One-off command that copied confirmed fit dates from linked Order records into '
-                    'AnthillSale.fit_date (117 records updated on 2026-03-09). '
-                    'Superseded by sync_anthill_fit_dates which parses the Fit From Date '
-                    'custom field (already synced by sync_anthill_workflow).'
-                ),
+                'bullets': [
+                    'One-off command: copied confirmed fit dates from linked Order records into AnthillSale.fit_date.',
+                    '117 records updated on 2026-03-09.',
+                    'Superseded by sync_anthill_fit_dates, which parses the Fit From Date custom field directly.',
+                ],
                 'file': 'stock_take/management/commands/backfill_sale_fit_dates.py',
                 'schedule': 'One-off (already run — 117 records updated)',
                 'commands': [
@@ -396,14 +390,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_anthill_payments',
                 'label': 'Payment History Sync  ⚠️ API limitation',
-                'description': (
-                    '⚠️ NOT AVAILABLE — The Anthill CRM SOAP API does not expose a payment read endpoint. '
-                    'The only payment methods available are AddPayment / AddPaymentByUserId (write-only). '
-                    'There is no GetSalePayments or equivalent GET method; payment history visible in '
-                    'the Anthill UI cannot be fetched via the API. '
-                    'The AnthillPayment model and command are retained as placeholders in case Anthill '
-                    'exposes a read endpoint in a future API version.'
-                ),
+                'bullets': [
+                    '⚠️ NOT AVAILABLE — the Anthill SOAP API has no payment read endpoint.',
+                    'Only write-only methods exist: AddPayment / AddPaymentByUserId.',
+                    'Payment history visible in the Anthill UI cannot be fetched via the API.',
+                    'The model and command are retained as placeholders for a future API version.',
+                ],
                 'file': 'stock_take/management/commands/sync_anthill_payments.py',
                 'schedule': 'N/A — API does not support reading payments',
                 'commands': [
@@ -413,13 +405,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'upgrade_leads',
                 'label': 'Upgrade Leads → Customers',
-                'description': (
-                    'Re-checks every Lead that has an Anthill Customer ID and promotes it to a Customer '
-                    'if Anthill now reports a qualifying sale activity (any non-cancelled sale type). '
-                    'For each promotion the command creates a Customer record, saves Anthill sale activities, '
-                    'links any pre-existing AnthillSale records, and marks the Lead as converted. '
-                    'Safe to run repeatedly — leads already converted are skipped.'
-                ),
+                'bullets': [
+                    'Re-checks every Lead with an Anthill Customer ID for a qualifying (non-cancelled) sale.',
+                    'Promotes matching leads: creates a Customer record, saves sale activities, links existing AnthillSale records.',
+                    'Marks the Lead as converted after promotion.',
+                    'Safe to run repeatedly — already-converted leads are skipped.',
+                ],
                 'file': 'stock_take/management/commands/upgrade_leads.py',
                 'schedule': 'Manual / as needed',
                 'commands': [
@@ -437,11 +428,11 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_xero_customers',
                 'label': 'Sync Customers to Xero',
-                'description': (
-                    'Fetches all contacts from Xero and matches them to local Customer records by name. '
-                    'Stores the Xero Contact ID on each matched customer. '
-                    'Prerequisite: connect to Xero via /xero/status/ first.'
-                ),
+                'bullets': [
+                    'Fetches all contacts from Xero and matches them to local Customer records by name.',
+                    'Stores the Xero Contact ID on each matched customer.',
+                    'Prerequisite: connect to Xero via /xero/status/ first.',
+                ],
                 'file': 'stock_take/management/commands/sync_xero_customers.py',
                 'schedule': 'Manual',
                 'commands': [
@@ -452,11 +443,11 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_xero_invoices',
                 'label': 'Sync Invoices from Xero',
-                'description': (
-                    'For every customer with a Xero Contact ID, fetches their invoices and '
-                    'creates/updates local Invoice records with payment status. '
-                    'Prerequisite: connect to Xero via /xero/status/ and run sync_xero_customers first.'
-                ),
+                'bullets': [
+                    'Fetches invoices for every customer with a Xero Contact ID.',
+                    'Creates/updates local Invoice records with payment status.',
+                    'Prerequisites: Xero connected (/xero/status/) and sync_xero_customers run first.',
+                ],
                 'file': 'stock_take/management/commands/sync_xero_invoices.py',
                 'schedule': 'Manual',
                 'commands': [
@@ -468,14 +459,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'sync_xero_sale_payments',
                 'label': 'Sync Sale Payments from Xero',
-                'description': (
-                    'Fetches payment records for Anthill sales from Xero by matching the sale contract number '
-                    '(e.g. "BFS-SD-412885") against the Xero invoice Reference field. '
-                    'For each matched invoice, individual payments are stored as AnthillPayment records. '
-                    'Read-only — this command never writes to or modifies any data in Xero. '
-                    'Prerequisites: Xero must be connected (/xero/status/) and sales must have a contract '
-                    'number (run sync_anthill_workflow first).'
-                ),
+                'bullets': [
+                    'Matches Anthill sale contract numbers (e.g. BFS-SD-412885) against Xero invoice Reference fields.',
+                    'Stores individual payments as AnthillPayment records.',
+                    'Read-only — never writes to or modifies any Xero data.',
+                    'Prerequisites: Xero connected (/xero/status/) and sales have contract numbers (run sync_anthill_workflow first).',
+                ],
                 'file': 'stock_take/management/commands/sync_xero_sale_payments.py',
                 'schedule': 'Manual / Scheduled',
                 'commands': [
@@ -489,11 +478,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'mark_historic_sales_paid',
                 'label': 'Mark Historic Sales as Paid',
-                'description': (
-                    'Marks all existing AnthillSale records as paid_in_full=True to establish a clean '
-                    'baseline for the outstanding balance dashboard card and report. Run this once after '
-                    'setting up Xero payment sync. Use --location to restrict to a single location.'
-                ),
+                'bullets': [
+                    'Marks all existing AnthillSale records as paid_in_full=True.',
+                    'Establishes a clean baseline for the outstanding balance dashboard card.',
+                    'Run once after setting up Xero payment sync.',
+                    'Use --location to restrict to a single branch.',
+                ],
                 'file': 'stock_take/management/commands/mark_historic_sales_paid.py',
                 'schedule': 'One-time',
                 'commands': [
@@ -511,11 +501,11 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'check_maps_usage',
                 'label': 'Check Maps API Usage',
-                'description': (
-                    'Reports current Google Maps API usage against the free-tier limits '
-                    '(10,000 loads/month for Dynamic Maps; 10,000 requests/month for Geocoding). '
-                    'Alerts when usage exceeds the configured threshold.'
-                ),
+                'bullets': [
+                    'Reports current Google Maps API usage against free-tier limits.',
+                    'Limits: 10,000 Dynamic Map loads/month and 10,000 Geocoding requests/month.',
+                    'Alerts when usage exceeds the configured threshold.',
+                ],
                 'file': 'stock_take/management/commands/check_maps_usage.py',
                 'schedule': 'Manual',
                 'commands': [
@@ -533,10 +523,10 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'cleanup_duplicate_schedules',
                 'label': 'Clean Up Duplicate Schedules',
-                'description': (
-                    'Removes duplicate auto-generated stock take schedules that can accumulate '
-                    'over time. Safe to run at any time.'
-                ),
+                'bullets': [
+                    'Removes duplicate auto-generated stock take schedules that accumulate over time.',
+                    'Safe to run at any time.',
+                ],
                 'file': 'stock_take/management/commands/cleanup_duplicate_schedules.py',
                 'schedule': 'Manual / as needed',
                 'commands': [
@@ -547,10 +537,11 @@ SCRIPT_GROUPS = [
             {
                 'log_name': 'set_legacy_completion_dates',
                 'label': 'Set Legacy Completion Dates',
-                'description': (
-                    'Backfills completion dates on older completed stock take schedule records '
-                    'that pre-date the completion date field. One-off migration helper.'
-                ),
+                'bullets': [
+                    'Backfills completion dates on older completed stock take schedule records.',
+                    'Covers records that pre-date the addition of the completion date field.',
+                    'One-off migration helper — safe to re-run.',
+                ],
                 'file': 'stock_take/management/commands/set_legacy_completion_dates.py',
                 'schedule': 'One-off',
                 'commands': [
@@ -567,12 +558,12 @@ SCRIPT_GROUPS = [
             {
                 'log_name': None,
                 'label': 'Run Unit Tests (stock_take app)',
-                'description': (
-                    'Runs the full Django test suite for the stock_take application — currently 77 tests '
-                    'covering models, RBAC, forms, dashboard helpers, views, stock history, Anthill '
-                    'payments, and order workflow. Uses --keepdb to reuse the existing test database '
-                    'and speed up repeated runs. Exit code 0 = all pass; any failures are shown inline.'
-                ),
+                'bullets': [
+                    'Runs the full Django test suite for the stock_take application (currently 77 tests).',
+                    'Covers models, RBAC, forms, dashboard helpers, views, stock history, payments, and order workflow.',
+                    'Uses --keepdb by default to reuse the test database and speed up repeated runs.',
+                    'Exit code 0 = all pass; failures are shown inline.',
+                ],
                 'file': 'stock_take/tests.py',
                 'schedule': 'Manual / before deployments',
                 'commands': [
@@ -586,6 +577,32 @@ SCRIPT_GROUPS = [
 ]
 
 
+def _fmt_age(ran_at):
+    """Return a single-unit age string (e.g. '3 days ago') for a datetime."""
+    if ran_at is None:
+        return None
+    from django.utils import timezone
+    delta = timezone.now() - ran_at
+    total_seconds = int(delta.total_seconds())
+    if total_seconds < 60:
+        return 'just now'
+    minutes = total_seconds // 60
+    hours   = total_seconds // 3600
+    days    = total_seconds // 86400
+    months  = days // 30
+    years   = days // 365
+    if minutes < 60:
+        return f"{minutes} min ago"
+    elif hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    elif days < 90:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    elif months < 12:
+        return f"{months} month{'s' if months != 1 else ''} ago"
+    else:
+        return f"{years} year{'s' if years != 1 else ''} ago"
+
+
 @staff_required
 def admin_api(request):
     """Admin API scripts page — shows script registry and recent run logs."""
@@ -597,10 +614,34 @@ def admin_api(request):
             log_name = entry.get('log_name')
             last_log = SyncLog.objects.filter(script_name=log_name).order_by('-ran_at').first() if log_name else None
             recent_logs = SyncLog.objects.filter(script_name=log_name).order_by('-ran_at')[:5] if log_name else []
+
+            # Derive trigger type and schedule detail from the schedule string
+            schedule = entry.get('schedule', '')
+            if 'Automated' in schedule:
+                trigger = 'automated'
+                schedule_detail = schedule.replace('Automated — ', '').replace('Automated', '').strip(' —')
+            elif 'One-off' in schedule:
+                trigger = 'oneoff'
+                import re as _re
+                m = _re.search(r'\((.+)\)', schedule)
+                schedule_detail = m.group(1) if m else ''
+            elif 'One-time' in schedule:
+                trigger = 'oneoff'
+                schedule_detail = ''
+            elif 'N/A' in schedule:
+                trigger = 'na'
+                schedule_detail = schedule.replace('N/A — ', '').replace('N/A', '').strip(' —')
+            else:
+                trigger = 'manual'
+                schedule_detail = schedule.split(' / ', 1)[1] if ' / ' in schedule else ''
+
             enriched_scripts.append({
                 **entry,
                 'last_log': last_log,
                 'recent_logs': recent_logs,
+                'trigger': trigger,
+                'schedule_detail': schedule_detail,
+                'last_run_display': _fmt_age(last_log.ran_at) if last_log else None,
             })
         groups.append({
             'group': group['group'],
@@ -824,10 +865,20 @@ def admin_activity_log(request):
     users          = DjangoUser.objects.filter(activity_logs__isnull=False).distinct().order_by('first_name', 'last_name')
     event_choices  = ActivityLog.EVENT_CHOICES
 
+    # Include any event_types stored in the DB that aren't in EVENT_CHOICES
+    defined_keys = {k for k, _ in event_choices}
+    extra_types = (
+        ActivityLog.objects.exclude(event_type__in=defined_keys)
+        .values_list('event_type', flat=True)
+        .distinct()
+        .order_by('event_type')
+    )
+    all_choices = list(event_choices) + [(t, t.replace('_', ' ').title()) for t in extra_types]
+
     return render(request, 'stock_take/admin_activity_log.html', {
         'page_obj':      page_obj,
         'users':         users,
-        'event_choices': event_choices,
+        'event_choices': all_choices,
         'filter_event':  event_type,
         'filter_user':   user_id,
         'filter_q':      search,

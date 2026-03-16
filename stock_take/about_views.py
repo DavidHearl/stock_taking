@@ -1,4 +1,5 @@
 import os
+import re
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
@@ -6,8 +7,14 @@ from django.db import connection
 from django.contrib.auth.models import User
 
 
+_SCRIPT_RE = re.compile(r'<script(?:\s[^>]*)?>(.+?)</script>', re.DOTALL | re.IGNORECASE)
+
+
 def _count_lines_of_code():
-    """Count lines of code in first-party application directories."""
+    """Count lines of code in first-party application directories.
+
+    JavaScript inside <script> tags in .html files is counted as JS, not HTML.
+    """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     app_dirs = ["stock_take", "stock_taking", "material_generator", "templates", "order_generator_files", "static"]
     extensions = {".py", ".html", ".css", ".js"}
@@ -15,6 +22,8 @@ def _count_lines_of_code():
 
     by_type = {}
     total_files = 0
+
+    inline_js_lines = 0  # JS lines extracted from HTML <script> blocks
 
     for app_dir in app_dirs:
         full_dir = os.path.join(base_dir, app_dir)
@@ -31,9 +40,17 @@ def _count_lines_of_code():
                     fpath = os.path.join(dirpath, fname)
                     try:
                         with open(fpath, encoding="utf-8", errors="ignore") as f:
-                            lines = len(f.readlines())
+                            content = f.read()
+                        lines = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
                         by_type[ext] = by_type.get(ext, 0) + lines
                         total_files += 1
+
+                        # For HTML files, count lines inside <script> tags as JS
+                        if ext == ".html":
+                            for m in _SCRIPT_RE.finditer(content):
+                                script_body = m.group(1)
+                                js_count = script_body.count('\n') + (1 if script_body and not script_body.endswith('\n') else 0)
+                                inline_js_lines += js_count
                     except Exception:
                         pass
 
@@ -48,6 +65,10 @@ def _count_lines_of_code():
                 total_files += 1
             except Exception:
                 pass
+
+    # Move inline JS lines from HTML to JS totals
+    by_type[".html"] = max(by_type.get(".html", 0) - inline_js_lines, 0)
+    by_type[".js"] = by_type.get(".js", 0) + inline_js_lines
 
     total_lines = sum(by_type.values())
     return total_lines, total_files, by_type
@@ -86,44 +107,63 @@ def _fmt_size(num_bytes):
 
 
 def _get_media_stats():
-    """Walk the MEDIA_ROOT and return file count and total size by subfolder."""
-    media_root = getattr(settings, "MEDIA_ROOT", None)
-    if not media_root or not os.path.isdir(media_root):
+    """List objects in DigitalOcean Spaces and return file count / size by folder."""
+    import boto3
+
+    endpoint = getattr(settings, "AWS_S3_ENDPOINT_URL", None)
+    bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
+    key_id = getattr(settings, "AWS_ACCESS_KEY_ID", None)
+    secret = getattr(settings, "AWS_SECRET_ACCESS_KEY", None)
+    prefix = getattr(settings, "AWS_LOCATION", "media")
+
+    if not all([endpoint, bucket, key_id, secret]):
         return {"total_files": 0, "total_size": "0 B", "folders": []}
 
-    total_files = 0
-    total_bytes = 0
-    folder_stats = {}
+    try:
+        session = boto3.session.Session()
+        client = session.client(
+            "s3",
+            region_name=getattr(settings, "AWS_S3_REGION_NAME", "ams3"),
+            endpoint_url=endpoint,
+            aws_access_key_id=key_id,
+            aws_secret_access_key=secret,
+        )
 
-    for dirpath, dirnames, filenames in os.walk(media_root):
-        # Compute top-level subfolder name
-        rel = os.path.relpath(dirpath, media_root)
-        top = rel.split(os.sep)[0] if rel != "." else "(root)"
-        for fname in filenames:
-            fpath = os.path.join(dirpath, fname)
-            try:
-                size = os.path.getsize(fpath)
-            except OSError:
-                size = 0
-            total_files += 1
-            total_bytes += size
-            if top not in folder_stats:
-                folder_stats[top] = {"files": 0, "bytes": 0}
-            folder_stats[top]["files"] += 1
-            folder_stats[top]["bytes"] += size
+        total_files = 0
+        total_bytes = 0
+        folder_stats = {}
 
-    folders = sorted(
-        [
-            {"name": k, "files": v["files"], "size": _fmt_size(v["bytes"])}
-            for k, v in folder_stats.items()
-        ],
-        key=lambda x: x["name"],
-    )
-    return {
-        "total_files": total_files,
-        "total_size": _fmt_size(total_bytes),
-        "folders": folders,
-    }
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix + "/"):
+            for obj in page.get("Contents", []):
+                # Strip the prefix to get relative path
+                rel_key = obj["Key"][len(prefix):].lstrip("/")
+                if not rel_key:
+                    continue
+                parts = rel_key.split("/")
+                top = parts[0] if len(parts) > 1 else "(root)"
+                size = obj.get("Size", 0)
+                total_files += 1
+                total_bytes += size
+                if top not in folder_stats:
+                    folder_stats[top] = {"files": 0, "bytes": 0}
+                folder_stats[top]["files"] += 1
+                folder_stats[top]["bytes"] += size
+
+        folders = sorted(
+            [
+                {"name": k, "files": v["files"], "size": _fmt_size(v["bytes"])}
+                for k, v in folder_stats.items()
+            ],
+            key=lambda x: x["name"],
+        )
+        return {
+            "total_files": total_files,
+            "total_size": _fmt_size(total_bytes),
+            "folders": folders,
+        }
+    except Exception:
+        return {"total_files": 0, "total_size": "0 B", "folders": []}
 
 
 @login_required

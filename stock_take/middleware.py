@@ -1,10 +1,12 @@
 """
-Role-based access control middleware & user impersonation.
+Role-based access control middleware, user impersonation, and activity logging.
 
 Automatically checks page permissions based on the resolved URL name.
 This is applied globally so no individual view decorators are needed.
 Admin users and superusers bypass all checks.
 """
+
+import logging
 
 from django.contrib.auth.models import User
 from django.http import JsonResponse
@@ -178,3 +180,100 @@ class RolePermissionMiddleware:
             'page_name': page_name,
             'action': action,
         }, status=403)
+
+
+# ─── Activity Logging Middleware ──────────────────────────────────
+
+logger = logging.getLogger(__name__)
+
+# URL name prefixes/patterns to skip logging (read-only AJAX, polling, static)
+_SKIP_URL_NAMES = {
+    'toggle_dark_mode',
+    'global_search',
+    'search_customers',
+    'search_orders_api',
+    'search_remedials_api',
+    'search_stock_items',
+    'get_week_fit_appointments',
+    'get_week_fitter_timesheets',
+}
+
+# URL path prefixes to skip
+_SKIP_PREFIXES = (
+    '/admin/',
+    '/accounts/',
+    '/__debug__/',
+    '/static/',
+    '/media/',
+)
+
+
+class ActivityLoggingMiddleware:
+    """
+    Automatically log every data-mutating request (POST, PUT, PATCH, DELETE)
+    to the ActivityLog table.
+
+    Skips requests where a view already called ``log_activity()`` (detected via
+    the ``request._activity_logged`` flag), and skips read-only / utility
+    endpoints listed in _SKIP_URL_NAMES / _SKIP_PREFIXES.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+
+        # Only log mutating methods
+        if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            return response
+
+        # Only log authenticated users
+        if not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return response
+
+        # Skip if a view already logged a specific event
+        if getattr(request, '_activity_logged', False):
+            return response
+
+        # Skip error responses (4xx / 5xx)
+        if response.status_code >= 400:
+            return response
+
+        # Skip exempt paths
+        path = request.path
+        for prefix in _SKIP_PREFIXES:
+            if path.startswith(prefix):
+                return response
+
+        # Resolve URL name
+        try:
+            match = resolve(path)
+            url_name = match.url_name or ''
+            view_func = match.func
+        except Resolver404:
+            return response
+
+        # Skip exempt URL names
+        if url_name in _SKIP_URL_NAMES:
+            return response
+
+        # Build a human-readable description from the view function name
+        func_name = getattr(view_func, '__name__', url_name)
+        description = func_name.replace('_', ' ').title()
+
+        # Include the path for extra context
+        extra_data = {'path': path, 'method': request.method}
+
+        try:
+            from .models import ActivityLog
+            ActivityLog.objects.create(
+                user=request.user,
+                event_type='page_action',
+                description=description,
+                extra_data=extra_data,
+            )
+        except Exception:
+            logger.exception('ActivityLoggingMiddleware failed to write log')
+
+        return response

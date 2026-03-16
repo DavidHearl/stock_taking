@@ -188,7 +188,15 @@
             <div class="po-overview-item">
                 <span class="po-overview-label">Received By</span>
                 <span class="po-overview-value po-view-val" data-field="received_by_name">{{ purchase_order.received_by_name|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="received_by_name" value="{{ purchase_order.received_by_name|default:'' }}" style="display:none;">
+                <div class="po-received-by-wrapper po-edit-val" style="display:none; position:relative;">
+                    <input class="po-edit-input" type="text" id="received-by-input" value="{{ purchase_order.received_by_name|default:'' }}" autocomplete="off" placeholder="Type or select a user...">
+                    <input type="hidden" class="po-edit-val" data-field="received_by_name" id="received-by-hidden" value="{{ purchase_order.received_by_name|default:'' }}">
+                    <div class="po-received-by-dropdown" id="received-by-dropdown">
+                        {% for u in staff_users %}
+                        <div class="po-received-by-option" data-value="{{ u.get_full_name|default:u.username }}">{{ u.get_full_name|default:u.username }}</div>
+                        {% endfor %}
+                    </div>
+                </div>
             </div>
         </div>
         <div class="po-overview-row">
@@ -2714,5 +2722,42 @@ function syncCurrencyFromSupplier(supplierCurrency) {
     })
     .catch(err => showNotification('Error: ' + err.message, 'error'));
 }
+
+/* Received-by searchable dropdown */
+(function() {
+    const input = document.getElementById('received-by-input');
+    const hidden = document.getElementById('received-by-hidden');
+    const dropdown = document.getElementById('received-by-dropdown');
+    if (!input || !dropdown || !hidden) return;
+
+    const allOptions = dropdown.querySelectorAll('.po-received-by-option');
+
+    function showDropdown() { dropdown.style.display = 'block'; }
+    function hideDropdown() { setTimeout(() => { dropdown.style.display = 'none'; }, 150); }
+
+    function filterOptions() {
+        const query = input.value.toLowerCase();
+        let anyVisible = false;
+        allOptions.forEach(opt => {
+            const match = opt.dataset.value.toLowerCase().includes(query);
+            opt.style.display = match ? '' : 'none';
+            if (match) anyVisible = true;
+        });
+        dropdown.style.display = anyVisible ? 'block' : 'none';
+    }
+
+    input.addEventListener('focus', () => { filterOptions(); });
+    input.addEventListener('input', () => { hidden.value = input.value; filterOptions(); });
+    input.addEventListener('blur', hideDropdown);
+
+    allOptions.forEach(opt => {
+        opt.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            input.value = opt.dataset.value;
+            hidden.value = opt.dataset.value;
+            dropdown.style.display = 'none';
+        });
+    });
+})();
 </script>
 {% endblock %}

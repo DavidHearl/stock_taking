@@ -171,6 +171,16 @@ def ordering(request):
         for r in Remedial.objects.filter(is_completed=False).values('id', 'original_order_id')
     }
 
+    # Count Anthill orders awaiting placement (cached in DB)
+    from .models import AnthillOrderToPlace
+    anthill_orders_to_place_count = AnthillOrderToPlace.objects.filter(resolved=False).count()
+
+    # All sale numbers across ALL orders (used for Anthill modal matching, not tab-filtered)
+    all_existing_sale_numbers = list(
+        Order.objects.exclude(sale_number__isnull=True).exclude(sale_number='')
+        .values_list('sale_number', flat=True)
+    )
+
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'pfp_orders': orders.filter(order_date__isnull=True, fit_date__isnull=True),
@@ -189,6 +199,8 @@ def ordering(request):
         'wip_orders': wip_orders,
         'financial_map': financial_map,
         'remedials_map': remedials_map,
+        'anthill_orders_to_place_count': anthill_orders_to_place_count,
+        'all_existing_sale_numbers': all_existing_sale_numbers,
     })
 
 @login_required
@@ -452,6 +464,371 @@ def load_order_indicators_ajax(request):
     # ------------------------------------------------
     
     return JsonResponse({'success': True, 'indicators': indicators})
+
+
+@login_required
+def scrape_anthill_orders_to_place(request):
+    """
+    Scrape the Anthill CRM 'Place Order or Allocate from Stock' workflow page
+    using Playwright headless browser to handle JavaScript rendering.
+    Returns the rows as JSON for display in a modal.
+    """
+    import re
+    from html.parser import HTMLParser
+
+    # ── Parser: first <table class="sortable"> tbody rows ────────────────────
+    class _OrderTableParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self._in_target = False
+            self._in_tbody = False
+            self._depth = 0
+            self._in_row = False
+            self._in_cell = False
+            self._current_row = []
+            self._current_row_links = []
+            self._current_cell_parts = []
+            self._current_cell_href = ''
+            self.rows = []
+            self.links = []
+            self.found = False
+
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            if tag == 'table' and not self._in_target:
+                if 'sortable' in attr_dict.get('class', '').split():
+                    self._in_target = True
+                    self._depth = 1
+                    return
+            if not self._in_target:
+                return
+            if tag == 'table':
+                self._depth += 1
+            elif tag == 'tbody':
+                self._in_tbody = True
+            elif tag == 'tr' and self._in_tbody:
+                self._in_row = True
+                self._current_row = []
+                self._current_row_links = []
+            elif tag in ('td', 'th') and self._in_row:
+                self._in_cell = True
+                self._current_cell_parts = []
+                self._current_cell_href = ''
+            elif tag == 'a' and self._in_cell and not self._current_cell_href:
+                self._current_cell_href = attr_dict.get('href', '')
+
+        def handle_endtag(self, tag):
+            if not self._in_target:
+                return
+            if tag == 'table':
+                self._depth -= 1
+                if self._depth == 0:
+                    self._in_target = False
+                    self.found = True
+            elif tag == 'tbody':
+                self._in_tbody = False
+            elif tag == 'tr' and self._in_row:
+                self._in_row = False
+                self.rows.append(list(self._current_row))
+                self.links.append(list(self._current_row_links))
+            elif tag in ('td', 'th') and self._in_cell:
+                self._in_cell = False
+                text = re.sub(r'\s+', ' ', ' '.join(self._current_cell_parts)).strip()
+                self._current_row.append(text)
+                self._current_row_links.append(self._current_cell_href)
+
+        def handle_data(self, data):
+            if self._in_cell:
+                stripped = data.strip()
+                if stripped:
+                    self._current_cell_parts.append(stripped)
+
+    # ── Credentials / target URL ──────────────────────────────────────────────
+    username = os.getenv('ANTHILL_USER_USERNAME')
+    password = os.getenv('ANTHILL_USER_PASSWORD')
+    subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+    if not username or not password:
+        return JsonResponse({'success': False, 'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not configured.'})
+
+    base_url = f'https://{subdomain}.anthillcrm.com'
+    login_url = f'{base_url}/sign-in'
+    # Anthill "Place Order or Allocate from Stock" workflow screen (Belfast location)
+    target_url = (
+        f'{base_url}/n/screens/0/CAEaEgmodXB0DE3fQBGxXocD9CIgKw'
+        '?f=ChUKChIITG9jYXRpb24aBy8xLzMvMS8'
+        '&rf=CjwKFgoEU2FsZRIOV29ya2Zsb3dBY3Rpb24aIlBsYWNlIE9yZGVyIG9yIEFsbG9jYXRlIGZyb20gU3RvY2sKHQoOCgRTYWxlEgZTdGF0dXMQARoJQ2FuY2VsbGVk'
+    )
+
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+    except ImportError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Playwright is not installed. Run: pip install playwright && playwright install chromium'
+        })
+
+    html_content = ''
+    login_page_html = ''
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
+            page = context.new_page()
+
+            # Navigate directly to the target URL - Anthill will redirect to login if needed
+            page.goto(target_url, timeout=30000)
+            page.wait_for_load_state('domcontentloaded', timeout=15000)
+
+            # If redirected to a login page, authenticate
+            current_url = page.url.lower()
+            if 'sign-in' in current_url or 'login' in current_url or 'signin' in current_url:
+                login_page_html = page.content()
+
+                # Try all visible text inputs in order - first is username, second is password
+                all_inputs = page.locator('input:visible').all()
+                text_inputs = []
+                pass_inputs = []
+                for inp in all_inputs:
+                    try:
+                        itype = (inp.get_attribute('type') or 'text').lower()
+                        if itype == 'password':
+                            pass_inputs.append(inp)
+                        elif itype in ('text', 'email', ''):
+                            text_inputs.append(inp)
+                    except Exception:
+                        pass
+
+                if not text_inputs or not pass_inputs:
+                    browser.close()
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Could not find login form fields on the Anthill sign-in page.',
+                        'diag': {
+                            'login_url': page.url,
+                            'html_sample': login_page_html[:3000],
+                            'visible_inputs': len(all_inputs),
+                        }
+                    })
+
+                text_inputs[0].fill(username)
+                pass_inputs[0].fill(password)
+
+                # Submit: press Enter on password field, or click a submit button
+                try:
+                    submit = page.locator('button[type="submit"], input[type="submit"]').first
+                    submit.click(timeout=5000)
+                except PlaywrightTimeout:
+                    pass_inputs[0].press('Enter')
+
+                # Wait for navigation away from the login page
+                try:
+                    page.wait_for_url(lambda url: 'sign-in' not in url.lower() and 'login' not in url.lower(), timeout=20000)
+                except PlaywrightTimeout:
+                    browser.close()
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Login failed — still on sign-in page after submitting. Check ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD.',
+                    })
+
+                # Now navigate to the target URL
+                page.goto(target_url, timeout=30000)
+
+            # Wait for the table to render
+            try:
+                page.wait_for_selector('table.sortable tbody tr', timeout=25000)
+            except PlaywrightTimeout:
+                pass
+
+            # Extra wait for any lazy-loading rows
+            page.wait_for_timeout(2000)
+
+            html_content = page.content()
+            browser.close()
+
+    except Exception as exc:
+        return JsonResponse({'success': False, 'error': f'Playwright error: {exc}'})
+
+    # ── Parse table ───────────────────────────────────────────────────────────
+    parser = _OrderTableParser()
+    parser.feed(html_content)
+
+    if not parser.found:
+        title_match = re.search(r'<title[^>]*>([^<]{0,200})</title>', html_content, re.IGNORECASE)
+        page_title = title_match.group(1).strip() if title_match else '(no title)'
+        return JsonResponse({
+            'success': False,
+            'error': (
+                'Orders table not found on the Anthill page after JS rendering. '
+                'Login may have failed or the page structure changed.'
+            ),
+            'diag': {
+                'page_title': page_title,
+                'has_sortable_table': 'class="sortable"' in html_content or "class='sortable'" in html_content,
+                'has_tbody': '<tbody' in html_content,
+                'html_length': len(html_content),
+                'html_sample': html_content[:5000],
+            },
+        })
+
+    # Column indices (0-based):
+    # 0=Customer, 1=Contract, 2=Date Sold, 3=Address, 4=Postcode,
+    # 5=Site, 6=Assigned To, 7=Type, 8=Total Payments, 9=Total Value Ex VAT,
+    # 10=Margin, 11=Profit, 12=System No., 13=Last Updated,
+    # 14=Workflow Status, 15=Workflow Action, 16=Workflow Due Date,
+    # 17=Progress, 18=Fit Date
+    def _col(row, idx, default=''):
+        return row[idx] if len(row) > idx else default
+
+    scraped = []
+    for row, lnks in zip(parser.rows, parser.links):
+        if len(row) < 6:
+            continue
+        if _col(row, 0).lower() == 'total':
+            continue
+        customer = _col(row, 0)
+        contract = _col(row, 1)
+        if not contract:
+            continue
+        date_sold = _col(row, 2)
+        address = _col(row, 3)
+        postcode = _col(row, 4)
+        site = _col(row, 5)
+        assigned_to = _col(row, 6)
+        total_value = _col(row, 9)
+        workflow_status = _col(row, 14)
+        fit_date = _col(row, 18)
+
+        href = lnks[0] if lnks else ''
+        if href.startswith('http'):
+            order_url = href
+        elif href.startswith('/'):
+            order_url = base_url + href
+        else:
+            order_url = ''
+
+        full_address = f'{address}, {postcode}'.strip(', ') if postcode else address
+
+        scraped.append({
+            'customer': customer,
+            'contract': contract,
+            'date_sold': date_sold,
+            'address': full_address,
+            'site': site,
+            'assigned_to': assigned_to,
+            'total_value': total_value,
+            'workflow_status': workflow_status,
+            'fit_date': fit_date,
+            'order_url': order_url,
+        })
+
+    # ── Save to DB and compute diff ───────────────────────────────────────────
+    from .models import AnthillOrderToPlace
+    from django.utils import timezone
+
+    scraped_contracts = {o['contract'] for o in scraped}
+
+    # Fetch all previously active (unresolved) records
+    existing_qs = AnthillOrderToPlace.objects.filter(resolved=False)
+    existing_map = {r.contract_number: r for r in existing_qs}
+    existing_contracts = set(existing_map.keys())
+
+    now = timezone.now()
+    new_contracts = scraped_contracts - existing_contracts
+    removed_contracts = existing_contracts - scraped_contracts
+
+    # Mark removed as resolved
+    if removed_contracts:
+        AnthillOrderToPlace.objects.filter(
+            contract_number__in=removed_contracts, resolved=False
+        ).update(resolved=True, resolved_at=now)
+
+    # Upsert scraped rows
+    changed_contracts = set()
+    for o in scraped:
+        contract = o['contract']
+        fields = dict(
+            customer=o['customer'],
+            date_sold=o['date_sold'],
+            address=o['address'],
+            site=o['site'],
+            assigned_to=o['assigned_to'],
+            total_value=o['total_value'],
+            workflow_status=o['workflow_status'],
+            fit_date=o['fit_date'],
+            order_url=o['order_url'],
+            resolved=False,
+        )
+        if contract in existing_map:
+            rec = existing_map[contract]
+            # Detect meaningful changes (ignore last_seen)
+            changed = any(getattr(rec, k) != v for k, v in fields.items() if k != 'resolved')
+            if changed:
+                changed_contracts.add(contract)
+            for k, v in fields.items():
+                setattr(rec, k, v)
+            rec.last_seen = now
+            rec.save()
+        else:
+            AnthillOrderToPlace.objects.create(contract_number=contract, **fields)
+
+    # Annotate each order with its change status for the UI
+    orders = []
+    for o in scraped:
+        contract = o['contract']
+        if contract in new_contracts:
+            change = 'new'
+        elif contract in changed_contracts:
+            change = 'changed'
+        else:
+            change = None
+        orders.append({**o, 'change': change})
+
+    return JsonResponse({
+        'success': True,
+        'orders': orders,
+        'count': len(orders),
+        'new_count': len(new_contracts),
+        'removed_count': len(removed_contracts),
+        'changed_count': len(changed_contracts),
+    })
+
+
+@login_required
+def get_anthill_orders_from_db(request):
+    """Returns cached Anthill orders from the DB without running Playwright."""
+    from .models import AnthillOrderToPlace
+    from django.db.models import Max
+    qs = AnthillOrderToPlace.objects.filter(resolved=False).order_by('fit_date', 'customer')
+    orders = []
+    for r in qs:
+        orders.append({
+            'customer': r.customer,
+            'contract': r.contract_number,
+            'date_sold': r.date_sold,
+            'address': r.address,
+            'site': r.site,
+            'assigned_to': r.assigned_to,
+            'total_value': r.total_value,
+            'workflow_status': r.workflow_status,
+            'fit_date': r.fit_date,
+            'order_url': r.order_url,
+            'change': None,
+        })
+    agg = AnthillOrderToPlace.objects.filter(resolved=False).aggregate(m=Max('last_seen'))
+    last_seen = agg.get('m')
+    return JsonResponse({
+        'success': True,
+        'orders': orders,
+        'count': len(orders),
+        'new_count': 0,
+        'removed_count': 0,
+        'changed_count': 0,
+        'last_synced': last_seen.strftime('%d %b %Y %H:%M') if last_seen else None,
+        'from_cache': True,
+    })
+
 
 @login_required
 def search_orders(request):
@@ -5072,9 +5449,12 @@ def stock_list(request):
     tracking_type_filter = request.GET.get('tracking_type', '')
     
     # Get last modification time for cache invalidation
+    # Use integer timestamps to avoid spaces/colons/+ characters that trigger CacheKeyWarning
     last_import = ImportHistory.objects.aggregate(Max('imported_at'))['imported_at__max']
-    last_update = StockItem.objects.aggregate(Max('last_checked'))['last_checked__max'] or 0
-    cache_version = f"{last_import}_{last_update}"
+    last_update = StockItem.objects.aggregate(Max('last_checked'))['last_checked__max']
+    last_import_ts = int(last_import.timestamp()) if last_import else 0
+    last_update_ts = int(last_update.timestamp()) if last_update else 0
+    cache_version = f"{last_import_ts}_{last_update_ts}"
     
     cache_key = f"stock_list_{search}_{category_filter}_{stock_take_group_filter}_{tracking_type_filter}_{cache_version}"
     
@@ -9403,11 +9783,16 @@ def generate_and_upload_accessories_csv(request, order_id):
 
         # Generate CSV content using customer number (CAD number)
         logger.info(f"Generating accessories CSV for CAD Number: {order.customer_number}")
-        csv_content = workguru_logic.generate_workguru_csv(
-            int(order.customer_number),
-            cad_db_path,
-            products_db_path
-        )
+        import sqlite3 as _sqlite3
+        cad_conn = _sqlite3.connect(cad_db_path)
+        try:
+            csv_content = workguru_logic.generate_workguru_csv(
+                int(order.customer_number),
+                cad_conn,
+                products_db_path
+            )
+        finally:
+            cad_conn.close()
         
         if not csv_content or csv_content.strip() == '':
             messages.warning(request, f'No accessory data found for CAD Number {order.customer_number}.')
@@ -9907,16 +10292,27 @@ def delete_expense(request, expense_id):
 @login_required
 def timesheets(request):
     """Page to manage timesheets and factory worker rates"""
-    from .models import FactoryWorker, Fitter, Timesheet
+    from .models import FactoryWorker, Fitter, Timesheet, FitAppointment
     
     factory_workers = FactoryWorker.objects.all().order_by('display_order', 'name')
     fitters = Fitter.objects.all().order_by('name')
     timesheets = Timesheet.objects.all().select_related('order', 'fitter', 'factory_worker').order_by('-date', '-created_at')[:100]
-    
+
+    # Build mapping: FitAppointment char code → Fitter model id
+    fitter_char_map = {}
+    fitter_id_to_char = {}
+    for code, name in FitAppointment.FITTER_CHOICES:
+        fitter = Fitter.objects.filter(name__istartswith=name, active=True).first()
+        if fitter:
+            fitter_char_map[code] = fitter.id
+            fitter_id_to_char[str(fitter.id)] = code
+
     return render(request, 'stock_take/timesheets.html', {
         'factory_workers': factory_workers,
         'fitters': fitters,
         'timesheets': timesheets,
+        'fitter_char_map': fitter_char_map,
+        'fitter_id_to_char': fitter_id_to_char,
     })
 
 
@@ -10112,6 +10508,67 @@ def get_week_timesheets(request):
             'task_type':   task_type,
             'start_slot':  start_slot,
             'span_len':    span_len,
+        })
+
+    return JsonResponse({'success': True, 'entries': result})
+
+
+@require_http_methods(["GET"])
+@login_required
+def get_week_fit_appointments(request):
+    """Return FitAppointments for a given week, mapped to Fitter model IDs."""
+    from datetime import date as date_type, timedelta
+    from .models import FitAppointment, Fitter
+
+    week_start_str = request.GET.get('week_start')
+    if not week_start_str:
+        return JsonResponse({'success': False, 'error': 'week_start required'}, status=400)
+    try:
+        week_start = date_type.fromisoformat(week_start_str)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
+
+    week_end = week_start + timedelta(days=5)  # Mon-Sat
+
+    # Build mapping from FitAppointment char code → Fitter model id
+    fitter_map = {}
+    for code, name in FitAppointment.FITTER_CHOICES:
+        fitter = Fitter.objects.filter(name__istartswith=name, active=True).first()
+        if fitter:
+            fitter_map[code] = fitter.id
+
+    appointments = FitAppointment.objects.filter(
+        fit_date__gte=week_start,
+        fit_date__lte=week_end,
+    ).select_related('order', 'remedial')
+
+    result = []
+    for appt in appointments:
+        fitter_id = fitter_map.get(appt.fitter)
+        if not fitter_id:
+            continue
+        day_index = (appt.fit_date - week_start).days
+        if day_index < 0 or day_index > 5:
+            continue
+
+        customer_name = appt.customer_name
+        sale_number = ''
+        order_id = None
+        if appt.order:
+            sale_number = appt.order.sale_number or ''
+            order_id = appt.order.id
+        elif appt.remedial:
+            sale_number = appt.remedial.remedial_number or ''
+
+        label = f"{sale_number} - {customer_name}" if sale_number else customer_name
+
+        result.append({
+            'appointment_id': appt.id,
+            'worker_id': fitter_id,
+            'day_index': day_index,
+            'order_id': str(order_id) if order_id else 'GENERAL',
+            'order_label': label,
+            'fitter_char': appt.fitter,
         })
 
     return JsonResponse({'success': True, 'entries': result})

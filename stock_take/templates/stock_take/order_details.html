@@ -1880,55 +1880,32 @@
 
                 <!-- Parsed result preview -->
                 <div id="osd-parse-result" class="hidden">
-                    <h4 style="margin-bottom: 0.5rem;">Parsed Result</h4>
-                    <form method="POST" id="osd-parsed-form">
-                        {% csrf_token %}
-                        <div class="form-grid-2col">
-                            <div class="form-group">
-                                <label for="osd-parsed-door-style">Door Style</label>
-                                <input type="text" class="form-input" id="osd-parsed-door-style" name="door_style" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-style-colour">Style Colour</label>
-                                <input type="text" class="form-input" id="osd-parsed-style-colour" name="style_colour" required>
-                            </div>
-                            <div class="form-group form-group-span-2">
-                                <label for="osd-parsed-description">Item Description</label>
-                                <textarea class="form-input" id="osd-parsed-description" name="item_description" rows="2" required></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-height">Height (mm)</label>
-                                <input type="number" class="form-input" id="osd-parsed-height" name="height" step="0.01" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-width">Width (mm)</label>
-                                <input type="number" class="form-input" id="osd-parsed-width" name="width" step="0.01" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-colour">Colour</label>
-                                <input type="text" class="form-input" id="osd-parsed-colour" name="colour" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-quantity">Quantity</label>
-                                <input type="number" class="form-input" id="osd-parsed-quantity" name="quantity" min="1" value="1" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-cost-price">Cost Price (£)</label>
-                                <input type="number" class="form-input" id="osd-parsed-cost-price" name="cost_price" step="0.01" min="0" value="0">
-                            </div>
-                            <div class="form-group">
-                                <label for="osd-parsed-total-price">Total Price (£)</label>
-                                <input type="number" class="form-input" id="osd-parsed-total-price" step="0.01" min="0" value="0" disabled 
-                                       style="background: var(--bg-tertiary); color: var(--text-secondary);">
-                            </div>
-                        </div>
-                    </form>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                        <h4 style="margin:0;" id="osd-parse-count">0 doors found</h4>
+                        <small class="form-help" style="margin:0;">Edit Qty or Cost Price inline if needed.</small>
+                    </div>
+                    <div style="overflow-x:auto; max-height:340px; overflow-y:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                            <thead>
+                                <tr style="border-bottom:2px solid var(--border-color); white-space:nowrap;">
+                                    <th style="padding:6px 8px; text-align:left;">Door Style</th>
+                                    <th style="padding:6px 8px; text-align:center;">H &times; W</th>
+                                    <th style="padding:6px 8px; text-align:left;">Colour</th>
+                                    <th style="padding:6px 8px; text-align:center; width:60px;">Qty</th>
+                                    <th style="padding:6px 8px; text-align:right; width:90px;">Cost (£)</th>
+                                    <th style="padding:6px 8px; width:30px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="osd-parsed-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="osd-parse-progress" class="hidden" style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-secondary);"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('pasteOSDoorModal')">Cancel</button>
                 <button type="button" class="btn btn-success" id="osd-parsed-submit" onclick="submitParsedOSDoor()" disabled>
-                    <i class="bi bi-plus-lg"></i> Add OS Door
+                    <i class="bi bi-plus-lg"></i> <span id="osd-submit-label">Add OS Door</span>
                 </button>
             </div>
         </div>
@@ -2935,6 +2912,32 @@ function cancelJobFinished() {
 
 // Auto-dismiss alerts after 5 seconds
 document.addEventListener('DOMContentLoaded', function() {
+    // Wrap .pnx-dimension-input and .accessory-quantity elements with custom spinner buttons
+    document.querySelectorAll('.pnx-dimension-input, .accessory-quantity').forEach(function(input) {
+        const wrap = document.createElement('div');
+        wrap.className = 'pnx-spinner-wrap';
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+
+        const btns = document.createElement('div');
+        btns.className = 'pnx-spinner-btns';
+        btns.innerHTML = '<button type="button" class="pnx-spinner-btn" data-dir="1">&#x25B2;</button>'
+                       + '<button type="button" class="pnx-spinner-btn" data-dir="-1">&#x25BC;</button>';
+        wrap.appendChild(btns);
+
+        btns.querySelectorAll('.pnx-spinner-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                const step = parseInt(input.step) || 1;
+                const dir = parseInt(this.getAttribute('data-dir'));
+                const min = input.min !== '' ? parseFloat(input.min) : -Infinity;
+                let val = (parseFloat(input.value) || 0) + step * dir;
+                if (val < min) val = min;
+                input.value = val;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+        });
+    });
+
     // Calculate profit on page load
     calculateProfit();
     
@@ -3878,6 +3881,84 @@ function getKnownColours() {
     return ['Superior Matt Light Grey', 'Superior Matt White', 'Superior Matt Cashmere'];
 }
 
+// Stores all parsed OS door items for bulk submit
+let _parsedOSDoors = [];
+
+function _parseSingleOSDoorRow(cols1, cols2) {
+    // cols1 = primary row columns, cols2 = optional price continuation row
+    let doorStyle = '', styleColour = '', itemDescription = '', colour = '';
+    let height = 0, width = 0, costPrice = 0, quantity = 1;
+
+    // Detect the description column by finding the one that contains dimensions
+    // (e.g. "210 x 503" or "355X958"). This is more reliable than fixed index.
+    const dimPattern = /\b(\d{2,4})\s*[xX×]\s*(\d{2,4})\b/;
+    let descIdx = -1;
+    for (let i = 0; i < cols1.length; i++) {
+        if (dimPattern.test(cols1[i])) { descIdx = i; break; }
+    }
+
+    if (descIdx >= 0) {
+        itemDescription = cols1[descIdx];
+        const dims = extractDimensions(itemDescription);
+        height = dims.height;
+        width  = dims.width;
+
+        doorStyle    = cols1[0] || '';
+        // Style colour is the column immediately before the description
+        styleColour  = descIdx >= 2 ? deduplicateColour(cols1[descIdx - 1])
+                                    : deduplicateColour(cols1[0]);
+        // Colour is the column immediately after the description
+        colour       = descIdx + 1 < cols1.length ? deduplicateColour(cols1[descIdx + 1]) : '';
+
+        if (cols2) {
+            // Continuation row format: £halfPrice  [qty]  £totalPrice  [XRemove Item]
+            // Scan all cols2 cells: £ values are prices, plain integers are quantity
+            let col2Prices = [];
+            for (let j = 0; j < cols2.length; j++) {
+                const v = cols2[j];
+                if (!v || v === 'X' || /^[A-Za-z]+$/.test(v)) continue;
+                const p = extractPrice(v);
+                if (p > 0) {
+                    col2Prices.push(p);
+                } else if (/^\d+$/.test(v)) {
+                    quantity = parseInt(v);
+                }
+            }
+            if (col2Prices.length >= 1) costPrice = col2Prices[0]; // first = half/cost price
+            // Fallback: if still qty=1, also scan cols1 after description for a plain integer
+            if (quantity === 1) {
+                for (let i = descIdx + 2; i < cols1.length; i++) {
+                    if (/^\d+$/.test(cols1[i])) { quantity = parseInt(cols1[i]); break; }
+                }
+            }
+        } else {
+            let prices = [];
+            for (let i = descIdx + 1; i < cols1.length; i++) {
+                const v = cols1[i];
+                if (!v || v === 'X' || /^[A-Z]$/.test(v)) continue;
+                const p = extractPrice(v);
+                if (p > 0) prices.push(p);
+                else if (/^\d+$/.test(v)) quantity = parseInt(v);
+            }
+            if (prices.length >= 1) costPrice = prices[0];
+        }
+    } else {
+        // Fallback: no dimensions found — use positional mapping
+        doorStyle       = cols1[0] || '';
+        styleColour     = deduplicateColour(cols1[1] || '');
+        itemDescription = cols1[2] || cols1.join(' ');
+        colour          = deduplicateColour(cols1[3] || '');
+        const dims = extractDimensions(itemDescription);
+        height = dims.height; width = dims.width;
+        if (cols2) {
+            const firstNonEmpty = cols2.find(c => c.length > 0) || '';
+            costPrice = extractPrice(firstNonEmpty) || 0;
+        }
+    }
+
+    return { doorStyle, styleColour, itemDescription, colour, height, width, quantity, costPrice };
+}
+
 function parseOSDoorPaste() {
     const raw = document.getElementById('osd-paste-input').value.trim();
     if (!raw) {
@@ -3885,140 +3966,108 @@ function parseOSDoorPaste() {
         return;
     }
 
-    // Split by tab characters, keep empty entries to preserve column positions
-    const rawCols = raw.split('\t').map(c => c.trim());
-    // Strip leading empty columns
-    const cols = rawCols.slice(rawCols.findIndex(c => c.length > 0));
+    // Split into non-empty lines
+    const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    _parsedOSDoors = [];
 
-    let doorStyle = '';
-    let styleColour = '';
-    let itemDescription = '';
-    let colour = '';
-    let height = 0;
-    let width = 0;
-    let costPrice = 0;
-    let quantity = 1;
-    let totalPrice = 0;
+    let i = 0;
+    while (i < lines.length) {
+        const cols1 = lines[i].split('\t').map(c => c.trim());
+        // Strip leading empty columns
+        const firstNonEmpty = cols1.findIndex(c => c.length > 0);
+        const trimmedCols1 = firstNonEmpty >= 0 ? cols1.slice(firstNonEmpty) : cols1;
 
-    const knownStyles = getKnownStyles();
-    const knownColours = getKnownColours();
-
-    // ── Strategy: tab-separated columns ──
-    // Expected layout after stripping leading empties:
-    //   [0] Door Style        e.g. "Morris"
-    //   [1] Style Colour      e.g. "Superior Matt Light Grey Superior Matt Light Grey"
-    //   [2] Item Description  e.g. "Morris Superior Matt Light Grey Drawer 210 x 960 (MTM)"
-    //   [3] Colour            e.g. "Light Grey Light Grey"
-    //   [4] Handing           e.g. "H"  (ignored)
-    //   [5] Unit Price        e.g. "£18.29"
-    //   [6] Quantity          e.g. "2"
-    //   [7] Total Price       e.g. "£36.58"
-
-    if (cols.length >= 4) {
-        // Column 0 → Door Style
-        doorStyle = cols[0];
-
-        // Column 1 → Style Colour (may be duplicated)
-        styleColour = deduplicateColour(cols[1]);
-
-        // Column 2 → Item Description
-        itemDescription = cols[2];
-
-        // Column 3 → Colour (may be duplicated)
-        colour = deduplicateColour(cols[3]);
-
-        // Extract dimensions from description
-        const dims = extractDimensions(itemDescription);
-        height = dims.height;
-        width = dims.width;
-
-        // Scan remaining columns for price, quantity, total
-        // Strategy: find £ values and pure numbers
-        let pricesFound = [];
-        let numbersFound = [];
-
-        for (let i = 4; i < cols.length; i++) {
-            const val = cols[i];
-            // Skip handing indicators (single letter)
-            if (/^[A-Z]$/.test(val)) continue;
-            // Skip X buttons, empty strings
-            if (val === 'X' || val === '') continue;
-
-            const price = extractPrice(val);
-            if (price > 0) {
-                pricesFound.push({ index: i, value: price });
-            } else if (/^\d+$/.test(val)) {
-                numbersFound.push({ index: i, value: parseInt(val) });
-            }
+        // Skip lines that are clearly price-only continuation rows
+        // (starts with a £ price and has no description-like text in first col)
+        if (extractPrice(trimmedCols1[0]) > 0 && trimmedCols1.length <= 5) {
+            i++;
+            continue;
         }
 
-        // Assign: first price = unit cost, pure number = quantity, second price = total
-        if (pricesFound.length >= 1) costPrice = pricesFound[0].value;
-        if (numbersFound.length >= 1) quantity = numbersFound[0].value;
-        if (pricesFound.length >= 2) {
-            totalPrice = pricesFound[pricesFound.length - 1].value;
+        // Check if next line is a price continuation row
+        // (first non-empty token is a £ price)
+        let cols2 = null;
+        if (i + 1 < lines.length) {
+            const nextCols = lines[i + 1].split('\t').map(c => c.trim());
+            const nextFirst = nextCols.find(c => c.length > 0) || '';
+            if (extractPrice(nextFirst) > 0) {
+                cols2 = nextCols;
+                i += 2;  // consume both lines
+            } else {
+                i += 1;
+            }
         } else {
-            totalPrice = costPrice * quantity;
-        }
-    } else {
-        // Fallback: try to parse the whole string
-        for (const style of knownStyles) {
-            if (raw.includes(style)) {
-                doorStyle = style;
-                break;
-            }
+            i += 1;
         }
 
-        for (const c of knownColours) {
-            if (raw.includes(c)) {
-                styleColour = c;
-                const parts = c.split(' ');
-                colour = parts.slice(-2).join(' ');
-                break;
-            }
-        }
-
-        const dims = extractDimensions(raw);
-        height = dims.height;
-        width = dims.width;
-        costPrice = extractPrice(raw);
-        totalPrice = costPrice;
-        itemDescription = raw;
+        if (trimmedCols1.length < 2) continue;
+        const item = _parseSingleOSDoorRow(trimmedCols1, cols2);
+        if (!item.itemDescription) continue;
+        _parsedOSDoors.push(item);
     }
 
-    // Populate the parsed form
-    document.getElementById('osd-parsed-door-style').value = doorStyle;
-    document.getElementById('osd-parsed-style-colour').value = styleColour;
-    document.getElementById('osd-parsed-description').value = itemDescription;
-    document.getElementById('osd-parsed-height').value = height || '';
-    document.getElementById('osd-parsed-width').value = width || '';
-    document.getElementById('osd-parsed-colour').value = colour;
-    document.getElementById('osd-parsed-quantity').value = quantity;
-    document.getElementById('osd-parsed-cost-price').value = costPrice || '';
-    document.getElementById('osd-parsed-total-price').value = totalPrice ? totalPrice.toFixed(2) : '';
+    if (_parsedOSDoors.length === 0) {
+        showAlert('Could not parse any door items — check the format.', 'warning');
+        return;
+    }
+    renderParsedTable();
+}
 
-    // Recalculate total when qty or cost changes
-    updateParsedTotal();
+function renderParsedTable() {
+    const tbody = document.getElementById('osd-parsed-tbody');
+    tbody.innerHTML = '';
+    const items = _parsedOSDoors
+        .map(function(item, realIdx) { return { item: item, realIdx: realIdx }; })
+        .filter(function(x) { return x.item !== null; });
 
-    // Show result and enable submit
+    items.forEach(function(x) {
+        const item = x.item;
+        const realIdx = x.realIdx;
+
+        // Row 1: Door Style | H×W | Colour | Qty | Cost | ✕ (rowspan 2)
+        const tr1 = document.createElement('tr');
+        tr1.style.borderTop = '1px solid var(--border-color)';
+        tr1.innerHTML =
+            '<td style="padding:5px 8px; white-space:nowrap; font-weight:500;">' + _esc(item.doorStyle) + '</td>' +
+            '<td style="padding:5px 8px; white-space:nowrap; text-align:center;">' + (item.height||'?') + ' &times; ' + (item.width||'?') + '</td>' +
+            '<td style="padding:5px 8px; white-space:nowrap;">' + _esc(item.colour) + '</td>' +
+            '<td style="padding:5px 8px; text-align:center;">' +
+                '<input type="number" min="1" value="' + item.quantity + '" style="width:52px; text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; padding:2px 4px; color:var(--text-primary); font-size:0.82rem;" ' +
+                'onchange="_parsedOSDoors[' + realIdx + '].quantity=parseInt(this.value)||1">' +
+            '</td>' +
+            '<td style="padding:5px 8px; text-align:right;">' +
+                '<input type="number" min="0" step="0.01" value="' + (item.costPrice ? item.costPrice.toFixed(2) : '0.00') + '" style="width:72px; text-align:right; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; padding:2px 4px; color:var(--text-primary); font-size:0.82rem;" ' +
+                'onchange="_parsedOSDoors[' + realIdx + '].costPrice=parseFloat(this.value)||0">' +
+            '</td>' +
+            '<td style="padding:5px 4px; text-align:center;" rowspan="2">' +
+                '<button type="button" title="Remove" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:1.1rem; padding:0 4px;" ' +
+                'onclick="_removeParsedRow(' + realIdx + ')">&times;</button>' +
+            '</td>';
+        tbody.appendChild(tr1);
+
+        // Row 2: Description (spans all data columns)
+        const tr2 = document.createElement('tr');
+        tr2.innerHTML =
+            '<td colspan="5" style="padding:2px 8px 7px 8px; font-size:0.76rem; color:var(--text-secondary); font-style:italic;">' +
+            _esc(item.itemDescription) + '</td>';
+        tbody.appendChild(tr2);
+    });
+
+    const count = items.length;
+    document.getElementById('osd-parse-count').textContent = count + ' door' + (count !== 1 ? 's' : '') + ' found';
+    document.getElementById('osd-submit-label').textContent = 'Add ' + count + ' Door' + (count !== 1 ? 's' : '');
     document.getElementById('osd-parse-result').classList.remove('hidden');
-    document.getElementById('osd-parsed-submit').disabled = false;
+    document.getElementById('osd-parsed-submit').disabled = (count === 0);
 }
 
-// Live total recalculation
-function updateParsedTotal() {
-    const qty = parseFloat(document.getElementById('osd-parsed-quantity').value) || 0;
-    const cost = parseFloat(document.getElementById('osd-parsed-cost-price').value) || 0;
-    document.getElementById('osd-parsed-total-price').value = (qty * cost).toFixed(2);
+function _esc(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Attach live recalc listeners after DOM load
-document.addEventListener('DOMContentLoaded', function() {
-    const qtyInput = document.getElementById('osd-parsed-quantity');
-    const costInput = document.getElementById('osd-parsed-cost-price');
-    if (qtyInput) qtyInput.addEventListener('input', updateParsedTotal);
-    if (costInput) costInput.addEventListener('input', updateParsedTotal);
-});
+function _removeParsedRow(idx) {
+    _parsedOSDoors[idx] = null;
+    renderParsedTable();
+}
 
 function deduplicateColour(str) {
     // "Superior Matt Light Grey Superior Matt Light Grey" → "Superior Matt Light Grey"
@@ -4056,53 +4105,59 @@ function extractPrice(str) {
     return 0;
 }
 
-function submitParsedOSDoor() {
-    const form = document.getElementById('osd-parsed-form');
-    const formData = new FormData(form);
+async function submitParsedOSDoor() {
+    const items = _parsedOSDoors.filter(x => x !== null);
+    if (items.length === 0) {
+        showAlert('No items to add.', 'warning');
+        return;
+    }
+
     const btn = document.getElementById('osd-parsed-submit');
-
-    // Validate required fields
-    const requiredFields = ['door_style', 'style_colour', 'item_description', 'height', 'width', 'colour', 'quantity'];
-    for (const field of requiredFields) {
-        if (!formData.get(field)) {
-            showAlert(`Please fill in the ${field.replace('_', ' ')} field.`, 'warning');
-            return;
-        }
-    }
-
-    // Show loading state
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Adding...';
-
-    // Inject the active PO number so the door is saved to the right PO
-    if (_osdActivePo) {
-        formData.append('po_number', _osdActivePo);
-    }
-
-    // Submit via fetch to the same add-door endpoint
+    const progressEl = document.getElementById('osd-parse-progress');
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
-    fetch(window.location.href, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': csrfToken
-        },
-        body: formData
-    })
-    .then(response => {
-        if (response.redirected) {
-            window.location.href = response.url;
-        } else {
-            return response.text().then(html => {
-                location.reload();
+    btn.disabled = true;
+    progressEl.classList.remove('hidden');
+
+    let added = 0;
+    let failed = 0;
+
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        progressEl.textContent = 'Adding ' + (i + 1) + ' of ' + items.length + '...';
+
+        const formData = new FormData();
+        formData.append('door_style',       item.doorStyle);
+        formData.append('style_colour',     item.styleColour);
+        formData.append('item_description', item.itemDescription);
+        formData.append('height',           item.height || 0);
+        formData.append('width',            item.width  || 0);
+        formData.append('colour',           item.colour);
+        formData.append('quantity',         item.quantity);
+        formData.append('cost_price',       item.costPrice || 0);
+        if (_osdActivePo) formData.append('po_number', _osdActivePo);
+
+        try {
+            const resp = await fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken },
+                body: formData,
+                redirect: 'follow'
             });
+            if (resp.ok || resp.redirected) {
+                added++;
+            } else {
+                failed++;
+            }
+        } catch (err) {
+            failed++;
         }
-    })
-    .catch(error => {
-        showAlert('Error adding OS Door: ' + error, 'danger');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-plus-lg"></i> Add OS Door';
-    });
+    }
+
+    if (failed > 0) {
+        showAlert('Added ' + added + ' door(s), ' + failed + ' failed. Reloading...', 'warning');
+    }
+    setTimeout(function() { location.reload(); }, 800);
 }
 
 // Track which boards PO is currently being acted on

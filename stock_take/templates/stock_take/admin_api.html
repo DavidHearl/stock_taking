@@ -23,7 +23,9 @@
         <thead>
             <tr>
                 <th>Script</th>
+                <th>Trigger</th>
                 <th>Schedule</th>
+                <th>Status</th>
                 <th>Last Run</th>
                 <th></th>
             </tr>
@@ -34,25 +36,42 @@
             onclick="toggleScript('script-{{ forloop.parentloop.counter }}-{{ forloop.counter }}')">
             <td>
                 <div class="script-name">{{ script.label }}</div>
-                <div class="script-description-inline">{{ script.description }}</div>
-                <span class="script-file-badge">{{ script.file }}</span>
+            </td>
+            <td class="col-trigger">
+                {% if script.trigger == 'automated' %}
+                    <span class="schedule-type-badge sched-auto"><i class="bi bi-clock-fill"></i> Automated</span>
+                {% elif script.trigger == 'oneoff' %}
+                    <span class="schedule-type-badge sched-oneoff"><i class="bi bi-1-circle-fill"></i> One-off</span>
+                {% elif script.trigger == 'na' %}
+                    <span class="schedule-type-badge sched-na"><i class="bi bi-slash-circle"></i> N/A</span>
+                {% else %}
+                    <span class="schedule-type-badge sched-manual"><i class="bi bi-hand-index-fill"></i> Manual</span>
+                {% endif %}
             </td>
             <td class="col-schedule">
-                <span class="script-schedule-text"><i class="bi bi-calendar3"></i> {{ script.schedule }}</span>
+                {% if script.schedule_detail %}
+                    <span class="schedule-detail-text">{{ script.schedule_detail }}</span>
+                {% else %}
+                    <span class="schedule-no-detail">—</span>
+                {% endif %}
             </td>
-            <td class="col-status">
+            <td class="col-run-status">
                 {% if script.last_log %}
                     <span class="sync-badge sync-{{ script.last_log.status }}">
                         <i class="bi bi-circle-fill" style="font-size:0.5em;"></i>
                         {{ script.last_log.get_status_display }}
                     </span>
-                    <div class="last-run-time" title="{{ script.last_log.ran_at|date:'d/m/Y H:i' }}">
-                        {{ script.last_log.ran_at|timesince }} ago
-                    </div>
                 {% elif script.log_name %}
                     <span class="sync-badge sync-never">Never run</span>
                 {% else %}
-                    <span class="script-schedule-text">—</span>
+                    <span class="last-run-time" style="opacity:0.4;">—</span>
+                {% endif %}
+            </td>
+            <td class="col-run-date">
+                {% if script.last_run_display %}
+                    <span class="last-run-time" title="{{ script.last_log.ran_at|date:'d/m/Y H:i' }}">{{ script.last_run_display }}</span>
+                {% else %}
+                    <span class="last-run-time" style="opacity:0.4;">—</span>
                 {% endif %}
             </td>
             <td class="col-expand">
@@ -60,8 +79,17 @@
             </td>
         </tr>
         <tr class="script-detail-row" id="detail-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
-            <td colspan="4">
+            <td colspan="6">
                 <div class="script-detail-content">
+
+                <ul class="detail-bullets">
+                    {% for bullet in script.bullets %}
+                    <li>{{ bullet }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="detail-meta">
+                    <span class="script-file-badge"><i class="bi bi-file-code"></i> {{ script.file }}</span>
+                </div>
 
                 {% if script.commands %}
                 <div class="commands-label">Commands</div>
@@ -144,7 +172,7 @@ function toggleScript(id) {
     const detailId = 'detail-' + id.slice('script-'.length);
     const detailRow = document.getElementById(detailId);
     if (row) row.classList.toggle('open');
-    if (detailRow) detailRow.style.display = (row && row.classList.contains('open')) ? '' : 'none';
+    if (detailRow) detailRow.style.display = (row && row.classList.contains('open')) ? 'table-row' : 'none';
 }
 
 function getTerminalForBtn(btn) {
@@ -315,7 +343,7 @@ function clearTerminal(closeBtn) {
                     if (detailContent) {
                         const detailRow = detailContent.closest('tr.script-detail-row');
                         if (detailRow) {
-                            detailRow.style.display = '';
+                            detailRow.style.display = 'table-row';
                             const rowId = detailRow.id.replace('detail-', 'script-');
                             const scriptRow = document.getElementById(rowId);
                             if (scriptRow) scriptRow.classList.add('open');

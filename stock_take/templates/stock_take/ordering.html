@@ -118,6 +118,7 @@
     background: #f59e0b;
     color: #fff;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 {% endblock %}
 
@@ -168,6 +169,10 @@
     </div>
     <button type="button" id="togglePfpBtn" class="btn btn-sm btn-outline-warning" onclick="togglePfp()" title="Toggle PFP orders">
         <i class="bi bi-clock"></i> Hide PFP
+    </button>
+    <button type="button" id="anthillOrdersBtn" class="btn btn-sm btn-outline-secondary" onclick="openAnthillOrdersModal()" title="Orders awaiting placement in Anthill" style="display:flex;align-items:center;gap:5px;white-space:nowrap;">
+        <i class="bi bi-arrow-repeat"></i>
+        {% if anthill_orders_to_place_count %}<strong>{{ anthill_orders_to_place_count }}</strong>&nbsp;to place&nbsp;&middot;&nbsp;{% endif %}Sync Anthill
     </button>
 </div>
 
@@ -485,6 +490,58 @@
             {% endfor %}
         </tbody>
     </table>
+</div>
+
+<!-- Modal: Anthill "Orders to Place" -->
+<div class="modal" id="anthillOrdersModal">
+    <div class="modal-overlay" onclick="closeModal('anthillOrdersModal')"></div>
+    <div class="modal-dialog" style="max-width:1100px;width:95%;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-clipboard-data"></i> Orders to Place (Anthill)</h3>
+                <div class="modal-header-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('anthillOrdersModal')">Close</button>
+                </div>
+            </div>
+            <div class="modal-body" style="padding:0;">
+                <!-- Error display -->
+                <div id="anthillParseError" class="alert alert-danger" style="display:none;margin:1rem;"></div>
+                
+                <!-- Results section -->
+                <div id="anthillOrdersResults">
+                    <div style="padding:.55rem 1rem;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+                        <span style="font-size:.85rem;color:var(--text-secondary);">
+                            <strong id="anthillOrdersCount">&#x2014;</strong> orders awaiting placement
+                        </span>
+                        <span id="anthillDiffSummary" style="display:none;font-size:.78rem;gap:.4rem;"></span>
+                        <span style="display:flex;align-items:center;gap:10px;font-size:.72rem;font-weight:600;letter-spacing:.03em;margin-left:1rem;">
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(16,185,129,.35);"></span> Ordered</span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(240,173,78,.35);"></span> Added</span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(220,53,69,.35);"></span> Short</span>
+                        </span>
+                        <span id="anthillSyncStatus" style="margin-left:auto;font-size:.75rem;display:flex;align-items:center;gap:5px;"></span>
+                    </div>
+                    <div style="overflow-x:auto;max-height:50vh;overflow-y:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+                            <thead>
+                                <tr style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
+                                    <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Customer</th>
+                                    <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Contract No.</th>
+                                    <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Date Sold</th>
+                                    <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Site</th>
+                                    <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Assigned To</th>
+                                    <th style="padding:8px 10px;text-align:right;border-bottom:2px solid var(--border-color);white-space:nowrap;">Value (ex VAT)</th>
+                                    <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Fit Date</th>
+                                    <th style="padding:8px 10px;text-align:center;border-bottom:2px solid var(--border-color);white-space:nowrap;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="anthillOrdersTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Modal for Creating New Boards PO -->
@@ -1639,6 +1696,403 @@
         }
     }
 
+    // ── Anthill "Orders to Place" modal ────────────────────────────────────────
+    const ANTHILL_URL = 'https://sliderobes.anthillcrm.com/n/screens/0/CAEaEgmodXB0DE3fQBGxXocD9CIgKw?f=ChUKChIITG9jYXRpb24aBy8xLzMvMS8&rf=CjwKFgoEU2FsZRIOV29ya2Zsb3dBY3Rpb24aIlBsYWNlIE9yZGVyIG9yIEFsbG9jYXRlIGZyb20gU3RvY2sKHQoOCgRTYWxlEgZTdGF0dXMQARoJQ2FuY2VsbGVk';
+
+    function setSyncStatus(state, text) {
+        const el = document.getElementById('anthillSyncStatus');
+        if (!el) return;
+        if (state === 'syncing') {
+            el.innerHTML = '<div style="width:13px;height:13px;border:2px solid var(--border-color);border-top-color:var(--primary-color);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;"></div><span style="color:var(--text-secondary);">Syncing…</span>';
+        } else if (state === 'done') {
+            el.innerHTML = `<i class="bi bi-check-circle-fill" style="color:#28a745;font-size:.9rem;"></i><span style="color:var(--text-secondary);">${escHtml(text || 'Synced')}</span>`;
+        } else if (state === 'error') {
+            el.innerHTML = `<i class="bi bi-exclamation-circle-fill" style="color:#dc3545;font-size:.9rem;"></i><span style="color:#dc3545;" title="${escHtml(text || '')}">Sync failed</span>`;
+        } else {
+            el.innerHTML = '';
+        }
+    }
+
+    function openAnthillOrdersModal() {
+        openModal('anthillOrdersModal');
+        // Use the server-rendered set (covers all tabs, not just what's visible in the DOM)
+        window._existingOrderSaleNumbers = window._allExistingSaleNumbers;
+        document.getElementById('anthillParseError').style.display = 'none';
+        document.getElementById('anthillOrdersTbody').innerHTML = '';
+        document.getElementById('anthillOrdersCount').textContent = '—';
+        const diff = document.getElementById('anthillDiffSummary');
+        if (diff) { diff.innerHTML = ''; diff.style.display = 'none'; }
+        setSyncStatus('syncing');
+        loadAnthillFromDb();
+    }
+
+    function loadAnthillFromDb() {
+        fetch('{% url "get_anthill_orders_from_db" %}', {
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.orders && data.orders.length > 0) {
+                renderAnthillOrders(data.orders, data);
+            }
+            // Always kick off a live sync in the background
+            runBackgroundSync();
+        })
+        .catch(() => runBackgroundSync());
+    }
+
+    function runBackgroundSync() {
+        setSyncStatus('syncing');
+        const errorEl = document.getElementById('anthillParseError');
+        fetch('{% url "scrape_anthill_orders_to_place" %}', {
+            method: 'GET',
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.orders) {
+                renderAnthillOrders(data.orders, data);
+                const now = new Date();
+                setSyncStatus('done', 'Synced at ' + now.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}));
+                const btn = document.getElementById('anthillOrdersBtn');
+                if (btn && data.count != null) {
+                    btn.innerHTML = `<i class="bi bi-arrow-repeat"></i> <strong>${data.count}</strong>&nbsp;to place&nbsp;&middot;&nbsp;Sync Anthill`;
+                }
+            } else {
+                setSyncStatus('error', data.error || 'Unknown error');
+                let errHtml = `<strong>${escHtml(data.error || 'Sync failed')}</strong>`;
+                if (data.diag) {
+                    errHtml += `<br><br><a href="${ANTHILL_URL}" target="_blank" class="btn btn-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> Open Anthill in New Tab</a>`;
+                }
+                errorEl.innerHTML = errHtml;
+                errorEl.className = 'alert alert-danger';
+                errorEl.style.display = 'block';
+            }
+        })
+        .catch(err => setSyncStatus('error', err.toString()));
+    }
+
+    function parseAnthillHtml() {
+        const html = document.getElementById('anthillHtmlInput').value.trim();
+        const errorEl = document.getElementById('anthillParseError');
+        const resultsEl = document.getElementById('anthillOrdersResults');
+        const tbody = document.getElementById('anthillOrdersTbody');
+
+        errorEl.style.display = 'none';
+        resultsEl.style.display = 'none';
+        tbody.innerHTML = '';
+
+        if (!html) {
+            errorEl.textContent = 'Please paste the HTML first.';
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        // Parse HTML using DOMParser
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const table = doc.querySelector('table.sortable') || doc.querySelector('table');
+        if (!table) {
+            errorEl.textContent = 'No <table> found in the pasted HTML. Make sure you copied the <div class="data">...</div> element.';
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        const rows = table.querySelectorAll('tbody tr');
+        if (rows.length === 0) {
+            errorEl.textContent = 'Table found but no data rows in <tbody>. Check your paste.';
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        // Column indices (0-based):
+        // 0=Customer, 1=Contract, 2=Date Sold, 3=Address, 4=Postcode,
+        // 5=Site, 6=Assigned To, 7=Type, 8=Total Payments, 9=Total Value Ex VAT,
+        // 10=Margin, 11=Profit, 12=System No., 13=Last Updated,
+        // 14=Workflow Status, 15=Workflow Action, 16=Workflow Due Date,
+        // 17=Progress, 18=Fit Date
+        const orders = [];
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 6) return;
+            const getText = (idx) => cells[idx]?.textContent?.trim() || '';
+            const customer = getText(0);
+            if (customer.toLowerCase() === 'total') return;
+            const link = cells[0]?.querySelector('a');
+            let orderUrl = link?.getAttribute('href') || '';
+            if (orderUrl && !orderUrl.startsWith('http')) {
+                orderUrl = 'https://sliderobes.anthillcrm.com' + orderUrl;
+            }
+            const contract = getText(1);
+            const dateSold = getText(2);
+            const address = getText(3);
+            const postcode = getText(4);
+            const site = getText(5);
+            const assignedTo = getText(6);
+            const totalValue = getText(9);
+            const workflowStatusSpan = cells[14]?.querySelector('.overdue, .action-status-icon');
+            const workflowStatus = workflowStatusSpan ? workflowStatusSpan.textContent.trim() : getText(14);
+            const workflowDue = getText(16);
+            const fitDate = getText(18);
+            orders.push({
+                customer, contract, dateSold, address: address + (postcode ? ', ' + postcode : ''),
+                site, assignedTo, totalValue, workflowStatus, workflowDue, fitDate, orderUrl
+            });
+        });
+
+        if (orders.length === 0) {
+            errorEl.textContent = 'Parsed 0 orders. The table rows may not have the expected structure.';
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        renderAnthillOrders(orders, null);
+    }
+
+    function renderAnthillOrders(orders, meta) {
+        const resultsEl = document.getElementById('anthillOrdersResults');
+        const tbody = document.getElementById('anthillOrdersTbody');
+        tbody.innerHTML = '';
+
+        document.getElementById('anthillOrdersCount').textContent = orders.length;
+
+        // Sort by fit date ascending (closest first), blanks at end
+        const parseFitDate = (str) => {
+            if (!str) return null;
+            // Try direct parse first (handles ISO and many formats)
+            const d = new Date(str);
+            if (!isNaN(d)) return d;
+            // Try dd/mm/yyyy
+            const parts = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+            if (parts) return new Date(parts[3], parts[2] - 1, parts[1]);
+            return null;
+        };
+        orders = orders.slice().sort((a, b) => {
+            const da = parseFitDate(a.fitDate || a.fit_date);
+            const db = parseFitDate(b.fitDate || b.fit_date);
+            if (!da && !db) return 0;
+            if (!da) return 1;
+            if (!db) return -1;
+            return da - db;
+        });
+
+        orders.forEach((o, i) => {
+            const change = o.change;
+            let rowBg;
+            if (change === 'new')          rowBg = 'background:rgba(40,167,69,.07);';
+            else if (change === 'changed') rowBg = 'background:rgba(255,193,7,.08);';
+            else                           rowBg = i % 2 === 0 ? '' : 'background:var(--bg-secondary);';
+            const changePip = change === 'new'
+                ? '<span title="New" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#28a745;margin-right:5px;flex-shrink:0;"></span>'
+                : change === 'changed'
+                ? '<span title="Changed" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ffc107;margin-right:5px;flex-shrink:0;"></span>'
+                : '';
+            const contractNum = String(o.contract || o.contract_number || '').trim();
+            // Extract just the numeric portion (e.g. 'BFS-NR-418230' -> '418230')
+            const saleNum = extractSaleNumber(contractNum);
+            const orderExists = saleNum && window._existingOrderSaleNumbers && window._existingOrderSaleNumbers.has(saleNum);
+            // Store the full order data for the create button so we can populate the form
+            const orderDataAttr = escHtml(JSON.stringify({
+                customer: o.customer || '',
+                contract: contractNum,
+                saleNum: saleNum,
+                dateSold: o.dateSold || o.date_sold || '',
+                address: o.address || '',
+                site: o.site || '',
+                assignedTo: o.assignedTo || o.assigned_to || '',
+                totalValue: o.totalValue || o.total_value || '',
+                fitDate: o.fitDate || o.fit_date || '',
+                orderUrl: o.orderUrl || o.order_url || ''
+            }));
+            const actionBtn = orderExists
+                ? `<button type="button" class="btn btn-sm btn-primary" data-sale-num="${escHtml(saleNum)}" onclick="viewOrderInTable(this.dataset.saleNum)"><i class="bi bi-eye"></i> View Order</button>`
+                : `<button type="button" class="btn btn-sm btn-success" data-order="${orderDataAttr}" onclick="createOrderFromAnthill(this)"><i class="bi bi-plus-lg"></i> Create Order</button>`;
+            const url = o.orderUrl || o.order_url || '';
+            const customerCell = url
+                ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);font-weight:600;display:flex;align-items:center;">${changePip}${escHtml(o.customer)}</a>`
+                : `<span style="font-weight:600;display:flex;align-items:center;">${changePip}${escHtml(o.customer)}</span>`;
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr style="${rowBg}" data-acc-sale="${escHtml(saleNum)}">
+                    <td style="padding:7px 10px 2px;">${customerCell}</td>
+                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.contract || o.contract_number || '')}</td>
+                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.dateSold || o.date_sold || '')}</td>
+                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.site)}</td>
+                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.assignedTo || o.assigned_to || '')}</td>
+                    <td style="padding:7px 10px 2px;text-align:right;white-space:nowrap;">${escHtml(o.totalValue || o.total_value || '')}</td>
+                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.fitDate || o.fit_date || '')}</td>
+                    <td style="padding:7px 10px 2px;text-align:center;">${actionBtn}</td>
+                </tr>
+                <tr style="${rowBg}border-bottom:1px solid var(--border-color);" data-acc-sale="${escHtml(saleNum)}">
+                    <td colspan="8" style="padding:2px 10px 7px;color:var(--text-secondary);font-size:.78rem;">
+                        ${escHtml(o.address)}
+                    </td>
+                </tr>`);
+        });
+        resultsEl.style.display = 'block';
+
+        // Fetch accessories status for orders that exist in our system
+        const matchingSaleNums = orders
+            .map(o => extractSaleNumber(String(o.contract || o.contract_number || '')))
+            .filter(sn => sn && window._existingOrderSaleNumbers && window._existingOrderSaleNumbers.has(sn));
+        if (matchingSaleNums.length > 0) {
+            fetch(`/ordering/load-indicators/?sale_numbers=${matchingSaleNums.join(',')}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+                    Object.entries(data.indicators).forEach(([sn, ind]) => {
+                        const rows = document.querySelectorAll(`[data-acc-sale="${sn}"]`);
+                        if (!rows.length) return;
+                        let bg = '';
+                        if (ind.has_short) {
+                            bg = 'rgba(220,53,69,.10)';
+                        } else if (ind.has_accessories && !ind.accessories_not_required) {
+                            if (ind.all_items_ordered || !ind.has_unordered_accessories) {
+                                bg = 'rgba(16,185,129,.10)';
+                            } else {
+                                bg = 'rgba(240,173,78,.10)';
+                            }
+                        }
+                        if (bg) {
+                            rows.forEach(r => {
+                                r.querySelectorAll('td').forEach(td => td.style.backgroundColor = bg);
+                            });
+                        }
+                    });
+                })
+                .catch(err => console.error('Error loading modal accessories:', err));
+        }
+    }
+
+    function viewOrderInTable(saleNumber) {
+        // Use numeric part for searching/scrolling
+        const numericPart = extractSaleNumber(saleNumber);
+        closeModal('anthillOrdersModal');
+        const searchInput = document.getElementById('orderSearch');
+        if (searchInput) {
+            searchInput.value = numericPart;
+            searchInput.dispatchEvent(new Event('input'));
+        }
+        const row = document.getElementById('main-' + numericPart);
+        if (row) {
+            setTimeout(function() {
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 150);
+        }
+    }
+
+    function createOrderFromAnthill(btn) {
+        const data = JSON.parse(btn.dataset.order);
+        closeModal('anthillOrdersModal');
+
+        // Populate sale number (numeric part)
+        const saleInput = document.querySelector('#add-order-form [name="sale_number"]');
+        if (saleInput) saleInput.value = data.saleNum;
+
+        // Split customer name into first/last
+        const nameParts = (data.customer || '').split(/\s+/);
+        const firstNameInput = document.querySelector('#add-order-form [name="first_name"]');
+        const lastNameInput = document.querySelector('#add-order-form [name="last_name"]');
+        if (firstNameInput && nameParts.length > 0) firstNameInput.value = nameParts[0];
+        if (lastNameInput && nameParts.length > 1) lastNameInput.value = nameParts.slice(1).join(' ');
+
+        // Address — may include postcode at the end
+        const addressInput = document.querySelector('#add-order-form [name="address"]');
+        if (addressInput && data.address) {
+            // Try to split trailing postcode (UK pattern)
+            const pcMatch = data.address.match(/,\s*([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$/i);
+            if (pcMatch) {
+                addressInput.value = data.address.slice(0, pcMatch.index).trim();
+                const postcodeInput = document.querySelector('#add-order-form [name="postcode"]');
+                if (postcodeInput) postcodeInput.value = pcMatch[1].trim();
+            } else {
+                addressInput.value = data.address;
+            }
+        }
+
+        // Fit date — parse and set as YYYY-MM-DD for the date input
+        const fitDateInput = document.querySelector('#add-order-form [name="fit_date"]');
+        if (fitDateInput && data.fitDate) {
+            const fd = parseDateForInput(data.fitDate);
+            if (fd) fitDateInput.value = fd;
+        }
+
+        // Order date (date sold)
+        const orderDateInput = document.querySelector('#add-order-form [name="order_date"]');
+        if (orderDateInput && data.dateSold) {
+            const od = parseDateForInput(data.dateSold);
+            if (od) orderDateInput.value = od;
+        }
+
+        // Sale value (total value ex VAT) — add 20% VAT for the inc VAT field
+        const valueInput = document.querySelector('#add-order-form [name="total_value_inc_vat"]');
+        if (valueInput && data.totalValue) {
+            const numVal = parseFloat(data.totalValue.replace(/[^\d.\-]/g, ''));
+            if (!isNaN(numVal)) {
+                valueInput.value = (numVal * 1.2).toFixed(2);
+            }
+        }
+
+        // Designer (assigned to) — try to select in dropdown
+        const designerSelect = document.querySelector('#add-order-form [name="designer"]');
+        if (designerSelect && data.assignedTo) {
+            const assignedLower = data.assignedTo.toLowerCase();
+            for (const opt of designerSelect.options) {
+                if (opt.text.toLowerCase() === assignedLower) {
+                    designerSelect.value = opt.value;
+                    break;
+                }
+            }
+        }
+
+        openModal('addOrderModal');
+    }
+
+    // Extract just the numeric sale number from a contract string like 'BFS-NR-418230'
+    function extractSaleNumber(str) {
+        if (!str) return '';
+        // If it's already purely digits, return as-is
+        if (/^\d+$/.test(str.trim())) return str.trim();
+        // Otherwise grab the last sequence of digits (the meaningful ID)
+        const m = str.match(/(\d+)(?!.*\d)/);
+        return m ? m[1] : str.trim();
+    }
+
+    // Parse various date formats into YYYY-MM-DD for <input type="date">
+    function parseDateForInput(str) {
+        if (!str) return null;
+        // Try dd/mm/yyyy or dd-mm-yyyy
+        const parts = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        if (parts) {
+            const d = parts[1].padStart(2, '0');
+            const m = parts[2].padStart(2, '0');
+            return `${parts[3]}-${m}-${d}`;
+        }
+        // Try "16 Mar 2026" style
+        const d2 = new Date(str);
+        if (!isNaN(d2)) {
+            return d2.toISOString().split('T')[0];
+        }
+        return null;
+    }
+
+    function escHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
 </script>
 
+{% endblock %}
+
+{% block extra_js %}
+{{ all_existing_sale_numbers|json_script:"existing-sale-numbers" }}
+<script>
+// All sale numbers from the database — server-rendered, covers all tabs/order types
+window._allExistingSaleNumbers = new Set(
+    JSON.parse(document.getElementById('existing-sale-numbers').textContent).map(n => String(n).trim())
+);
+</script>
 {% endblock %}

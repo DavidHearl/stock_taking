@@ -285,6 +285,41 @@ class AnthillPayment(models.Model):
         verbose_name_plural = 'Anthill Payments'
 
 
+class AnthillOrderToPlace(models.Model):
+    """
+    A row from the Anthill 'Place Order or Allocate from Stock' workflow screen.
+    Scraped periodically; used to detect new/removed/changed entries over time.
+    """
+    # Unique identifier — contract number is stable across scrapes
+    contract_number = models.CharField(max_length=100, unique=True, db_index=True)
+
+    customer = models.CharField(max_length=255, blank=True)
+    date_sold = models.CharField(max_length=50, blank=True)
+    address = models.CharField(max_length=500, blank=True)
+    site = models.CharField(max_length=100, blank=True)
+    assigned_to = models.CharField(max_length=150, blank=True)
+    total_value = models.CharField(max_length=50, blank=True)
+    workflow_status = models.CharField(max_length=100, blank=True)
+    fit_date = models.CharField(max_length=50, blank=True)
+    order_url = models.URLField(max_length=1000, blank=True)
+
+    # Track when this order was first seen and last seen on the list
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    # Set to True once the order has been placed/resolved and disappears from Anthill
+    resolved = models.BooleanField(default=False)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f'{self.contract_number} — {self.customer}'
+
+    class Meta:
+        ordering = ['date_sold']
+        verbose_name = 'Anthill Order to Place'
+        verbose_name_plural = 'Anthill Orders to Place'
+
+
 class Designer(models.Model):
     """Designer model to store designer information"""
     name = models.CharField(max_length=100, unique=True)
@@ -2146,6 +2181,7 @@ class ActivityLog(models.Model):
     """Audit trail of user actions across the application."""
 
     EVENT_CHOICES = [
+        ('page_action',        'Page Action'),
         ('job_finished',       'Job Marked as Finished'),
         ('job_unfinished',     'Job Marked as Unfinished'),
         ('order_created',      'Order Created'),
@@ -2183,7 +2219,7 @@ class ActivityLog(models.Model):
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M')}] {actor}: {self.get_event_type_display()}"
 
 
-def log_activity(user, event_type, description, order=None, extra_data=None):
+def log_activity(user, event_type, description, order=None, extra_data=None, request=None):
     """Helper – create an ActivityLog entry. Safe to call from any view."""
     try:
         ActivityLog.objects.create(
@@ -2193,6 +2229,8 @@ def log_activity(user, event_type, description, order=None, extra_data=None):
             order=order,
             extra_data=extra_data or {},
         )
+        if request is not None:
+            request._activity_logged = True
     except Exception:
         pass  # Never let logging break the main request
 

@@ -763,6 +763,24 @@ function onDrop(e){
     const newWi=parseInt(td.dataset.workerIdx);
     const newData={ ...srcData, workerIdx:newWi, is_start:true };
     writeFn(tgtW, parseInt(tgtD), tgtS, newData);
+
+    // If this was a calendar appointment, sync the fitter change back to the calendar
+    if(isFitter && srcData.is_calendar && srcData.appointment_id){
+        const newFitterChar = FITTER_ID_TO_CHAR[String(tgtW)];
+        const dayOffset = parseInt(tgtD);
+        const newDate = new Date(currentWeekStart);
+        newDate.setDate(newDate.getDate() + dayOffset);
+        const dateStr = newDate.toISOString().split('T')[0];
+        const payload = { fitter: newFitterChar, fit_date: dateStr };
+        fetch('/fit-board/move-appointment/'+srcData.appointment_id+'/', {
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},
+            body:JSON.stringify(payload)
+        }).then(r=>r.json()).then(resp=>{
+            if(!resp.success) console.warn('Failed to sync calendar appointment:', resp.error);
+        }).catch(err=>console.warn('Calendar sync error:', err));
+    }
+
     _dragSourceKey=null;
     _dragSourceIsFitter=false;
 }
@@ -770,10 +788,10 @@ function onDrop(e){
 // ── Slot click / popover ──────────────────────────────────────
 function setTaskType(type){
     document.querySelectorAll('.task-type-btn').forEach(b=>b.classList.toggle('active', b.dataset.type===type));
-    const isOrder = type==='order';
-    document.getElementById('popover-order-row').style.display = isOrder ? '' : 'none';
-    document.getElementById('popover-desc-hint').textContent   = isOrder ? '(optional)' : '';
-    if(!isOrder){
+    const showOrder = type==='order' || type==='installation';
+    document.getElementById('popover-order-row').style.display = showOrder ? '' : 'none';
+    document.getElementById('popover-desc-hint').textContent   = showOrder ? '(optional)' : '';
+    if(!showOrder){
         document.getElementById('popover-order-search').value='';
         document.getElementById('popover-order-id').value=type.toUpperCase(); // synthetic ID
     }
@@ -805,7 +823,7 @@ function onSlotClick(e){
     const dateStr=dayDate.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'});
 
     document.getElementById('popover-title').textContent=(worker?worker.name.split(' ')[0]:'?')+' \u00b7 '+dateStr+' \u00b7 '+slot;
-    if(existType==='order'){
+    if(existType==='order' || existType==='installation'){
         document.getElementById('popover-order-search').value = existing ? existing.order_label : '';
         document.getElementById('popover-order-id').value     = existing ? existing.order_id    : '';
     }
@@ -839,9 +857,10 @@ function onSlotClick(e){
     document.getElementById('popover-backdrop').style.display='block';
 
     const rect=td.getBoundingClientRect(), pW=320, pH=380;
-    let left=rect.left+window.scrollX, top=rect.bottom+window.scrollY+6;
+    let left=rect.left, top=rect.bottom+6;
     if(left+pW>window.innerWidth-12) left=window.innerWidth-pW-12;
-    if(top+pH>window.innerHeight+window.scrollY-12) top=rect.top+window.scrollY-pH-6;
+    if(top+pH>window.innerHeight-12) top=rect.top-pH-6;
+    if(top<8) top=8;
     popover.style.left=left+'px'; popover.style.top=top+'px';
 
     if(existType==='order') document.getElementById('popover-order-search').focus();
@@ -865,6 +884,16 @@ function assignSlot(){
         orderId    = document.getElementById('popover-order-id').value;
         orderLabel = document.getElementById('popover-order-search').value.trim();
         if(!orderId||!orderLabel){ alert('Please select an order'); return; }
+    } else if(activeType==='installation'){
+        orderId    = document.getElementById('popover-order-id').value;
+        orderLabel = document.getElementById('popover-order-search').value.trim();
+        if(orderId && orderLabel){
+            // Installation linked to a specific order
+            orderLabel = 'Installation: ' + orderLabel;
+        } else {
+            orderId    = 'INSTALLATION';
+            orderLabel = desc ? 'Installation: '+desc : 'Installation';
+        }
     } else {
         const typeLabels = { delivery:'Delivery', general:'General', installation:'Installation' };
         const typeLabel  = typeLabels[activeType] || 'General';
@@ -1120,9 +1149,10 @@ function renderFitterSpan(wid, di, startSlot, data){
         if(isStart){
             const pill=document.createElement('span');
             const isMulti=spanSlots.length>1;
-            pill.className=`slot-pill fitter-pill-${wi}`+(isMulti?' pill-span':'');
+            const isCalendar=!!data.is_calendar;
+            pill.className=`slot-pill fitter-pill-${wi}`+(isMulti?' pill-span':'')+(isCalendar?' calendar-pill':'');
             const fullLabel=data.order_label+(data.description?' \u2014 '+data.description:'');
-            pill.title=fullLabel;
+            pill.title=isCalendar ? '\uD83D\uDCC5 '+fullLabel : fullLabel;
             if(isMulti){
                 const roughW=spanSlots.length*57-8;
                 pill.style.cssText=`position:absolute; top:4px; bottom:4px; left:4px; width:${roughW}px; max-width:none; z-index:3; box-sizing:border-box; border-radius:4px;`;
@@ -1217,11 +1247,15 @@ function clearAllFitterAssignments(){
 function loadFitterTimesheets(){
     clearAllFitterAssignments();
     const weekStart=currentWeekStart.toISOString().split('T')[0];
-    fetch('/api/get-week-fitter-timesheets/?week_start='+weekStart)
-        .then(r=>r.json())
-        .then(data=>{
-            if(!data.success)return;
-            data.entries.forEach(e=>{
+
+    // Load both existing timesheets AND calendar fit-appointments
+    Promise.all([
+        fetch('/api/get-week-fitter-timesheets/?week_start='+weekStart).then(r=>r.json()),
+        fetch('/api/get-week-fit-appointments/?week_start='+weekStart).then(r=>r.json()),
+    ]).then(([tsData, apptData])=>{
+        // Render saved timesheets
+        if(tsData.success){
+            tsData.entries.forEach(e=>{
                 const fitter=FITTERS.find(f=>String(f.id)===String(e.worker_id));
                 if(!fitter)return;
                 const wi=FITTERS.indexOf(fitter);
@@ -1232,17 +1266,35 @@ function loadFitterTimesheets(){
                       workerIdx:wi, span_len:e.span_len, is_start:true }
                 );
             });
-        })
-        .catch(err=>console.warn('Failed to load fitter timesheets:', err));
+        }
+        // Render calendar appointments as full-day entries
+        if(apptData.success){
+            apptData.entries.forEach(e=>{
+                if(e.day_index > 4) return; // skip Saturday
+                const fitter=FITTERS.find(f=>String(f.id)===String(e.worker_id));
+                if(!fitter)return;
+                const wi=FITTERS.indexOf(fitter);
+                writeFitterAssignment(
+                    String(e.worker_id), e.day_index, '07:30',
+                    { order_id:e.order_id, order_label:e.order_label,
+                      description:'', task_type:'installation',
+                      workerIdx:wi, span_len:16, is_start:true,
+                      is_calendar:true, appointment_id:e.appointment_id }
+                );
+            });
+        }
+    }).catch(err=>console.warn('Failed to load fitter data:', err));
 }
 
 function saveFitterWeek(){
-    if(Object.keys(fitterAssignments).length===0){alert('No fitter slots assigned yet');return;}
+    // Only count non-calendar assignments
+    const realEntries = Object.values(fitterAssignments).filter(d=>d.is_start && !d.is_calendar);
+    if(realEntries.length===0){alert('No fitter slots assigned yet');return;}
     const weekStart=currentWeekStart.toISOString().split('T')[0];
 
     const grouped={};
     Object.entries(fitterAssignments).forEach(([key,data])=>{
-        if(!data.is_start)return;
+        if(!data.is_start || data.is_calendar)return;
         const [wid,dayIdx,slot]=key.split('__');
         const gKey=`${wid}__${dayIdx}__${data.order_id}__${data.description||''}`;
         if(!grouped[gKey]) grouped[gKey]={
@@ -1286,5 +1338,11 @@ WORKERS.push({ id: {{ worker.id }}, name: "{{ worker.name|escapejs }}" });
 {% for fitter in fitters %}{% if fitter.active %}
 FITTERS.push({ id: {{ fitter.id }}, name: "{{ fitter.name|escapejs }}" });
 {% endif %}{% endfor %}
+
+// ── Fitter ID → FitAppointment char code mapping ─────────────────────────
+const FITTER_ID_TO_CHAR = {};
+{% for fid, fchar in fitter_id_to_char.items %}
+FITTER_ID_TO_CHAR["{{ fid }}"] = "{{ fchar }}";
+{% endfor %}
 </script>
 {% endblock %}

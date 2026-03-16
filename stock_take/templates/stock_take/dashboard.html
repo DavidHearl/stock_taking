@@ -149,12 +149,49 @@
         </div>
     </div>
 
-    <!-- Pending Purchase Orders (lower priority) -->
-    <div class="dashboard-grid dashboard-grid-1">
+    <!-- Pending Purchase Orders + Item Shortages -->
+    <div class="dashboard-grid dashboard-grid-2">
         <div class="dashboard-card accent-warning">
             <div class="card-label"><i class="bi bi-receipt" style="color:#f0ad4e;"></i> Pending Purchase Orders</div>
             <div class="card-value">{{ pending_pos_count }}</div>
             <div class="card-subtext">Approved and awaiting arrival</div>
+        </div>
+        <div class="dashboard-card {% if shortage_count > 0 %}accent-danger{% else %}accent-success{% endif %}">
+            <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}#dc3545{% else %}#28a745{% endif %};"></i> Item Shortages</div>
+            <div class="card-value">{{ shortage_count }}</div>
+            <div class="card-subtext">Items below par level</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openShortagesModal()">View All</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Item Shortages Modal -->
+<div id="shortagesModal" style="display:none; position:fixed; inset:0; z-index:1050; background:rgba(0,0,0,0.6);" onclick="if(event.target===this)closeShortagesModal()">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; width:min(800px,95vw); max-height:80vh; display:flex; flex-direction:column; margin:auto; margin-top:clamp(40px,8vh,100px); overflow:hidden;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border-color);">
+            <h3 style="margin:0; font-size:1rem; font-weight:700;"><i class="bi bi-exclamation-circle" style="color:#dc3545; margin-right:6px;"></i>Item Shortages</h3>
+            <button onclick="closeShortagesModal()" style="background:none; border:none; font-size:1.2rem; color:var(--text-muted); cursor:pointer;">&times;</button>
+        </div>
+        <div id="shortagesModalBody" style="overflow-y:auto; padding:16px 20px; flex:1;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.83rem;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border-color);">
+                        <th style="text-align:left; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">SKU</th>
+                        <th style="text-align:left; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em;">Name</th>
+                        <th style="text-align:right; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">In Stock</th>
+                        <th style="text-align:right; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">Par Level</th>
+                        <th style="text-align:right; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">Short By</th>
+                    </tr>
+                </thead>
+                <tbody id="shortagesTableBody"></tbody>
+            </table>
+            <div id="shortagesEmptyMsg" style="display:none; text-align:center; padding:40px 20px; color:var(--text-muted);"><i class="bi bi-check-circle" style="font-size:2rem; display:block; margin-bottom:8px; color:#28a745;"></i>All items are above par level.</div>
+        </div>
+        <div style="padding:12px 20px; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end; gap:8px;">
+            <a href="{% url 'stock_list' %}" class="card-action-btn" style="text-decoration:none;">Go to Stock List</a>
+            <button onclick="closeShortagesModal()" style="padding:6px 16px; background:none; border:1px solid var(--border-color); border-radius:6px; color:var(--text-secondary); cursor:pointer; font-size:0.83rem;">Close</button>
         </div>
     </div>
 </div>
@@ -1686,6 +1723,49 @@ function openAvgReport() {
             body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
         });
 }
+</script>
+
+<script>
+const _shortagesData = {{ shortage_items_json|safe }};
+
+function openShortagesModal() {
+    const modal = document.getElementById('shortagesModal');
+    const tbody = document.getElementById('shortagesTableBody');
+    const emptyMsg = document.getElementById('shortagesEmptyMsg');
+    const table = tbody.closest('table');
+
+    tbody.innerHTML = '';
+    if (!_shortagesData || _shortagesData.length === 0) {
+        table.style.display = 'none';
+        emptyMsg.style.display = 'block';
+    } else {
+        table.style.display = '';
+        emptyMsg.style.display = 'none';
+        _shortagesData.forEach(function(item) {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+            tr.innerHTML =
+                '<td style="padding:7px 10px; white-space:nowrap; color:var(--text-muted); font-size:0.78rem;">' + (item.sku || '—') + '</td>' +
+                '<td style="padding:7px 10px;">' + item.name + '</td>' +
+                '<td style="padding:7px 10px; text-align:right; font-weight:600; color:#dc3545;">' + item.quantity + '</td>' +
+                '<td style="padding:7px 10px; text-align:right; color:var(--text-muted);">' + item.par_level + '</td>' +
+                '<td style="padding:7px 10px; text-align:right; color:#f0ad4e; font-weight:600;">' + item.shortfall + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'flex-start';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeShortagesModal() {
+    document.getElementById('shortagesModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeShortagesModal();
+});
 </script>
 
 {% endblock %}

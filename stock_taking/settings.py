@@ -72,6 +72,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'stock_take.middleware.RolePermissionMiddleware',
+    'stock_take.middleware.ActivityLoggingMiddleware',
 ]
 
 # Add debug toolbar middleware if available

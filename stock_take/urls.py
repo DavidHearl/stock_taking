@@ -187,6 +187,8 @@ urlpatterns = [
     path('ordering/', views.ordering, name='ordering'),
     path('ordering/load-order-details/<str:sale_number>/', views.load_order_details_ajax, name='load_order_details_ajax'),
     path('ordering/load-indicators/', views.load_order_indicators_ajax, name='load_order_indicators_ajax'),
+    path('ordering/scrape-anthill-orders/', views.scrape_anthill_orders_to_place, name='scrape_anthill_orders_to_place'),
+    path('ordering/anthill-orders-db/', views.get_anthill_orders_from_db, name='get_anthill_orders_from_db'),
     path('search-customers/', views.search_customers, name='search_customers'),
     path('add-designer/', views.add_designer, name='add_designer'),
     path('search/', views.search_orders, name='search_orders'),
@@ -343,6 +345,7 @@ urlpatterns = [
     path('api/get-week-timesheets/', views.get_week_timesheets, name='get_week_timesheets'),
     path('api/save-fitter-week/', views.save_fitter_week, name='save_fitter_week'),
     path('api/get-week-fitter-timesheets/', views.get_week_fitter_timesheets, name='get_week_fitter_timesheets'),
+    path('api/get-week-fit-appointments/', views.get_week_fit_appointments, name='get_week_fit_appointments'),
 
     # Dark mode / location toggles
     path('toggle-dark-mode/', toggle_dark_mode, name='toggle_dark_mode'),

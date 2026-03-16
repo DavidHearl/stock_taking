@@ -264,6 +264,13 @@ def purchase_order_detail(request, po_id):
     all_suppliers = list(
         Supplier.objects.order_by('name')
     )
+
+    # Staff users for the received-by dropdown
+    from django.contrib.auth.models import User as AuthUser
+    staff_users = list(
+        AuthUser.objects.filter(is_active=True)
+        .order_by('first_name', 'last_name')
+    )
     
     # Try to find a linked local Order via multiple strategies
     linked_order = None
@@ -506,6 +513,7 @@ def purchase_order_detail(request, po_id):
         'po_net_total': po_net_total,
         'po_vat_amount': po_vat_amount,
         'po_gross_total': po_gross_total,
+        'staff_users': staff_users,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)

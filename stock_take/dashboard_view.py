@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery
+from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery, F
 from django.db.models.functions import TruncWeek, TruncMonth, Coalesce
 from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
@@ -293,6 +293,27 @@ def dashboard(request):
     ).exclude(
         status__in=['Received', 'Invoiced', 'Cancelled', 'Closed']
     ).count()
+
+    # Item shortages — tracked items where quantity is below par level (par_level > 0)
+    shortage_items = (
+        StockItem.objects
+        .filter(tracking_type__in=['stock', 'non-stock'], par_level__gt=0)
+        .filter(quantity__lt=F('par_level'))
+        .only('id', 'sku', 'name', 'quantity', 'par_level', 'cost')
+        .order_by('quantity')
+    )
+    shortage_items_list = [
+        {
+            'id': s.id,
+            'sku': s.sku,
+            'name': s.name,
+            'quantity': s.quantity,
+            'par_level': s.par_level,
+            'shortfall': s.par_level - s.quantity,
+        }
+        for s in shortage_items
+    ]
+    shortage_count = len(shortage_items_list)
     
     # Total stock value — includes both 'stock' and 'non-stock' items with quantity > 0
     # Non-stock items are still physical warehouse stock and count for accounting purposes
@@ -508,6 +529,8 @@ def dashboard(request):
         'current_month_board_index': current_month_board_index,
         'current_month_sales_index': current_month_sales_index,
         'pending_pos_count': pending_pos,
+        'shortage_count': shortage_count,
+        'shortage_items_json': json.dumps(shortage_items_list),
         'total_stock_value': '{:,.0f}'.format(total_stock_value),
         'stock_item_count': '{:,}'.format(stock_item_count),
         'stock_value_7day_delta': float(stock_value_7day_delta),
