@@ -8250,8 +8250,8 @@ def update_stock_items_batch(request):
                                 quantity=new_quantity,
                                 change_amount=new_quantity - old_quantity,
                                 change_type='adjustment',
-                                reference='Stock list edit',
-                                notes=f'Changed from {old_quantity} to {new_quantity} via stock list',
+                                reference='Product list edit',
+                                notes=f'Changed from {old_quantity} to {new_quantity} via products list',
                                 created_by=request.user if request.user.is_authenticated else None,
                             )
                         else:

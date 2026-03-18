@@ -224,6 +224,35 @@ INTERNAL_IPS = [
     'localhost',
 ]
 
+# Suppress noisy __debug__ toolbar requests from the dev server log
+class SkipDebugToolbarFilter:
+    def filter(self, record):
+        msg = record.getMessage()
+        return '/__debug__/' not in msg
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'skip_debug_toolbar': {
+            '()': 'stock_taking.settings.SkipDebugToolbarFilter',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'filters': ['skip_debug_toolbar'],
+        },
+    },
+    'loggers': {
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 CSRF_TRUSTED_ORIGINS_STRING = os.environ.get('CSRF_TRUSTED_ORIGINS', '')

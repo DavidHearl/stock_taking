@@ -1903,7 +1903,7 @@ PAGE_SECTIONS = [
     ('Products & Stock', [
         ('products', 'Products'),
         ('product_details', 'Product Details'),
-        ('stock_list', 'Stock List'),
+        ('stock_list', 'Products'),
         ('stock_take', 'Stock Take'),
         ('categories', 'Categories'),
         ('substitutions', 'Substitutions'),

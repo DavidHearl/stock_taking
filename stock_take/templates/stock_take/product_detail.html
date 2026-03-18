@@ -22,6 +22,9 @@
             <div class="product-sku">{{ product.sku }}</div>
         </div>
         <div class="product-actions">
+            <button class="btn btn-sm btn-warning" onclick="openAdjustStockModal()">
+                <i class="bi bi-plus-slash-minus"></i> Adjust Stock
+            </button>
             <button class="btn btn-sm btn-primary" id="editProductBtn" onclick="toggleEditMode()">
                 <i class="bi bi-pencil"></i> Edit Product
             </button>
@@ -235,17 +238,7 @@
                 <h3>Stock Levels &amp; Location</h3>
                 <div class="info-row">
                     <div class="info-label">Current Quantity</div>
-                    <div class="info-value qty-inline-edit" data-field="quantity" data-value="{{ product.quantity }}">
-                        <span class="qty-display" id="qty-display">{{ product.quantity }}</span>
-                        <button class="btn btn-sm btn-outline-primary qty-edit-btn" onclick="showQtyEdit()" title="Edit quantity">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <div class="qty-edit-controls" id="qty-edit-controls" style="display: none;">
-                            <input type="number" class="form-input qty-edit-input" id="qty-edit-input" value="{{ product.quantity }}" step="1" min="0">
-                            <button class="btn btn-sm btn-success" onclick="saveQuickQty()" title="Save"><i class="bi bi-check-lg"></i></button>
-                            <button class="btn btn-sm btn-secondary" onclick="cancelQtyEdit()" title="Cancel"><i class="bi bi-x-lg"></i></button>
-                        </div>
-                    </div>
+                    <div class="info-value" style="font-weight: 600; font-size: 1.1rem;" id="qty-display">{{ product.quantity }}</div>
                 </div>
                 <div class="info-row">
                     <div class="info-label">Allocated to Jobs</div>
@@ -1015,24 +1008,31 @@ async function removeProductImage() {
     }
 }
 
-/* ── Quick Quantity Edit ────────────────────────── */
-function showQtyEdit() {
-    document.getElementById('qty-display').style.display = 'none';
-    document.querySelector('.qty-edit-btn').style.display = 'none';
-    document.getElementById('qty-edit-controls').style.display = 'flex';
-    document.getElementById('qty-edit-input').focus();
-    document.getElementById('qty-edit-input').select();
+/* ── Stock Adjustment Modal ────────────────────────── */
+function openAdjustStockModal() {
+    document.getElementById('adjust-qty-input').value = {{ product.quantity }};
+    document.getElementById('adjust-description').value = '';
+    document.getElementById('adjust-stock-modal').style.display = 'flex';
+    document.getElementById('adjust-qty-input').focus();
 }
 
-function cancelQtyEdit() {
-    document.getElementById('qty-display').style.display = '';
-    document.querySelector('.qty-edit-btn').style.display = '';
-    document.getElementById('qty-edit-controls').style.display = 'none';
-    document.getElementById('qty-edit-input').value = {{ product.quantity }};
+function closeAdjustStockModal() {
+    document.getElementById('adjust-stock-modal').style.display = 'none';
 }
 
-async function saveQuickQty() {
-    const newQty = parseInt(document.getElementById('qty-edit-input').value) || 0;
+function adjustQty(delta) {
+    const input = document.getElementById('adjust-qty-input');
+    let val = parseInt(input.value) || 0;
+    val = Math.max(0, val + delta);
+    input.value = val;
+}
+
+async function saveStockAdjustment() {
+    const newQty = parseInt(document.getElementById('adjust-qty-input').value) || 0;
+    const description = document.getElementById('adjust-description').value.trim();
+    const btn = document.getElementById('adjust-save-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
     try {
         const response = await fetch('{% url "update_product_quantity" %}', {
             method: 'POST',
@@ -1042,7 +1042,8 @@ async function saveQuickQty() {
             },
             body: JSON.stringify({
                 item_id: {{ product.id }},
-                quantity: newQty
+                quantity: newQty,
+                reason: description
             })
         });
         const result = await response.json();
@@ -1050,10 +1051,63 @@ async function saveQuickQty() {
             location.reload();
         } else {
             alert('Error: ' + (result.error || 'Failed to update quantity'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Save Adjustment';
         }
     } catch (error) {
         alert('Failed to update quantity: ' + error);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Save Adjustment';
     }
 }
+
+// Close modal on Escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeAdjustStockModal();
+});
 </script>
+
+<!-- Adjust Stock Modal -->
+<div id="adjust-stock-modal" class="adjust-stock-modal" style="display:none;" onclick="if(event.target===this)closeAdjustStockModal()">
+    <div class="adjust-stock-dialog">
+        <div class="adjust-stock-header">
+            <h3><i class="bi bi-plus-slash-minus"></i> Adjust Stock</h3>
+            <button class="adjust-stock-close" onclick="closeAdjustStockModal()">&times;</button>
+        </div>
+        <div class="adjust-stock-body">
+            <div class="adjust-field">
+                <div class="adjust-label">SKU</div>
+                <div class="adjust-value">{{ product.sku }}</div>
+            </div>
+            <div class="adjust-field">
+                <div class="adjust-label">Name</div>
+                <div class="adjust-value">{{ product.name }}</div>
+            </div>
+            <div class="adjust-qty-row">
+                <div class="adjust-qty-col">
+                    <div class="adjust-label">Current Quantity</div>
+                    <div class="adjust-current-qty">{{ product.quantity }}</div>
+                </div>
+                <div class="adjust-qty-col">
+                    <label class="adjust-label">New Quantity</label>
+                    <div class="adjust-qty-controls">
+                        <button type="button" class="adjust-qty-btn" onclick="adjustQty(-1)" title="Decrease">−</button>
+                        <input type="number" class="form-input adjust-qty-input" id="adjust-qty-input" value="{{ product.quantity }}" step="1" min="0">
+                        <button type="button" class="adjust-qty-btn" onclick="adjustQty(1)" title="Increase">+</button>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <label class="adjust-label">Description (optional)</label>
+                <textarea class="form-input adjust-description" id="adjust-description" placeholder="e.g. Damaged goods, recount, returns..." maxlength="500" rows="3"></textarea>
+            </div>
+        </div>
+        <div class="adjust-stock-footer">
+            <button class="btn btn-sm btn-secondary" onclick="closeAdjustStockModal()">Cancel</button>
+            <button class="btn btn-sm btn-success" id="adjust-save-btn" onclick="saveStockAdjustment()">
+                <i class="bi bi-check-lg"></i> Save Adjustment
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
