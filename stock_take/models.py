@@ -2195,6 +2195,7 @@ class ActivityLog(models.Model):
         ('product_created',    'Product Created'),
         ('product_updated',    'Product Updated'),
         ('stock_adjusted',     'Stock Adjusted'),
+        ('error',              'Error'),
         ('other',              'Other'),
     ]
 

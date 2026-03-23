@@ -881,6 +881,14 @@ def admin_activity_log(request):
     )
     all_choices = list(event_choices) + [(t, t.replace('_', ' ').title()) for t in extra_types]
 
+    # Recent error logs (last 50)
+    error_logs = (
+        ActivityLog.objects
+        .filter(event_type='error')
+        .select_related('user', 'order')
+        .order_by('-timestamp')[:50]
+    )
+
     return render(request, 'stock_take/admin_activity_log.html', {
         'page_obj':      page_obj,
         'users':         users,
@@ -889,4 +897,5 @@ def admin_activity_log(request):
         'filter_user':   user_id,
         'filter_q':      search,
         'total_count':   logs.count(),
+        'error_logs':    error_logs,
     })

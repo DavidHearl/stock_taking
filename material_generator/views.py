@@ -24,10 +24,33 @@ CAD_DB_STORAGE_PATH = 'cad_data/cad_data.db'
 
 def _open_cad_db():
     """Read the CAD database from cloud storage and return an in-memory SQLite connection."""
+    import tempfile, os
     db_bytes = default_storage.open(CAD_DB_STORAGE_PATH, 'rb').read()
-    conn = sqlite3.connect(':memory:')
-    conn.deserialize(db_bytes)
+    # Write to a temp file and open — avoids conn.deserialize() which
+    # requires Python 3.11.4+ and a specific sqlite3 compile flag.
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+    try:
+        tmp.write(db_bytes)
+        tmp.close()
+        conn = sqlite3.connect(tmp.name)
+    except Exception:
+        os.unlink(tmp.name)
+        raise
+    # Stash the temp path so callers can clean up after closing
+    conn._tmp_path = tmp.name
     return conn
+
+
+def _close_cad_db(conn):
+    """Close a CAD db connection and clean up its temp file."""
+    import os
+    tmp_path = getattr(conn, '_tmp_path', None)
+    conn.close()
+    if tmp_path:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 # Global variables to cache imports
 _board_logic = None
@@ -156,7 +179,7 @@ def generate_pnx(request):
         conn = _open_cad_db()
         logger.info("Calling generate_board_order_file function")
         pnx_content = board_logic.generate_board_order_file(system_numbers, conn)
-        conn.close()
+        _close_cad_db(conn)
         logger.info(f"PNX file generated successfully, size: {len(pnx_content)} bytes")
         
         # Prepare the file for download
@@ -237,7 +260,7 @@ def generate_csv(request):
             
             logger.info(f"Single CSV file download initiated for system {sysNum}")
             messages.success(request, f'CSV file generated successfully for system {sysNum}')
-            conn.close()
+            _close_cad_db(conn)
             return response
         
         else:
@@ -260,7 +283,7 @@ def generate_csv(request):
             
             logger.info(f"Zip archive created successfully with {len(numList)} files")
             messages.success(request, f'ZIP file generated successfully with {len(numList)} CSV files')
-            conn.close()
+            _close_cad_db(conn)
             return response
         
     except ValueError as e:

@@ -376,6 +376,31 @@ def get_bank_transactions(page=1):
     return _api_get("BankTransactions", params={"page": page})
 
 
+def get_bank_transactions_for_contact(contact_id):
+    """
+    Fetch all RECEIVE-type bank transactions for a specific Xero contact.
+    These are "Receive money" entries that don't appear as invoices.
+    Returns a list of bank transaction dicts.
+    """
+    all_txns = []
+    page = 1
+    while True:
+        result = _api_get("BankTransactions", params={
+            "where": f'Contact.ContactID==guid("{contact_id}") AND Type=="RECEIVE"',
+            "page": page,
+        })
+        if not result or "BankTransactions" not in result:
+            break
+        txns = result["BankTransactions"]
+        if not txns:
+            break
+        all_txns.extend(txns)
+        if len(txns) < 100:
+            break
+        page += 1
+    return all_txns
+
+
 def get_reports_balance_sheet(date=None):
     """Fetch the balance sheet report."""
     params = {}
@@ -483,74 +508,116 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
     """
     from decimal import Decimal
     import re
+    import datetime
 
-    invoices = get_invoices_by_reference(contract_number)
-    if not invoices:
+    def _parse_xero_date(raw_date):
+        """Parse a Xero date string into a datetime, or None."""
+        if not raw_date:
+            return None
+        ms_match = re.search(r'/Date\((\d+)', raw_date)
+        if ms_match:
+            ts = int(ms_match.group(1)) / 1000
+            return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+        for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+            try:
+                return datetime.datetime.strptime(raw_date[:10], fmt)
+            except ValueError:
+                pass
+        return None
+
+    # ── Step 1: find invoices by contract-number reference ──
+    invoices_by_ref = get_invoices_by_reference(contract_number)
+
+    # ── Step 2: also find ALL invoices for the same Xero contact ──
+    # This catches invoices with a different reference (e.g. PO numbers)
+    # that belong to the same customer.
+    seen_ids = {inv.get("InvoiceID") for inv in invoices_by_ref}
+    contact_id = None
+    for inv in invoices_by_ref:
+        cid = (inv.get("Contact") or {}).get("ContactID")
+        if cid:
+            contact_id = cid
+            break
+
+    # If we didn't find a contact from invoices, try searching by name
+    if not contact_id and contact_name:
+        contact_id = find_contact_by_name(contact_name)
+
+    all_invoices = list(invoices_by_ref)
+    if contact_id:
+        contact_invoices = get_invoices_for_contact(contact_id)
+        for inv in contact_invoices:
+            iid = inv.get("InvoiceID")
+            if iid and iid not in seen_ids:
+                seen_ids.add(iid)
+                all_invoices.append(inv)
+
+    if not all_invoices:
         return []
 
     results = []
 
-    for inv_summary in invoices:
-        # Optional: soft name cross-check — log a warning but never skip.
-        # The reference match is already specific enough; hard-filtering by name
-        # causes false negatives when Anthill and Xero store slightly different
-        # versions of the customer's name (e.g. "liz enzor" vs "Elizabeth Enzor").
-        if contact_name:
-            xero_contact = inv_summary.get("Contact", {}).get("Name", "")
-            name_match = (
-                contact_name.lower() in xero_contact.lower()
-                or xero_contact.lower() in contact_name.lower()
-                # Also try matching on surname only (last word of each name)
-                or contact_name.split()[-1].lower() in xero_contact.lower()
-            )
-            if not name_match:
-                logger.warning(
-                    f"Invoice {inv_summary.get('InvoiceNumber')} ref={inv_summary.get('Reference')}: "
-                    f"contact '{xero_contact}' does not match '{contact_name}' — including anyway (reference matched)"
-                )
+    for inv_summary in all_invoices:
+        # Skip voided/deleted invoices
+        status = (inv_summary.get("Status") or "").upper()
+        if status in ("VOIDED", "DELETED"):
+            continue
 
         invoice_id = inv_summary.get("InvoiceID", "")
         if not invoice_id:
             continue
 
-        # Fetch full invoice to get the Payments sub-array
+        # Fetch full invoice to get Payments, Overpayments, Prepayments, CreditNotes
         full_inv = get_invoice_with_payments(invoice_id)
         if not full_inv:
-            full_inv = inv_summary  # fall back to summary if detail fetch fails
+            full_inv = inv_summary
 
         total = Decimal(str(full_inv.get("Total", 0) or 0))
         amount_paid = Decimal(str(full_inv.get("AmountPaid", 0) or 0))
         amount_due = Decimal(str(full_inv.get("AmountDue", 0) or 0))
 
-        # Parse individual payments
+        # Parse direct payments
         parsed_payments = []
         for p in full_inv.get("Payments", []):
-            raw_date = p.get("Date", "")
-            parsed_date = None
-            if raw_date:
-                # Xero dates come as "/Date(1738234567000+0000)/"
-                ms_match = re.search(r'/Date\((\d+)', raw_date)
-                if ms_match:
-                    import datetime
-                    ts = int(ms_match.group(1)) / 1000
-                    parsed_date = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
-                else:
-                    # Try ISO format fallback
-                    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
-                        try:
-                            import datetime
-                            parsed_date = datetime.datetime.strptime(raw_date[:10], fmt)
-                            break
-                        except ValueError:
-                            pass
-
             parsed_payments.append({
                 'payment_id': p.get("PaymentID", ""),
-                'date': parsed_date,
+                'date': _parse_xero_date(p.get("Date", "")),
                 'amount': Decimal(str(p.get("Amount", 0) or 0)),
                 'reference': p.get("Reference", "") or "Payment",
                 'status': "Confirmed",
             })
+
+        # Parse overpayment allocations (e.g. "Receive money" applied to invoice)
+        for op in full_inv.get("Overpayments", []):
+            parsed_payments.append({
+                'payment_id': op.get("OverpaymentID", ""),
+                'date': _parse_xero_date(op.get("Date", "")),
+                'amount': Decimal(str(op.get("AppliedAmount", 0) or op.get("Total", 0) or 0)),
+                'reference': "Overpayment",
+                'status': "Confirmed",
+            })
+
+        # Parse prepayment allocations
+        for pp in full_inv.get("Prepayments", []):
+            parsed_payments.append({
+                'payment_id': pp.get("PrepaymentID", ""),
+                'date': _parse_xero_date(pp.get("Date", "")),
+                'amount': Decimal(str(pp.get("AppliedAmount", 0) or pp.get("Total", 0) or 0)),
+                'reference': "Prepayment",
+                'status': "Confirmed",
+            })
+
+        # Parse credit note allocations
+        for cn in full_inv.get("CreditNotes", []):
+            applied = Decimal(str(cn.get("AppliedAmount", 0) or cn.get("Total", 0) or 0))
+            if applied > 0:
+                parsed_payments.append({
+                    'payment_id': cn.get("CreditNoteID", ""),
+                    'date': _parse_xero_date(cn.get("Date", "")),
+                    'amount': applied,
+                    'reference': "Credit Note",
+                    'status': "Confirmed",
+                })
 
         results.append({
             'invoice_id': invoice_id,
@@ -563,6 +630,47 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
             'contact_name': (full_inv.get("Contact") or {}).get("Name", ""),
             'payments': parsed_payments,
         })
+
+    # ── Step 4: fetch "Receive money" bank transactions for the contact ──
+    # These are direct bank receipts that don't appear as invoices but
+    # represent real money received from the customer.
+    if contact_id:
+        # Collect all payment IDs we already have to avoid duplicates
+        existing_payment_ids = set()
+        for r in results:
+            for p in r['payments']:
+                if p['payment_id']:
+                    existing_payment_ids.add(p['payment_id'])
+
+        bank_txns = get_bank_transactions_for_contact(contact_id)
+        for txn in bank_txns:
+            txn_id = txn.get("BankTransactionID", "")
+            if not txn_id or txn_id in existing_payment_ids:
+                continue
+            txn_status = (txn.get("Status") or "").upper()
+            if txn_status in ("VOIDED", "DELETED"):
+                continue
+            txn_total = Decimal(str(txn.get("Total", 0) or 0))
+            if txn_total <= 0:
+                continue
+            txn_ref = txn.get("Reference", "") or ""
+            results.append({
+                'invoice_id': txn_id,
+                'invoice_number': f'BankTxn',
+                'reference': txn_ref,
+                'status': txn_status or 'PAID',
+                'total': txn_total,
+                'amount_paid': txn_total,
+                'amount_due': Decimal('0'),
+                'contact_name': (txn.get("Contact") or {}).get("Name", ""),
+                'payments': [{
+                    'payment_id': txn_id,
+                    'date': _parse_xero_date(txn.get("Date", "")),
+                    'amount': txn_total,
+                    'reference': 'Receive Money',
+                    'status': 'Confirmed',
+                }],
+            })
 
     return results
 

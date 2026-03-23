@@ -224,20 +224,64 @@ class ActivityLoggingMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
 
-        # Only log mutating methods
-        if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
-            return response
-
         # Only log authenticated users
         if not getattr(request, 'user', None) or not request.user.is_authenticated:
             return response
 
-        # Skip if a view already logged a specific event
-        if getattr(request, '_activity_logged', False):
+        # ── Log error responses (4xx / 5xx) ──
+        if response.status_code >= 400:
+            # Only log mutating methods or server errors
+            if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') or response.status_code >= 500:
+                error_message = ''
+                try:
+                    content_type = response.get('Content-Type', '')
+                    if 'application/json' in content_type:
+                        import json
+                        body = json.loads(response.content.decode('utf-8', errors='replace'))
+                        error_message = body.get('error', '') or body.get('message', '') or body.get('detail', '')
+                    if not error_message:
+                        # Try to get Django messages framework errors
+                        from django.contrib.messages import get_messages
+                        msgs = [str(m) for m in get_messages(request) if m.level >= 40]  # ERROR level
+                        error_message = '; '.join(msgs)
+                except Exception:
+                    pass
+
+                path = request.path
+                try:
+                    match = resolve(path)
+                    func_name = getattr(match.func, '__name__', match.url_name or path)
+                except Exception:
+                    func_name = path
+
+                description = f"{response.status_code} error on {func_name.replace('_', ' ').title()}"
+                if error_message:
+                    description += f": {error_message}"
+
+                try:
+                    from .models import ActivityLog
+                    ActivityLog.objects.create(
+                        user=request.user,
+                        event_type='error',
+                        description=description,
+                        extra_data={
+                            'path': path,
+                            'method': request.method,
+                            'status_code': response.status_code,
+                            'error_message': error_message,
+                        },
+                    )
+                except Exception:
+                    logger.exception('ActivityLoggingMiddleware failed to write error log')
+
             return response
 
-        # Skip error responses (4xx / 5xx)
-        if response.status_code >= 400:
+        # Only log mutating methods for non-error responses
+        if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            return response
+
+        # Skip if a view already logged a specific event
+        if getattr(request, '_activity_logged', False):
             return response
 
         # Skip exempt paths

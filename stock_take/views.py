@@ -9421,14 +9421,18 @@ def generate_and_attach_pnx(request, order_id):
             return JsonResponse({'success': False, 'error': 'CAD database not found in DigitalOcean Spaces. Please ensure the CAD sync has been run.'})
         
         db_bytes = default_storage.open(CAD_DB_STORAGE_PATH, 'rb').read()
-        conn = _sqlite3.connect(':memory:')
-        conn.deserialize(db_bytes)
+        import tempfile as _tmpfile, os as _os
+        _tmp = _tmpfile.NamedTemporaryFile(delete=False, suffix='.db')
+        _tmp.write(db_bytes)
+        _tmp.close()
+        conn = _sqlite3.connect(_tmp.name)
         
         try:
             # Generate PNX content using customer number (CAD number)
             pnx_content = generate_board_order_file(order.customer_number, conn)
         finally:
             conn.close()
+            _os.unlink(_tmp.name)
         
         if not pnx_content or pnx_content.strip() == '':
             return JsonResponse({'success': False, 'error': f'No board data found for CAD Number {order.customer_number}.'})
