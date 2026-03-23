@@ -269,6 +269,12 @@ def admin_settings(request):
     return render(request, 'stock_take/admin_settings.html', context)
 
 
+@staff_required
+def admin_design_rules(request):
+    """Design system reference — live preview of all UI components."""
+    return render(request, 'stock_take/admin_design_rules.html')
+
+
 # ── Registry of all API / sync scripts ────────────────────────────────
 # Each entry may optionally carry a 'log_name' key that matches the
 # SyncLog.script_name written by that script.  If omitted, no run history
@@ -466,7 +472,7 @@ SCRIPT_GROUPS = [
                     'Prerequisites: Xero connected (/xero/status/) and sales have contract numbers (run sync_anthill_workflow first).',
                 ],
                 'file': 'stock_take/management/commands/sync_xero_sale_payments.py',
-                'schedule': 'Manual / Scheduled',
+                'schedule': 'Automated — daily at 10:00 (Docker scheduler)',
                 'commands': [
                     {'cmd': 'python manage.py sync_xero_sale_payments', 'note': 'Sync all Category 3 sales with a contract number'},
                     {'cmd': 'python manage.py sync_xero_sale_payments --days 90', 'note': 'Only sales active within last 90 days'},

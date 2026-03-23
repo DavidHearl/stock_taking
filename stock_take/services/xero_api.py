@@ -417,11 +417,14 @@ def get_invoices_by_reference(reference):
         "Statuses": "AUTHORISED,PAID",
     })
     if result and "Invoices" in result:
-        # Keep only invoices whose Reference actually contains our contract number
-        # (searchTerm also matches contact names, descriptions, etc.)
+        # Keep invoices where the contract number appears in the Reference field
+        # OR in the Contact Name (some Xero contacts are stored under the
+        # contract number rather than the customer's actual name).
+        ref_lower = reference.lower()
         return [
             inv for inv in result["Invoices"]
-            if reference.lower() in (inv.get("Reference") or "").lower()
+            if ref_lower in (inv.get("Reference") or "").lower()
+            or ref_lower in (inv.get("Contact", {}).get("Name", "") or "").lower()
         ]
     return []
 

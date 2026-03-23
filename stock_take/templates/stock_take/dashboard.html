@@ -149,52 +149,100 @@
         </div>
     </div>
 
-    <!-- Pending Purchase Orders + Item Shortages -->
-    <div class="dashboard-grid dashboard-grid-2">
+    <!-- Pending Purchase Orders + Item Shortages + Incoming Materials -->
+    <div class="dashboard-grid dashboard-grid-3">
         <div class="dashboard-card accent-warning">
-            <div class="card-label"><i class="bi bi-receipt" style="color:#f0ad4e;"></i> Pending Purchase Orders</div>
+            <div class="card-label"><i class="bi bi-receipt" style="color:var(--warning-color);"></i> Pending Purchase Orders</div>
             <div class="card-value">{{ pending_pos_count }}</div>
             <div class="card-subtext">Approved and awaiting arrival</div>
         </div>
         <div class="dashboard-card {% if shortage_count > 0 %}accent-danger{% else %}accent-success{% endif %}">
-            <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}#dc3545{% else %}#28a745{% endif %};"></i> Item Shortages</div>
+            <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};"></i> Item Shortages</div>
             <div class="card-value">{{ shortage_count }}</div>
             <div class="card-subtext">Items below par level</div>
             <div class="card-action">
                 <button class="card-action-btn" onclick="openShortagesModal()">View All</button>
             </div>
         </div>
+        <div class="dashboard-card accent-info">
+            <div class="card-label"><i class="bi bi-truck" style="color:var(--info-color);"></i> Incoming Materials</div>
+            <div class="card-value">{{ incoming_materials_count }}</div>
+            <div class="card-subtext">Purchase orders in transit</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openIncomingModal()">View All</button>
+            </div>
+        </div>
     </div>
 </div>
 
 <!-- Item Shortages Modal -->
-<div id="shortagesModal" style="display:none; position:fixed; inset:0; z-index:1050; background:rgba(0,0,0,0.6);" onclick="if(event.target===this)closeShortagesModal()">
-    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; width:min(800px,95vw); max-height:80vh; display:flex; flex-direction:column; margin:auto; margin-top:clamp(40px,8vh,100px); overflow:hidden;">
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border-color);">
-            <h3 style="margin:0; font-size:1rem; font-weight:700;"><i class="bi bi-exclamation-circle" style="color:#dc3545; margin-right:6px;"></i>Item Shortages</h3>
-            <button onclick="closeShortagesModal()" style="background:none; border:none; font-size:1.2rem; color:var(--text-muted); cursor:pointer;">&times;</button>
+<dialog id="shortagesModal" class="dash-report-modal" style="max-width:860px;">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-exclamation-circle" style="color:var(--danger-color);"></i>
+            Item Shortages
+            <span class="dash-report-meta" id="shortagesMetaCount"></span>
         </div>
-        <div id="shortagesModalBody" style="overflow-y:auto; padding:16px 20px; flex:1;">
-            <table style="width:100%; border-collapse:collapse; font-size:0.83rem;">
-                <thead>
-                    <tr style="border-bottom:1px solid var(--border-color);">
-                        <th style="text-align:left; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">SKU</th>
-                        <th style="text-align:left; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em;">Name</th>
-                        <th style="text-align:right; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">In Stock</th>
-                        <th style="text-align:right; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">Par Level</th>
-                        <th style="text-align:right; padding:4px 12px; color:var(--text-muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;">Short By</th>
-                    </tr>
-                </thead>
-                <tbody id="shortagesTableBody"></tbody>
-            </table>
-            <div id="shortagesEmptyMsg" style="display:none; text-align:center; padding:40px 20px; color:var(--text-muted);"><i class="bi bi-check-circle" style="font-size:2rem; display:block; margin-bottom:8px; color:#28a745;"></i>All items are above par level.</div>
-        </div>
-        <div style="padding:12px 20px; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end; gap:8px;">
-            <a href="{% url 'stock_list' %}" class="card-action-btn" style="text-decoration:none;">Go to Products</a>
-            <button onclick="closeShortagesModal()" style="padding:6px 16px; background:none; border:1px solid var(--border-color); border-radius:6px; color:var(--text-secondary); cursor:pointer; font-size:0.83rem;">Close</button>
+        <button class="dash-report-close" onclick="document.getElementById('shortagesModal').close()">&times;</button>
+    </div>
+    <div class="dash-report-body">
+        <table class="dash-report-table" id="shortagesTable">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Name</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Incoming</th>
+                    <th class="text-right">Par Level</th>
+                    <th class="text-right">Short By</th>
+                </tr>
+            </thead>
+            <tbody id="shortagesTableBody"></tbody>
+        </table>
+        <div id="shortagesEmptyMsg" style="display:none; text-align:center; padding:40px 20px; color:var(--text-muted);">
+            <i class="bi bi-check-circle" style="font-size:2rem; display:block; margin-bottom:8px; color:var(--success-color);"></i>
+            All items are above par level.
         </div>
     </div>
-</div>
+    <div style="padding:12px 18px; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end; gap:8px;">
+        <a href="{% url 'shortages' %}" class="card-action-btn" style="text-decoration:none; width:auto;">View Shortages Page</a>
+        <button onclick="document.getElementById('shortagesModal').close()" class="card-action-btn" style="width:auto;">Close</button>
+    </div>
+</dialog>
+
+<!-- Incoming Materials Modal -->
+<dialog id="incomingModal" class="dash-report-modal" style="max-width:1000px;">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-truck" style="color:var(--info-color);"></i>
+            Incoming Materials
+            <span class="dash-report-meta" id="incomingMetaCount"></span>
+        </div>
+        <button class="dash-report-close" onclick="document.getElementById('incomingModal').close()">&times;</button>
+    </div>
+    <div class="dash-report-body">
+        <table class="dash-report-table" id="incomingTable">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Supplier</th>
+                    <th class="text-right">Qty Outstanding</th>
+                    <th>PO(s)</th>
+                    <th>Expected Date</th>
+                </tr>
+            </thead>
+            <tbody id="incomingTableBody"></tbody>
+        </table>
+        <div id="incomingEmptyMsg" style="display:none; text-align:center; padding:40px 20px; color:var(--text-muted);">
+            <i class="bi bi-check-circle" style="font-size:2rem; display:block; margin-bottom:8px; color:var(--success-color);"></i>
+            No incoming shortage items.
+        </div>
+    </div>
+    <div style="padding:12px 18px; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end; gap:8px;">
+        <a href="{% url 'purchase_orders_list' %}" class="card-action-btn" style="text-decoration:none; width:auto;">View Purchase Orders</a>
+        <button onclick="document.getElementById('incomingModal').close()" class="card-action-btn" style="width:auto;">Close</button>
+    </div>
+</dialog>
 
 <script>
 // Month Switcher
@@ -967,17 +1015,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <!-- Outstanding Balance Report Modal -->
 <dialog id="outstandingReportModal" class="dash-report-modal">
+    <!-- Row 1: title, search, close -->
     <div class="dash-report-header">
         <div class="dash-report-title">
             <i class="bi bi-exclamation-circle" style="color:#dc3545;"></i>
             <span>Outstanding Balance Report</span>
-            <span id="outstandingReportMeta" class="dash-report-meta"></span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
             <input id="outstandingSearchInput" type="search" class="dash-report-search"
                    placeholder="Search customer..." oninput="filterOutstandingRows()">
+            <button class="dash-report-close" onclick="document.getElementById('outstandingReportModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <!-- Row 2: filters, actions, summary -->
+    <div class="dash-report-toolbar">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div class="dash-report-period-group">
+                <button class="dash-report-period-btn active" data-period="all" onclick="setOutstandingPeriod('all')" title="All time">All</button>
+                <button class="dash-report-period-btn" data-period="monthly" onclick="setOutstandingPeriod('monthly')" title="This month">Monthly</button>
+                <button class="dash-report-period-btn" data-period="weekly" onclick="setOutstandingPeriod('weekly')" title="This week">Weekly</button>
+            </div>
             <button id="outstandingHidePaymentsBtn" class="dash-report-filter-btn" onclick="toggleHidePayments()" title="Only show sales with no payment records">
                 <i class="bi bi-funnel"></i> Hide Paid
+            </button>
+            <button id="outstandingXeroCheckBtn" class="dash-report-filter-btn" onclick="checkXeroPayments()" title="Check Xero for new payments for the displayed customers">
+                <i class="bi bi-arrow-repeat"></i> Check Xero for Payments
             </button>
             <a id="outstandingReportPdfBtn"
                href="{% url 'dashboard_outstanding_pdf' %}"
@@ -985,13 +1049,14 @@ document.addEventListener('DOMContentLoaded', function() {
                title="Download PDF">
                 <i class="bi bi-file-earmark-pdf"></i> PDF
             </a>
-            <button class="dash-report-close" onclick="document.getElementById('outstandingReportModal').close()">
-                <i class="bi bi-x-lg"></i>
-            </button>
         </div>
+        <span id="outstandingReportMeta" class="dash-report-meta"></span>
     </div>
     <div class="dash-report-body" id="outstandingReportBody">
         <p class="text-muted">Loading&hellip;</p>
+    </div>
+    <!-- Xero check log panel (hidden by default) -->
+    <div id="xeroCheckLogPanel" style="display:none;border-top:1px solid var(--border-color);height:400px;overflow-y:auto;font-family:monospace;font-size:12px;padding:8px 12px;background:var(--bg-secondary, #f8f9fa);">
     </div>
 </dialog>
 
@@ -1000,8 +1065,13 @@ document.addEventListener('DOMContentLoaded', function() {
 document.getElementById('outstandingReportModal').addEventListener('click', function(e) {
     if (e.target === this) this.close();
 });
+document.getElementById('outstandingReportModal').addEventListener('close', function() {
+    document.body.style.overflow = '';
+});
 
 let outstandingHidePayments = false;
+let outstandingPeriod = 'all';
+
 function toggleHidePayments() {
     outstandingHidePayments = !outstandingHidePayments;
     const btn = document.getElementById('outstandingHidePaymentsBtn');
@@ -1009,29 +1079,47 @@ function toggleHidePayments() {
     btn.innerHTML = outstandingHidePayments
         ? '<i class="bi bi-funnel-fill"></i> Show All'
         : '<i class="bi bi-funnel"></i> Hide Paid';
-    // Re-run the unified filter so search + paid filter stay in sync
     filterOutstandingRows();
+}
+
+function setOutstandingPeriod(period) {
+    outstandingPeriod = period;
+    document.querySelectorAll('.dash-report-period-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.period === period);
+    });
+    // Re-fetch with the new period
+    loadOutstandingReport();
 }
 
 function openOutstandingReport() {
     outstandingHidePayments = false;
+    outstandingPeriod = 'all';
     const btn = document.getElementById('outstandingHidePaymentsBtn');
     if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="bi bi-funnel"></i> Hide Paid'; }
+    document.querySelectorAll('.dash-report-period-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.period === 'all');
+    });
     const searchInput = document.getElementById('outstandingSearchInput');
     if (searchInput) searchInput.value = '';
     const modal = document.getElementById('outstandingReportModal');
+    document.body.style.overflow = 'hidden';
+    modal.showModal();
+    loadOutstandingReport();
+}
+
+function loadOutstandingReport() {
     const body = document.getElementById('outstandingReportBody');
     body.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
     document.getElementById('outstandingReportMeta').textContent = '';
-    modal.showModal();
     const _loc = '{{ current_location|escapejs }}';
     const _baseReportUrl = '{% url "dashboard_outstanding_report" %}';
     const _basePdfUrl = '{% url "dashboard_outstanding_pdf" %}';
-    const _locParam = _loc ? '?location=' + encodeURIComponent(_loc) : '';
-    const _reportUrl = _baseReportUrl + _locParam;
-    // Keep the PDF button in sync with the same location filter
-    document.getElementById('outstandingReportPdfBtn').href = _basePdfUrl + _locParam;
-    fetch(_reportUrl)
+    let params = [];
+    if (_loc) params.push('location=' + encodeURIComponent(_loc));
+    if (outstandingPeriod !== 'all') params.push('period=' + outstandingPeriod);
+    const queryStr = params.length ? '?' + params.join('&') : '';
+    document.getElementById('outstandingReportPdfBtn').href = _basePdfUrl + queryStr;
+    fetch(_baseReportUrl + queryStr)
         .then(r => r.json())
         .then(data => {
             const meta = document.getElementById('outstandingReportMeta');
@@ -1041,77 +1129,166 @@ function openOutstandingReport() {
                 return;
             }
             const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
+            const fmtDec = n => '\u00a3' + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
             const totalOutstanding = data.rows.reduce((s, r) => s + r.outstanding, 0);
             const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
-            meta.innerHTML = `&nbsp;&mdash;&nbsp;${data.count} customer${data.count !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstanding)} &nbsp;|&nbsp; ${locLabel}`;
+            meta.innerHTML = `${data.count} customer${data.count !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstanding)} &nbsp;|&nbsp; ${locLabel}`;
 
-            // Group rows by year
-            const byYear = {};
+            // Group rows by fit_date year (null = "No Fit Date")
+            const byGroup = {};
             data.rows.forEach(r => {
-                const y = r.year || 'Unknown';
-                if (!byYear[y]) byYear[y] = [];
-                byYear[y].push(r);
+                const key = r.year !== null ? r.year : 'no_fit_date';
+                if (!byGroup[key]) byGroup[key] = [];
+                byGroup[key].push(r);
             });
-            const years = Object.keys(byYear).sort((a, b) => b - a);
+            const groups = Object.keys(byGroup).sort((a, b) => {
+                if (a === 'no_fit_date') return -1;
+                if (b === 'no_fit_date') return 1;
+                return Number(b) - Number(a);
+            });
+
+            const COL_COUNT = 10;
+            const todayISO = new Date().toISOString().split('T')[0];
+            const todayLabel = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
             let html = '<table class="dash-report-table"><thead><tr>';
-            html += '<th>Customer</th><th>Sale #</th><th>Anthill</th><th>Contract</th><th>Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-center" title="Has payment records">Pmts</th>';
+            html += '<th style="width:24px"></th><th>Customer</th><th>Sale #</th><th>Anthill</th><th>Contract</th><th>Fit Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-center" title="Actions" style="width:36px"></th>';
             html += '</tr></thead><tbody>';
 
-            years.forEach(yr => {
-                const yearRows = byYear[yr];
-                const yearTotal = yearRows.reduce((s, r) => s + r.outstanding, 0);
-                html += `<tr class="dash-report-year-sep" data-year-sep="${yr}"><td colspan="9"><strong>${yr}</strong><span class="dash-report-year-total">${fmt(yearTotal)} outstanding &mdash; ${yearRows.length} customer${yearRows.length !== 1 ? 's' : ''}</span></td></tr>`;
+            let rowIdx = 0;
+            groups.forEach(grp => {
+                const groupRows = byGroup[grp];
+                const groupTotal = groupRows.reduce((s, r) => s + r.outstanding, 0);
+                const label = grp === 'no_fit_date' ? 'No Fit Date' : grp;
+                const badgeClass = grp === 'no_fit_date' ? ' style="color:#dc3545;"' : '';
+                html += `<tr class="dash-report-year-sep" data-year-sep="${grp}"><td colspan="${COL_COUNT}"><strong${badgeClass}>${label}</strong><span class="dash-report-year-total">${fmt(groupTotal)} outstanding &mdash; ${groupRows.length} customer${groupRows.length !== 1 ? 's' : ''}</span></td></tr>`;
 
-                yearRows.forEach(r => {
+                groupRows.sort((a, b) => {
+                    if (!a.fit_date_iso && !b.fit_date_iso) return 0;
+                    if (!a.fit_date_iso) return 1;
+                    if (!b.fit_date_iso) return -1;
+                    return b.fit_date_iso.localeCompare(a.fit_date_iso);
+                });
+
+                const currentYear = new Date().getFullYear();
+                let todayInserted = false;
+                groupRows.forEach(r => {
+                    if (!todayInserted && String(grp) === String(currentYear) && r.fit_date_iso && r.fit_date_iso < todayISO) {
+                        html += `<tr class="today-divider-row"><td colspan="${COL_COUNT}" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td></tr>`;
+                        todayInserted = true;
+                    }
+                    const rid = 'os-row-' + rowIdx++;
                     const anthillCell = r.sale_number
                         ? '<a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID=' + r.sale_number + '" target="_blank" class="dash-report-anthill-btn" title="Open in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>'
                         : '-';
-                    const pmtDot = r.paid > 0
-                        ? '<span title="Has payments" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;"></span>'
-                        : '<span title="No payments recorded" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc3545;"></span>';
-                    html += `<tr data-has-payments="${r.paid > 0 ? 1 : 0}" data-year="${yr}" data-outstanding="${r.outstanding}">
-                        <td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>
-                        <td>${r.sale_number ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>' : '-'}</td>
-                        <td>${anthillCell}</td>
-                        <td>${r.contract || '-'}</td>
-                        <td>${r.date}</td>
-                        <td class="text-right">${fmt(r.sale_value)}</td>
-                        <td class="text-right">${fmt(r.paid)}</td>
-                        <td class="text-right" style="color:#dc3545;font-weight:600">${fmt(r.outstanding)}</td>
-                        <td class="text-center">${pmtDot}</td>
-                    </tr>`;
+                    const fitDateCell = r.fit_date
+                        ? r.fit_date
+                        : '<span style="color:#dc3545;font-style:italic;">No fit date</span>';
+                    const hasPayments = r.payments && r.payments.length > 0;
+                    const chevron = hasPayments
+                        ? `<i class="bi bi-chevron-down os-row-chevron" id="icon-${rid}"></i>`
+                        : '<span style="display:inline-block;width:14px;"></span>';
+
+                    html += `<tr class="os-main-row${hasPayments ? ' os-expandable' : ''}" data-has-payments="${hasPayments ? 1 : 0}" data-year="${grp}" data-outstanding="${r.outstanding}" data-rid="${rid}" onclick="toggleOutstandingDetail('${rid}', event)">`;
+                    html += `<td class="text-center" style="padding-left:8px;padding-right:0;">${chevron}</td>`;
+                    html += `<td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>`;
+                    html += `<td>${r.sale_number ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>' : '-'}</td>`;
+                    html += `<td>${anthillCell}</td>`;
+                    html += `<td>${r.contract || '-'}</td>`;
+                    html += `<td>${fitDateCell}</td>`;
+                    html += `<td class="text-right">${fmt(r.sale_value)}</td>`;
+                    html += `<td class="text-right">${fmt(r.paid)}</td>`;
+                    html += `<td class="text-right" style="color:#dc3545;font-weight:600">${fmt(r.outstanding)}</td>`;
+                    html += `<td class="text-center"><button class="os-xero-btn" onclick="checkXeroSingle(${r.pk}, this, event)" title="Check Xero for payments"><i class="bi bi-arrow-repeat"></i></button></td>`;
+                    html += `</tr>`;
+
+                    // Expandable detail row (hidden by default)
+                    html += `<tr class="os-detail-row" id="${rid}" style="display:none;"><td colspan="${COL_COUNT}">`;
+                    html += `<div class="os-detail-content">`;
+                    if (hasPayments) {
+                        html += `<table class="os-payments-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Invoice</th><th>Status</th><th class="text-right">Amount</th></tr></thead><tbody>`;
+                        r.payments.forEach(p => {
+                            html += `<tr><td>${p.date || '-'}</td><td>${p.type}</td><td>${p.source}</td><td>${p.invoice || '-'}</td><td>${p.invoice_status || '-'}</td><td class="text-right">${fmtDec(p.amount)}</td></tr>`;
+                        });
+                        html += `</tbody></table>`;
+                    } else {
+                        html += `<p style="margin:0;color:var(--text-secondary);font-size:0.8rem;">No payment records found.</p>`;
+                    }
+                    html += `</div></td></tr>`;
                 });
             });
 
             html += '</tbody></table>';
             body.innerHTML = html;
+            filterOutstandingRows();
         })
         .catch(() => {
             body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
         });
 }
 
+function toggleOutstandingDetail(rid, event) {
+    if (event && event.target && (event.target.closest('a') || event.target.closest('button'))) return;
+    const detailRow = document.getElementById(rid);
+    const icon = document.getElementById('icon-' + rid);
+    if (!detailRow || !icon) return;
+    const isOpen = detailRow.style.display !== 'none';
+    detailRow.style.display = isOpen ? 'none' : 'table-row';
+    const mainRow = document.querySelector(`tr[data-rid="${rid}"]`);
+    if (mainRow) mainRow.classList.toggle('os-open', !isOpen);
+}
+
+function checkXeroSingle(salePk, btnEl, event) {
+    if (event) { event.stopPropagation(); event.preventDefault(); }
+    const originalHtml = btnEl.innerHTML;
+    btnEl.disabled = true;
+    btnEl.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    const url = '{% url "dashboard_outstanding_xero_check_single" %}?sale_pk=' + salePk;
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            btnEl.disabled = false;
+            if (!data.success) {
+                btnEl.innerHTML = '<i class="bi bi-x-circle" style="color:#dc3545;"></i>';
+                btnEl.title = data.error || 'Error';
+                setTimeout(() => { btnEl.innerHTML = originalHtml; btnEl.title = 'Check Xero for payments'; }, 3000);
+                return;
+            }
+            if (data.found && (data.payments_created > 0 || data.payments_updated > 0)) {
+                btnEl.innerHTML = '<i class="bi bi-check-circle" style="color:#10b981;"></i>';
+                btnEl.title = data.message;
+                // Reload report to pick up new payment data
+                setTimeout(() => loadOutstandingReport(), 1500);
+            } else {
+                btnEl.innerHTML = '<i class="bi bi-dash-circle" style="color:var(--text-secondary);"></i>';
+                btnEl.title = data.message || 'No invoices found';
+                setTimeout(() => { btnEl.innerHTML = originalHtml; btnEl.title = 'Check Xero for payments'; }, 3000);
+            }
+        })
+        .catch(() => {
+            btnEl.disabled = false;
+            btnEl.innerHTML = '<i class="bi bi-x-circle" style="color:#dc3545;"></i>';
+            setTimeout(() => { btnEl.innerHTML = originalHtml; }, 3000);
+        });
+}
+
 function _recalcOutstandingMeta() {
     const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
-    // Recalculate year separator rows
     document.querySelectorAll('#outstandingReportBody tr[data-year-sep]').forEach(sepRow => {
         const yr = sepRow.dataset.yearSep;
         let visibleCount = 0, visibleTotal = 0;
-        document.querySelectorAll(`#outstandingReportBody tr[data-year="${yr}"]`).forEach(tr => {
+        document.querySelectorAll(`#outstandingReportBody tr.os-main-row[data-year="${yr}"]`).forEach(tr => {
             if (tr.style.display !== 'none') {
                 visibleCount++;
                 visibleTotal += parseFloat(tr.dataset.outstanding || 0);
             }
         });
-        // Hide separator itself if all rows in this year are hidden
         sepRow.style.display = visibleCount === 0 ? 'none' : '';
         const span = sepRow.querySelector('.dash-report-year-total');
         if (span) span.textContent = `${fmt(visibleTotal)} outstanding \u2014 ${visibleCount} customer${visibleCount !== 1 ? 's' : ''}`;
     });
-    // Recalculate header meta
     let totalVisible = 0, totalOutstandingVisible = 0;
-    document.querySelectorAll('#outstandingReportBody tr[data-outstanding]').forEach(tr => {
+    document.querySelectorAll('#outstandingReportBody tr.os-main-row[data-outstanding]').forEach(tr => {
         if (tr.style.display !== 'none') {
             totalVisible++;
             totalOutstandingVisible += parseFloat(tr.dataset.outstanding || 0);
@@ -1120,20 +1297,141 @@ function _recalcOutstandingMeta() {
     const meta = document.getElementById('outstandingReportMeta');
     if (meta) {
         const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
-        meta.innerHTML = `&nbsp;&mdash;&nbsp;${totalVisible} customer${totalVisible !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstandingVisible)} &nbsp;|&nbsp; ${locLabel}`;
+        meta.innerHTML = `${totalVisible} customer${totalVisible !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstandingVisible)} &nbsp;|&nbsp; ${locLabel}`;
     }
 }
 
 function filterOutstandingRows() {
     const q = (document.getElementById('outstandingSearchInput').value || '').toLowerCase().trim();
-    document.querySelectorAll('#outstandingReportBody tr[data-outstanding]').forEach(tr => {
-        const customerCell = tr.querySelector('td:first-child');
-        const name = customerCell ? customerCell.textContent.toLowerCase() : '';
+    document.querySelectorAll('#outstandingReportBody tr.os-main-row[data-outstanding]').forEach(tr => {
+        const cells = tr.querySelectorAll('td');
+        const name = cells[1] ? cells[1].textContent.toLowerCase() : '';
         const matchesSearch = !q || name.includes(q);
         const matchesPaid = !outstandingHidePayments || tr.dataset.hasPayments !== '1';
-        tr.style.display = (matchesSearch && matchesPaid) ? '' : 'none';
+        const show = matchesSearch && matchesPaid;
+        tr.style.display = show ? '' : 'none';
+        // Also hide/show the corresponding detail row
+        const rid = tr.dataset.rid;
+        if (rid) {
+            const detailRow = document.getElementById(rid);
+            if (detailRow && !show) detailRow.style.display = 'none';
+        }
     });
     _recalcOutstandingMeta();
+}
+
+function checkXeroPayments() {
+    const btn = document.getElementById('outstandingXeroCheckBtn');
+    const logPanel = document.getElementById('xeroCheckLogPanel');
+    const originalHtml = btn.innerHTML;
+    let abortController = new AbortController();
+    let hadUpdates = false;
+
+    // Switch button to cancel mode
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-x-circle"></i> Cancel';
+    btn.classList.add('active');
+    btn.onclick = function() {
+        abortController.abort();
+        appendLog('Cancelled by user.', 'warn');
+        resetBtn();
+    };
+
+    // Show and clear log panel
+    logPanel.style.display = 'block';
+    logPanel.innerHTML = '';
+
+    function appendLog(text, level) {
+        const line = document.createElement('div');
+        if (level === 'found') { line.style.color = '#10b981'; line.style.fontWeight = '600'; }
+        else if (level === 'error') { line.style.color = '#dc3545'; }
+        else if (level === 'warn') { line.style.color = '#f59e0b'; }
+        else if (level === 'skip') { line.style.color = 'var(--text-secondary, #6c757d)'; }
+        else { line.style.color = 'var(--text-primary, #212529)'; }
+        line.textContent = text;
+        logPanel.appendChild(line);
+        logPanel.scrollTop = logPanel.scrollHeight;
+    }
+
+    function resetBtn() {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        btn.classList.remove('active');
+        btn.onclick = checkXeroPayments;
+        if (hadUpdates) loadOutstandingReport();
+    }
+
+    const _loc = '{{ current_location|escapejs }}';
+    const _baseCheckUrl = '{% url "dashboard_outstanding_xero_check" %}';
+    let params = [];
+    if (_loc) params.push('location=' + encodeURIComponent(_loc));
+    if (outstandingPeriod !== 'all') params.push('period=' + outstandingPeriod);
+    const queryStr = params.length ? '?' + params.join('&') : '';
+
+    fetch(_baseCheckUrl + queryStr, { signal: abortController.signal })
+        .then(response => {
+            // Check if it's a JSON error response (not streaming)
+            const ct = response.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+                return response.json().then(data => {
+                    if (!data.success) appendLog('Error: ' + (data.error || 'Unknown error'), 'error');
+                    else if (data.message) appendLog(data.message, 'warn');
+                    resetBtn();
+                });
+            }
+
+            // Stream the ndjson response
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            function processLine(line) {
+                if (!line.trim()) return;
+                let msg;
+                try { msg = JSON.parse(line); } catch { return; }
+
+                if (msg.type === 'start') {
+                    appendLog(`Starting Xero check for ${msg.total} outstanding sale${msg.total !== 1 ? 's' : ''}...`, 'info');
+                } else if (msg.type === 'checking') {
+                    appendLog(`[${msg.index}/${msg.total}] Checking ${msg.customer} (${msg.contract})...`, 'info');
+                } else if (msg.type === 'result') {
+                    if (msg.status === 'found') {
+                        appendLog(`[${msg.index}/${msg.total}] ✓ ${msg.customer}: ${msg.message}`, 'found');
+                        hadUpdates = true;
+                    } else if (msg.status === 'error') {
+                        appendLog(`[${msg.index}/${msg.total}] ✗ ${msg.customer}: ${msg.message}`, 'error');
+                    } else {
+                        appendLog(`[${msg.index}/${msg.total}] — ${msg.customer}: ${msg.message}`, 'skip');
+                    }
+                } else if (msg.type === 'done') {
+                    const s = msg.stats;
+                    appendLog('─'.repeat(50), 'info');
+                    appendLog(`Done. ${s.total} checked | ${s.invoices_found} invoices found | ${s.payments_created} created | ${s.payments_updated} updated | ${s.no_invoice} no invoice | ${s.errors} errors`, 'info');
+                    resetBtn();
+                }
+            }
+
+            function pump() {
+                return reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (buffer.trim()) processLine(buffer);
+                        resetBtn();
+                        return;
+                    }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    lines.forEach(processLine);
+                    return pump();
+                });
+            }
+            return pump();
+        })
+        .catch(err => {
+            if (err.name === 'AbortError') return;
+            appendLog('Connection error: ' + err.message, 'error');
+            resetBtn();
+        });
 }
 </script>
 
@@ -1732,40 +2030,74 @@ function openShortagesModal() {
     const modal = document.getElementById('shortagesModal');
     const tbody = document.getElementById('shortagesTableBody');
     const emptyMsg = document.getElementById('shortagesEmptyMsg');
-    const table = tbody.closest('table');
+    const table = document.getElementById('shortagesTable');
+    const metaCount = document.getElementById('shortagesMetaCount');
 
     tbody.innerHTML = '';
     if (!_shortagesData || _shortagesData.length === 0) {
         table.style.display = 'none';
         emptyMsg.style.display = 'block';
+        if (metaCount) metaCount.textContent = '';
     } else {
         table.style.display = '';
         emptyMsg.style.display = 'none';
+        if (metaCount) metaCount.textContent = _shortagesData.length + ' items';
         _shortagesData.forEach(function(item) {
             const tr = document.createElement('tr');
-            tr.style.borderBottom = '1px solid var(--border-color)';
+            const incoming = item.incoming_qty || 0;
             tr.innerHTML =
-                '<td style="padding:7px 10px; white-space:nowrap; color:var(--text-muted); font-size:0.78rem;">' + (item.sku || '—') + '</td>' +
-                '<td style="padding:7px 10px;">' + item.name + '</td>' +
-                '<td style="padding:7px 10px; text-align:right; font-weight:600; color:#dc3545;">' + item.quantity + '</td>' +
-                '<td style="padding:7px 10px; text-align:right; color:var(--text-muted);">' + item.par_level + '</td>' +
-                '<td style="padding:7px 10px; text-align:right; color:#f0ad4e; font-weight:600;">' + item.shortfall + '</td>';
+                '<td style="white-space:nowrap; color:var(--text-muted); font-size:0.78rem;">' + (item.sku || '—') + '</td>' +
+                '<td>' + item.name + '</td>' +
+                '<td class="text-right" style="font-weight:600; color:var(--danger-color);">' + item.quantity + '</td>' +
+                '<td class="text-right">' + (incoming > 0 ? '<span style="color:var(--success-color); font-weight:600;">' + incoming + '</span>' : '<span style="color:var(--text-muted);">0</span>') + '</td>' +
+                '<td class="text-right" style="color:var(--text-muted);">' + item.par_level + '</td>' +
+                '<td class="text-right" style="color:var(--warning-color); font-weight:600;">' + item.shortfall + '</td>';
             tbody.appendChild(tr);
         });
     }
-    modal.style.display = 'flex';
-    modal.style.alignItems = 'flex-start';
-    document.body.style.overflow = 'hidden';
-}
-
-function closeShortagesModal() {
-    document.getElementById('shortagesModal').style.display = 'none';
-    document.body.style.overflow = '';
+    modal.showModal();
 }
 
 document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closeShortagesModal();
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('shortagesModal');
+        if (modal.open) modal.close();
+    }
 });
+</script>
+
+<script>
+const _incomingData = {{ incoming_materials_json|safe }};
+
+function openIncomingModal() {
+    const modal = document.getElementById('incomingModal');
+    const tbody = document.getElementById('incomingTableBody');
+    const emptyMsg = document.getElementById('incomingEmptyMsg');
+    const table = document.getElementById('incomingTable');
+    const metaCount = document.getElementById('incomingMetaCount');
+
+    tbody.innerHTML = '';
+    if (!_incomingData || _incomingData.length === 0) {
+        table.style.display = 'none';
+        emptyMsg.style.display = 'block';
+        if (metaCount) metaCount.textContent = '';
+    } else {
+        table.style.display = '';
+        emptyMsg.style.display = 'none';
+        if (metaCount) metaCount.textContent = _incomingData.length + ' items';
+        _incomingData.forEach(function(item) {
+            const tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td style="font-weight:600;">' + item.name + '<br><span style="font-weight:400; font-size:0.78rem; color:var(--text-muted);">' + item.sku + '</span></td>' +
+                '<td>' + item.supplier + '</td>' +
+                '<td class="text-right" style="font-weight:600;">' + item.qty_outstanding + '</td>' +
+                '<td style="font-size:0.82rem;">' + item.po_numbers + '</td>' +
+                '<td>' + (item.expected_date !== '-' ? item.expected_date : '<span style="color:var(--text-muted);">Not set</span>') + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+    modal.showModal();
+}
 </script>
 
 {% endblock %}

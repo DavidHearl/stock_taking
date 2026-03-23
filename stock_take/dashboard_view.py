@@ -6,7 +6,7 @@ from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
-from .models import Order, PurchaseOrder, StockItem, StockHistory, AnthillSale, AnthillPayment
+from .models import Order, PurchaseOrder, PurchaseOrderProduct, StockItem, StockHistory, AnthillSale, AnthillPayment
 
 # Maps the user's selected_location value to the contract number prefix used by Anthill.
 # Contract numbers are the authoritative location signal — the location field in
@@ -302,6 +302,17 @@ def dashboard(request):
         .only('id', 'sku', 'name', 'quantity', 'par_level', 'cost')
         .order_by('quantity')
     )
+
+    # Incoming quantities from approved POs (not yet received)
+    shortage_skus = [s.sku for s in shortage_items]
+    incoming_data = (
+        PurchaseOrderProduct.objects
+        .filter(sku__in=shortage_skus, purchase_order__status='Approved')
+        .values('sku')
+        .annotate(total=Sum('order_quantity'))
+    )
+    incoming_map = {item['sku']: float(item['total'] or 0) for item in incoming_data}
+
     shortage_items_list = [
         {
             'id': s.id,
@@ -310,11 +321,57 @@ def dashboard(request):
             'quantity': s.quantity,
             'par_level': s.par_level,
             'shortfall': s.par_level - s.quantity,
+            'incoming_qty': incoming_map.get(s.sku, 0),
         }
         for s in shortage_items
     ]
     shortage_count = len(shortage_items_list)
-    
+
+    # Incoming materials — individual product items on pending purchase orders
+    # Exclude Carnehill and OS Doors suppliers
+    incoming_products = (
+        PurchaseOrderProduct.objects
+        .filter(
+            purchase_order__status__in=['Approved', 'Ordered', 'Sent'],
+        )
+        .exclude(purchase_order__supplier_name__icontains='carnehill')
+        .exclude(purchase_order__supplier_name__icontains='os doors')
+        .select_related('purchase_order')
+    )
+    # Build a dict keyed by SKU to aggregate same items
+    incoming_by_sku = {}
+    for p in incoming_products:
+        outstanding = float((p.order_quantity or 0) - (p.received_quantity or 0))
+        if outstanding <= 0:
+            continue
+        sku_key = p.sku or p.name or str(p.id)
+        if sku_key in incoming_by_sku:
+            incoming_by_sku[sku_key]['qty_outstanding'] += outstanding
+            po_num = p.purchase_order.display_number or str(p.purchase_order.id)
+            if po_num not in incoming_by_sku[sku_key]['po_numbers']:
+                incoming_by_sku[sku_key]['po_numbers'].append(po_num)
+            # Keep the earliest expected date
+            new_date = p.purchase_order.expected_date or ''
+            existing_date = incoming_by_sku[sku_key]['expected_date']
+            if new_date and (not existing_date or existing_date == '-' or new_date < existing_date):
+                incoming_by_sku[sku_key]['expected_date'] = new_date
+        else:
+            incoming_by_sku[sku_key] = {
+                'sku': p.sku or '-',
+                'name': p.name or '-',
+                'supplier': p.purchase_order.supplier_name or '-',
+                'po_numbers': [p.purchase_order.display_number or str(p.purchase_order.id)],
+                'qty_outstanding': outstanding,
+                'expected_date': p.purchase_order.expected_date or '-',
+                'status': p.purchase_order.status,
+            }
+    # Build the final list sorted by name for grouping same items together
+    incoming_materials_list = sorted(incoming_by_sku.values(), key=lambda x: x['name'])
+    # Convert po_numbers list to comma-separated string
+    for item in incoming_materials_list:
+        item['po_numbers'] = ', '.join(item['po_numbers'])
+    incoming_materials_count = len(incoming_materials_list)
+
     # Total stock value — includes both 'stock' and 'non-stock' items with quantity > 0
     # Non-stock items are still physical warehouse stock and count for accounting purposes
     stock_items = StockItem.objects.filter(tracking_type__in=['stock', 'non-stock'], quantity__gt=0)
@@ -531,6 +588,8 @@ def dashboard(request):
         'pending_pos_count': pending_pos,
         'shortage_count': shortage_count,
         'shortage_items_json': json.dumps(shortage_items_list),
+        'incoming_materials_count': incoming_materials_count,
+        'incoming_materials_json': json.dumps(incoming_materials_list),
         'total_stock_value': '{:,.0f}'.format(total_stock_value),
         'stock_item_count': '{:,}'.format(stock_item_count),
         'stock_value_7day_delta': float(stock_value_7day_delta),
@@ -841,6 +900,7 @@ def dashboard_outstanding_report(request):
     profile = getattr(request.user, 'profile', None)
     raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
     contract_prefix = _contract_prefix_for_location(raw_location)
+    time_filter = request.GET.get('period', 'all')  # all, monthly, weekly
 
     payments_subquery = Subquery(
         AnthillPayment.objects.filter(sale=OuterRef('pk'))
@@ -856,19 +916,59 @@ def dashboard_outstanding_report(request):
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .order_by('-activity_date')
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'activity_date', 'location', 'total_paid')
+                'sale_value', 'activity_date', 'location', 'total_paid', 'fit_date')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
 
-    results = []
+    # Apply time period filter based on fit_date
+    if time_filter == 'weekly':
+        from datetime import date
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        week_end = week_start + timedelta(days=6)
+        qs = qs.filter(fit_date__gte=week_start, fit_date__lte=week_end)
+    elif time_filter == 'monthly':
+        from datetime import date
+        today = date.today()
+        month_start = today.replace(day=1)
+        next_month = (month_start + timedelta(days=32)).replace(day=1)
+        qs = qs.filter(fit_date__gte=month_start, fit_date__lt=next_month)
+
+    # Collect PKs first, then bulk-fetch payments
+    sale_rows = []
     for row in qs:
         sv = row['sale_value'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
         real_outstanding = sv - total_paid
-        if real_outstanding <= Decimal('0'):
+        if real_outstanding < Decimal('10'):
             continue
+        sale_rows.append(row)
+
+    # Bulk-fetch payments for all qualifying sales
+    sale_pks = [r['pk'] for r in sale_rows]
+    payments_by_sale = {}
+    if sale_pks:
+        for p in AnthillPayment.objects.filter(sale_id__in=sale_pks).order_by('date').values(
+            'sale_id', 'amount', 'date', 'payment_type', 'source',
+            'xero_invoice_number', 'invoice_status',
+        ):
+            payments_by_sale.setdefault(p['sale_id'], []).append({
+                'amount': float(p['amount'] or 0),
+                'date': p['date'].strftime('%d/%m/%Y') if p['date'] else '',
+                'type': p['payment_type'] or 'Payment',
+                'source': p['source'] or '',
+                'invoice': p['xero_invoice_number'] or '',
+                'invoice_status': p['invoice_status'] or '',
+            })
+
+    results = []
+    for row in sale_rows:
+        sv = row['sale_value'] or Decimal('0')
+        total_paid = row['total_paid'] or Decimal('0')
+        real_outstanding = sv - total_paid
         dt = row['activity_date']
+        fd = row['fit_date']
         results.append({
             'pk': row['pk'],
             'sale_number': row['anthill_activity_id'],
@@ -878,11 +978,348 @@ def dashboard_outstanding_report(request):
             'sale_value': float(sv),
             'paid': float(total_paid),
             'outstanding': float(real_outstanding),
-            'year': dt.year if dt else None,
-            'date': dt.strftime('%d/%m/%Y') if dt else '',
+            'year': fd.year if fd else None,
+            'fit_date': fd.strftime('%d/%m/%Y') if fd else '',
+            'fit_date_iso': fd.isoformat() if fd else '',
+            'payments': payments_by_sale.get(row['pk'], []),
         })
-    results.sort(key=lambda x: (-(x['year'] or 0), x['outstanding'] * -1))
+    # Sort by fit_date year descending (no fit date last), then outstanding descending
+    results.sort(key=lambda x: (0 if x['year'] is None else 1, -(x['year'] or 0), -x['outstanding']))
     return JsonResponse({'success': True, 'rows': results, 'count': len(results)})
+
+
+@login_required
+def dashboard_outstanding_xero_check(request):
+    """
+    Check Xero for payments for the sales currently shown in the outstanding
+    balance report (respects the same location & period filters).
+    Streams newline-delimited JSON so the frontend can show live progress.
+    """
+    import time
+    from django.http import StreamingHttpResponse
+    from .services import xero_api
+
+    profile = getattr(request.user, 'profile', None)
+    raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
+    contract_prefix = _contract_prefix_for_location(raw_location)
+    time_filter = request.GET.get('period', 'all')
+
+    # Check Xero connection first
+    access_token, _ = xero_api.get_valid_access_token()
+    if not access_token:
+        return JsonResponse({'success': False, 'error': 'Xero is not connected. Please connect via the Xero settings page first.'})
+
+    # Build the same queryset as dashboard_outstanding_report
+    payments_subquery = Subquery(
+        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        .values('sale')
+        .annotate(total=Sum('amount'))
+        .values('total'),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+    qs = (
+        AnthillSale.objects
+        .filter(sale_value__gt=0)
+        .exclude(status='cancelled')
+        .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
+        .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
+                'sale_value', 'total_paid', 'fit_date')
+    )
+    if contract_prefix:
+        qs = qs.filter(contract_number__istartswith=contract_prefix)
+
+    if time_filter == 'weekly':
+        from datetime import date
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        week_end = week_start + timedelta(days=6)
+        qs = qs.filter(fit_date__gte=week_start, fit_date__lte=week_end)
+    elif time_filter == 'monthly':
+        from datetime import date
+        today = date.today()
+        month_start = today.replace(day=1)
+        next_month = (month_start + timedelta(days=32)).replace(day=1)
+        qs = qs.filter(fit_date__gte=month_start, fit_date__lt=next_month)
+
+    # Filter to only outstanding rows (same £10 threshold)
+    sales_to_check = []
+    for row in qs:
+        sv = row['sale_value'] or Decimal('0')
+        total_paid = row['total_paid'] or Decimal('0')
+        if sv - total_paid < Decimal('10'):
+            continue
+        if not row['contract_number']:
+            continue
+        sales_to_check.append(row)
+
+    if not sales_to_check:
+        return JsonResponse({'success': True, 'message': 'No outstanding sales to check.', 'results': [], 'stats': {}})
+
+    def _stream():
+        stats = {
+            'total': len(sales_to_check),
+            'checked': 0,
+            'invoices_found': 0,
+            'payments_created': 0,
+            'payments_updated': 0,
+            'no_invoice': 0,
+            'errors': 0,
+        }
+
+        yield json.dumps({'type': 'start', 'total': len(sales_to_check)}) + '\n'
+
+        for idx, row in enumerate(sales_to_check):
+            sale_pk = row['pk']
+            contract_number = row['contract_number']
+            customer_name = row['customer_name'] or ''
+            activity_id = row['anthill_activity_id']
+
+            yield json.dumps({
+                'type': 'checking',
+                'index': idx + 1,
+                'total': len(sales_to_check),
+                'customer': customer_name,
+                'contract': contract_number,
+            }) + '\n'
+
+            try:
+                invoice_data = xero_api.get_sale_payments_from_xero(
+                    contract_number=contract_number,
+                    contact_name=customer_name or None,
+                )
+            except Exception as exc:
+                stats['errors'] += 1
+                yield json.dumps({
+                    'type': 'result',
+                    'index': idx + 1,
+                    'customer': customer_name,
+                    'contract': contract_number,
+                    'status': 'error',
+                    'message': str(exc),
+                }) + '\n'
+                time.sleep(1)
+                continue
+
+            stats['checked'] += 1
+
+            if not invoice_data:
+                stats['no_invoice'] += 1
+                yield json.dumps({
+                    'type': 'result',
+                    'index': idx + 1,
+                    'customer': customer_name,
+                    'contract': contract_number,
+                    'status': 'no_invoice',
+                    'message': 'No matching invoices in Xero',
+                }) + '\n'
+                time.sleep(1.0)
+                continue
+
+            stats['invoices_found'] += len(invoice_data)
+
+            # Write payments to DB
+            try:
+                sale = AnthillSale.objects.get(pk=sale_pk)
+            except AnthillSale.DoesNotExist:
+                continue
+
+            sale_payments_created = 0
+            sale_payments_updated = 0
+
+            for inv in invoice_data:
+                if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
+                    continue
+
+                for p in inv['payments']:
+                    if p.get('status', '').upper() == 'CANCELLED':
+                        continue
+                    pid = p.get('payment_id') or ''
+                    defaults = {
+                        'source': 'xero',
+                        'xero_invoice_id': inv['invoice_id'],
+                        'xero_invoice_number': inv['invoice_number'],
+                        'invoice_total': inv['total'],
+                        'invoice_amount_due': inv['amount_due'],
+                        'invoice_status': inv['status'],
+                        'payment_type': p['reference'] or 'Payment',
+                        'date': p['date'],
+                        'amount': p['amount'],
+                        'status': p['status'],
+                        'location': '',
+                        'user_name': '',
+                    }
+
+                    if pid:
+                        obj, created = AnthillPayment.objects.update_or_create(
+                            sale=sale,
+                            anthill_payment_id=pid,
+                            defaults=defaults,
+                        )
+                    else:
+                        obj, created = AnthillPayment.objects.update_or_create(
+                            sale=sale,
+                            xero_invoice_id=inv['invoice_id'],
+                            date=p['date'],
+                            defaults=defaults,
+                        )
+
+                    if created:
+                        sale_payments_created += 1
+                        stats['payments_created'] += 1
+                    else:
+                        sale_payments_updated += 1
+                        stats['payments_updated'] += 1
+
+                # Invoice-level summary row for invoices with no individual payments
+                if not inv['payments']:
+                    defaults = {
+                        'source': 'xero',
+                        'xero_invoice_id': inv['invoice_id'],
+                        'xero_invoice_number': inv['invoice_number'],
+                        'invoice_total': inv['total'],
+                        'invoice_amount_due': inv['amount_due'],
+                        'invoice_status': inv['status'],
+                        'payment_type': 'Invoice Payment',
+                        'date': None,
+                        'amount': inv['amount_paid'],
+                        'status': inv['status'],
+                        'location': '',
+                        'user_name': '',
+                    }
+                    obj, created = AnthillPayment.objects.update_or_create(
+                        sale=sale,
+                        xero_invoice_id=inv['invoice_id'],
+                        date=None,
+                        defaults=defaults,
+                    )
+                    if created:
+                        sale_payments_created += 1
+                        stats['payments_created'] += 1
+                    else:
+                        sale_payments_updated += 1
+                        stats['payments_updated'] += 1
+
+            inv_nums = ', '.join(inv['invoice_number'] for inv in invoice_data)
+            yield json.dumps({
+                'type': 'result',
+                'index': idx + 1,
+                'customer': customer_name,
+                'contract': contract_number,
+                'status': 'found',
+                'message': f'{inv_nums} — {sale_payments_created} new, {sale_payments_updated} updated',
+            }) + '\n'
+
+            time.sleep(1.5)  # Xero rate limit
+
+        yield json.dumps({'type': 'done', 'stats': stats}) + '\n'
+
+    response = StreamingHttpResponse(_stream(), content_type='application/x-ndjson')
+    response['X-Accel-Buffering'] = 'no'
+    response['Cache-Control'] = 'no-cache'
+    return response
+
+
+@login_required
+def dashboard_outstanding_xero_check_single(request):
+    """
+    Check Xero for payments for a single sale by PK.
+    Returns JSON with the result.
+    """
+    import time
+    from .services import xero_api
+
+    sale_pk = request.GET.get('sale_pk')
+    if not sale_pk:
+        return JsonResponse({'success': False, 'error': 'Missing sale_pk parameter.'})
+
+    access_token, _ = xero_api.get_valid_access_token()
+    if not access_token:
+        return JsonResponse({'success': False, 'error': 'Xero is not connected.'})
+
+    try:
+        sale = AnthillSale.objects.get(pk=sale_pk)
+    except AnthillSale.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Sale not found.'})
+
+    if not sale.contract_number:
+        return JsonResponse({'success': False, 'error': 'Sale has no contract number.'})
+
+    try:
+        invoice_data = xero_api.get_sale_payments_from_xero(
+            contract_number=sale.contract_number,
+            contact_name=sale.customer_name or None,
+        )
+    except Exception as exc:
+        return JsonResponse({'success': False, 'error': str(exc)})
+
+    if not invoice_data:
+        return JsonResponse({'success': True, 'found': False, 'message': 'No matching invoices found in Xero.'})
+
+    payments_created = 0
+    payments_updated = 0
+
+    for inv in invoice_data:
+        if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
+            continue
+        for p in inv['payments']:
+            if p.get('status', '').upper() == 'CANCELLED':
+                continue
+            pid = p.get('payment_id') or ''
+            defaults = {
+                'source': 'xero',
+                'xero_invoice_id': inv['invoice_id'],
+                'xero_invoice_number': inv['invoice_number'],
+                'invoice_total': inv['total'],
+                'invoice_amount_due': inv['amount_due'],
+                'invoice_status': inv['status'],
+                'payment_type': p['reference'] or 'Payment',
+                'date': p['date'],
+                'amount': p['amount'],
+                'status': p['status'],
+                'location': '',
+                'user_name': '',
+            }
+            if pid:
+                obj, created = AnthillPayment.objects.update_or_create(
+                    sale=sale, anthill_payment_id=pid, defaults=defaults)
+            else:
+                obj, created = AnthillPayment.objects.update_or_create(
+                    sale=sale, xero_invoice_id=inv['invoice_id'], date=p['date'], defaults=defaults)
+            if created:
+                payments_created += 1
+            else:
+                payments_updated += 1
+
+        if not inv['payments']:
+            defaults = {
+                'source': 'xero',
+                'xero_invoice_id': inv['invoice_id'],
+                'xero_invoice_number': inv['invoice_number'],
+                'invoice_total': inv['total'],
+                'invoice_amount_due': inv['amount_due'],
+                'invoice_status': inv['status'],
+                'payment_type': 'Invoice Payment',
+                'date': None,
+                'amount': inv['amount_paid'],
+                'status': inv['status'],
+                'location': '',
+                'user_name': '',
+            }
+            obj, created = AnthillPayment.objects.update_or_create(
+                sale=sale, xero_invoice_id=inv['invoice_id'], date=None, defaults=defaults)
+            if created:
+                payments_created += 1
+            else:
+                payments_updated += 1
+
+    inv_nums = ', '.join(inv['invoice_number'] for inv in invoice_data)
+    return JsonResponse({
+        'success': True,
+        'found': True,
+        'message': f'{inv_nums} — {payments_created} new, {payments_updated} updated',
+        'payments_created': payments_created,
+        'payments_updated': payments_updated,
+    })
 
 
 @login_required
@@ -918,7 +1355,7 @@ def dashboard_outstanding_pdf(request):
         sv = row['sale_value'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
         real_outstanding = sv - total_paid
-        if real_outstanding <= Decimal('0'):
+        if real_outstanding < Decimal('10'):
             continue
         dt = row['activity_date']
         rows.append({

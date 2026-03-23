@@ -41,10 +41,11 @@ logger = logging.getLogger(__name__)
 # Each entry: (hour, minute, command_name, kwargs_dict)
 # --------------------------------------------------------------------------- #
 SCHEDULE = [
-    (7,  0, 'upgrade_leads',          {'days': 365}),
-    (8,  0, 'sync_recent_customers',  {}),
-    (9,  0, 'sync_anthill_fit_dates', {'days': 365}),
-    (12, 0, 'sync_recent_customers',  {}),
+    (7,  0, 'upgrade_leads',              {'days': 365}),
+    (8,  0, 'sync_recent_customers',      {}),
+    (9,  0, 'sync_anthill_fit_dates',     {'days': 365}),
+    (10, 0, 'sync_xero_sale_payments',    {}),
+    (12, 0, 'sync_recent_customers',      {}),
 ]
 
 # How many seconds past the scheduled minute we will still fire a missed job.

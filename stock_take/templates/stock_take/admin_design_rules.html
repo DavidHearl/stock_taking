@@ -1,0 +1,816 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Design Rules - Admin{% endblock %}
+
+{% block nav_admin_design_rules_active %}active{% endblock %}
+
+{% block page_title %}<i class="bi bi-palette"></i> Design Rules{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/admin_pages.css' %}" rel="stylesheet">
+<style>
+    /* ── Design Rules page-specific styles ── */
+    .dr-section { margin-bottom: 48px; }
+    .dr-section-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+        color: var(--text-primary);
+    }
+    .dr-section-desc {
+        font-size: 0.88rem;
+        color: var(--text-secondary);
+        margin-bottom: 24px;
+    }
+    .dr-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-start;
+        margin-bottom: 16px;
+    }
+    .dr-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+    }
+    .dr-group {
+        margin-bottom: 24px;
+    }
+
+    /* Colour swatches */
+    .dr-swatch-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+    .dr-swatch {
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+    }
+    .dr-swatch-color {
+        height: 64px;
+        display: flex;
+        align-items: flex-end;
+        padding: 8px;
+    }
+    .dr-swatch-info {
+        padding: 8px;
+        background: var(--bg-secondary);
+    }
+    .dr-swatch-name {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .dr-swatch-var {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        font-family: monospace;
+    }
+
+    /* Spacing ruler */
+    .dr-spacing-row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 8px;
+    }
+    .dr-spacing-block {
+        background: var(--primary-subtle);
+        border: 1px solid var(--primary-color);
+        border-radius: 4px;
+        height: 24px;
+    }
+    .dr-spacing-label {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        font-family: monospace;
+        min-width: 100px;
+    }
+
+    /* Radius examples */
+    .dr-radius-grid {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+    }
+    .dr-radius-box {
+        width: 80px;
+        height: 80px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.72rem;
+        font-family: monospace;
+        color: var(--text-secondary);
+    }
+
+    /* Typography samples */
+    .dr-type-sample {
+        margin-bottom: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .dr-type-meta {
+        font-size: 0.72rem;
+        font-family: monospace;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+
+    /* Table demo */
+    .dr-table-wrap {
+        overflow-x: auto;
+    }
+
+    /* Copy button */
+    .dr-copy {
+        font-size: 0.7rem;
+        cursor: pointer;
+        padding: 2px 8px;
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-muted);
+        transition: all 0.15s;
+        margin-left: 8px;
+    }
+    .dr-copy:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+    .dr-copy.copied { color: var(--success-color); border-color: var(--success-color); }
+
+    /* Rules box */
+    .dr-rule-box {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        padding: 16px;
+        margin-bottom: 12px;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        line-height: 1.6;
+    }
+    .dr-rule-box code {
+        background: var(--bg-primary);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        color: var(--primary-color);
+    }
+    .dr-rule-box strong {
+        color: var(--text-primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Design Principles
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Design Principles</div>
+        <div class="dr-rule-box">
+            <strong>1. 4px Grid</strong> — All padding, margin, gap, and spacing values must be multiples of 4 (4, 8, 12, 16, 20, 24…). Never use 5px, 7px, 10px, 15px etc.<br>
+            <strong>2. Pill Buttons</strong> — All interactive buttons use <code>border-radius: var(--radius-pill)</code>. Containers, cards, and inputs use <code>var(--radius-sm)</code> or <code>var(--radius-md)</code>.<br>
+            <strong>3. Token-only Colours</strong> — Never hardcode hex colours in page-specific CSS. Always use <code>var(--name)</code> tokens. This ensures dark/light mode works everywhere.<br>
+            <strong>4. Surface Hierarchy</strong> — Page background (<code>--bg-primary</code>) → Cards (<code>--bg-secondary</code>) → Inset areas (<code>--bg-tertiary</code>). Sidebar and topbar sit on <code>--bg-primary</code>.<br>
+            <strong>5. Semantic Colours</strong> — Use the right colour for the right meaning: primary (action), success (positive), warning (caution), danger (destructive), info (neutral info).
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Colour Palette
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Colour Palette</div>
+        <div class="dr-section-desc">All colours are defined as CSS variables in <code>:root</code>. Swap them at the root to change the entire theme.</div>
+
+        <div class="dr-group">
+            <div class="dr-label">Surfaces</div>
+            <div class="dr-swatch-grid">
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-primary);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Primary BG</div><div class="dr-swatch-var">--bg-primary</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-secondary);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Secondary BG</div><div class="dr-swatch-var">--bg-secondary</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-tertiary);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Tertiary BG</div><div class="dr-swatch-var">--bg-tertiary</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-input);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Input BG</div><div class="dr-swatch-var">--bg-input</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-hover);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Hover BG</div><div class="dr-swatch-var">--bg-hover</div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Text</div>
+            <div class="dr-swatch-grid">
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-secondary); color: var(--text-primary); display: flex; align-items: center; justify-content: center; font-weight: 600;">Aa</div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Primary</div><div class="dr-swatch-var">--text-primary</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-secondary); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; font-weight: 600;">Aa</div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Secondary</div><div class="dr-swatch-var">--text-secondary</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--bg-secondary); color: var(--text-muted); display: flex; align-items: center; justify-content: center; font-weight: 600;">Aa</div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Muted</div><div class="dr-swatch-var">--text-muted</div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Semantic Colours</div>
+            <div class="dr-swatch-grid">
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--primary-color);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Primary</div><div class="dr-swatch-var">--primary-color</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--success-color);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Success</div><div class="dr-swatch-var">--success-color</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--warning-color);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Warning</div><div class="dr-swatch-var">--warning-color</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--danger-color);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Danger</div><div class="dr-swatch-var">--danger-color</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--info-color);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Info</div><div class="dr-swatch-var">--info-color</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--purple-color);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Purple</div><div class="dr-swatch-var">--purple-color</div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Subtle Backgrounds (for badges, alerts)</div>
+            <div class="dr-swatch-grid">
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--primary-subtle);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Primary Subtle</div><div class="dr-swatch-var">--primary-subtle</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--success-subtle);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Success Subtle</div><div class="dr-swatch-var">--success-subtle</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--warning-subtle);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Warning Subtle</div><div class="dr-swatch-var">--warning-subtle</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--danger-subtle);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Danger Subtle</div><div class="dr-swatch-var">--danger-subtle</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--info-subtle);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Info Subtle</div><div class="dr-swatch-var">--info-subtle</div></div>
+                </div>
+                <div class="dr-swatch">
+                    <div class="dr-swatch-color" style="background: var(--purple-subtle);"></div>
+                    <div class="dr-swatch-info"><div class="dr-swatch-name">Purple Subtle</div><div class="dr-swatch-var">--purple-subtle</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Buttons
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Buttons</div>
+        <div class="dr-section-desc">All buttons use pill shape. Use filled buttons for primary actions, outline for secondary, ghost for icons/tertiary.</div>
+
+        <div class="dr-group">
+            <div class="dr-label">Filled Buttons</div>
+            <div class="dr-row">
+                <button class="btn btn-primary"><i class="bi bi-plus"></i> Primary</button>
+                <button class="btn btn-success"><i class="bi bi-check"></i> Success</button>
+                <button class="btn btn-danger"><i class="bi bi-trash"></i> Danger</button>
+                <button class="btn btn-warning"><i class="bi bi-exclamation-triangle"></i> Warning</button>
+                <button class="btn btn-secondary">Secondary</button>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Outline Buttons</div>
+            <div class="dr-row">
+                <button class="btn btn-outline-primary">Outline Primary</button>
+                <button class="btn btn-outline-success">Outline Success</button>
+                <button class="btn btn-outline-danger">Outline Danger</button>
+                <button class="btn btn-outline-warning">Outline Warning</button>
+                <button class="btn btn-outline-secondary">Outline Secondary</button>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Ghost & Small Buttons</div>
+            <div class="dr-row">
+                <button class="btn btn-ghost"><i class="bi bi-gear"></i> Ghost</button>
+                <button class="btn btn-primary btn-sm">Small Primary</button>
+                <button class="btn btn-success btn-sm">Small Success</button>
+                <button class="btn btn-outline-secondary btn-sm">Small Outline</button>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Attention Pulse (draw the eye to important actions)</div>
+            <div class="dr-row">
+                <button class="btn btn-primary btn-pulse-primary"><i class="bi bi-plus"></i> Add New Order</button>
+                <button class="btn btn-success btn-pulse-success"><i class="bi bi-check"></i> Confirm</button>
+                <button class="btn btn-danger btn-pulse-danger"><i class="bi bi-trash"></i> Delete</button>
+                <button class="btn btn-warning btn-pulse-warning"><i class="bi bi-exclamation-triangle"></i> Review</button>
+            </div>
+        </div>
+
+        <div class="dr-rule-box">
+            <strong>Hover:</strong> All filled and outline buttons get a coloured <code>box-shadow</code> glow on hover. No vertical movement.<br>
+            <strong>Pulse:</strong> Add <code>.btn-pulse-primary</code> (or success/danger/warning) to make a button pulse — use sparingly to draw attention. Pulse stops on hover.<br>
+            <strong>Usage:</strong> <code>.btn .btn-primary</code> for main CTA. <code>.btn .btn-outline-*</code> for secondary. <code>.btn .btn-ghost</code> for minimal/icon actions. Add <code>.btn-sm</code> for compact areas like table rows.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Badges
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Badges</div>
+        <div class="dr-section-desc">Pill-shaped status indicators. Use subtle background + coloured text.</div>
+
+        <div class="dr-row">
+            <span class="badge badge-primary">Primary</span>
+            <span class="badge badge-success">Completed</span>
+            <span class="badge badge-warning">Pending</span>
+            <span class="badge badge-danger">Overdue</span>
+        </div>
+
+        <div class="dr-rule-box">
+            <strong>Usage:</strong> <code>.badge .badge-success</code> etc. Never use filled/solid backgrounds for badges — always subtle.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Alerts
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Alerts</div>
+        <div class="dr-section-desc">Notifications and messages with left border accent.</div>
+
+        <div class="alert alert-info"><i class="bi bi-info-circle"></i>&nbsp; This is an informational alert.</div>
+        <div class="alert alert-success"><i class="bi bi-check-circle"></i>&nbsp; Operation completed successfully.</div>
+        <div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i>&nbsp; Please review before proceeding.</div>
+        <div class="alert alert-danger"><i class="bi bi-x-circle"></i>&nbsp; Something went wrong. Please try again.</div>
+
+        <div class="dr-rule-box">
+            <strong>Usage:</strong> <code>.alert .alert-info</code> etc. Alerts use subtle background + 3px left border in the semantic colour.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Cards
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Cards</div>
+        <div class="dr-section-desc">Content containers that sit on <code>--bg-secondary</code> above the page.</div>
+
+        <div class="row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <span>Standard Card</span>
+                    <button class="btn btn-primary btn-sm">Action</button>
+                </div>
+                <div class="card-body">
+                    <p style="color: var(--text-secondary); margin: 0;">Card body content goes here. Cards use <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">--bg-secondary</code> background and <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">--radius-md</code> corners.</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span>Card With Table</span>
+                </div>
+                <div class="card-body" style="padding: 0;">
+                    <table class="table" style="margin: 0;">
+                        <thead>
+                            <tr><th>Name</th><th>Status</th><th>Amount</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Item One</td><td><span class="badge badge-success">Active</span></td><td>£1,200</td></tr>
+                            <tr><td>Item Two</td><td><span class="badge badge-warning">Pending</span></td><td>£840</td></tr>
+                            <tr><td>Item Three</td><td><span class="badge badge-danger">Overdue</span></td><td>£2,100</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 24px;">
+            <div class="dr-label">Stats Cards</div>
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-body" style="text-align: center;">
+                        <div class="stats-number">128</div>
+                        <div class="stats-label">Total Orders</div>
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-body" style="text-align: center;">
+                        <div class="stats-number" style="color: var(--success-color);">£45,200</div>
+                        <div class="stats-label">Revenue</div>
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-body" style="text-align: center;">
+                        <div class="stats-number" style="color: var(--warning-color);">24</div>
+                        <div class="stats-label">Pending</div>
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-body" style="text-align: center;">
+                        <div class="stats-number" style="color: var(--danger-color);">3</div>
+                        <div class="stats-label">Overdue</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-rule-box" style="margin-top: 24px;">
+            <strong>Usage:</strong> <code>.card</code> with <code>.card-header</code> and <code>.card-body</code>. For stats, use <code>.stats-number</code> and <code>.stats-label</code> inside a card body.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Forms
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Form Controls</div>
+        <div class="dr-section-desc">Standard inputs, selects, and textareas.</div>
+
+        <div class="card">
+            <div class="card-body">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <label>Text Input</label>
+                        <input type="text" class="form-control" placeholder="Enter something...">
+                    </div>
+                    <div>
+                        <label>Select</label>
+                        <select class="form-control">
+                            <option>Option One</option>
+                            <option>Option Two</option>
+                            <option>Option Three</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Disabled Input</label>
+                        <input type="text" class="form-control" disabled value="Cannot edit this">
+                    </div>
+                    <div>
+                        <label>Number Input (custom spinner)</label>
+                        <input type="number" class="form-control" value="42" min="0" step="1">
+                    </div>
+                    <div>
+                        <label>Decimal Spinner (step 0.5)</label>
+                        <input type="number" class="form-control" value="2.5" min="0" step="0.5">
+                    </div>
+                    <div style="grid-column: span 2;">
+                        <label>Textarea</label>
+                        <textarea class="form-control" rows="3" placeholder="Write a longer message..."></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-rule-box">
+            <strong>Usage:</strong> Use <code>.form-control</code> or the element selectors. Inputs use <code>--bg-input</code> background and <code>--radius-sm</code> corners. Focus state shows <code>--primary-color</code> border + subtle glow.<br>
+            <strong>Number inputs:</strong> All <code>input[type="number"]</code> elements are automatically wrapped with custom <code>.pnx-spinner-wrap</code> buttons globally via <code>base.html</code>. Native browser spinners are hidden. Set <code>min</code>, <code>max</code>, and <code>step</code> attributes as needed.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Tables
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Tables</div>
+        <div class="dr-section-desc">Standard data tables with hover rows.</div>
+
+        <div class="dr-table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Customer</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th>Total</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="font-weight: 600;">#419164</td>
+                        <td>Ben Watson</td>
+                        <td style="color: var(--text-secondary);">14 Mar 2026</td>
+                        <td><span class="badge badge-success">Completed</span></td>
+                        <td>£3,700.00</td>
+                        <td><button class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button> <button class="btn btn-ghost btn-sm"><i class="bi bi-pencil"></i></button></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight: 600;">#419165</td>
+                        <td>Sarah O'Neill</td>
+                        <td style="color: var(--text-secondary);">15 Mar 2026</td>
+                        <td><span class="badge badge-warning">Pending</span></td>
+                        <td>£2,450.00</td>
+                        <td><button class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button> <button class="btn btn-ghost btn-sm"><i class="bi bi-pencil"></i></button></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight: 600;">#419166</td>
+                        <td>Michael Brady</td>
+                        <td style="color: var(--text-secondary);">16 Mar 2026</td>
+                        <td><span class="badge badge-danger">Overdue</span></td>
+                        <td>£5,100.00</td>
+                        <td><button class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button> <button class="btn btn-ghost btn-sm"><i class="bi bi-pencil"></i></button></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="dr-rule-box">
+            <strong>Usage:</strong> <code>.table</code> with <code>thead</code> using <code>--bg-tertiary</code>. Row hover uses <code>--bg-hover</code>. Keep table inside a card for proper containment.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Spacing
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Spacing Scale (4px Grid)</div>
+        <div class="dr-section-desc">All spacing must use these values. Never use 5px, 7px, 10px, 15px etc.</div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">--sp-1: 4px</div>
+                    <div class="dr-spacing-block" style="width: 4px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">--sp-2: 8px</div>
+                    <div class="dr-spacing-block" style="width: 8px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">--sp-3: 12px</div>
+                    <div class="dr-spacing-block" style="width: 12px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">--sp-4: 16px</div>
+                    <div class="dr-spacing-block" style="width: 16px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">--sp-5: 20px</div>
+                    <div class="dr-spacing-block" style="width: 20px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">--sp-6: 24px</div>
+                    <div class="dr-spacing-block" style="width: 24px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">32px</div>
+                    <div class="dr-spacing-block" style="width: 32px;"></div>
+                </div>
+                <div class="dr-spacing-row">
+                    <div class="dr-spacing-label">48px</div>
+                    <div class="dr-spacing-block" style="width: 48px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Border Radius
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Border Radius</div>
+        <div class="dr-section-desc">Use tokens, not raw pixel values.</div>
+
+        <div class="dr-radius-grid">
+            <div style="text-align: center;">
+                <div class="dr-radius-box" style="border-radius: var(--radius-sm);">8px</div>
+                <div class="dr-spacing-label" style="margin-top: 8px;">--radius-sm<br>Inputs, small containers</div>
+            </div>
+            <div style="text-align: center;">
+                <div class="dr-radius-box" style="border-radius: var(--radius-md);">12px</div>
+                <div class="dr-spacing-label" style="margin-top: 8px;">--radius-md<br>Cards, modals</div>
+            </div>
+            <div style="text-align: center;">
+                <div class="dr-radius-box" style="border-radius: var(--radius-lg);">16px</div>
+                <div class="dr-spacing-label" style="margin-top: 8px;">--radius-lg<br>Large containers</div>
+            </div>
+            <div style="text-align: center;">
+                <div class="dr-radius-box" style="border-radius: var(--radius-pill); width: 120px;">100px</div>
+                <div class="dr-spacing-label" style="margin-top: 8px;">--radius-pill<br>Buttons, badges</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Typography
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Typography</div>
+        <div class="dr-section-desc">Font: Inter. Sizes and weights for common elements.</div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="dr-type-sample">
+                    <h1 style="margin: 0;">Page Heading</h1>
+                    <div class="dr-type-meta">h1 · 1.8rem · font-weight: 600</div>
+                </div>
+                <div class="dr-type-sample">
+                    <h2 style="margin: 0; font-size: 1.3rem;">Card Heading</h2>
+                    <div class="dr-type-meta">h2 · 1.3rem · font-weight: 600</div>
+                </div>
+                <div class="dr-type-sample">
+                    <h3 style="margin: 0; font-size: 1rem;">Section Heading</h3>
+                    <div class="dr-type-meta">h3 · 1rem · font-weight: 600</div>
+                </div>
+                <div class="dr-type-sample">
+                    <p style="margin: 0; color: var(--text-primary);">Body text — this is the standard paragraph style used everywhere in the application for content.</p>
+                    <div class="dr-type-meta">p · 0.875rem (inherited from body) · font-weight: 400</div>
+                </div>
+                <div class="dr-type-sample">
+                    <p style="margin: 0; font-size: 0.85rem; color: var(--text-secondary);">Secondary text — used for metadata, captions, and less important information.</p>
+                    <div class="dr-type-meta">0.85rem · color: --text-secondary</div>
+                </div>
+                <div class="dr-type-sample" style="border-bottom: none;">
+                    <p style="margin: 0; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Label / Caption Text</p>
+                    <div class="dr-type-meta">0.75rem · uppercase · letter-spacing: 0.05em · color: --text-muted</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Modals
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Modal (Preview)</div>
+        <div class="dr-section-desc">Click to see a sample modal overlay.</div>
+
+        <button class="btn btn-primary" onclick="document.getElementById('dr-sample-modal').classList.add('show')">
+            <i class="bi bi-window-stack"></i> Open Sample Modal
+        </button>
+
+        <div class="modal" id="dr-sample-modal">
+            <div class="modal-overlay" onclick="document.getElementById('dr-sample-modal').classList.remove('show')"></div>
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header">
+                    <h3>Sample Modal</h3>
+                    <button class="modal-close" onclick="document.getElementById('dr-sample-modal').classList.remove('show')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="color: var(--text-secondary); margin-bottom: 16px;">This is a standard modal dialog. It uses <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">--bg-secondary</code> background, <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">--radius-md</code> corners, and <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">--shadow-lg</code>.</p>
+                    <label>Example Input</label>
+                    <input type="text" class="form-control" placeholder="Type here...">
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="document.getElementById('dr-sample-modal').classList.remove('show')">Cancel</button>
+                    <button class="btn btn-primary" onclick="document.getElementById('dr-sample-modal').classList.remove('show')">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Tabs
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Tabs</div>
+        <div class="dr-section-desc">Two tab styles: underline (default) and pill. Use for switching between content panels.</div>
+
+        <div class="dr-group">
+            <div class="dr-label">Underline Tabs (default)</div>
+            <div class="card">
+                <div class="tab-nav" id="dr-tabs-underline">
+                    <button class="tab-button active" onclick="drSwitchTab(this, 'dr-tab-u')"><i class="bi bi-house"></i> Overview</button>
+                    <button class="tab-button" onclick="drSwitchTab(this, 'dr-tab-u')"><i class="bi bi-box"></i> Products <span class="badge badge-primary">12</span></button>
+                    <button class="tab-button" onclick="drSwitchTab(this, 'dr-tab-u')"><i class="bi bi-file-text"></i> Invoices</button>
+                    <button class="tab-button" onclick="drSwitchTab(this, 'dr-tab-u')"><i class="bi bi-gear"></i> Settings</button>
+                </div>
+                <div class="tab-content">
+                    <div class="tab-panel active dr-tab-u" style="padding: 24px;">
+                        <p style="color: var(--text-secondary); margin: 0;">Overview panel content. Underline tabs use a <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">2px bottom border</code> with rounded top corners.</p>
+                    </div>
+                    <div class="tab-panel dr-tab-u" style="padding: 24px;">
+                        <p style="color: var(--text-secondary); margin: 0;">Products panel content.</p>
+                    </div>
+                    <div class="tab-panel dr-tab-u" style="padding: 24px;">
+                        <p style="color: var(--text-secondary); margin: 0;">Invoices panel content.</p>
+                    </div>
+                    <div class="tab-panel dr-tab-u" style="padding: 24px;">
+                        <p style="color: var(--text-secondary); margin: 0;">Settings panel content.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-group">
+            <div class="dr-label">Pill Tabs (for compact inline switching)</div>
+            <div class="card">
+                <div class="card-body">
+                    <div class="tab-nav-pills" id="dr-tabs-pills">
+                        <button class="tab-button active" onclick="drSwitchTab(this, 'dr-tab-p')">Day</button>
+                        <button class="tab-button" onclick="drSwitchTab(this, 'dr-tab-p')">Week</button>
+                        <button class="tab-button" onclick="drSwitchTab(this, 'dr-tab-p')">Month</button>
+                        <button class="tab-button" onclick="drSwitchTab(this, 'dr-tab-p')">Year</button>
+                    </div>
+                    <div class="tab-content" style="margin-top: 16px;">
+                        <div class="tab-panel active dr-tab-p">
+                            <p style="color: var(--text-secondary); margin: 0;">Day view content. Pill tabs sit inside a <code style="color: var(--primary-color); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px;">--bg-tertiary</code> container with no bottom border.</p>
+                        </div>
+                        <div class="tab-panel dr-tab-p">
+                            <p style="color: var(--text-secondary); margin: 0;">Week view content.</p>
+                        </div>
+                        <div class="tab-panel dr-tab-p">
+                            <p style="color: var(--text-secondary); margin: 0;">Month view content.</p>
+                        </div>
+                        <div class="tab-panel dr-tab-p">
+                            <p style="color: var(--text-secondary); margin: 0;">Year view content.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dr-rule-box">
+            <strong>Underline:</strong> <code>.tab-nav</code> + <code>.tab-button</code> — use for main page sections. Tabs don’t stretch (no <code>flex: 1</code>).<br>
+            <strong>Pill:</strong> <code>.tab-nav-pills</code> + <code>.tab-button</code> — use inside cards for compact toggles (e.g. Day/Week/Month).<br>
+            <strong>JS:</strong> Toggle <code>.active</code> on both the button and its corresponding <code>.tab-panel</code>.
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION: Quick Reference
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="dr-section">
+        <div class="dr-section-title">Quick Reference</div>
+
+        <div class="dr-rule-box">
+            <strong>When adding a new page:</strong><br>
+            1. Extend <code>base.html</code><br>
+            2. Use <code>.card</code> for content sections<br>
+            3. Use <code>.btn .btn-*</code> for actions<br>
+            4. Use <code>.badge .badge-*</code> for status indicators<br>
+            5. Use <code>.table</code> for data<br>
+            6. Use <code>.alert .alert-*</code> for messages<br>
+            7. Use <code>.form-control</code> for inputs<br>
+            8. Only use CSS variables — never hardcode hex colors<br>
+            9. All spacing in multiples of 4px
+        </div>
+
+        <div class="dr-rule-box">
+            <strong>CSS files:</strong><br>
+            • <code>styles.css</code> — Global tokens + all shared components<br>
+            • <code>light-mode.css</code> — Variable overrides for <code>body.light-mode</code><br>
+            • <code>admin_pages.css</code> — Admin-specific styles<br>
+            • Page-specific CSS — Only for unique page layouts, never for redefining base components
+        </div>
+    </div>
+</div>
+
+<script>
+function drSwitchTab(btn, panelClass) {
+    var nav = btn.parentNode;
+    nav.querySelectorAll('.tab-button').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+
+    var panels = nav.closest('.card, .dr-group').querySelectorAll('.tab-panel.' + panelClass);
+    var idx = Array.from(nav.children).indexOf(btn);
+    panels.forEach(function(p, i) {
+        p.classList.toggle('active', i === idx);
+    });
+}
+</script>
+{% endblock %}

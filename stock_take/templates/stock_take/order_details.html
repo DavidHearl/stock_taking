@@ -118,303 +118,297 @@
                 </div>
             </div>
             
-            <div class="card">
-                <div class="card-header">
-                    <h3>Order Information</h3>
-                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary btn-sm btn-summary-doc" title="Download Summary Document PDF">
-                        <i class="bi bi-file-earmark-pdf"></i> Summary
-                    </a>
-                </div>
-                
-                <!-- Form Errors Display -->
-                {% if form.errors %}
-                <div class="alert alert-danger mb-3">
-                    <h6>Please correct the following errors:</h6>
-                    <ul class="mb-0">
-                        {% for field in form %}
-                            {% for error in field.errors %}
-                                <li><strong>{{ field.label }}:</strong> {{ error }}</li>
-                            {% endfor %}
+            <!-- Form Errors Display -->
+            {% if form.errors %}
+            <div class="alert alert-danger mb-3">
+                <h6>Please correct the following errors:</h6>
+                <ul class="mb-0">
+                    {% for field in form %}
+                        {% for error in field.errors %}
+                            <li><strong>{{ field.label }}:</strong> {{ error }}</li>
                         {% endfor %}
-                        {% for error in form.non_field_errors %}
-                            <li>{{ error }}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                {% endif %}
-                
-                <!-- Edit Order Information -->
-                <div class="card-body padded">
-                    <div class="form-grid-3col">
-                        <!-- Column 1: Customer Info -->
-                        <div>
-                            <!-- Customer Info -->
+                    {% endfor %}
+                    {% for error in form.non_field_errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="order-info-grid">
+                <!-- Card 1: Customer Info -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-customer">
+                        <h3><i class="bi bi-person"></i> Customer Info</h3>
+                        <div class="card-header-actions">
+                            <button type="button" class="btn btn-sm btn-outline-primary edit-btn-spacing" id="edit-customer-btn" onclick="toggleCustomerEdit()">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body padded">
+                        <div id="customer-display" class="info-display">
                             <div>
-                                <div class="info-section-header">
-                                    <h4 class="info-section-title customer">Customer Info</h4>
-                                    <button type="button" class="btn btn-sm btn-outline-primary edit-btn-spacing" id="edit-customer-btn" onclick="toggleCustomerEdit()">
-                                        <i class="bi bi-pencil"></i> Edit
+                                <div class="field-label">Customer Name</div>
+                                <div class="field-value-large" id="customer-name-display">{{ order.first_name }} {{ order.last_name }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Anthill Customer ID</div>
+                                <div class="field-row-with-button">
+                                    <div class="field-value" id="anthill-id-display">{{ order.anthill_id|default:"Not specified" }}</div>
+                                    {% if order.anthill_id %}
+                                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                            <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div>
+                                <div class="field-label">Address</div>
+                                <div class="field-value" id="address-display">{{ order.address|default:"Not set" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Postcode</div>
+                                <div class="field-value" id="postcode-display">{{ order.postcode|default:"Not set" }}</div>
+                            </div>
+                        </div>
+                        <div id="customer-edit" class="info-edit">
+                            <div>
+                                <label class="form-label">First Name</label>
+                                <input type="text" class="form-input" id="first-name-input" value="{{ order.first_name }}">
+                            </div>
+                            <div>
+                                <label class="form-label">Last Name</label>
+                                <input type="text" class="form-input" id="last-name-input" value="{{ order.last_name }}">
+                            </div>
+                            <div>
+                                <label class="form-label">Anthill Customer ID</label>
+                                <input type="text" class="form-input" id="anthill-id-input" value="{{ order.anthill_id }}">
+                            </div>
+                            <div>
+                                <label class="form-label">Address</label>
+                                <input type="text" class="form-input" id="address-input" value="{{ order.address }}">
+                            </div>
+                            <div>
+                                <label class="form-label">Postcode</label>
+                                <input type="text" class="form-input" id="postcode-input" value="{{ order.postcode }}">
+                            </div>
+                            <button type="button" class="btn btn-outline-success btn-sm" onclick="saveCustomerInfo({{ order.id }})">
+                                <i class="bi bi-check-lg"></i> Save Customer Info
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Sale Info -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-sale">
+                        <h3><i class="bi bi-receipt"></i> Sale Info</h3>
+                        <div class="card-header-actions">
+                            <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                            <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary btn-sm btn-summary-doc" title="Download Summary Document PDF">
+                                <i class="bi bi-file-earmark-pdf"></i> Summary
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body padded">
+                        <div id="sale-display" class="info-display">
+                            <div>
+                                <div class="field-label">Sale Number</div>
+                                <div class="field-row-with-button">
+                                    <div class="field-value-medium" id="sale-number-display">{{ order.sale_number }}</div>
+                                    {% if order.sale_number %}
+                                        <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
+                                            <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div>
+                                <div class="field-label">Customer Number</div>
+                                <div class="field-value" id="customer-number-display">{{ order.customer_number }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Designer</div>
+                                <div class="field-value" id="designer-display">{{ order.designer|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Order Date</div>
+                                <div class="field-value" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Fit Date</div>
+                                <div class="field-value" id="fit-date-display">{{ order.fit_date|date:"d M Y"|default:"Not set" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Total Value (Inc VAT)</div>
+                                <div class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                        <div id="sale-edit" class="info-edit">
+                            <div>
+                                <label class="form-label">Sale Number</label>
+                                <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
+                            </div>
+                            <div>
+                                <label class="form-label">Customer Number</label>
+                                <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
+                            </div>
+                            <div>
+                                <label class="form-label">Designer</label>
+                                <div class="flex-row-gap">
+                                    <select class="form-input flex-1" id="designer-input">
+                                        <option value="">Select designer...</option>
+                                        {% for designer in designers %}
+                                            <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddDesignerInline()" title="Add new designer">
+                                        <i class="bi bi-plus-lg"></i>
                                     </button>
                                 </div>
-                            <div id="customer-display" class="info-display">
-                                <div>
-                                    <div class="field-label">Customer Name</div>
-                                    <div class="field-value-large" id="customer-name-display">{{ order.first_name }} {{ order.last_name }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Anthill Customer ID</div>
-                                    <div class="field-row-with-button">
-                                        <div class="field-value" id="anthill-id-display">{{ order.anthill_id|default:"Not specified" }}</div>
-                                        {% if order.anthill_id %}
-                                            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                                <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
-                                            </a>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Address</div>
-                                    <div class="field-value" id="address-display">{{ order.address|default:"Not set" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Postcode</div>
-                                    <div class="field-value" id="postcode-display">{{ order.postcode|default:"Not set" }}</div>
+                                <div id="new-designer-inline" class="new-person-inline">
+                                    <input type="text" id="new-designer-name-inline" class="form-input flex-1" placeholder="New designer name">
+                                    <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesignerInline()" title="Cancel">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
                                 </div>
                             </div>
-                            <div id="customer-edit" class="info-edit">
-                                <div>
-                                    <label class="form-label">First Name</label>
-                                    <input type="text" class="form-input" id="first-name-input" value="{{ order.first_name }}">
+                            <div>
+                                <label class="form-label">Order Date</label>
+                                <div class="flex-row-gap">
+                                    <input type="date" class="form-input flex-1" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
+                                    <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('order-date-input').value=''" title="Clear order date">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
                                 </div>
-                                <div>
-                                    <label class="form-label">Last Name</label>
-                                    <input type="text" class="form-input" id="last-name-input" value="{{ order.last_name }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Anthill Customer ID</label>
-                                    <input type="text" class="form-input" id="anthill-id-input" value="{{ order.anthill_id }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Address</label>
-                                    <input type="text" class="form-input" id="address-input" value="{{ order.address }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Postcode</label>
-                                    <input type="text" class="form-input" id="postcode-input" value="{{ order.postcode }}">
-                                </div>
-                                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveCustomerInfo({{ order.id }})">
-                                    <i class="bi bi-check-lg"></i> Save Customer Info
-                                </button>
                             </div>
+                            <div>
+                                <label class="form-label">Fit Date</label>
+                                <div class="flex-row-gap">
+                                    <input type="date" class="form-input flex-1" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
+                                    <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('fit-date-input').value=''" title="Clear fit date">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
                             </div>
+                            <div>
+                                <label class="form-label">Total Value (Inc VAT)</label>
+                                <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
+                            </div>
+                            <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
+                                <i class="bi bi-check-lg"></i> Save Sale Info
+                            </button>
                         </div>
-                        
-                        <!-- Column 2: Sale Info -->
-                        <div>
-                            <div class="info-section-header">
-                                <h4 class="info-section-title sale">Sale Info</h4>
-                                <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
-                                    <i class="bi bi-pencil"></i> Edit
-                                </button>
-                            </div>
-                            <div id="sale-display" class="info-display">
-                                <div>
-                                    <div class="field-label">Sale Number</div>
-                                    <div class="field-row-with-button">
-                                        <div class="field-value-medium" id="sale-number-display">{{ order.sale_number }}</div>
-                                        {% if order.sale_number %}
-                                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                                <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
-                                            </a>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Customer Number</div>
-                                    <div class="field-value" id="customer-number-display">{{ order.customer_number }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Designer</div>
-                                    <div class="field-value" id="designer-display">{{ order.designer|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Order Date</div>
-                                    <div class="field-value" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Fit Date</div>
-                                    <div class="field-value" id="fit-date-display">{{ order.fit_date|date:"d M Y"|default:"Not set" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Total Value (Inc VAT)</div>
-                                    <div class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
-                                </div>
-                            </div>
-                            <div id="sale-edit" class="info-edit">
-                                <div>
-                                    <label class="form-label">Sale Number</label>
-                                    <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Customer Number</label>
-                                    <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
-                                </div>
-                                <div>
-                                    <label class="form-label">Designer</label>
+                    </div>
+                </div>
+
+                <!-- Card 3: Job Info -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-job">
+                        <h3><i class="bi bi-clipboard-check"></i> Job Info</h3>
+                    </div>
+                    <div class="card-body padded">
+                        <div class="job-info-column">
+                            <!-- Boards PO (Editable Dropdown) -->
+                            <div>
+                                <label class="form-label-uppercase">Boards PO</label>
+                                <div class="boards-po-combo" style="position:relative;">
                                     <div class="flex-row-gap">
-                                        <select class="form-input flex-1" id="designer-input">
-                                            <option value="">Select designer...</option>
-                                            {% for designer in designers %}
-                                                <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
-                                            {% endfor %}
-                                        </select>
-                                        <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddDesignerInline()" title="Add new designer">
+                                        <div style="flex:1;position:relative;">
+                                            <input type="text" class="form-input" id="boards-po-search"
+                                                   placeholder="Search PO number..."
+                                                   value="{% if order.boards_po %}{{ order.boards_po.po_number }}{% endif %}"
+                                                   autocomplete="off"
+                                                   oninput="searchBoardsPO(this.value)"
+                                                   onfocus="this.select(); searchBoardsPO(this.value);">
+                                            <div class="boards-po-results" id="boards-po-results" style="display:none;"></div>
+                                        </div>
+                                        {% if order.boards_po %}
+                                        <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="clearBoardsPOLink({{ order.id }})" title="Remove PO link">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                        {% else %}
+                                        <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="createNextBoardsPO({{ order.id }})" title="Create new PO with next available number">
                                             <i class="bi bi-plus-lg"></i>
                                         </button>
+                                        {% endif %}
                                     </div>
-                                    <div id="new-designer-inline" class="new-person-inline">
-                                        <input type="text" id="new-designer-name-inline" class="form-input flex-1" placeholder="New designer name">
-                                        <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
-                                            <i class="bi bi-check-lg"></i>
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesignerInline()" title="Cancel">
-                                            <i class="bi bi-x-lg"></i>
-                                        </button>
+                                    {% if order.boards_po and boards_purchase_order %}
+                                    <div style="margin-top:4px;">
+                                        <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn-link-sm" style="font-size:0.8rem;">
+                                            <i class="bi bi-eye"></i> View Purchase Order
+                                        </a>
                                     </div>
+                                    {% endif %}
                                 </div>
-                                <div>
-                                    <label class="form-label">Order Date</label>
-                                    <div class="flex-row-gap">
-                                        <input type="date" class="form-input flex-1" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
-                                        <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('order-date-input').value=''" title="Clear order date">
-                                            <i class="bi bi-x-lg"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="form-label">Fit Date</label>
-                                    <div class="flex-row-gap">
-                                        <input type="date" class="form-input flex-1" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
-                                        <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('fit-date-input').value=''" title="Clear fit date">
-                                            <i class="bi bi-x-lg"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="form-label">Total Value (Inc VAT)</label>
-                                    <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
-                                </div>
-                                <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
-                                    <i class="bi bi-check-lg"></i> Save Sale Info
+                            </div>
+                            
+                            <!-- Boards Not Required Checkbox -->
+                            <div class="job-checkbox-container">
+                                <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
+                                       {% if order.boards_not_required %}checked{% endif %}
+                                       onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
+                                <label class="job-checkbox-label" for="boardsNotRequired">
+                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required
+                                </label>
+                            </div>
+
+                            <!-- Accessories Not Required Checkbox -->
+                            <div class="job-checkbox-container">
+                                <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
+                                       {% if order.accessories_not_required %}checked{% endif %}
+                                       onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
+                                <label class="job-checkbox-label" for="accessoriesNotRequired">
+                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required
+                                </label>
+                            </div>
+
+                            <!-- All Items Ordered Checkbox -->
+                            <div class="job-checkbox-container">
+                                <input class="job-checkbox" type="checkbox" id="allItemsOrdered" 
+                                       {% if order.all_items_ordered %}checked{% endif %}
+                                       onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
+                                <label class="job-checkbox-label" for="allItemsOrdered">
+                                    <i class="bi bi-box-seam"></i> All Items Ordered
+                                </label>
+                            </div>
+                            
+                            <!-- Job Finished Checkbox -->
+                            <div class="job-checkbox-container">
+                                <input class="job-checkbox" type="checkbox" id="jobFinished" 
+                                       {% if order.job_finished %}checked{% endif %}
+                                       onchange="onJobFinishedChange(this, {{ order.id }})">
+                                <label class="job-checkbox-label" for="jobFinished">
+                                    <i class="bi bi-check2-circle"></i> Job Finished
+                                </label>
+                            </div>
+
+                            <!-- Materials Allocated Checkbox -->
+                            {% if order.accessories.exists %}
+                            <div class="job-checkbox-container">
+                                <input class="job-checkbox" type="checkbox" id="materialsAllocated" 
+                                       {% if all_allocated %}checked{% endif %}
+                                       onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
+                                <label class="job-checkbox-label" for="materialsAllocated">
+                                    <i class="bi bi-box-arrow-in-down"></i> Materials Allocated
+                                </label>
+                            </div>
+                            {% endif %}
+
+                            <!-- Add Additional Boards PO -->
+                            {% if order.boards_po %}
+                            <div class="section-add-row">
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAdditionalBoardsPO({{ order.id }})" title="Create an additional boards PO for this order">
+                                    <i class="bi bi-plus-circle"></i> Add Additional Boards PO
                                 </button>
                             </div>
-                        </div>
-                        
-                        <!-- Column 3: Job Info -->
-                        <div>
-                            <div class="job-section-spacing">
-                                <div class="info-section-header">
-                                    <h4 class="info-section-title job">Job Info</h4>
-                                </div>
-
-                                <div class="job-info-column">
-                                    <!-- Boards PO (Editable Dropdown) -->
-                                    <div>
-                                        <label class="form-label-uppercase">Boards PO</label>
-                                        <div class="boards-po-combo" style="position:relative;">
-                                            <div class="flex-row-gap">
-                                                <div style="flex:1;position:relative;">
-                                                    <input type="text" class="form-input" id="boards-po-search"
-                                                           placeholder="Search PO number..."
-                                                           value="{% if order.boards_po %}{{ order.boards_po.po_number }}{% endif %}"
-                                                           autocomplete="off"
-                                                           oninput="searchBoardsPO(this.value)"
-                                                           onfocus="this.select(); searchBoardsPO(this.value);">
-                                                    <div class="boards-po-results" id="boards-po-results" style="display:none;"></div>
-                                                </div>
-                                                {% if order.boards_po %}
-                                                <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="clearBoardsPOLink({{ order.id }})" title="Remove PO link">
-                                                    <i class="bi bi-x-lg"></i>
-                                                </button>
-                                                {% else %}
-                                                <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="createNextBoardsPO({{ order.id }})" title="Create new PO with next available number">
-                                                    <i class="bi bi-plus-lg"></i>
-                                                </button>
-                                                {% endif %}
-                                            </div>
-                                            {% if order.boards_po and boards_purchase_order %}
-                                            <div style="margin-top:4px;">
-                                                <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn-link-sm" style="font-size:0.8rem;">
-                                                    <i class="bi bi-eye"></i> View Purchase Order
-                                                </a>
-                                            </div>
-                                            {% endif %}
-                                        </div>
-
-                                    </div>
-                                    
-                                    <!-- Boards Not Required Checkbox -->
-                                    <div class="job-checkbox-container">
-                                        <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
-                                               {% if order.boards_not_required %}checked{% endif %}
-                                               onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
-                                        <label class="job-checkbox-label" for="boardsNotRequired">
-                                            <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required
-                                        </label>
-                                    </div>
-
-                                    <!-- Accessories Not Required Checkbox -->
-                                    <div class="job-checkbox-container">
-                                        <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
-                                               {% if order.accessories_not_required %}checked{% endif %}
-                                               onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
-                                        <label class="job-checkbox-label" for="accessoriesNotRequired">
-                                            <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required
-                                        </label>
-                                    </div>
-
-                                    <!-- All Items Ordered Checkbox -->
-                                    <div class="job-checkbox-container">
-                                        <input class="job-checkbox" type="checkbox" id="allItemsOrdered" 
-                                               {% if order.all_items_ordered %}checked{% endif %}
-                                               onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
-                                        <label class="job-checkbox-label" for="allItemsOrdered">
-                                            <i class="bi bi-box-seam"></i> All Items Ordered
-                                        </label>
-                                    </div>
-                                    
-                                    <!-- Job Finished Checkbox -->
-                                    <div class="job-checkbox-container">
-                                        <input class="job-checkbox" type="checkbox" id="jobFinished" 
-                                               {% if order.job_finished %}checked{% endif %}
-                                               onchange="onJobFinishedChange(this, {{ order.id }})">
-                                        <label class="job-checkbox-label" for="jobFinished">
-                                            <i class="bi bi-check2-circle"></i> Job Finished
-                                        </label>
-                                    </div>
-
-                                    <!-- Materials Allocated Checkbox -->
-                                    {% if order.accessories.exists %}
-                                    <div class="job-checkbox-container">
-                                        <input class="job-checkbox" type="checkbox" id="materialsAllocated" 
-                                               {% if all_allocated %}checked{% endif %}
-                                               onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
-                                        <label class="job-checkbox-label" for="materialsAllocated">
-                                            <i class="bi bi-box-arrow-in-down"></i> Materials Allocated
-                                        </label>
-                                    </div>
-                                    {% endif %}
-
-                                    <!-- Add Additional Boards PO -->
-                                    {% if order.boards_po %}
-                                    <div class="section-add-row">
-                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAdditionalBoardsPO({{ order.id }})" title="Create an additional boards PO for this order">
-                                            <i class="bi bi-plus-circle"></i> Add Additional Boards PO
-                                        </button>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                            </div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -2912,32 +2906,6 @@ function cancelJobFinished() {
 
 // Auto-dismiss alerts after 5 seconds
 document.addEventListener('DOMContentLoaded', function() {
-    // Wrap .pnx-dimension-input and .accessory-quantity elements with custom spinner buttons
-    document.querySelectorAll('.pnx-dimension-input, .accessory-quantity').forEach(function(input) {
-        const wrap = document.createElement('div');
-        wrap.className = 'pnx-spinner-wrap';
-        input.parentNode.insertBefore(wrap, input);
-        wrap.appendChild(input);
-
-        const btns = document.createElement('div');
-        btns.className = 'pnx-spinner-btns';
-        btns.innerHTML = '<button type="button" class="pnx-spinner-btn" data-dir="1">&#x25B2;</button>'
-                       + '<button type="button" class="pnx-spinner-btn" data-dir="-1">&#x25BC;</button>';
-        wrap.appendChild(btns);
-
-        btns.querySelectorAll('.pnx-spinner-btn').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                const step = parseInt(input.step) || 1;
-                const dir = parseInt(this.getAttribute('data-dir'));
-                const min = input.min !== '' ? parseFloat(input.min) : -Infinity;
-                let val = (parseFloat(input.value) || 0) + step * dir;
-                if (val < min) val = min;
-                input.value = val;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-        });
-    });
-
     // Calculate profit on page load
     calculateProfit();
     

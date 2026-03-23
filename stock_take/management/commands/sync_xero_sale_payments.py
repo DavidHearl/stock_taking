@@ -104,9 +104,13 @@ class Command(BaseCommand):
                     f'No sale found with activity ID "{sale_id}"'
                 ))
                 return
+            sales_list = list(
+                qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
+            )
+            pass_labels = [('Single sale', sales_list)]
         else:
-            # Only Belfast (BFS-*) Category 3 sales have Xero invoices
-            qs = (
+            # Base queryset: Belfast Category 3 sales with a contract number
+            base_qs = (
                 AnthillSale.objects
                 .filter(category='3')
                 .filter(contract_number__startswith='BFS')
@@ -115,35 +119,50 @@ class Command(BaseCommand):
             )
             if days:
                 cutoff = timezone.now() - timedelta(days=days)
-                qs = qs.filter(
+                base_qs = base_qs.filter(
                     Q(activity_date__gte=cutoff) | Q(updated_at__gte=cutoff)
                 )
 
-            # By default, skip sales that are already fully settled in Xero:
-            # a sale is considered fully paid when we have at least one Xero
-            # payment record for it and NONE of those records show an outstanding
-            # amount (invoice_amount_due > 0).  Sales with no Xero data yet are
-            # always included so we can discover new invoices.
-            if not include_paid:
-                has_outstanding = Exists(
-                    AnthillPayment.objects.filter(
-                        sale=OuterRef('pk'),
-                        source='xero',
-                        invoice_amount_due__gt=0,
-                    )
+            has_any_xero = Exists(
+                AnthillPayment.objects.filter(
+                    sale=OuterRef('pk'),
+                    source='xero',
                 )
-                has_any_xero = Exists(
-                    AnthillPayment.objects.filter(
-                        sale=OuterRef('pk'),
-                        source='xero',
-                    )
+            )
+            has_outstanding = Exists(
+                AnthillPayment.objects.filter(
+                    sale=OuterRef('pk'),
+                    source='xero',
+                    invoice_amount_due__gt=0,
                 )
-                # Keep: no Xero records yet  OR  at least one outstanding invoice
-                qs = qs.filter(~has_any_xero | has_outstanding)
+            )
 
-        sales_list = list(
-            qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
-        )
+            # PASS 1: Sales that already have Xero payment records
+            # (customers who have paid something — check for updates)
+            if include_paid:
+                pass1_qs = base_qs.filter(has_any_xero)
+            else:
+                # Only those with at least one outstanding invoice
+                pass1_qs = base_qs.filter(has_outstanding)
+
+            pass1_list = list(
+                pass1_qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
+            )
+
+            # PASS 2: Sales with no Xero records yet (discover new invoices)
+            pass2_qs = base_qs.filter(~has_any_xero)
+            pass2_list = list(
+                pass2_qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
+            )
+
+            pass_labels = []
+            if pass1_list:
+                pass_labels.append(('Pass 1 - Existing Xero payments (update)', pass1_list))
+            if pass2_list:
+                pass_labels.append(('Pass 2 - New sales (discover invoices)', pass2_list))
+
+            sales_list = pass1_list + pass2_list
+
         total = len(sales_list)
 
         if total == 0:
@@ -151,11 +170,14 @@ class Command(BaseCommand):
                 'No sales match the criteria. '
                 'Make sure Category 3 sales with a BFS-* contract number exist '
                 '(run sync_anthill_workflow first if needed). '
-                + ('' if include_paid else 'All matching sales may already be fully paid — use --include-paid to re-check them.')
+                + ('' if include_paid else 'All matching sales may already be fully paid - use --include-paid to re-check them.')
             ))
             return
 
         self.stdout.write(f'Sales to process: {total}\n')
+        for label, plist in pass_labels:
+            self.stdout.write(f'  {label}: {len(plist)} sales')
+        self.stdout.write('')
 
         stats = {
             'sales_with_invoices': 0,
@@ -166,135 +188,141 @@ class Command(BaseCommand):
             'errors': 0,
         }
         error_notes = []
+        global_idx = 0
 
-        for idx, (sale_pk, activity_id, cust_name, contract_number) in enumerate(sales_list, start=1):
-            prefix = f'  [{idx}/{total}] {activity_id} - {contract_number}'
-            self.stdout.write(prefix, ending='\r')
+        for pass_label, pass_list in pass_labels:
+            self.stdout.write(self.style.NOTICE(f'\n-- {pass_label} ({len(pass_list)} sales) --'))
+            for idx, (sale_pk, activity_id, cust_name, contract_number) in enumerate(pass_list, start=1):
+                global_idx += 1
+                prefix = f'  [{global_idx}/{total}] {activity_id} - {contract_number}'
+                self.stdout.write(prefix, ending='\r')
 
-            try:
-                invoice_data = xero_api.get_sale_payments_from_xero(
-                    contract_number=contract_number,
-                    contact_name=None if no_name_check else cust_name,
-                )
-            except Exception as exc:
-                self.stderr.write(self.style.ERROR(
-                    f'\n  ERROR {activity_id} ({contract_number}): {exc}'
-                ))
-                stats['errors'] += 1
-                error_notes.append(f'{activity_id}: {exc}')
-                time.sleep(1)
-                continue
-
-            if not invoice_data:
-                stats['no_invoice'] += 1
-                time.sleep(1.0)
-                continue
-
-            # Found at least one invoice — always print this line
-            inv_count = sum(len(inv['payments']) for inv in invoice_data)
-            inv_nums = ', '.join(inv['invoice_number'] for inv in invoice_data)
-            self.stdout.write(self.style.SUCCESS(
-                f'{prefix} -> {inv_nums} ({inv_count} payment(s))'
-            ))
-            stats['sales_with_invoices'] += 1
-            stats['invoices_found'] += len(invoice_data)
-
-            if dry_run:
-                for inv in invoice_data:
-                    self.stdout.write(
-                        f'    {inv["invoice_number"]} | {inv["status"]} | '
-                        f'Total £{inv["total"]} | Paid £{inv["amount_paid"]} | '
-                        f'Due £{inv["amount_due"]} | Contact: {inv["contact_name"]}'
+                try:
+                    invoice_data = xero_api.get_sale_payments_from_xero(
+                        contract_number=contract_number,
+                        contact_name=None if no_name_check else cust_name,
                     )
-                    for p in inv['payments']:
-                        date_str = p['date'].strftime('%d/%m/%Y') if p['date'] else '?'
-                        self.stdout.write(
-                            f'      Payment: £{p["amount"]} on {date_str} - {p["reference"]}'
-                        )
-                time.sleep(0.25)
-                continue
-
-            # Write to DB
-            close_old_connections()
-            try:
-                sale = AnthillSale.objects.get(pk=sale_pk)
-            except AnthillSale.DoesNotExist:
-                continue
-
-            for inv in invoice_data:
-                # Skip cancelled/voided invoices — nothing to record
-                if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
-                    self.stdout.write(f'    Skipping {inv["invoice_number"]} (status: {inv["status"]})')
+                except Exception as exc:
+                    self.stderr.write(self.style.ERROR(
+                        f'\n  ERROR {activity_id} ({contract_number}): {exc}'
+                    ))
+                    stats['errors'] += 1
+                    error_notes.append(f'{activity_id}: {exc}')
+                    time.sleep(1)
                     continue
 
-                for p in inv['payments']:
-                    # Skip cancelled individual payments
-                    if p.get('status', '').upper() == 'CANCELLED':
-                        continue
-                    pid = p.get('payment_id') or ''
-                    defaults = {
-                        'source': 'xero',
-                        'xero_invoice_id': inv['invoice_id'],
-                        'xero_invoice_number': inv['invoice_number'],
-                        'invoice_total': inv['total'],
-                        'invoice_amount_due': inv['amount_due'],
-                        'invoice_status': inv['status'],
-                        'payment_type': p['reference'] or 'Payment',
-                        'date': p['date'],
-                        'amount': p['amount'],
-                        'status': p['status'],
-                        'location': '',
-                        'user_name': '',
-                    }
+                if not invoice_data:
+                    stats['no_invoice'] += 1
+                    time.sleep(1.0)
+                    continue
 
-                    if pid:
-                        obj, created = AnthillPayment.objects.update_or_create(
-                            sale=sale,
-                            anthill_payment_id=pid,
-                            defaults=defaults,
+                # Found at least one invoice — always print this line
+                inv_count = sum(len(inv['payments']) for inv in invoice_data)
+                inv_nums = ', '.join(inv['invoice_number'] for inv in invoice_data)
+                self.stdout.write(self.style.SUCCESS(
+                    f'{prefix} -> {inv_nums} ({inv_count} payment(s))'
+                ))
+                stats['sales_with_invoices'] += 1
+                stats['invoices_found'] += len(invoice_data)
+
+                if dry_run:
+                    for inv in invoice_data:
+                        self.stdout.write(
+                            f'    {inv["invoice_number"]} | {inv["status"]} | '
+                            f'Total £{inv["total"]} | Paid £{inv["amount_paid"]} | '
+                            f'Due £{inv["amount_due"]} | Contact: {inv["contact_name"]}'
                         )
-                    else:
-                        # No payment ID — use invoice ID + date as surrogate key
+                        for p in inv['payments']:
+                            date_str = p['date'].strftime('%d/%m/%Y') if p['date'] else '?'
+                            self.stdout.write(
+                                f'      Payment: £{p["amount"]} on {date_str} - {p["reference"]}'
+                            )
+                    time.sleep(0.25)
+                    continue
+
+                # Write to DB
+                close_old_connections()
+                try:
+                    sale = AnthillSale.objects.get(pk=sale_pk)
+                except AnthillSale.DoesNotExist:
+                    continue
+
+                for inv in invoice_data:
+                    # Skip cancelled/voided invoices — nothing to record
+                    if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
+                        self.stdout.write(f'    Skipping {inv["invoice_number"]} (status: {inv["status"]})')
+                        continue
+
+                    for p in inv['payments']:
+                        # Skip cancelled individual payments
+                        if p.get('status', '').upper() == 'CANCELLED':
+                            continue
+                        pid = p.get('payment_id') or ''
+                        defaults = {
+                            'source': 'xero',
+                            'xero_invoice_id': inv['invoice_id'],
+                            'xero_invoice_number': inv['invoice_number'],
+                            'invoice_total': inv['total'],
+                            'invoice_amount_due': inv['amount_due'],
+                            'invoice_status': inv['status'],
+                            'payment_type': p['reference'] or 'Payment',
+                            'date': p['date'],
+                            'amount': p['amount'],
+                            'status': p['status'],
+                            'location': '',
+                            'user_name': '',
+                        }
+
+                        if pid:
+                            obj, created = AnthillPayment.objects.update_or_create(
+                                sale=sale,
+                                anthill_payment_id=pid,
+                                defaults=defaults,
+                            )
+                        else:
+                            # No payment ID — use invoice ID + date as surrogate key
+                            obj, created = AnthillPayment.objects.update_or_create(
+                                sale=sale,
+                                xero_invoice_id=inv['invoice_id'],
+                                date=p['date'],
+                                defaults=defaults,
+                            )
+
+                        if created:
+                            stats['payments_created'] += 1
+                        else:
+                            stats['payments_updated'] += 1
+
+                    # If invoice has no individual payments, record an invoice-level summary row
+                    # so we always capture invoice_total / invoice_amount_due even for
+                    # AUTHORISED invoices that haven't been paid yet.
+                    if not inv['payments']:
+                        defaults = {
+                            'source': 'xero',
+                            'xero_invoice_id': inv['invoice_id'],
+                            'xero_invoice_number': inv['invoice_number'],
+                            'invoice_total': inv['total'],
+                            'invoice_amount_due': inv['amount_due'],
+                            'invoice_status': inv['status'],
+                            'payment_type': 'Invoice Payment',
+                            'date': None,
+                            'amount': inv['amount_paid'],
+                            'status': inv['status'],
+                            'location': '',
+                            'user_name': '',
+                        }
                         obj, created = AnthillPayment.objects.update_or_create(
                             sale=sale,
                             xero_invoice_id=inv['invoice_id'],
-                            date=p['date'],
+                            date=None,
                             defaults=defaults,
                         )
+                        if created:
+                            stats['payments_created'] += 1
+                        else:
+                            stats['payments_updated'] += 1
 
-                    if created:
-                        stats['payments_created'] += 1
-                    else:
-                        stats['payments_updated'] += 1
-
-                # If invoice has no individual payments, record an invoice-level summary row
-                if not inv['payments'] and inv['amount_paid']:
-                    defaults = {
-                        'source': 'xero',
-                        'xero_invoice_id': inv['invoice_id'],
-                        'xero_invoice_number': inv['invoice_number'],
-                        'invoice_total': inv['total'],
-                        'invoice_amount_due': inv['amount_due'],
-                        'invoice_status': inv['status'],
-                        'payment_type': 'Invoice Payment',
-                        'date': None,
-                        'amount': inv['amount_paid'],
-                        'status': inv['status'],
-                        'location': '',
-                        'user_name': '',
-                    }
-                    obj, created = AnthillPayment.objects.update_or_create(
-                        sale=sale,
-                        xero_invoice_id=inv['invoice_id'],
-                        date=None,
-                        defaults=defaults,
-                    )
-                    if created:
-                        stats['payments_created'] += 1
-                    else:
-                        stats['payments_updated'] += 1
-
-            time.sleep(1.5)  # stay within Xero rate limit (60 req/min; each sale = up to 2 calls)
+                time.sleep(1.5)  # stay within Xero rate limit (60 req/min; each sale = up to 2 calls)
 
         # Final summary
         self.stdout.write('')
