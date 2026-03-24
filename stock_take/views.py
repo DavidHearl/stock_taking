@@ -3087,8 +3087,8 @@ def add_board_item(request):
             if not boards_po:
                 return JsonResponse({'success': False, 'error': 'Boards PO not found'})
             
-            # Get the linked order (reverse relation - boards_po has many orders)
-            linked_order = boards_po.orders.first()
+            # Get the linked order (checks both primary FK and additional M2M)
+            linked_order = _get_linked_order(boards_po)
             
             # Create the new PNX item
             pnx_item = PNXItem.objects.create(
@@ -3134,8 +3134,8 @@ def reimport_pnx(request, boards_po_id):
             content = boards_po.file.read().decode('utf-8')
             reader = csv.DictReader(io.StringIO(content), delimiter=';')
             
-            # Resolve linked order for customer value
-            linked_order = boards_po.orders.select_related('designer').first()
+            # Resolve linked order for customer value (checks both primary FK and additional M2M)
+            linked_order = _get_linked_order(boards_po)
             customer_value = _build_customer_value(linked_order)
             
             count = 0
@@ -3173,6 +3173,14 @@ def reimport_pnx(request, boards_po_id):
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 
+def _get_linked_order(boards_po):
+    """Find the order linked to a BoardsPO — checks both primary FK and additional M2M."""
+    order = boards_po.orders.select_related('designer').first()
+    if not order:
+        order = boards_po.additional_orders.select_related('designer').first()
+    return order
+
+
 def _build_customer_value(order):
     """Build the structured customer string: BFS-INITIALS-SALE FirstName LastName"""
     if not order:
@@ -3200,8 +3208,8 @@ def regenerate_pnx_csv_files(boards_po):
     if not pnx_items.exists():
         return
     
-    # Resolve linked order to rebuild the customer value
-    linked_order = boards_po.orders.select_related('designer').first()
+    # Resolve linked order to rebuild the customer value (checks both primary FK and additional M2M)
+    linked_order = _get_linked_order(boards_po)
     customer_value = _build_customer_value(linked_order)
     
     # Update customer field on all items if we have a linked order
@@ -4655,7 +4663,10 @@ def order_details(request, order_id):
     
     def process_pnx_items(bpo, sale_number, price):
         """Process PNX items for a single BoardsPO, returning annotated sorted list and total cost."""
-        items = list(bpo.pnx_items.filter(customer__icontains=sale_number))
+        from django.db.models import Q
+        items = list(bpo.pnx_items.filter(
+            Q(customer__icontains=sale_number) | Q(customer='') | Q(customer__isnull=True)
+        ))
         for item in items:
             item.calculated_cost = item.get_cost(price)
         total = sum(item.calculated_cost for item in items)

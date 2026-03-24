@@ -142,8 +142,19 @@ class Command(BaseCommand):
             if include_paid:
                 pass1_qs = base_qs.filter(has_any_xero)
             else:
-                # Only those with at least one outstanding invoice
-                pass1_qs = base_qs.filter(has_outstanding)
+                # Include sales with outstanding Xero invoices, PLUS sales that
+                # have Xero records but aren't marked paid_in_full yet.
+                # This catches the "dead zone" where Xero invoice shows PAID
+                # (amount_due=0) but individual payment records are incomplete.
+                pass1_qs = base_qs.filter(has_any_xero).filter(
+                    Q(Exists(
+                        AnthillPayment.objects.filter(
+                            sale=OuterRef('pk'),
+                            source='xero',
+                            invoice_amount_due__gt=0,
+                        )
+                    )) | Q(paid_in_full=False)
+                )
 
             pass1_list = list(
                 pass1_qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
@@ -321,6 +332,28 @@ class Command(BaseCommand):
                             stats['payments_created'] += 1
                         else:
                             stats['payments_updated'] += 1
+                    else:
+                        # Real payments found — clean up any stale £0 "Invoice Payment"
+                        # fallback records that were created before individual payments
+                        # were discovered.
+                        stale_deleted, _ = AnthillPayment.objects.filter(
+                            sale=sale,
+                            xero_invoice_id=inv['invoice_id'],
+                            payment_type='Invoice Payment',
+                            amount=0,
+                            anthill_payment_id='',
+                        ).delete()
+                        if stale_deleted:
+                            stats['stale_cleaned'] = stats.get('stale_cleaned', 0) + stale_deleted
+
+                # Recalculate paid_in_full for this sale after syncing payments
+                if not dry_run:
+                    xero_payments = sale.payments.filter(source='xero', ignored=False)
+                    total_paid = sum(p.amount for p in xero_payments)
+                    if sale.sale_value and total_paid >= sale.sale_value and not sale.paid_in_full:
+                        sale.paid_in_full = True
+                        sale.balance_payable = 0
+                        sale.save(update_fields=['paid_in_full', 'balance_payable'])
 
                 time.sleep(1.5)  # stay within Xero rate limit (60 req/min; each sale = up to 2 calls)
 
@@ -334,6 +367,7 @@ class Command(BaseCommand):
             f'  Invoices found        : {stats["invoices_found"]}\n'
             f'  Payments created      : {stats["payments_created"]}\n'
             f'  Payments updated      : {stats["payments_updated"]}\n'
+            f'  Stale records cleaned : {stats.get("stale_cleaned", 0)}\n'
             f'  Errors                : {stats["errors"]}'
         ))
 
