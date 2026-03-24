@@ -1,6 +1,7 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, log_activity
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, SyncLog, log_activity
 
+import copy
 import csv
 import io
 import os
@@ -8649,6 +8650,16 @@ def calendar_weekly(request):
     next_week = week_start + timedelta(days=7)
 
     # Fit appointments this week
+    # ── Propagate AnthillSale fit_dates → Orders that don't have one yet ──
+    anthill_with_fit = AnthillSale.objects.filter(
+        fit_date__gte=week_start, fit_date__lte=week_end,
+        order__isnull=False,
+    ).select_related('order')
+    for sale in anthill_with_fit:
+        if sale.order and not sale.order.fit_date:
+            sale.order.fit_date = sale.fit_date
+            sale.order.save(update_fields=['fit_date'])
+
     # Auto-create FitAppointment for orders with fit_date but no appointment
     orders_without_appt = (
         Order.objects
@@ -8679,28 +8690,72 @@ def calendar_weekly(request):
             AnthillSale.objects
             .filter(anthill_activity_id__in=sale_numbers)
             .annotate(payments_sum=Sum('payments__amount'))
-            .values('anthill_activity_id', 'sale_value', 'payments_sum')
+            .values('id', 'anthill_activity_id', 'sale_value', 'payments_sum',
+                     'range_name', 'door_type', 'source', 'contract_number',
+                     'assigned_to_name', 'discount')
         )
         _fin_map = {}
         for row in _sale_rows:
             sv = row['sale_value'] or Decimal('0')
             pt = row['payments_sum'] or Decimal('0')
+            disc = row['discount'] or Decimal('0')
             _fin_map[row['anthill_activity_id']] = {
                 'sale_value': sv,
                 'payments_total': pt,
                 'outstanding': sv - pt,
+                'anthill_sale_pk': row['id'],
+                'range_name': row['range_name'] or '',
+                'door_type': row['door_type'] or '',
+                'source': row['source'] or '',
+                'contract_number': row['contract_number'] or '',
+                'assigned_to_name': row['assigned_to_name'] or '',
+                'discount': disc,
             }
         for appt in appointments:
             if appt.order:
                 appt.fin = _fin_map.get(appt.order.sale_number)
 
     # Group appointments by date → fitter
+    # Multi-day appointments get their own spanning rows; single-day go into columns.
+    week_day_list = [week_start + timedelta(days=i) for i in range(6)]
+    week_dates_set = set(week_day_list)
+    day_index = {d: i for i, d in enumerate(week_day_list)}
+    fitter_codes = ['R', 'G', 'S', 'P']
+    fitter_names = {'R': 'Ross', 'G': 'Gavin', 'S': 'Stuart', 'P': 'Paddy'}
     appts_map = {}
+    multi_day_rows = []  # [{appt, start_col, end_col, span_cols}]
     for appt in appointments:
-        appts_map.setdefault(appt.fit_date, {}).setdefault(appt.fitter, []).append(appt)
+        duration = getattr(appt, 'fit_duration', 1) or 1
+        if duration > 1:
+            # Multi-day: compute grid columns (1-based for CSS grid)
+            start_date = appt.fit_date
+            end_date = appt.fit_date + timedelta(days=duration - 1)
+            if start_date not in week_dates_set and end_date not in week_dates_set:
+                continue
+            # Clamp to visible week
+            clamped_start = max(start_date, week_start)
+            clamped_end = min(end_date, week_end)
+            start_col = day_index.get(clamped_start, 0)
+            end_col = day_index.get(clamped_end, 5)
+            appt.span_total = duration
+            appt.span_day = 1
+            appt.is_continuation = False
+            appt.is_last_day = True
+            appt.multi_start_col = start_col + 1  # CSS grid is 1-based
+            appt.multi_end_col = end_col + 2       # grid-column-end is exclusive
+            appt.fitter_name = fitter_names.get(appt.fitter, appt.fitter)
+            multi_day_rows.append(appt)
+        else:
+            # Single-day
+            if appt.fit_date not in week_dates_set:
+                continue
+            appt.span_day = 1
+            appt.span_total = 1
+            appt.is_continuation = False
+            appt.is_last_day = True
+            appts_map.setdefault(appt.fit_date, {}).setdefault(appt.fitter, []).append(appt)
 
     # PO expected deliveries this week (ordered but not received)
-    week_day_list = [week_start + timedelta(days=i) for i in range(6)]
     po_date_strings = [d.strftime('%Y-%m-%d') for d in week_day_list]
     pending_pos = (
         PurchaseOrder.objects
@@ -8728,9 +8783,6 @@ def calendar_weekly(request):
             {'supplier': sname, 'pos': plist}
             for sname, plist in supplier_groups.items()
         ]
-
-    fitter_codes = ['R', 'G', 'S', 'P']
-    fitter_names = {'R': 'Ross', 'G': 'Gavin', 'S': 'Stuart', 'P': 'Paddy'}
 
     # ── Sales appointments this week ──────────────────────────────
     from .models import SalesAppointment
@@ -8770,8 +8822,12 @@ def calendar_weekly(request):
             'sales': sales_map.get(d, []),
         })
 
+    # Get last Anthill sync timestamp
+    anthill_sync = SyncLog.objects.filter(script_name='anthill_fit_dates').first()
+
     context = {
         'week_data': week_data,
+        'multi_day_rows': multi_day_rows,
         'week_start': week_start,
         'week_end': week_end,
         'prev_week': prev_week,
@@ -8781,6 +8837,7 @@ def calendar_weekly(request):
         'current_month': week_start.month,
         'fitters': list(zip(fitter_codes, [fitter_names[c] for c in fitter_codes])),
         'designers': Designer.objects.all().order_by('name'),
+        'last_anthill_sync': anthill_sync,
     }
 
     return render(request, 'stock_take/calendar_weekly.html', context)
@@ -9255,6 +9312,12 @@ def move_fit_appointment(request, appointment_id):
                     appointment.order.fit_date = new_date
                     appointment.order.save(update_fields=['fit_date'])
             
+            # Update fit duration if provided
+            if 'fit_duration' in data:
+                dur = int(data['fit_duration'])
+                if 1 <= dur <= 10:
+                    appointment.fit_duration = dur
+            
             appointment.save()
             
             return JsonResponse({
@@ -9265,6 +9328,376 @@ def move_fit_appointment(request, appointment_id):
             return JsonResponse({'success': False, 'error': str(e)})
     
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def refresh_anthill_fit_dates(request):
+    """Scrape Anthill sale pages to get Installation appointment dates, durations, and fitters."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+
+    import re
+    import requests as req_lib
+    from html.parser import HTMLParser
+    from datetime import datetime as _dt, timedelta as _td
+
+    data = json.loads(request.body)
+    week_start_str = data.get('week_start', '')
+    try:
+        week_start = _dt.strptime(week_start_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return JsonResponse({'success': False, 'error': 'Invalid week_start'})
+
+    week_end = week_start + _td(days=5)
+
+    username = os.getenv('ANTHILL_USER_USERNAME', '')
+    password = os.getenv('ANTHILL_USER_PASSWORD', '')
+    subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+
+    if not username or not password:
+        return JsonResponse({'success': False, 'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not set'})
+
+    base_url = f'https://{subdomain}.anthillcrm.com'
+
+    # ── Find sales to check ──────────────────────────────────────────────
+    appt_order_ids = (
+        FitAppointment.objects
+        .filter(fit_date__gte=week_start, fit_date__lte=week_end, order__isnull=False)
+        .values_list('order_id', flat=True)
+    )
+    sales_to_check = list(
+        AnthillSale.objects
+        .filter(order__isnull=False, category='3')
+        .filter(
+            models.Q(fit_date__gte=week_start, fit_date__lte=week_end) |
+            models.Q(order_id__in=appt_order_ids)
+        )
+        .select_related('order')
+        .distinct()
+    )
+    # Include orders with fit_date this week whose sale may not be linked
+    unlinked_sale_nums = list(
+        Order.objects
+        .filter(fit_date__gte=week_start, fit_date__lte=week_end, sale_number__isnull=False)
+        .exclude(sale_number='')
+        .values_list('sale_number', flat=True)
+    )
+    unlinked_sales = list(
+        AnthillSale.objects
+        .filter(anthill_activity_id__in=unlinked_sale_nums)
+        .exclude(pk__in=[s.pk for s in sales_to_check])
+        .select_related('order')
+    )
+    sales_to_check.extend(unlinked_sales)
+
+    if not sales_to_check:
+        return JsonResponse({'success': True, 'checked': 0, 'updated': 0, 'created': 0, 'errors': 0})
+
+    # ── Appointment parser ───────────────────────────────────────────────
+    # Parses within <div id="tdAppoints"> looking for Installation rows.
+    # Each row is a <tr data-id="..."> containing the appointment text.
+    class _AppointmentParser(HTMLParser):
+        """Extract Installation appointments from the tdAppoints div."""
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self._in_target = False
+            self._depth = 0
+            self._in_row = False
+            self._in_td = False
+            self._current_text_parts = []
+            self._current_data_id = ''
+            self.appointments = []  # [{type, date_str, duration_str, with_str, notes}]
+
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            if tag == 'div' and attr_dict.get('id') == 'tdAppoints':
+                self._in_target = True
+                self._depth = 1
+                return
+            if not self._in_target:
+                return
+            if tag == 'div':
+                self._depth += 1
+            elif tag == 'tr':
+                self._in_row = True
+                self._current_data_id = attr_dict.get('data-id', '')
+                self._current_text_parts = []
+            elif tag == 'td' and self._in_row:
+                # Only capture the main content td (second td, not icon/action tds)
+                td_class = attr_dict.get('class', '')
+                if 'td-icon' not in td_class and 'td-preview' not in td_class \
+                   and 'td-complete' not in td_class and 'td-cancel' not in td_class:
+                    self._in_td = True
+                    self._current_text_parts = []
+            elif tag == 'b' and self._in_td:
+                pass  # will capture text inside
+            elif tag == 'br' and self._in_td:
+                self._current_text_parts.append('\n')
+
+        def handle_endtag(self, tag):
+            if not self._in_target:
+                return
+            if tag == 'div':
+                self._depth -= 1
+                if self._depth <= 0:
+                    self._in_target = False
+            elif tag == 'tr' and self._in_row:
+                self._in_row = False
+                self._in_td = False
+                text = ''.join(self._current_text_parts).strip()
+                if text:
+                    self.appointments.append({
+                        'data_id': self._current_data_id,
+                        'raw_text': text,
+                    })
+            elif tag == 'td' and self._in_td:
+                self._in_td = False
+
+        def handle_data(self, data):
+            if self._in_td:
+                self._current_text_parts.append(data)
+
+    def _parse_appt_text(raw):
+        """Parse raw appointment text into structured data."""
+        # Example: "Installation\nDate: 23/03/26 09:00 - Duration: 4d 6h  - With: gavin.reynolds - Location: Belfast\n\nNotes: £4,750.00"
+        lines = [l.strip() for l in raw.split('\n') if l.strip()]
+        if not lines:
+            return None
+        appt_type = lines[0].strip()
+        detail_text = ' '.join(lines[1:])
+
+        result = {'type': appt_type, 'date_str': '', 'duration_str': '', 'with_str': '', 'location': '', 'notes': ''}
+
+        # Extract Date
+        m = re.search(r'Date:\s*(\d{1,2}/\d{1,2}/\d{2,4}\s+\d{1,2}:\d{2})', detail_text)
+        if m:
+            result['date_str'] = m.group(1).strip()
+
+        # Extract Duration
+        m = re.search(r'Duration:\s*([\d]+\s*[dhm](?:\s*[\d]+\s*[dhm])*)', detail_text, re.IGNORECASE)
+        if m:
+            result['duration_str'] = m.group(1).strip()
+
+        # Extract With
+        m = re.search(r'With:\s*([\w.]+)', detail_text)
+        if m:
+            result['with_str'] = m.group(1).strip()
+
+        # Extract Location
+        m = re.search(r'Location:\s*(\w[\w\s]*)', detail_text)
+        if m:
+            result['location'] = m.group(1).strip()
+
+        # Extract Notes
+        m = re.search(r'Notes:\s*(.*)', detail_text)
+        if m:
+            result['notes'] = m.group(1).strip()
+
+        return result
+
+    def _duration_to_days(dur_str):
+        """Convert Anthill duration string into whole days (minimum 1).
+        Anthill uses 6h to represent one full working day.
+        '4d 6h' → 5 days, '6h' → 1 day, '2d' → 2 days, '12h' → 2 days."""
+        if not dur_str:
+            return 1
+        days = 0
+        hours = 0
+        m_days = re.search(r'(\d+)\s*d', dur_str, re.IGNORECASE)
+        m_hours = re.search(r'(\d+)\s*h', dur_str, re.IGNORECASE)
+        if m_days:
+            days = int(m_days.group(1))
+        if m_hours:
+            hours = int(m_hours.group(1))
+        # Anthill treats 6h as one full working day
+        extra_days, remaining = divmod(hours, 6)
+        total = days + extra_days + (1 if remaining > 0 else 0)
+        return max(1, total)
+
+    # Map Anthill usernames to our fitter codes
+    FITTER_MAP = {
+        'ross.middleton': 'R',
+        'gavin.reynolds': 'G',
+        'stuart.stevenson': 'S',
+        'paddy': 'P',
+    }
+
+    # ── Authenticate with Anthill web UI ─────────────────────────────────
+    session = req_lib.Session()
+    session.headers['User-Agent'] = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    )
+
+    class _FormParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self._in_form = False
+            self.action = ''
+            self.fields = {}
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            if tag == 'form':
+                self._in_form = True
+                self.action = attr_dict.get('action', '')
+            elif tag == 'input' and self._in_form:
+                name = attr_dict.get('name', '').strip()
+                value = attr_dict.get('value', '')
+                if name:
+                    self.fields[name] = value
+        def handle_endtag(self, tag):
+            if tag == 'form':
+                self._in_form = False
+
+    def _is_auth_page(url):
+        u = url.lower()
+        return 'login' in u or 'signin' in u or '/sign-in' in u
+
+    authenticated = False
+    updated = 0
+    created = 0
+    errors = 0
+
+    for sale in sales_to_check:
+        sale_url = f'{base_url}/system/Orders/ViewOrder.aspx?OrderID={sale.anthill_activity_id}'
+        try:
+            resp = session.get(sale_url, timeout=20, allow_redirects=True)
+
+            # Authenticate on first redirect to login
+            if not authenticated and (_is_auth_page(resp.url) or resp.status_code in (401, 403)):
+                fp = _FormParser()
+                fp.feed(resp.text)
+                payload = dict(fp.fields)
+                login_post_url = resp.url
+                if fp.action:
+                    action = fp.action.strip()
+                    if action.startswith('http'):
+                        login_post_url = action
+                    elif action.startswith('/'):
+                        login_post_url = base_url + action
+                    else:
+                        login_post_url = resp.url.rsplit('/', 1)[0] + '/' + action
+
+                u_filled = p_filled = False
+                for name in list(payload.keys()):
+                    nl = name.lower()
+                    if not u_filled and any(k in nl for k in ('user', 'email', 'login')) \
+                            and 'view' not in nl and 'event' not in nl:
+                        payload[name] = username
+                        u_filled = True
+                    elif not p_filled and 'pass' in nl:
+                        payload[name] = password
+                        p_filled = True
+                if not u_filled:
+                    payload['username'] = username
+                if not p_filled:
+                    payload['password'] = password
+
+                login_resp = session.post(login_post_url, data=payload, timeout=20, allow_redirects=True)
+                if _is_auth_page(login_resp.url):
+                    return JsonResponse({'success': False, 'error': 'Anthill login failed'})
+                authenticated = True
+                # Re-fetch the sale page now that we're authenticated
+                resp = session.get(sale_url, timeout=20)
+
+            if 'tdAppoints' not in resp.text:
+                continue
+
+            # Parse appointments
+            parser = _AppointmentParser()
+            parser.feed(resp.text)
+
+            # Find the Installation appointment
+            install_appt = None
+            for appt_raw in parser.appointments:
+                parsed = _parse_appt_text(appt_raw['raw_text'])
+                if parsed and parsed['type'].lower() == 'installation':
+                    install_appt = parsed
+                    break
+
+            if not install_appt or not install_appt['date_str']:
+                continue
+
+            # Parse the date from "23/03/26 09:00"
+            fit_date = None
+            for fmt in ('%d/%m/%y %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%y', '%d/%m/%Y'):
+                try:
+                    fit_date = _dt.strptime(install_appt['date_str'], fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if fit_date is None:
+                continue
+
+            duration_days = _duration_to_days(install_appt['duration_str'])
+            fitter_code = FITTER_MAP.get(install_appt['with_str'].lower(), '')
+
+            # Update AnthillSale fit_date
+            changed = False
+            if sale.fit_date != fit_date:
+                sale.fit_date = fit_date
+                sale.fit_from_date = install_appt['date_str']
+                sale.save(update_fields=['fit_date', 'fit_from_date', 'updated_at'])
+                changed = True
+
+            # Sync to linked order
+            if sale.order and sale.order.fit_date != fit_date:
+                sale.order.fit_date = fit_date
+                sale.order.save(update_fields=['fit_date'])
+                changed = True
+
+            # Create or update FitAppointment
+            if sale.order:
+                existing = FitAppointment.objects.filter(order=sale.order).first()
+                if existing:
+                    appt_changed = False
+                    if existing.fit_date != fit_date:
+                        existing.fit_date = fit_date
+                        appt_changed = True
+                    if existing.fit_duration != duration_days:
+                        existing.fit_duration = duration_days
+                        appt_changed = True
+                    if fitter_code and existing.fitter != fitter_code:
+                        existing.fitter = fitter_code
+                        appt_changed = True
+                    if appt_changed:
+                        existing.save()
+                        changed = True
+                else:
+                    FitAppointment.objects.create(
+                        order=sale.order,
+                        fit_date=fit_date,
+                        fit_duration=duration_days,
+                        fitter=fitter_code or 'R',
+                    )
+                    created += 1
+                    changed = True
+
+            if changed:
+                updated += 1
+
+        except Exception:
+            errors += 1
+            continue
+
+    # Record sync timestamp
+    SyncLog.objects.create(
+        script_name='anthill_fit_dates',
+        ran_at=timezone.now(),
+        status='success',
+        records_updated=updated,
+        records_created=created,
+        errors=errors,
+        notes=f'Synced by {request.user.get_full_name() or request.user.username}',
+    )
+
+    return JsonResponse({
+        'success': True,
+        'checked': len(sales_to_check),
+        'updated': updated,
+        'created': created,
+        'errors': errors,
+    })
 
 
 @login_required

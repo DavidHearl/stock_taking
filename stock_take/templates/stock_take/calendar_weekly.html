@@ -13,20 +13,39 @@
 
 <!-- Appointment Detail Modal -->
 <div id="appointmentDetailModal" class="modal">
-    <div class="modal-content" style="max-width: 560px;">
+    <div class="modal-content" style="max-width: 640px;">
         <div class="modal-header">
             <h3 id="detailCustomerName">Appointment</h3>
             <span class="close" onclick="closeModal('appointmentDetailModal')">&times;</span>
         </div>
         <div class="modal-body">
+            <!-- Quick links -->
+            <div class="detail-links">
+                <a id="detailOrderLink" href="#" class="detail-link-btn" target="_blank">
+                    <i class="bi bi-box-seam"></i> View Order
+                </a>
+                <a id="detailAnthillLink" href="#" class="detail-link-btn detail-link-anthill" target="_blank">
+                    <i class="bi bi-box-arrow-up-right"></i> Open in Anthill
+                </a>
+                <a id="detailSaleLink" href="#" class="detail-link-btn detail-link-sale" target="_blank" style="display:none;">
+                    <i class="bi bi-currency-pound"></i> Sale &amp; Payments
+                </a>
+            </div>
+
+            <!-- Section: Customer & Order -->
+            <div class="detail-section-label">Customer &amp; Order</div>
             <div class="detail-grid">
                 <div class="detail-row">
                     <label>Sale Number</label>
                     <span id="detailSaleNumber">-</span>
                 </div>
                 <div class="detail-row">
-                    <label>Customer Number</label>
+                    <label>Customer No.</label>
                     <span id="detailCustomerNumber">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Designer</label>
+                    <span id="detailDesigner">-</span>
                 </div>
                 <div class="detail-row">
                     <label>Order Date</label>
@@ -42,9 +61,50 @@
                 </div>
             </div>
 
-            <hr style="border-color: var(--border-color); margin: 14px 0;">
-
+            <!-- Section: Product -->
+            <div class="detail-section-label">Product</div>
             <div class="detail-grid">
+                <div class="detail-row">
+                    <label>Range</label>
+                    <span id="detailRange">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Door Type</label>
+                    <span id="detailDoorType">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Source</label>
+                    <span id="detailSource">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Contract No.</label>
+                    <span id="detailContractNumber">-</span>
+                </div>
+            </div>
+
+            <!-- Section: Financials -->
+            <div class="detail-section-label">Financials</div>
+            <div class="detail-grid detail-grid-3">
+                <div class="detail-row">
+                    <label>Sale Value</label>
+                    <span id="detailSaleValue" class="detail-val-money">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Paid</label>
+                    <span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Outstanding</label>
+                    <span id="detailOutstanding" class="detail-val-money">-</span>
+                </div>
+            </div>
+            <div class="detail-payment-bar" id="detailPaymentBar" style="display:none;">
+                <div class="detail-payment-fill" id="detailPaymentFill"></div>
+            </div>
+
+            <!-- Section: Fit Assignment -->
+            <div class="detail-section-label">Fit Assignment</div>
+            <div class="detail-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                 <div class="detail-row">
                     <label>Fitter</label>
                     <select id="detailFitterSelect" class="modal-select" style="margin-bottom:0;">
@@ -57,10 +117,20 @@
                     <label>Fit Date</label>
                     <input type="date" id="detailFitDate" class="modal-select" style="margin-bottom:0;">
                 </div>
+                <div class="detail-row">
+                    <label>Duration (days)</label>
+                    <select id="detailFitDuration" class="modal-select" style="margin-bottom:0;">
+                        <option value="1">1 day</option>
+                        <option value="2">2 days</option>
+                        <option value="3">3 days</option>
+                        <option value="4">4 days</option>
+                        <option value="5">5 days</option>
+                    </select>
+                </div>
             </div>
 
-            <hr style="border-color: var(--border-color); margin: 14px 0;">
-
+            <!-- Section: Completion Status -->
+            <div class="detail-section-label">Completion Status</div>
             <div class="detail-checks">
                 <div class="detail-check-item">
                     <input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
@@ -132,6 +202,9 @@
     </div>
 
     <div class="cal-toolbar-right">
+        <button class="btn btn-secondary btn-sm" id="btnRefreshAnthill" onclick="refreshAnthillDates()" title="Refresh fit dates from Anthill CRM">
+            <i class="bi bi-arrow-repeat"></i> Sync Anthill
+        </button>
         <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="btn btn-primary btn-sm">Today</a>
         <div class="view-toggle">
             <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn">Monthly</a>
@@ -141,23 +214,89 @@
     </div>
 </div>
 
+{% if last_anthill_sync %}
+<div class="wk-sync-banner">
+    <i class="bi bi-cloud-check"></i>
+    Last synced with Anthill: {{ last_anthill_sync.ran_at|timesince }} ago
+    {% if last_anthill_sync.notes %}<span class="wk-sync-by">{{ last_anthill_sync.notes }}</span>{% endif %}
+</div>
+{% else %}
+<div class="wk-sync-banner wk-sync-never">
+    <i class="bi bi-cloud-slash"></i>
+    Anthill data has not been synced yet
+</div>
+{% endif %}
+
 <div class="calendar-container">
 
-    <!-- Weekly Grid — vertical columns, left to right -->
+    <!-- Weekly Grid — CSS grid layout with spanning multi-day rows -->
     <div class="weekly-grid">
+        <!-- Day column headers -->
         {% for day in week_data %}
-        <div class="weekly-col {% if day.is_today %}today{% endif %}"
+        <div class="weekly-col-header {% if day.is_today %}today{% endif %}" style="grid-column: {{ forloop.counter }};">
+            <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
+            <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
+        </div>
+        {% endfor %}
+
+        <!-- Multi-day appointment rows spanning across columns -->
+        {% for appt in multi_day_rows %}
+        <div class="wk-multi-bar {% if appt.order %}{% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% endif %}{% if appt.remedial %} remedial{% endif %}"
+             style="grid-column: {{ appt.multi_start_col }} / {{ appt.multi_end_col }};"
+             data-appointment-id="{{ appt.id }}"
+             {% if appt.order %}data-order-id="{{ appt.order.id }}"
+             data-customer-name="{{ appt.order.first_name }} {{ appt.order.last_name }}"
+             data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
+             data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
+             data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
+             data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
+             data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
+             data-sale-number="{{ appt.order.sale_number }}"
+             data-customer-number="{{ appt.order.customer_number }}"
+             data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
+             data-address="{{ appt.order.address|default:'-' }}"
+             data-postcode="{{ appt.order.postcode|default:'-' }}"
+             data-designer="{{ appt.order.designer.name|default:'-' }}"
+             data-order-url="/order/{{ appt.order.id }}/"
+             data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
+             {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
+             data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
+             data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
+             data-anthill-sale-pk="{{ appt.fin.anthill_sale_pk }}"
+             data-range-name="{{ appt.fin.range_name }}"
+             data-door-type="{{ appt.fin.door_type }}"
+             data-source="{{ appt.fin.source }}"
+             data-contract-number="{{ appt.fin.contract_number }}"
+             data-assigned-to="{{ appt.fin.assigned_to_name }}"
+             data-discount="{{ appt.fin.discount|floatformat:0 }}"
+             {% endif %}
+             {% elif appt.remedial %}data-remedial-id="{{ appt.remedial.id }}"
+             data-customer-name="{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}"
+             data-sale-number="{{ appt.remedial.remedial_number }}"
+             data-customer-number="{{ appt.remedial.customer_number }}"
+             data-address="{{ appt.remedial.address|default:'-' }}"
+             data-postcode="{{ appt.remedial.postcode|default:'-' }}"
+             {% endif %}
+             data-fitter-code="{{ appt.fitter }}"
+             data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+             data-fit-duration="{{ appt.span_total }}"
+             data-span-day="1"
+             data-span-total="{{ appt.span_total }}"
+             onclick="selectAppointmentFromCard(this)">
+            <span class="wk-multi-name">{% if appt.order %}{{ appt.order.first_name }} {{ appt.order.last_name }}{% elif appt.remedial %}{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}{% endif %}</span>
+            <span class="wk-multi-info">{{ appt.span_total }} days &middot; {{ appt.fitter_name }} &middot; {% if appt.order %}{{ appt.order.sale_number }}{% elif appt.remedial %}{{ appt.remedial.remedial_number }}{% endif %}</span>
+        </div>
+        {% endfor %}
+
+        <!-- Day columns body (single-day appointments + deliveries) -->
+        {% for day in week_data %}
+        <div class="weekly-col-body {% if day.is_today %}today{% endif %}"
+             style="grid-column: {{ forloop.counter }};"
              data-date="{{ day.date_str }}"
              ondrop="handleDrop(event)"
              ondragover="handleDragOver(event)"
              ondragleave="handleDragLeave(event)">
 
-            <div class="weekly-col-header">
-                <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
-                <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
-            </div>
-
-            <div class="weekly-col-body">
                 {% for fitter in day.fitter_rows %}
                     {% for appt in fitter.appointments %}
                         {% if appt.order %}
@@ -180,8 +319,25 @@
                              data-fitter-code="{{ fitter.code }}"
                              data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
                              data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                             data-fit-duration="{{ appt.span_total }}"
+                             data-span-day="{{ appt.span_day }}"
+                             data-span-total="{{ appt.span_total }}"
                              data-address="{{ appt.order.address|default:'-' }}"
                              data-postcode="{{ appt.order.postcode|default:'-' }}"
+                             data-designer="{{ appt.order.designer.name|default:'-' }}"
+                             data-order-url="/order/{{ appt.order.id }}/"
+                             data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
+                             {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
+                             data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
+                             data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
+                             data-anthill-sale-pk="{{ appt.fin.anthill_sale_pk }}"
+                             data-range-name="{{ appt.fin.range_name }}"
+                             data-door-type="{{ appt.fin.door_type }}"
+                             data-source="{{ appt.fin.source }}"
+                             data-contract-number="{{ appt.fin.contract_number }}"
+                             data-assigned-to="{{ appt.fin.assigned_to_name }}"
+                             data-discount="{{ appt.fin.discount|floatformat:0 }}"
+                             {% endif %}
                              onclick="selectAppointmentFromCard(this)">
                             <div class="wk-card-header">
                                 <span class="wk-card-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
@@ -193,10 +349,6 @@
                                     <span class="wk-fin-val">{{ fitter.name }}</span>
                                 </div>
                                 {% if appt.fin and appt.fin.sale_value %}
-                                <div class="wk-card-row">
-                                    <span class="wk-fin-label">Sale Value</span>
-                                    <span class="wk-fin-val {% if appt.fin.outstanding == 0 %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.sale_value|floatformat:0 }}</span>
-                                </div>
                                 <div class="wk-card-row">
                                     <span class="wk-fin-label">Outstanding</span>
                                     <span class="wk-fin-val {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>
@@ -218,6 +370,9 @@
                              data-fitter="{{ fitter.name }}"
                              data-fitter-code="{{ fitter.code }}"
                              data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                             data-fit-duration="{{ appt.span_total }}"
+                             data-span-day="{{ appt.span_day }}"
+                             data-span-total="{{ appt.span_total }}"
                              data-address="{{ appt.remedial.address|default:'-' }}"
                              data-postcode="{{ appt.remedial.postcode|default:'-' }}"
                              onclick="selectAppointmentFromCard(this)">
@@ -237,24 +392,24 @@
                 {% endfor %}
 
                 {% for group in day.pos_groups %}
-                <div class="wk-po-card">
-                    <div class="wk-po-supplier-header">
-                        <i class="bi bi-truck"></i>
-                        <span class="wk-po-supplier">{{ group.supplier }}</span>
+                <div class="wk-delivery-table">
+                    <div class="wk-delivery-header">
+                        <i class="bi bi-truck"></i> {{ group.supplier }}
                     </div>
-                    {% for po in group.pos %}
-                    <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="wk-po-row">
-                        <span class="wk-po-num">{{ po.display_number }}</span>
-                        <span class="wk-po-customer">{{ po.project_name|default:"" }}</span>
-                    </a>
-                    {% endfor %}
+                    <table class="wk-delivery-rows">
+                        {% for po in group.pos %}
+                        <tr class="wk-delivery-row">
+                            <td class="wk-delivery-po"><a href="{% url 'purchase_order_detail' po.workguru_id %}">{{ po.display_number }}</a></td>
+                            <td class="wk-delivery-customer">{{ po.project_name|default:"" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </table>
                 </div>
                 {% endfor %}
 
                 {% if not day.has_appointments and not day.pos_groups %}
                 <div class="wk-empty">—</div>
                 {% endif %}
-            </div>
         </div>
         {% endfor %}
     </div>
@@ -270,16 +425,18 @@
 
     <div class="weekly-grid sales-grid">
         {% for day in week_data %}
-        <div class="weekly-col {% if day.is_today %}today{% endif %}"
+        <div class="weekly-col-header {% if day.is_today %}today{% endif %}" style="grid-column: {{ forloop.counter }};">
+            <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
+            <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
+        </div>
+        {% endfor %}
+        {% for day in week_data %}
+        <div class="weekly-col-body {% if day.is_today %}today{% endif %}"
+             style="grid-column: {{ forloop.counter }};"
              data-date="{{ day.date_str }}"
              ondrop="handleSalesDrop(event)"
              ondragover="handleSalesDragOver(event)"
              ondragleave="handleSalesDragLeave(event)">
-            <div class="weekly-col-header">
-                <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
-                <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
-            </div>
-            <div class="weekly-col-body">
                 {% for sa in day.sales %}
                 <div class="wk-sales-card"
                      data-sales-id="{{ sa.id }}"
@@ -310,7 +467,6 @@
                 {% empty %}
                 <div class="wk-empty">—</div>
                 {% endfor %}
-            </div>
         </div>
         {% endfor %}
     </div>
@@ -422,7 +578,7 @@ function handleSalesDragStart(event) {
 
 function handleSalesDragEnd(event) {
     event.target.closest('[data-sales-id]')?.classList.remove('dragging');
-    document.querySelectorAll('.weekly-col').forEach(c => c.classList.remove('drag-over'));
+    document.querySelectorAll('.weekly-col-body').forEach(c => c.classList.remove('drag-over'));
 }
 
 function handleSalesDragOver(event) {
@@ -465,7 +621,7 @@ function handleDragStart(event) {
 
 function handleDragEnd(event) {
     event.target.classList.remove('dragging');
-    document.querySelectorAll('.weekly-col').forEach(r => r.classList.remove('drag-over'));
+    document.querySelectorAll('.weekly-col-body').forEach(r => r.classList.remove('drag-over'));
 }
 
 function handleDragOver(event) {
@@ -504,18 +660,63 @@ function handleDrop(event) {
 // ── Appointment Selection → Detail Modal ───────────────────────
 let _origFitterCode = null;
 let _origFitDate = null;
+let _origDuration = null;
 
 function selectAppointmentFromCard(el) {
     const d = el.dataset;
     selectedAppointmentId = parseInt(d.appointmentId);
     window.selectedOrderId = parseInt(d.orderId) || null;
 
+    // Header
     document.getElementById('detailCustomerName').textContent = d.customerName || 'Appointment';
+
+    // Links
+    const orderLink = document.getElementById('detailOrderLink');
+    const anthillLink = document.getElementById('detailAnthillLink');
+    const saleLink = document.getElementById('detailSaleLink');
+    if (d.orderUrl) { orderLink.href = d.orderUrl; orderLink.style.display = ''; }
+    else { orderLink.style.display = 'none'; }
+    if (d.anthillUrl) { anthillLink.href = d.anthillUrl; anthillLink.style.display = ''; }
+    else { anthillLink.style.display = 'none'; }
+    if (d.anthillSalePk) { saleLink.href = '/sale/' + d.anthillSalePk + '/'; saleLink.style.display = ''; }
+    else { saleLink.style.display = 'none'; }
+
+    // Customer & Order
     document.getElementById('detailSaleNumber').textContent = d.saleNumber || '-';
     document.getElementById('detailCustomerNumber').textContent = d.customerNumber || '-';
+    document.getElementById('detailDesigner').textContent = d.designer || '-';
     document.getElementById('detailOrderDate').textContent = d.orderDate || '-';
     document.getElementById('detailAddress').textContent = d.address || '-';
     document.getElementById('detailPostcode').textContent = d.postcode || '-';
+
+    // Product
+    document.getElementById('detailRange').textContent = d.rangeName || '-';
+    document.getElementById('detailDoorType').textContent = d.doorType || '-';
+    document.getElementById('detailSource').textContent = d.source || '-';
+    document.getElementById('detailContractNumber').textContent = d.contractNumber || '-';
+
+    // Financials
+    const sv = d.saleValue;
+    const pt = d.paymentsTotal;
+    const os = d.outstanding;
+    document.getElementById('detailSaleValue').textContent = sv ? '£' + Number(sv).toLocaleString() : '-';
+    document.getElementById('detailPaid').textContent = pt ? '£' + Number(pt).toLocaleString() : '-';
+    const outEl = document.getElementById('detailOutstanding');
+    outEl.textContent = os ? '£' + Number(os).toLocaleString() : '-';
+    outEl.classList.toggle('detail-val-due', os && Number(os) > 0);
+    outEl.classList.toggle('detail-val-paid', os && Number(os) <= 0);
+
+    // Payment progress bar
+    const bar = document.getElementById('detailPaymentBar');
+    const fill = document.getElementById('detailPaymentFill');
+    if (sv && Number(sv) > 0) {
+        const pct = Math.min(100, Math.round((Number(pt || 0) / Number(sv)) * 100));
+        fill.style.width = pct + '%';
+        fill.classList.toggle('bar-complete', pct >= 100);
+        bar.style.display = '';
+    } else {
+        bar.style.display = 'none';
+    }
 
     // Fitter dropdown
     const fitterSelect = document.getElementById('detailFitterSelect');
@@ -532,6 +733,11 @@ function selectAppointmentFromCard(el) {
             _origFitDate = iso;
         }
     }
+
+    // Duration
+    const durSelect = document.getElementById('detailFitDuration');
+    durSelect.value = d.fitDuration || '1';
+    _origDuration = durSelect.value;
 
     // Checkboxes
     document.getElementById('detail-interior').checked = d.interior === 'true';
@@ -591,9 +797,10 @@ function saveDetailMove() {
     if (!selectedAppointmentId) return;
     const newFitter = document.getElementById('detailFitterSelect').value;
     const newDate = document.getElementById('detailFitDate').value;
-    // Only call the move endpoint if fitter or date actually changed
-    if (newFitter !== _origFitterCode || newDate !== _origFitDate) {
-        const payload = { fitter: newFitter };
+    const newDuration = document.getElementById('detailFitDuration').value;
+    // Only call the move endpoint if fitter, date, or duration actually changed
+    if (newFitter !== _origFitterCode || newDate !== _origFitDate || newDuration !== _origDuration) {
+        const payload = { fitter: newFitter, fit_duration: parseInt(newDuration) };
         if (newDate) payload.fit_date = newDate;
         fetch(`/fit-board/move-appointment/${selectedAppointmentId}/`, {
             method: 'POST',
@@ -813,6 +1020,51 @@ function applyFitterChange(code) {
     .then(r => r.json())
     .then(data => { if (data.success) location.reload(); else alert(data.error || 'Failed'); })
     .catch(() => alert('Error changing fitter'));
+}
+
+// ── Refresh fit dates from Anthill CRM ──────────────────────────
+function refreshAnthillDates() {
+    const btn = document.getElementById('btnRefreshAnthill');
+    const origHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Syncing…';
+
+    fetch('{% url "refresh_anthill_fit_dates" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ week_start: '{{ week_start|date:"Y-m-d" }}' })
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        if (data.success) {
+            const parts = [];
+            if (data.updated) parts.push(data.updated + ' updated');
+            if (data.created) parts.push(data.created + ' created');
+            if (data.errors) parts.push(data.errors + ' errors');
+            const msg = parts.length ? parts.join(', ') : 'All dates up to date';
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> ' + msg;
+            // Update the sync banner
+            const banner = document.querySelector('.wk-sync-banner');
+            if (banner) {
+                banner.classList.remove('wk-sync-never');
+                banner.innerHTML = '<i class="bi bi-cloud-check"></i> Last synced with Anthill: just now';
+            }
+            if (data.updated || data.created) {
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                setTimeout(() => { btn.innerHTML = origHTML; }, 3000);
+            }
+        } else {
+            btn.innerHTML = origHTML;
+            alert(data.error || 'Sync failed');
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = origHTML;
+        alert('Error contacting Anthill');
+    });
 }
 </script>
 {% endblock %}

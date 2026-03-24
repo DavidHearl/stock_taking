@@ -1325,6 +1325,7 @@ class FitAppointment(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
     remedial = models.ForeignKey(Remedial, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
     fit_date = models.DateField(help_text='Scheduled fit date')
+    fit_duration = models.PositiveSmallIntegerField(default=1, help_text='Number of days for the fit (1 = single day)')
     fitter = models.CharField(max_length=1, choices=FITTER_CHOICES, default='R', help_text='Assigned fitter')
     interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')
     door_completed = models.BooleanField(default=False, help_text='Door fit completed')
