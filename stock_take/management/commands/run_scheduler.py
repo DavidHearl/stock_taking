@@ -14,6 +14,8 @@ Schedule (UTC):
     07:00  — upgrade_leads          (promote leads with a qualifying sale, last 365 days)
     08:00  — sync_recent_customers  (sync new/updated Anthill customers, last 7 days)
     09:00  — sync_anthill_fit_dates (parse fit_from_date text into fit_date, last 365 days)
+    09:30  — sync_anthill_workflow  (refresh sale details: financials, contract numbers, etc.)
+    10:00  — sync_xero_sale_payments (sync Xero payment data)
     12:00  — sync_recent_customers  (midday re-sync)
 
 Design notes:
@@ -44,6 +46,7 @@ SCHEDULE = [
     (7,  0, 'upgrade_leads',              {'days': 365}),
     (8,  0, 'sync_recent_customers',      {}),
     (9,  0, 'sync_anthill_fit_dates',     {'days': 365}),
+    (9, 30, 'sync_anthill_workflow',       {'days': 365}),
     (10, 0, 'sync_xero_sale_payments',    {}),
     (12, 0, 'sync_recent_customers',      {}),
 ]
@@ -74,6 +77,21 @@ class Command(BaseCommand):
         for h, m, cmd, _ in SCHEDULE:
             self.stdout.write(f'  {h:02d}:{m:02d}  ->  {cmd}')
         self.stdout.write('')
+
+        # Write a startup log so we can verify the scheduler is alive
+        try:
+            from stock_take.models import SyncLog
+            SyncLog.objects.create(
+                script_name='run_scheduler',
+                status='success',
+                records_created=0,
+                records_updated=0,
+                errors=0,
+                notes=f'Scheduler started at {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}',
+            )
+            self.stdout.write('Startup logged to SyncLog.')
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f'Could not write startup log: {exc}'))
 
         # Keys: (hour, minute, command_name) — reset at midnight UTC.
         fired_today: set = set()

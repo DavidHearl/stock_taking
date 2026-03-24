@@ -755,9 +755,22 @@ def sale_detail(request, pk):
     all_payments = list(sale.payments.all().order_by('date'))
     xero_payments = [p for p in all_payments if p.source != 'manual']
     manual_payments = [p for p in all_payments if p.source == 'manual']
-    payments_total = sum(p.amount for p in all_payments if p.amount) or None
+
+    # Table footer totals (include all amounts as shown in table)
     xero_payments_total = sum(p.amount for p in xero_payments if p.amount) or None
     manual_payments_total = sum(p.amount for p in manual_payments if p.amount) or None
+
+    # Financial summary using credit-payment matching (exclude ignored)
+    from decimal import Decimal
+    active_payments = [p for p in all_payments if not p.ignored]
+    total_paid, discount = _match_credits_to_payments(active_payments)
+    sale_value = sale.sale_value or Decimal('0')
+    effective_value = sale_value - discount
+    outstanding = max(effective_value - total_paid, Decimal('0'))
+    overpayment = max(total_paid - effective_value, Decimal('0'))
+    payment_pct = int(min(total_paid / effective_value * 100, 100)) if effective_value > 0 else 0
+    overpayment_pct = int(overpayment / effective_value * 100) if effective_value > 0 and overpayment > 0 else 0
+    adjusted_profit = (sale.profit or Decimal('0')) - discount if sale.profit else None
 
     context = {
         'sale': sale,
@@ -765,23 +778,73 @@ def sale_detail(request, pk):
         'payments': all_payments,
         'xero_payments': xero_payments,
         'manual_payments': manual_payments,
-        'payments_total': payments_total,
+        'payments_total': total_paid,
         'xero_payments_total': xero_payments_total,
         'manual_payments_total': manual_payments_total,
+        'effective_value': effective_value,
+        'discount': discount,
+        'outstanding': outstanding,
+        'overpayment': overpayment,
+        'payment_pct': payment_pct,
+        'overpayment_pct': overpayment_pct,
+        'adjusted_profit': adjusted_profit,
     }
 
     return render(request, 'stock_take/sale_detail.html', context)
 
 
-def _recalculate_sale_balance(sale):
-    """Recompute balance_payable and paid_in_full from all payment records."""
+def _match_credits_to_payments(payments_list):
+    """Match credit payments to positive payments by amount.
+
+    ALL credits count as discount (reduce the sale obligation).
+    Credits that mirror a positive payment (same absolute amount) also
+    remove that positive from total_paid — those entries represent the
+    credit being applied, not real cash received.
+
+    Returns (total_paid, discount).
+    """
     from decimal import Decimal
-    total_paid = sale.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    credits = []
+    positives = []
+    other_negatives = Decimal('0')  # non-credit negatives (adjustments, refunds)
+    for p in payments_list:
+        amt = getattr(p, 'amount', None) or Decimal('0')
+        ptype = getattr(p, 'payment_type', '') or ''
+        if 'credit' in ptype.lower() and amt < 0:
+            credits.append(abs(amt))
+        elif amt > 0:
+            positives.append(amt)
+        elif amt < 0:
+            other_negatives += amt
+
+    # ALL credits are discount
+    discount = sum(credits, Decimal('0'))
+
+    # Match credits to positives — matched positives are removed from paid
+    # (they represent the credit being applied, not real cash)
+    unmatched_positives = list(positives)
+    for credit_amt in credits:
+        for i, pay_amt in enumerate(unmatched_positives):
+            if abs(pay_amt - credit_amt) < Decimal('0.50'):
+                unmatched_positives.pop(i)
+                break
+
+    total_paid = sum(unmatched_positives, Decimal('0')) + other_negatives
+    return max(total_paid, Decimal('0')), discount
+
+
+def _recalculate_sale_financials(sale):
+    """Recompute discount, balance_payable and paid_in_full using credit-payment matching."""
+    from decimal import Decimal
+    payments = list(sale.payments.filter(ignored=False))
+    total_paid, discount = _match_credits_to_payments(payments)
+    sale.discount = discount
     sale_value = sale.sale_value or Decimal('0')
-    new_balance = max(sale_value - total_paid, Decimal('0'))
+    effective_value = sale_value - discount
+    new_balance = max(effective_value - total_paid, Decimal('0'))
     sale.balance_payable = new_balance
     sale.paid_in_full = new_balance <= Decimal('0')
-    sale.save(update_fields=['balance_payable', 'paid_in_full'])
+    sale.save(update_fields=['discount', 'balance_payable', 'paid_in_full'])
 
 
 @login_required
@@ -837,7 +900,7 @@ def add_manual_payment(request, pk):
     if errors and not created_ids:
         return JsonResponse({'success': False, 'errors': errors}, status=400)
 
-    _recalculate_sale_balance(sale)
+    _recalculate_sale_financials(sale)
     return JsonResponse({'success': True, 'created': len(created_ids), 'errors': errors})
 
 
@@ -850,8 +913,21 @@ def delete_manual_payment(request, pk, payment_pk):
     payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk, source='manual')
     sale = payment.sale
     payment.delete()
-    _recalculate_sale_balance(sale)
+    _recalculate_sale_financials(sale)
     return JsonResponse({'success': True})
+
+
+@login_required
+def toggle_payment_ignored(request, pk, payment_pk):
+    """Toggle the 'ignored' flag on a payment (POST). Returns new state."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk)
+    payment.ignored = not payment.ignored
+    payment.save(update_fields=['ignored'])
+    _recalculate_sale_financials(payment.sale)
+    return JsonResponse({'success': True, 'ignored': payment.ignored})
 
 
 @login_required

@@ -44,7 +44,7 @@ import django
 django.setup()
 
 from django.db import close_old_connections
-from stock_take.models import AnthillSale, SyncLog  # noqa: E402
+from stock_take.models import AnthillSale, Order, SyncLog  # noqa: E402
 
 # ── Logging setup ───────────────────────────────────────────────────────
 LOG_DIR = os.path.join(BASE_DIR, 'logs')
@@ -325,6 +325,25 @@ def sync_workflow(dry_run: bool = False, days: int = None):
                 sale.fit_date = parsed_fit
                 changed_fields.append('fit_date')
                 logger.debug(f'    fit_date (from Fit From Date): {parsed_fit}')
+
+        # --- Auto-link sale ↔ order and sync fit_date ---
+        if not sale.order_id:
+            matching_order = Order.objects.filter(sale_number=sale.anthill_activity_id).first()
+            if matching_order:
+                sale.order = matching_order
+                changed_fields.append('order')
+                logger.info(f'    Linked to Order {matching_order.sale_number} (pk={matching_order.pk})')
+                # Sync fit_date from order if sale still has none
+                if not sale.fit_date and matching_order.fit_date:
+                    sale.fit_date = matching_order.fit_date
+                    if 'fit_date' not in changed_fields:
+                        changed_fields.append('fit_date')
+                    logger.info(f'    fit_date from Order: {matching_order.fit_date}')
+                # Sync fit_date TO order if order has none
+                if sale.fit_date and not matching_order.fit_date and not dry_run:
+                    matching_order.fit_date = sale.fit_date
+                    matching_order.save(update_fields=['fit_date'])
+                    logger.info(f'    fit_date → Order: {sale.fit_date}')
 
         if changed_fields:
             if not dry_run:

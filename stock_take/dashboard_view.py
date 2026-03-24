@@ -523,7 +523,7 @@ def dashboard(request):
 
     # Compute real outstanding dynamically: sale_value - sum(all payments)
     payments_subquery = Subquery(
-        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
         .values('sale')
         .annotate(total=Sum('amount'))
         .values('total'),
@@ -534,20 +534,20 @@ def dashboard(request):
         .filter(sale_value__gt=0)
         .exclude(status='cancelled')
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
-        .values('sale_value', 'total_paid')
+        .values('sale_value', 'discount', 'total_paid')
     )
     if contract_prefix:
         outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
 
     outstanding_rows = list(outstanding_qs)
     total_outstanding_balance = sum(
-        max((row['sale_value'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
+        max((row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
         for row in outstanding_rows
-        if (row['sale_value'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
+        if (row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
     ) or Decimal('0')
     outstanding_debtor_count = sum(
         1 for row in outstanding_rows
-        if (row['sale_value'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
+        if (row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
     )
 
     # Remaining balance of fits scheduled this week
@@ -556,12 +556,12 @@ def dashboard(request):
         .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
         .exclude(status__in=['cancelled', 'dead'])
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
-        .values('sale_value', 'total_paid')
+        .values('sale_value', 'discount', 'total_paid')
     )
     if contract_prefix:
         this_week_qs = this_week_qs.filter(contract_number__istartswith=contract_prefix)
     expected_this_week = sum(
-        max((row['sale_value'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
+        max((row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
         for row in this_week_qs
     ) or Decimal('0')
     
@@ -903,7 +903,7 @@ def dashboard_outstanding_report(request):
     time_filter = request.GET.get('period', 'all')  # all, monthly, weekly
 
     payments_subquery = Subquery(
-        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
         .values('sale')
         .annotate(total=Sum('amount'))
         .values('total'),
@@ -916,7 +916,7 @@ def dashboard_outstanding_report(request):
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .order_by('-activity_date')
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'activity_date', 'location', 'total_paid', 'fit_date')
+                'sale_value', 'discount', 'activity_date', 'location', 'total_paid', 'fit_date')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
@@ -937,16 +937,22 @@ def dashboard_outstanding_report(request):
 
     # Collect PKs first, then bulk-fetch payments
     sale_rows = []
+    overpaid_rows = []
     for row in qs:
         sv = row['sale_value'] or Decimal('0')
+        disc = row['discount'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
-        real_outstanding = sv - total_paid
-        if real_outstanding < Decimal('10'):
-            continue
-        sale_rows.append(row)
+        real_paid = total_paid + disc
+        effective_sv = sv - disc
+        real_outstanding = effective_sv - real_paid
+        if real_outstanding < Decimal('-5'):
+            # Overpaid by more than £5
+            overpaid_rows.append(row)
+        elif real_outstanding >= Decimal('10'):
+            sale_rows.append(row)
 
-    # Bulk-fetch payments for all qualifying sales
-    sale_pks = [r['pk'] for r in sale_rows]
+    # Bulk-fetch payments for all qualifying sales (outstanding + overpaid)
+    sale_pks = [r['pk'] for r in sale_rows] + [r['pk'] for r in overpaid_rows]
     payments_by_sale = {}
     if sale_pks:
         for p in AnthillPayment.objects.filter(sale_id__in=sale_pks).order_by('date').values(
@@ -965,8 +971,11 @@ def dashboard_outstanding_report(request):
     results = []
     for row in sale_rows:
         sv = row['sale_value'] or Decimal('0')
+        disc = row['discount'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
-        real_outstanding = sv - total_paid
+        real_paid = total_paid + disc
+        effective_sv = sv - disc
+        real_outstanding = effective_sv - real_paid
         dt = row['activity_date']
         fd = row['fit_date']
         results.append({
@@ -976,7 +985,7 @@ def dashboard_outstanding_report(request):
             'contract': row['contract_number'] or '',
             'location': row['location'] or '',
             'sale_value': float(sv),
-            'paid': float(total_paid),
+            'paid': float(real_paid),
             'outstanding': float(real_outstanding),
             'year': fd.year if fd else None,
             'fit_date': fd.strftime('%d/%m/%Y') if fd else '',
@@ -985,7 +994,33 @@ def dashboard_outstanding_report(request):
         })
     # Sort by fit_date year descending (no fit date last), then outstanding descending
     results.sort(key=lambda x: (0 if x['year'] is None else 1, -(x['year'] or 0), -x['outstanding']))
-    return JsonResponse({'success': True, 'rows': results, 'count': len(results)})
+
+    overpaid_results = []
+    for row in overpaid_rows:
+        sv = row['sale_value'] or Decimal('0')
+        disc = row['discount'] or Decimal('0')
+        total_paid = row['total_paid'] or Decimal('0')
+        real_paid = total_paid + disc
+        effective_sv = sv - disc
+        overpay_amount = real_paid - effective_sv
+        fd = row['fit_date']
+        overpaid_results.append({
+            'pk': row['pk'],
+            'sale_number': row['anthill_activity_id'],
+            'customer': row['customer_name'] or '-',
+            'contract': row['contract_number'] or '',
+            'sale_value': float(sv),
+            'paid': float(real_paid),
+            'overpaid': float(overpay_amount),
+            'fit_date': fd.strftime('%d/%m/%Y') if fd else '',
+            'payments': payments_by_sale.get(row['pk'], []),
+        })
+    overpaid_results.sort(key=lambda x: -x['overpaid'])
+
+    return JsonResponse({
+        'success': True, 'rows': results, 'count': len(results),
+        'overpaid_rows': overpaid_results, 'overpaid_count': len(overpaid_results),
+    })
 
 
 @login_required
@@ -1011,7 +1046,7 @@ def dashboard_outstanding_xero_check(request):
 
     # Build the same queryset as dashboard_outstanding_report
     payments_subquery = Subquery(
-        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
         .values('sale')
         .annotate(total=Sum('amount'))
         .values('total'),
@@ -1023,7 +1058,7 @@ def dashboard_outstanding_xero_check(request):
         .exclude(status='cancelled')
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'total_paid', 'fit_date')
+                'sale_value', 'discount', 'total_paid', 'fit_date')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
@@ -1045,8 +1080,11 @@ def dashboard_outstanding_xero_check(request):
     sales_to_check = []
     for row in qs:
         sv = row['sale_value'] or Decimal('0')
+        disc = row['discount'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
-        if sv - total_paid < Decimal('10'):
+        real_paid = total_paid + disc
+        effective_sv = sv - disc
+        if effective_sv - real_paid < Decimal('10'):
             continue
         if not row['contract_number']:
             continue
@@ -1067,6 +1105,11 @@ def dashboard_outstanding_xero_check(request):
         }
 
         yield json.dumps({'type': 'start', 'total': len(sales_to_check)}) + '\n'
+
+        # Track base payment IDs across all sales to prevent double-counting.
+        # If a fallback-amount overpayment/prepayment has already been saved
+        # to one sale, skip it on subsequent sales.
+        seen_fallback_base_pids = set()
 
         for idx, row in enumerate(sales_to_check):
             sale_pk = row['pk']
@@ -1125,6 +1168,15 @@ def dashboard_outstanding_xero_check(request):
 
             sale_payments_created = 0
             sale_payments_updated = 0
+            sale_payments_skipped = 0
+
+            # Payment cap: never credit more than the sale is worth.
+            sale_value = (sale.sale_value or Decimal('0')) - (sale.discount or Decimal('0'))
+            existing_paid = (
+                AnthillPayment.objects.filter(sale=sale)
+                .aggregate(total=Sum('amount'))['total']
+            ) or Decimal('0')
+            running_total = existing_paid
 
             for inv in invoice_data:
                 if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
@@ -1134,6 +1186,39 @@ def dashboard_outstanding_xero_check(request):
                     if p.get('status', '').upper() == 'CANCELLED':
                         continue
                     pid = p.get('payment_id') or ''
+                    base_pid = p.get('base_payment_id') or ''
+                    is_fallback = p.get('is_fallback', False)
+                    p_amount = p['amount'] or Decimal('0')
+
+                    # Prevent double-counting: if a fallback-amount payment
+                    # (no per-invoice allocation from Xero) has already been
+                    # attributed to another sale in this batch, skip it.
+                    if is_fallback and base_pid and base_pid in seen_fallback_base_pids:
+                        continue
+                    # Also check DB for prior runs: same base on a different sale
+                    if is_fallback and base_pid:
+                        already_on_other = AnthillPayment.objects.filter(
+                            anthill_payment_id__startswith=base_pid,
+                        ).exclude(sale=sale).exists()
+                        if already_on_other:
+                            continue
+
+                    # Check if this payment already exists (update won't change total)
+                    already_exists = False
+                    if pid:
+                        already_exists = AnthillPayment.objects.filter(
+                            sale=sale, anthill_payment_id=pid).exists()
+                    else:
+                        already_exists = AnthillPayment.objects.filter(
+                            sale=sale, xero_invoice_id=inv['invoice_id'],
+                            date=p['date']).exists()
+
+                    # Payment cap: skip NEW payments that would exceed sale value
+                    if not already_exists and sale_value > 0:
+                        if running_total + p_amount > sale_value + Decimal('0.50'):
+                            sale_payments_skipped += 1
+                            continue
+
                     defaults = {
                         'source': 'xero',
                         'xero_invoice_id': inv['invoice_id'],
@@ -1143,7 +1228,7 @@ def dashboard_outstanding_xero_check(request):
                         'invoice_status': inv['status'],
                         'payment_type': p['reference'] or 'Payment',
                         'date': p['date'],
-                        'amount': p['amount'],
+                        'amount': p_amount,
                         'status': p['status'],
                         'location': '',
                         'user_name': '',
@@ -1166,12 +1251,26 @@ def dashboard_outstanding_xero_check(request):
                     if created:
                         sale_payments_created += 1
                         stats['payments_created'] += 1
+                        running_total += p_amount
                     else:
                         sale_payments_updated += 1
                         stats['payments_updated'] += 1
 
+                    # Track fallback base IDs to prevent cross-sale duplication
+                    if is_fallback and base_pid:
+                        seen_fallback_base_pids.add(base_pid)
+
                 # Invoice-level summary row for invoices with no individual payments
                 if not inv['payments']:
+                    inv_amount = inv['amount_paid'] or Decimal('0')
+                    already_exists = AnthillPayment.objects.filter(
+                        sale=sale, xero_invoice_id=inv['invoice_id'],
+                        date=None).exists()
+                    if not already_exists and sale_value > 0:
+                        if running_total + inv_amount > sale_value + Decimal('0.50'):
+                            sale_payments_skipped += 1
+                            continue
+
                     defaults = {
                         'source': 'xero',
                         'xero_invoice_id': inv['invoice_id'],
@@ -1181,7 +1280,7 @@ def dashboard_outstanding_xero_check(request):
                         'invoice_status': inv['status'],
                         'payment_type': 'Invoice Payment',
                         'date': None,
-                        'amount': inv['amount_paid'],
+                        'amount': inv_amount,
                         'status': inv['status'],
                         'location': '',
                         'user_name': '',
@@ -1195,18 +1294,29 @@ def dashboard_outstanding_xero_check(request):
                     if created:
                         sale_payments_created += 1
                         stats['payments_created'] += 1
+                        running_total += inv_amount
                     else:
                         sale_payments_updated += 1
                         stats['payments_updated'] += 1
 
             inv_nums = ', '.join(inv['invoice_number'] for inv in invoice_data)
+            # Clean up old-format payment IDs (plain UUID without _InvoiceID suffix)
+            # that were created before the allocation-based parsing fix.
+            _cleanup_old_format_payment_ids(sale)
+            # Deduplicate manual payments that match Xero payments
+            dups_removed = _deduplicate_manual_payments(sale)
+            msg = f'{inv_nums} — {sale_payments_created} new, {sale_payments_updated} updated'
+            if dups_removed:
+                msg += f', {dups_removed} dup removed'
+            if sale_payments_skipped:
+                msg += f', {sale_payments_skipped} skipped (exceeds sale value)'
             yield json.dumps({
                 'type': 'result',
                 'index': idx + 1,
                 'customer': customer_name,
                 'contract': contract_number,
                 'status': 'found',
-                'message': f'{inv_nums} — {sale_payments_created} new, {sale_payments_updated} updated',
+                'message': msg,
             }) + '\n'
 
             time.sleep(1.5)  # Xero rate limit
@@ -1217,6 +1327,66 @@ def dashboard_outstanding_xero_check(request):
     response['X-Accel-Buffering'] = 'no'
     response['Cache-Control'] = 'no-cache'
     return response
+
+
+def _deduplicate_manual_payments(sale):
+    """
+    Remove manual (anthill-sourced) payments that clearly duplicate a Xero payment.
+    A manual payment is considered a duplicate if:
+      - It has source='anthill' (or empty/non-xero)
+      - A Xero payment exists on the same sale with identical amount
+    Returns the number of manual payments removed.
+    """
+    xero_payments = list(
+        AnthillPayment.objects.filter(sale=sale, source='xero')
+        .values_list('amount', flat=True)
+    )
+    if not xero_payments:
+        return 0
+
+    # Build a list of xero amounts (allow each to match at most once)
+    xero_amounts = list(xero_payments)  # mutable copy
+    manual_payments = AnthillPayment.objects.filter(sale=sale).exclude(source='xero')
+    removed = 0
+    for mp in manual_payments:
+        mp_amount = mp.amount or Decimal('0')
+        # Look for an exact-amount match in the Xero payments
+        for i, xa in enumerate(xero_amounts):
+            if xa is not None and abs(mp_amount - xa) < Decimal('0.01'):
+                mp.delete()
+                xero_amounts.pop(i)  # consume this Xero match
+                removed += 1
+                break
+    return removed
+
+
+def _cleanup_old_format_payment_ids(sale):
+    """
+    Remove Xero payment records that use the old-format anthill_payment_id
+    (plain UUID) when a new-format record (UUID_InvoiceID) now exists
+    for the same base payment on this sale. This prevents stale records
+    from a previous run doubling up the totals.
+    """
+    import re
+    uuid_re = re.compile(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        re.IGNORECASE,
+    )
+    xero_payments = AnthillPayment.objects.filter(sale=sale, source='xero')
+    # Collect new-format base IDs (anything before the first _InvoiceID)
+    new_format_bases = set()
+    for ap in xero_payments:
+        pid = ap.anthill_payment_id or ''
+        if '_' in pid:
+            base = pid.split('_', 1)[0]
+            new_format_bases.add(base.lower())
+    if not new_format_bases:
+        return
+    # Delete old-format records whose plain UUID matches a new-format base
+    for ap in xero_payments:
+        pid = ap.anthill_payment_id or ''
+        if uuid_re.match(pid) and pid.lower() in new_format_bases:
+            ap.delete()
 
 
 @login_required
@@ -1257,6 +1427,15 @@ def dashboard_outstanding_xero_check_single(request):
 
     payments_created = 0
     payments_updated = 0
+    payments_skipped = 0
+
+    # Payment cap: never credit more than the sale is worth.
+    sale_value = (sale.sale_value or Decimal('0')) - (sale.discount or Decimal('0'))
+    existing_paid = (
+        AnthillPayment.objects.filter(sale=sale)
+        .aggregate(total=Sum('amount'))['total']
+    ) or Decimal('0')
+    running_total = existing_paid
 
     for inv in invoice_data:
         if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
@@ -1265,6 +1444,35 @@ def dashboard_outstanding_xero_check_single(request):
             if p.get('status', '').upper() == 'CANCELLED':
                 continue
             pid = p.get('payment_id') or ''
+            base_pid = p.get('base_payment_id') or ''
+            is_fallback = p.get('is_fallback', False)
+            p_amount = p['amount'] or Decimal('0')
+
+            # Prevent double-counting: if a fallback-amount payment
+            # already exists on a different sale, skip it.
+            if is_fallback and base_pid:
+                already_on_other = AnthillPayment.objects.filter(
+                    anthill_payment_id__startswith=base_pid,
+                ).exclude(sale=sale).exists()
+                if already_on_other:
+                    continue
+
+            # Check if this payment already exists (update won't change total)
+            already_exists = False
+            if pid:
+                already_exists = AnthillPayment.objects.filter(
+                    sale=sale, anthill_payment_id=pid).exists()
+            else:
+                already_exists = AnthillPayment.objects.filter(
+                    sale=sale, xero_invoice_id=inv['invoice_id'],
+                    date=p['date']).exists()
+
+            # Payment cap: skip NEW payments that would exceed sale value
+            if not already_exists and sale_value > 0:
+                if running_total + p_amount > sale_value + Decimal('0.50'):
+                    payments_skipped += 1
+                    continue
+
             defaults = {
                 'source': 'xero',
                 'xero_invoice_id': inv['invoice_id'],
@@ -1274,7 +1482,7 @@ def dashboard_outstanding_xero_check_single(request):
                 'invoice_status': inv['status'],
                 'payment_type': p['reference'] or 'Payment',
                 'date': p['date'],
-                'amount': p['amount'],
+                'amount': p_amount,
                 'status': p['status'],
                 'location': '',
                 'user_name': '',
@@ -1287,10 +1495,20 @@ def dashboard_outstanding_xero_check_single(request):
                     sale=sale, xero_invoice_id=inv['invoice_id'], date=p['date'], defaults=defaults)
             if created:
                 payments_created += 1
+                running_total += p_amount
             else:
                 payments_updated += 1
 
         if not inv['payments']:
+            inv_amount = inv['amount_paid'] or Decimal('0')
+            already_exists = AnthillPayment.objects.filter(
+                sale=sale, xero_invoice_id=inv['invoice_id'],
+                date=None).exists()
+            if not already_exists and sale_value > 0:
+                if running_total + inv_amount > sale_value + Decimal('0.50'):
+                    payments_skipped += 1
+                    continue
+
             defaults = {
                 'source': 'xero',
                 'xero_invoice_id': inv['invoice_id'],
@@ -1300,7 +1518,7 @@ def dashboard_outstanding_xero_check_single(request):
                 'invoice_status': inv['status'],
                 'payment_type': 'Invoice Payment',
                 'date': None,
-                'amount': inv['amount_paid'],
+                'amount': inv_amount,
                 'status': inv['status'],
                 'location': '',
                 'user_name': '',
@@ -1309,16 +1527,28 @@ def dashboard_outstanding_xero_check_single(request):
                 sale=sale, xero_invoice_id=inv['invoice_id'], date=None, defaults=defaults)
             if created:
                 payments_created += 1
+                running_total += inv_amount
             else:
                 payments_updated += 1
 
     inv_nums = ', '.join(inv['invoice_number'] for inv in invoice_data)
+    # Clean up old-format payment IDs
+    _cleanup_old_format_payment_ids(sale)
+    # Deduplicate: remove manual payments that match Xero payments
+    duplicates_removed = _deduplicate_manual_payments(sale)
+    msg = f'{inv_nums} — {payments_created} new, {payments_updated} updated'
+    if duplicates_removed:
+        msg += f', {duplicates_removed} duplicate manual payment{"s" if duplicates_removed != 1 else ""} removed'
+    if payments_skipped:
+        msg += f', {payments_skipped} skipped (exceeds sale value £{sale_value})'
     return JsonResponse({
         'success': True,
         'found': True,
-        'message': f'{inv_nums} — {payments_created} new, {payments_updated} updated',
+        'message': msg,
         'payments_created': payments_created,
         'payments_updated': payments_updated,
+        'duplicates_removed': duplicates_removed,
+        'payments_skipped': payments_skipped,
     })
 
 
@@ -1333,7 +1563,7 @@ def dashboard_outstanding_pdf(request):
     location_label = raw_location.title() if raw_location else 'All Locations'
 
     payments_subquery = Subquery(
-        AnthillPayment.objects.filter(sale=OuterRef('pk'))
+        AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
         .values('sale')
         .annotate(total=Sum('amount'))
         .values('total'),
@@ -1345,7 +1575,7 @@ def dashboard_outstanding_pdf(request):
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .order_by('-activity_date')
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'activity_date', 'total_paid')
+                'sale_value', 'discount', 'activity_date', 'total_paid')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
@@ -1353,8 +1583,11 @@ def dashboard_outstanding_pdf(request):
     rows = []
     for row in qs:
         sv = row['sale_value'] or Decimal('0')
+        disc = row['discount'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
-        real_outstanding = sv - total_paid
+        real_paid = total_paid + disc
+        effective_sv = sv - disc
+        real_outstanding = effective_sv - real_paid
         if real_outstanding < Decimal('10'):
             continue
         dt = row['activity_date']
@@ -1364,7 +1597,7 @@ def dashboard_outstanding_pdf(request):
             'customer': row['customer_name'] or '-',
             'contract': row['contract_number'] or '',
             'sale_value': float(sv),
-            'paid': float(total_paid),
+            'paid': float(real_paid),
             'outstanding': float(real_outstanding),
             'year': dt.year if dt else None,
             'date': dt.strftime('%d/%m/%Y') if dt else '',

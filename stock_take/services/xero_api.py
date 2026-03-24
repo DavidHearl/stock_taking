@@ -469,6 +469,30 @@ def get_invoice_with_payments(invoice_id):
     return None
 
 
+def get_overpayment_detail(overpayment_id):
+    """Fetch a single overpayment by ID to get full Allocations detail."""
+    result = _api_get(f"Overpayments/{overpayment_id}")
+    if result and "Overpayments" in result and result["Overpayments"]:
+        return result["Overpayments"][0]
+    return None
+
+
+def get_prepayment_detail(prepayment_id):
+    """Fetch a single prepayment by ID to get full Allocations detail."""
+    result = _api_get(f"Prepayments/{prepayment_id}")
+    if result and "Prepayments" in result and result["Prepayments"]:
+        return result["Prepayments"][0]
+    return None
+
+
+def get_creditnote_detail(creditnote_id):
+    """Fetch a single credit note by ID to get full Allocations detail."""
+    result = _api_get(f"CreditNotes/{creditnote_id}")
+    if result and "CreditNotes" in result and result["CreditNotes"]:
+        return result["CreditNotes"][0]
+    return None
+
+
 def get_sale_payments_from_xero(contract_number, contact_name=None):
     """
     High-level helper: find all Xero invoices for an Anthill sale and return
@@ -526,33 +550,23 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
         return None
 
     # ── Step 1: find invoices by contract-number reference ──
-    invoices_by_ref = get_invoices_by_reference(contract_number)
+    # Only matches invoices whose Reference field contains the contract number.
+    # This ensures we only get invoices for THIS specific job, not other jobs
+    # the same customer may have.
+    all_invoices = get_invoices_by_reference(contract_number)
 
-    # ── Step 2: also find ALL invoices for the same Xero contact ──
-    # This catches invoices with a different reference (e.g. PO numbers)
-    # that belong to the same customer.
-    seen_ids = {inv.get("InvoiceID") for inv in invoices_by_ref}
+    # Extract contact_id for bank transaction lookup later
     contact_id = None
-    for inv in invoices_by_ref:
+    for inv in all_invoices:
         cid = (inv.get("Contact") or {}).get("ContactID")
         if cid:
             contact_id = cid
             break
 
-    # If we didn't find a contact from invoices, try searching by name
     if not contact_id and contact_name:
         contact_id = find_contact_by_name(contact_name)
 
-    all_invoices = list(invoices_by_ref)
-    if contact_id:
-        contact_invoices = get_invoices_for_contact(contact_id)
-        for inv in contact_invoices:
-            iid = inv.get("InvoiceID")
-            if iid and iid not in seen_ids:
-                seen_ids.add(iid)
-                all_invoices.append(inv)
-
-    if not all_invoices:
+    if not all_invoices and not contact_id:
         return []
 
     results = []
@@ -579,8 +593,11 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
         # Parse direct payments
         parsed_payments = []
         for p in full_inv.get("Payments", []):
+            pid = p.get("PaymentID", "")
             parsed_payments.append({
-                'payment_id': p.get("PaymentID", ""),
+                'payment_id': pid,
+                'base_payment_id': pid,
+                'is_fallback': False,
                 'date': _parse_xero_date(p.get("Date", "")),
                 'amount': Decimal(str(p.get("Amount", 0) or 0)),
                 'reference': p.get("Reference", "") or "Payment",
@@ -589,35 +606,115 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
 
         # Parse overpayment allocations (e.g. "Receive money" applied to invoice)
         for op in full_inv.get("Overpayments", []):
+            op_id = op.get("OverpaymentID", "")
+            # Determine the amount allocated to THIS specific invoice.
+            # The Allocations sub-array shows per-invoice amounts.
+            allocated_amount = Decimal('0')
+            alloc_date = None
+            is_fallback = False
+            allocations = op.get("Allocations", [])
+            # If the nested response lacks Allocations, fetch the full overpayment
+            if not allocations and op_id:
+                full_op = get_overpayment_detail(op_id)
+                if full_op:
+                    allocations = full_op.get("Allocations", [])
+            for alloc in allocations:
+                alloc_inv = (alloc.get("Invoice") or {}).get("InvoiceID", "")
+                if alloc_inv == invoice_id:
+                    allocated_amount = Decimal(str(alloc.get("Amount", 0) or 0))
+                    alloc_date = _parse_xero_date(alloc.get("Date", ""))
+                    break
+            if allocated_amount <= 0 and allocations:
+                # No matching allocation found but allocations exist — skip
+                # (this overpayment wasn't allocated to this invoice)
+                continue
+            if allocated_amount <= 0:
+                # No Allocations array — fallback to AppliedAmount or Total
+                allocated_amount = Decimal(str(op.get("AppliedAmount", 0) or op.get("Total", 0) or 0))
+                is_fallback = True
+            if allocated_amount <= 0:
+                continue
+            # Make payment_id unique per invoice allocation to avoid collisions
+            unique_pid = f"{op_id}_{invoice_id}" if op_id else ""
             parsed_payments.append({
-                'payment_id': op.get("OverpaymentID", ""),
-                'date': _parse_xero_date(op.get("Date", "")),
-                'amount': Decimal(str(op.get("AppliedAmount", 0) or op.get("Total", 0) or 0)),
+                'payment_id': unique_pid,
+                'base_payment_id': op_id,
+                'is_fallback': is_fallback,
+                'date': alloc_date or _parse_xero_date(op.get("Date", "")),
+                'amount': allocated_amount,
                 'reference': "Overpayment",
                 'status': "Confirmed",
             })
 
         # Parse prepayment allocations
         for pp in full_inv.get("Prepayments", []):
+            pp_id = pp.get("PrepaymentID", "")
+            allocated_amount = Decimal('0')
+            alloc_date = None
+            is_fallback = False
+            allocations = pp.get("Allocations", [])
+            if not allocations and pp_id:
+                full_pp = get_prepayment_detail(pp_id)
+                if full_pp:
+                    allocations = full_pp.get("Allocations", [])
+            for alloc in allocations:
+                alloc_inv = (alloc.get("Invoice") or {}).get("InvoiceID", "")
+                if alloc_inv == invoice_id:
+                    allocated_amount = Decimal(str(alloc.get("Amount", 0) or 0))
+                    alloc_date = _parse_xero_date(alloc.get("Date", ""))
+                    break
+            if allocated_amount <= 0 and allocations:
+                continue
+            if allocated_amount <= 0:
+                allocated_amount = Decimal(str(pp.get("AppliedAmount", 0) or pp.get("Total", 0) or 0))
+                is_fallback = True
+            if allocated_amount <= 0:
+                continue
+            unique_pid = f"{pp_id}_{invoice_id}" if pp_id else ""
             parsed_payments.append({
-                'payment_id': pp.get("PrepaymentID", ""),
-                'date': _parse_xero_date(pp.get("Date", "")),
-                'amount': Decimal(str(pp.get("AppliedAmount", 0) or pp.get("Total", 0) or 0)),
+                'payment_id': unique_pid,
+                'base_payment_id': pp_id,
+                'is_fallback': is_fallback,
+                'date': alloc_date or _parse_xero_date(pp.get("Date", "")),
+                'amount': allocated_amount,
                 'reference': "Prepayment",
                 'status': "Confirmed",
             })
 
         # Parse credit note allocations
         for cn in full_inv.get("CreditNotes", []):
-            applied = Decimal(str(cn.get("AppliedAmount", 0) or cn.get("Total", 0) or 0))
-            if applied > 0:
-                parsed_payments.append({
-                    'payment_id': cn.get("CreditNoteID", ""),
-                    'date': _parse_xero_date(cn.get("Date", "")),
-                    'amount': applied,
-                    'reference': "Credit Note",
-                    'status': "Confirmed",
-                })
+            cn_id = cn.get("CreditNoteID", "")
+            allocated_amount = Decimal('0')
+            alloc_date = None
+            is_fallback = False
+            allocations = cn.get("Allocations", [])
+            if not allocations and cn_id:
+                full_cn = get_creditnote_detail(cn_id)
+                if full_cn:
+                    allocations = full_cn.get("Allocations", [])
+            for alloc in allocations:
+                alloc_inv = (alloc.get("Invoice") or {}).get("InvoiceID", "")
+                if alloc_inv == invoice_id:
+                    allocated_amount = Decimal(str(alloc.get("Amount", 0) or 0))
+                    alloc_date = _parse_xero_date(alloc.get("Date", ""))
+                    break
+            if allocated_amount <= 0 and allocations:
+                continue
+            if allocated_amount <= 0:
+                allocated_amount = Decimal(str(cn.get("AppliedAmount", 0) or cn.get("Total", 0) or 0))
+                is_fallback = True
+            if allocated_amount <= 0:
+                continue
+            unique_pid = f"{cn_id}_{invoice_id}" if cn_id else ""
+            parsed_payments.append({
+                'payment_id': unique_pid,
+                'base_payment_id': cn_id,
+                'is_fallback': is_fallback,
+                'date': alloc_date or _parse_xero_date(cn.get("Date", "")),
+                'amount': allocated_amount,
+                'reference': "Credit Note",
+                'status': "Confirmed",
+            })
 
         results.append({
             'invoice_id': invoice_id,
@@ -631,9 +728,10 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
             'payments': parsed_payments,
         })
 
-    # ── Step 4: fetch "Receive money" bank transactions for the contact ──
-    # These are direct bank receipts that don't appear as invoices but
-    # represent real money received from the customer.
+    # ── Step 3: fetch "Receive money" bank transactions matching this contract ──
+    # These are direct bank receipts that don't appear as invoices.
+    # Only include transactions whose reference contains the contract number
+    # to avoid cross-contamination between different jobs for the same customer.
     if contact_id:
         # Collect all payment IDs we already have to avoid duplicates
         existing_payment_ids = set()
@@ -642,8 +740,13 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
                 if p['payment_id']:
                     existing_payment_ids.add(p['payment_id'])
 
+        contract_lower = contract_number.lower()
         bank_txns = get_bank_transactions_for_contact(contact_id)
         for txn in bank_txns:
+            txn_ref = txn.get("Reference", "") or ""
+            # Only include transactions whose reference matches this contract
+            if contract_lower not in txn_ref.lower():
+                continue
             txn_id = txn.get("BankTransactionID", "")
             if not txn_id or txn_id in existing_payment_ids:
                 continue
@@ -653,10 +756,9 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
             txn_total = Decimal(str(txn.get("Total", 0) or 0))
             if txn_total <= 0:
                 continue
-            txn_ref = txn.get("Reference", "") or ""
             results.append({
                 'invoice_id': txn_id,
-                'invoice_number': f'BankTxn',
+                'invoice_number': 'BankTxn',
                 'reference': txn_ref,
                 'status': txn_status or 'PAID',
                 'total': txn_total,
@@ -665,6 +767,7 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
                 'contact_name': (txn.get("Contact") or {}).get("Name", ""),
                 'payments': [{
                     'payment_id': txn_id,
+                    'base_payment_id': txn_id,
                     'date': _parse_xero_date(txn.get("Date", "")),
                     'amount': txn_total,
                     'reference': 'Receive Money',

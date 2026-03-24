@@ -394,6 +394,21 @@ SCRIPT_GROUPS = [
                 ],
             },
             {
+                'log_name': None,
+                'label': 'Link Sales ↔ Orders & Sync Fit Dates',
+                'bullets': [
+                    'Links AnthillSale records to their matching Order (by sale_number = anthill_activity_id).',
+                    'Syncs fit_date bidirectionally: Order → Sale and Sale → Order.',
+                    'Safe to re-run at any time — only updates where links or dates are missing.',
+                ],
+                'file': 'stock_take/management/commands/link_sales_orders.py',
+                'schedule': 'Manual / after syncing sales or orders',
+                'commands': [
+                    {'cmd': 'python manage.py link_sales_orders --dry-run', 'note': 'Preview changes'},
+                    {'cmd': 'python manage.py link_sales_orders', 'note': 'Link sales to orders and sync fit dates'},
+                ],
+            },
+            {
                 'log_name': 'sync_anthill_payments',
                 'label': 'Payment History Sync  ⚠️ API limitation',
                 'bullets': [
@@ -538,6 +553,23 @@ SCRIPT_GROUPS = [
                 'commands': [
                     {'cmd': 'python manage.py cleanup_duplicate_schedules', 'note': 'Remove duplicates'},
                     {'cmd': 'python manage.py cleanup_duplicate_schedules --dry-run', 'note': 'Preview without deleting'},
+                ],
+            },
+            {
+                'log_name': 'cleanup_xero_payment_duplicates',
+                'label': 'Clean Up Xero Payment Duplicates',
+                'bullets': [
+                    'Removes duplicate Xero payment records caused by overpayments being recorded with the full amount on every sale for the same customer.',
+                    'Pass 1: Removes old-format plain-UUID records where new UUID_InvoiceID records exist.',
+                    'Pass 2: Detects cross-sale duplication where the same payment appears on multiple sales.',
+                    'Pass 3: Removes payments that push a sale\'s total paid above its sale value.',
+                    'Always preview with --dry-run first.',
+                ],
+                'file': 'stock_take/management/commands/cleanup_xero_payment_duplicates.py',
+                'schedule': 'Manual / as needed',
+                'commands': [
+                    {'cmd': 'python manage.py cleanup_xero_payment_duplicates --dry-run', 'note': 'Preview without deleting'},
+                    {'cmd': 'python manage.py cleanup_xero_payment_duplicates', 'note': 'Remove duplicates'},
                 ],
             },
             {

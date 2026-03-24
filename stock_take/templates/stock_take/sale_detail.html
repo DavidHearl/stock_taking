@@ -15,120 +15,6 @@
 {% block extra_css %}
 <link href="{% static 'css/order_details.css' %}" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
-<style>
-.payment-source-label {
-    padding: 6px 16px 4px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-secondary);
-    border-top: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-.payment-source-label:first-of-type { border-top: none; }
-.manual-input {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    padding: 5px 8px;
-    font-size: 0.85rem;
-    box-sizing: border-box;
-    width: 100%;
-}
-.manual-input:focus { outline: none; border-color: var(--accent-blue, #4a9eff); }
-
-.manual-entry-table {
-    border-collapse: collapse;
-    width: 100%;
-    table-layout: fixed;
-}
-.manual-entry-table th,
-.manual-entry-table td {
-    border: 1px solid var(--border-color);
-    padding: 6px 8px;
-    vertical-align: middle;
-}
-.manual-entry-table th {
-    background: var(--bg-tertiary, var(--bg-secondary));
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-secondary);
-}
-
-a.field-link {
-    color: var(--accent-blue, #4a9eff);
-    text-decoration: none;
-    font-weight: 500;
-}
-a.field-link:hover { text-decoration: underline; }
-
-/* Manual payment modal */
-#addManualPaymentModal,
-#scrapeAnthillModal {
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    padding: 0;
-    max-width: 700px;
-    width: 96vw;
-    max-height: 88vh;
-    box-shadow: var(--shadow-lg);
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-}
-#addManualPaymentModal {
-    max-width: 1100px;
-}
-#addManualPaymentModal[open],
-#scrapeAnthillModal[open] {
-    display: flex;
-    flex-direction: column;
-}
-#addManualPaymentModal::backdrop,
-#scrapeAnthillModal::backdrop {
-    background: rgba(0,0,0,0.55);
-}
-.manual-modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border-color);
-    font-size: 0.9rem;
-    font-weight: 600;
-    flex-shrink: 0;
-}
-.manual-modal-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.manual-modal-body {
-    overflow-y: auto;
-    flex: 1;
-    padding: 20px;
-}
-.manual-modal-close {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--text-secondary);
-    font-size: 1rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    line-height: 1;
-}
-.manual-modal-close:hover { color: var(--text-primary); }
-</style>
 {% endblock %}
 
 {% block content %}
@@ -138,112 +24,147 @@ a.field-link:hover { text-decoration: underline; }
         <!-- ===== MAIN COLUMN ===== -->
         <div class="main-column">
 
-            <!-- Sale Information Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h3>Sale Information</h3>
-                    <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
-                        {{ sale.status|default:"Unknown" }}
-                    </span>
-                </div>
-                <div class="card-body padded">
-                    <div class="form-grid-3col">
+            <!-- Sale Information Cards -->
+            <div class="order-info-grid">
 
-                        <!-- Col 1: Sale Details -->
-                        <div>
-                            <div class="info-section-header">
-                                <h4 class="info-section-title sale">Sale Details</h4>
+                <!-- Card 1: Sale Details -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-sale">
+                        <h3><i class="bi bi-receipt"></i> Sale Details</h3>
+                        <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
+                            {{ sale.status|default:"Unknown" }}
+                        </span>
+                    </div>
+                    <div class="card-body padded">
+                        <div class="info-display">
+                            <div>
+                                <div class="field-label">Contract Number</div>
+                                <div class="field-value field-value-large">{{ sale.contract_number|default:"-" }}</div>
                             </div>
-                            <div class="info-display">
-                                <div>
-                                    <div class="field-label">Contract Number</div>
-                                    <div class="field-value field-value-large">{{ sale.contract_number|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Activity ID</div>
-                                    <div class="field-value">{{ sale.anthill_activity_id }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Date</div>
-                                    <div class="field-value">{{ sale.activity_date|date:"d M Y H:i"|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Location</div>
-                                    <div class="field-value">{{ sale.location|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Assigned To</div>
-                                    <div class="field-value">{{ sale.assigned_to_name|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Source</div>
-                                    <div class="field-value">{{ sale.source|default:"-" }}</div>
-                                </div>
+                            <div>
+                                <div class="field-label">Activity ID</div>
+                                <div class="field-value">{{ sale.anthill_activity_id }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Date</div>
+                                <div class="field-value">{{ sale.activity_date|date:"d M Y H:i"|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Location</div>
+                                <div class="field-value">{{ sale.location|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Assigned To</div>
+                                <div class="field-value">{{ sale.assigned_to_name|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Source</div>
+                                <div class="field-value">{{ sale.source|default:"-" }}</div>
                             </div>
                         </div>
-
-                        <!-- Col 2: Financial -->
-                        <div>
-                            <div class="info-section-header">
-                                <h4 class="info-section-title customer">Financial</h4>
-                            </div>
-                            <div class="info-display">
-                                <div>
-                                    <div class="field-label">Sale Value (Inc VAT)</div>
-                                    <div class="field-value field-value-large">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Profit</div>
-                                    <div class="field-value">{% if sale.profit %}£{{ sale.profit|floatformat:2 }}{% else %}-{% endif %}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Deposit Required</div>
-                                    <div class="field-value">{% if sale.deposit_required %}£{{ sale.deposit_required|floatformat:2 }}{% else %}-{% endif %}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Balance Payable</div>
-                                    <div class="field-value">{% if sale.balance_payable %}£{{ sale.balance_payable|floatformat:2 }}{% else %}-{% endif %}</div>
-                                </div>
-                                {% if payments_total %}
-                                <div>
-                                    <div class="field-label">Total Payments Received</div>
-                                    <div class="field-value field-value-large" style="color: #10b981;">£{{ payments_total|floatformat:2 }}</div>
-                                </div>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                        <!-- Col 3: Product Info -->
-                        <div>
-                            <div class="info-section-header">
-                                <h4 class="info-section-title job">Product Info</h4>
-                            </div>
-                            <div class="info-display">
-                                <div>
-                                    <div class="field-label">Range</div>
-                                    <div class="field-value">{{ sale.range_name|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Door Type</div>
-                                    <div class="field-value">{{ sale.door_type|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Products Included</div>
-                                    <div class="field-value">{{ sale.products_included|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Fit From Date</div>
-                                    <div class="field-value">{{ sale.fit_from_date|default:"-" }}</div>
-                                </div>
-                                <div>
-                                    <div class="field-label">Goods Due In</div>
-                                    <div class="field-value">{{ sale.goods_due_in|default:"-" }}</div>
-                                </div>
-                            </div>
-                        </div>
-
                     </div>
                 </div>
+
+                <!-- Card 2: Financial -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-customer">
+                        <h3><i class="bi bi-currency-pound"></i> Financial</h3>
+                    </div>
+                    <div class="financial-card-body">
+                        <div class="financial-cards-vertical">
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Sale Value (Inc VAT)</span>
+                                    <div class="financial-display">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                </div>
+                            </div>
+                            {% if discount %}
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Sliderobes Credit</span>
+                                    <div class="financial-display" style="color: var(--warning-color);">-£{{ discount|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Sale Value (Adjusted)</span>
+                                    <div class="financial-display">£{{ effective_value|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% if adjusted_profit %}
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Profit{% if discount %} (adjusted){% endif %}</span>
+                                    <div class="financial-display">£{{ adjusted_profit|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Payment Progress</span>
+                                    {% if effective_value %}
+                                    <div class="financial-progress-wrapper" style="margin-top: 4px;">
+                                        <div class="financial-progress">
+                                            <div class="financial-progress-bar" style="width: {{ payment_pct }}%;"></div>
+                                        </div>
+                                        <span class="financial-percentage">{{ payment_pct }}%</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                                        <span class="financial-display" style="font-size: 14px; color: var(--success-color);">£{{ payments_total|floatformat:2 }} of £{{ effective_value|floatformat:2 }} paid</span>
+                                        <span class="financial-display" style="font-size: 14px; color: {% if outstanding > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};">£{{ outstanding|floatformat:2 }} remaining</span>
+                                    </div>
+                                    {% if overpayment %}
+                                    <div class="financial-progress-wrapper" style="margin-top: 6px;">
+                                        <div class="financial-progress">
+                                            <div class="financial-progress-bar" style="width: {{ overpayment_pct }}%; background: linear-gradient(90deg, var(--warning-color) 0%, #e67e22 100%);"></div>
+                                        </div>
+                                        <span class="financial-percentage">+{{ overpayment_pct }}%</span>
+                                    </div>
+                                    <div style="margin-top: 2px;">
+                                        <span class="financial-display" style="font-size: 14px; color: var(--warning-color);">£{{ overpayment|floatformat:2 }} overpaid</span>
+                                    </div>
+                                    {% endif %}
+                                    {% else %}
+                                    <div class="financial-display" style="color: var(--text-secondary);">-</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Product Info -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-job">
+                        <h3><i class="bi bi-box-seam"></i> Product Info</h3>
+                    </div>
+                    <div class="card-body padded">
+                        <div class="info-display">
+                            <div>
+                                <div class="field-label">Range</div>
+                                <div class="field-value">{{ sale.range_name|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Door Type</div>
+                                <div class="field-value">{{ sale.door_type|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Products Included</div>
+                                <div class="field-value">{{ sale.products_included|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Fit From Date</div>
+                                <div class="field-value">{{ sale.fit_from_date|default:"-" }}</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Goods Due In</div>
+                                <div class="field-value">{{ sale.goods_due_in|default:"-" }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <!-- Payment History Card -->
@@ -272,11 +193,12 @@ a.field-link:hover { text-decoration: underline; }
                             <th>Amount Paid</th>
                             <th>Outstanding</th>
                             <th>Status</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for p in xero_payments %}
-                        <tr>
+                        <tr id="xero-row-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}>
                             <td>{{ p.xero_invoice_number|default:"-" }}</td>
                             <td>{{ p.payment_type|default:"-" }}</td>
                             <td>{{ p.date|date:"d/m/Y"|default:"-" }}</td>
@@ -293,6 +215,11 @@ a.field-link:hover { text-decoration: underline; }
                                 <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
+                            <td>
+                                <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
+                                    <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
+                                </button>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -302,7 +229,7 @@ a.field-link:hover { text-decoration: underline; }
                             <td style="font-weight:700; padding:10px 8px;">
                                 {% if xero_payments_total %}£{{ xero_payments_total|floatformat:2 }}{% else %}-{% endif %}
                             </td>
-                            <td colspan="2"></td>
+                            <td colspan="3"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -324,7 +251,7 @@ a.field-link:hover { text-decoration: underline; }
                     </thead>
                     <tbody>
                         {% for p in manual_payments %}
-                        <tr id="manual-row-{{ p.pk }}">
+                        <tr id="manual-row-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}>
                             <td>{{ p.payment_type|default:"-" }}</td>
                             <td>{{ p.date|date:"d/m/Y H:i"|default:"-" }}</td>
                             <td>{{ p.location|default:"-" }}</td>
@@ -335,7 +262,10 @@ a.field-link:hover { text-decoration: underline; }
                                 <span class="customer-active-badge {% if p.status|lower == 'confirmed' %}active{% else %}inactive{% endif %}">{{ p.status }}</span>
                                 {% else %}<span class="text-muted">-</span>{% endif %}
                             </td>
-                            <td>
+                            <td style="white-space:nowrap;">
+                                <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
+                                    <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
+                                </button>
                                 <button class="btn btn-sm btn-outline-danger" onclick="deleteManualPayment({{ p.pk }})" title="Delete">
                                     <i class="bi bi-trash"></i>
                                 </button>
@@ -747,6 +677,37 @@ a.field-link:hover { text-decoration: underline; }
                     if (data.success) {
                         const row = document.getElementById('manual-row-' + paymentPk);
                         if (row) row.remove();
+                    }
+                });
+            }
+
+            function toggleIgnorePayment(paymentPk, btn) {
+                fetch(DELETE_MANUAL_BASE + paymentPk + '/toggle-ignored/', {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN},
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const row = btn.closest('tr');
+                        const icon = btn.querySelector('i');
+                        if (data.ignored) {
+                            row.classList.add('payment-ignored');
+                            btn.classList.remove('btn-outline-secondary');
+                            btn.classList.add('btn-outline-success');
+                            btn.title = 'Include in calculations';
+                            icon.classList.remove('bi-eye-slash');
+                            icon.classList.add('bi-eye');
+                        } else {
+                            row.classList.remove('payment-ignored');
+                            btn.classList.remove('btn-outline-success');
+                            btn.classList.add('btn-outline-secondary');
+                            btn.title = 'Exclude from calculations';
+                            icon.classList.remove('bi-eye');
+                            icon.classList.add('bi-eye-slash');
+                        }
+                        // Reload to update financial card
+                        location.reload();
                     }
                 });
             }

@@ -179,6 +179,7 @@ class AnthillSale(models.Model):
     profit = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     deposit_required = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     balance_payable = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    discount = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text='Sliderobes Credit / discount that reduces the effective sale value')
 
     # Contract & reference
     contract_number = models.CharField(max_length=100, blank=True, help_text='Anthill contract number e.g. "NTG-KW-420968"')
@@ -253,7 +254,7 @@ class AnthillPayment(models.Model):
 
     # Individual payment fields
     anthill_payment_id = models.CharField(
-        max_length=50, blank=True, db_index=True,
+        max_length=100, blank=True, db_index=True,
         help_text='Payment ID from the source system (Xero PaymentID, etc.)',
     )
     payment_type = models.CharField(
@@ -270,6 +271,10 @@ class AnthillPayment(models.Model):
     status = models.CharField(
         max_length=50, blank=True,
         help_text='"Confirmed", "Authorised", etc.',
+    )
+    ignored = models.BooleanField(
+        default=False,
+        help_text='If True, this payment is excluded from financial calculations.',
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
