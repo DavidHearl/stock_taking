@@ -215,9 +215,12 @@
                                 <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td style="white-space:nowrap;">
                                 <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
                                     <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteXeroPayment({{ p.pk }})" title="Delete this payment record">
+                                    <i class="bi bi-trash"></i>
                                 </button>
                             </td>
                         </tr>
@@ -676,6 +679,21 @@
                 .then(data => {
                     if (data.success) {
                         const row = document.getElementById('manual-row-' + paymentPk);
+                        if (row) row.remove();
+                    }
+                });
+            }
+
+            function deleteXeroPayment(paymentPk) {
+                if (!confirm('Delete this Xero payment record? This removes it from the local database only (Xero is not affected). Use this when a payment was incorrectly matched to this sale.')) return;
+                fetch(DELETE_MANUAL_BASE + paymentPk + '/delete-xero/', {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN},
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const row = document.getElementById('xero-row-' + paymentPk);
                         if (row) row.remove();
                     }
                 });

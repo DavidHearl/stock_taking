@@ -796,7 +796,7 @@ def sale_detail(request, pk):
 def _match_credits_to_payments(payments_list):
     """Match credit payments to positive payments by amount.
 
-    ALL credits count as discount (reduce the sale obligation).
+    ALL negative amounts count as discount (reduce the sale obligation).
     Credits that mirror a positive payment (same absolute amount) also
     remove that positive from total_paid — those entries represent the
     credit being applied, not real cash received.
@@ -806,7 +806,7 @@ def _match_credits_to_payments(payments_list):
     from decimal import Decimal
     credits = []
     positives = []
-    other_negatives = Decimal('0')  # non-credit negatives (adjustments, refunds)
+    other_negatives = Decimal('0')  # non-credit negatives (adjustments, write-offs)
     for p in payments_list:
         amt = getattr(p, 'amount', None) or Decimal('0')
         ptype = getattr(p, 'payment_type', '') or ''
@@ -817,8 +817,10 @@ def _match_credits_to_payments(payments_list):
         elif amt < 0:
             other_negatives += amt
 
-    # ALL credits are discount
-    discount = sum(credits, Decimal('0'))
+    # ALL credits are discount; other negatives (write-offs, final balance
+    # adjustments, etc.) also reduce the sale obligation rather than
+    # subtracting from total paid.
+    discount = sum(credits, Decimal('0')) + abs(other_negatives)
 
     # Match credits to positives — matched positives are removed from paid
     # (they represent the credit being applied, not real cash)
@@ -829,7 +831,7 @@ def _match_credits_to_payments(payments_list):
                 unmatched_positives.pop(i)
                 break
 
-    total_paid = sum(unmatched_positives, Decimal('0')) + other_negatives
+    total_paid = sum(unmatched_positives, Decimal('0'))
     return max(total_paid, Decimal('0')), discount
 
 
@@ -911,6 +913,20 @@ def delete_manual_payment(request, pk, payment_pk):
         return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
 
     payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk, source='manual')
+    sale = payment.sale
+    payment.delete()
+    _recalculate_sale_financials(sale)
+    return JsonResponse({'success': True})
+
+
+@login_required
+def delete_xero_payment(request, pk, payment_pk):
+    """Delete a Xero payment record (POST). Used when a payment was
+    incorrectly matched to this sale (e.g. reference substring collision)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk, source='xero')
     sale = payment.sale
     payment.delete()
     _recalculate_sale_financials(sale)

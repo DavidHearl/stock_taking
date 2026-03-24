@@ -4,6 +4,8 @@ Handles token exchange, refresh, API client creation, and read-only API helpers.
 """
 import os
 import logging
+import time as _time
+from collections import deque
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -11,6 +13,40 @@ import requests
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+class XeroDailyLimitExceeded(Exception):
+    """Raised when Xero's daily API call limit (5,000/day) is exhausted."""
+    pass
+
+
+# ─── Rate Limiter ────────────────────────────────────────────────────
+# Xero allows 60 API calls per minute per tenant.
+# We target 45/minute to leave headroom and avoid 429s.
+_RATE_LIMIT = 45
+_RATE_WINDOW = 60          # seconds
+_call_timestamps = deque()  # timestamps of recent API calls
+_api_call_count = 0         # total API calls this process
+
+
+def get_api_call_count():
+    """Return the total number of Xero API calls made this process."""
+    return _api_call_count
+
+
+def _rate_limit_wait():
+    """Sleep if necessary to stay within the Xero rate limit."""
+    now = _time.monotonic()
+    # Purge timestamps older than the window
+    while _call_timestamps and _call_timestamps[0] <= now - _RATE_WINDOW:
+        _call_timestamps.popleft()
+    if len(_call_timestamps) >= _RATE_LIMIT:
+        # Wait until the oldest call in the window expires
+        sleep_for = _call_timestamps[0] - (now - _RATE_WINDOW) + 0.5
+        if sleep_for > 0:
+            logger.info(f"Rate limiter: {len(_call_timestamps)} calls in last {_RATE_WINDOW}s, sleeping {sleep_for:.1f}s")
+            _time.sleep(sleep_for)
+    _call_timestamps.append(_time.monotonic())
 
 # ─── Xero OAuth endpoints ───────────────────────────────────────────
 XERO_AUTH_URL = "https://login.xero.com/identity/connect/authorize"
@@ -189,21 +225,37 @@ def _api_get(endpoint, params=None):
         "Accept": "application/json",
     }
 
+    global _api_call_count
     for attempt in range(3):
+        _rate_limit_wait()
         try:
+            _api_call_count += 1
             response = requests.get(url, headers=headers, params=params, timeout=30)
             if response.status_code == 429:
-                # Respect Retry-After header, default to 61 seconds
-                retry_after = int(response.headers.get('Retry-After', 61))
+                # Check if this is a daily limit (X-Rate-Limit-Problem header)
+                limit_problem = response.headers.get('X-Rate-Limit-Problem', '').lower()
+                raw_retry = int(response.headers.get('Retry-After', 61))
+
+                if limit_problem == 'daily' or raw_retry > 3600:
+                    raise XeroDailyLimitExceeded(
+                        f"Xero daily API limit reached ({_api_call_count} calls this session). "
+                        f"Resets in ~{raw_retry // 3600}h {(raw_retry % 3600) // 60}m. "
+                        f"Reduce API calls or try again later."
+                    )
+
+                # Per-minute limit: Xero sometimes returns milliseconds
+                retry_after = raw_retry / 1000 if raw_retry > 120 else raw_retry
+                retry_after = max(1, min(retry_after, 120))  # clamp 1-120s
                 logger.warning(
                     f"Xero rate limit hit ({endpoint}). "
-                    f"Waiting {retry_after}s before retry (attempt {attempt + 1}/3)"
+                    f"Retry-After={raw_retry}, waiting {retry_after:.0f}s (attempt {attempt + 1}/3)"
                 )
-                import time as _time
                 _time.sleep(retry_after)
                 continue
             response.raise_for_status()
             return response.json()
+        except XeroDailyLimitExceeded:
+            raise
         except requests.RequestException as e:
             logger.error(f"Xero API error ({endpoint}): {e}")
             return None
@@ -442,14 +494,19 @@ def get_invoices_by_reference(reference):
         "Statuses": "AUTHORISED,PAID",
     })
     if result and "Invoices" in result:
-        # Keep invoices where the contract number appears in the Reference field
-        # OR in the Contact Name (some Xero contacts are stored under the
-        # contract number rather than the customer's actual name).
+        # Keep invoices where the contract number appears as a complete token
+        # in the Reference or Contact Name.  A "complete token" means the
+        # match is followed by end-of-string, a space, or other non-alnum
+        # character.  This prevents "BFS-PO-4083" from matching
+        # "BFS-PO-408357" (the digits continue beyond the search term).
+        import re
         ref_lower = reference.lower()
+        # Escape for regex, then require a word boundary after the match
+        pattern = re.compile(re.escape(ref_lower) + r'(?![0-9])', re.IGNORECASE)
         return [
             inv for inv in result["Invoices"]
-            if ref_lower in (inv.get("Reference") or "").lower()
-            or ref_lower in (inv.get("Contact", {}).get("Name", "") or "").lower()
+            if pattern.search(inv.get("Reference") or "")
+            or pattern.search((inv.get("Contact", {}).get("Name", "") or ""))
         ]
     return []
 
@@ -493,7 +550,58 @@ def get_creditnote_detail(creditnote_id):
     return None
 
 
-def get_sale_payments_from_xero(contract_number, contact_name=None):
+# ─── Bulk invoice fetching (reduces API calls dramatically) ─────────
+
+def bulk_fetch_invoices(search_prefix="BFS", statuses="AUTHORISED,PAID"):
+    """
+    Fetch all invoices matching search_prefix via Xero's searchTerm,
+    paginating through all pages.
+
+    For 736 sales this replaces 736 individual searchTerm queries
+    with ~10-20 paginated calls (100 invoices per page).
+
+    Returns a list of invoice summary dicts (no Payments sub-array).
+    """
+    all_invoices = []
+    page = 1
+    while True:
+        result = _api_get("Invoices", params={
+            "searchTerm": search_prefix,
+            "Statuses": statuses,
+            "page": page,
+        })
+        if not result or "Invoices" not in result:
+            break
+        invoices = result["Invoices"]
+        if not invoices:
+            break
+        all_invoices.extend(invoices)
+        logger.info(f"Bulk fetch page {page}: {len(invoices)} invoices ({len(all_invoices)} total)")
+        if len(invoices) < 100:
+            break
+        page += 1
+    return all_invoices
+
+
+def build_reference_index(invoices):
+    """
+    Build a dict mapping contract number (upper-cased) -> list of invoice dicts.
+
+    Extracts BFS-XX-NNNNNN patterns from each invoice's Reference field.
+    This allows O(1) lookup instead of per-sale API calls.
+    """
+    import re
+    index = {}
+    pattern = re.compile(r'BFS-[A-Z]+-\d+', re.IGNORECASE)
+    for inv in invoices:
+        ref = inv.get("Reference", "") or ""
+        for match in pattern.finditer(ref):
+            key = match.group().upper()
+            index.setdefault(key, []).append(inv)
+    return index
+
+
+def get_sale_payments_from_xero(contract_number, contact_name=None, prefetched_invoices=None):
     """
     High-level helper: find all Xero invoices for an Anthill sale and return
     a structured summary of invoices and their individual payments.
@@ -504,6 +612,9 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
         contact_name:    Optional customer name for cross-validation.
                          If provided, invoices whose contact name does NOT
                          fuzzy-match this are excluded.
+        prefetched_invoices: Optional list of invoice summary dicts from a bulk
+                         fetch.  When provided, skips the per-sale API search
+                         and uses these directly (saving 1 API call per sale).
 
     Returns:
         List of dicts, one per matching invoice:
@@ -550,10 +661,12 @@ def get_sale_payments_from_xero(contract_number, contact_name=None):
         return None
 
     # ── Step 1: find invoices by contract-number reference ──
-    # Only matches invoices whose Reference field contains the contract number.
-    # This ensures we only get invoices for THIS specific job, not other jobs
-    # the same customer may have.
-    all_invoices = get_invoices_by_reference(contract_number)
+    if prefetched_invoices is not None:
+        # Use pre-fetched data from bulk_fetch_invoices — no API call needed
+        all_invoices = prefetched_invoices
+    else:
+        # Fallback: individual API search (expensive — 1 call per sale)
+        all_invoices = get_invoices_by_reference(contract_number)
 
     # Extract contact_id for bank transaction lookup later
     contact_id = None

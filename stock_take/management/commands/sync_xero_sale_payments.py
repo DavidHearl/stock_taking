@@ -136,6 +136,23 @@ class Command(BaseCommand):
                     invoice_amount_due__gt=0,
                 )
             )
+            has_stale_placeholder = Exists(
+                AnthillPayment.objects.filter(
+                    sale=OuterRef('pk'),
+                    source='xero',
+                    payment_type='Invoice Payment',
+                    amount=0,
+                )
+            )
+
+            # PASS 0: Sales with stale £0 "Invoice Payment" placeholder records.
+            # These indicate invoices found in Xero that were paid via
+            # overpayments/credits but the individual payment items were never
+            # imported.  Always resync these regardless of paid_in_full.
+            pass0_qs = base_qs.filter(has_stale_placeholder)
+            pass0_list = list(
+                pass0_qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
+            )
 
             # PASS 1: Sales that already have Xero payment records
             # (customers who have paid something — check for updates)
@@ -157,7 +174,8 @@ class Command(BaseCommand):
                 )
 
             pass1_list = list(
-                pass1_qs.values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
+                pass1_qs.exclude(pk__in=[r[0] for r in pass0_list])
+                .values_list('pk', 'anthill_activity_id', 'customer_name', 'contract_number')
             )
 
             # PASS 2: Sales with no Xero records yet (discover new invoices)
@@ -167,12 +185,14 @@ class Command(BaseCommand):
             )
 
             pass_labels = []
+            if pass0_list:
+                pass_labels.append(('Pass 0 - Stale placeholders (resync overpayments)', pass0_list))
             if pass1_list:
                 pass_labels.append(('Pass 1 - Existing Xero payments (update)', pass1_list))
             if pass2_list:
                 pass_labels.append(('Pass 2 - New sales (discover invoices)', pass2_list))
 
-            sales_list = pass1_list + pass2_list
+            sales_list = pass0_list + pass1_list + pass2_list
 
         total = len(sales_list)
 
@@ -190,6 +210,26 @@ class Command(BaseCommand):
             self.stdout.write(f'  {label}: {len(plist)} sales')
         self.stdout.write('')
 
+        # ── Pre-fetch all BFS invoices in bulk ──────────────────────────
+        # Instead of 1 API call per sale to search by reference, we fetch
+        # ALL BFS invoices upfront (~10-20 paginated calls) and look up
+        # contract numbers locally.  This saves ~700+ API calls per run.
+        reference_index = {}
+        if not sale_id:
+            self.stdout.write('Fetching invoice index from Xero (bulk)...')
+            try:
+                all_bfs_invoices = xero_api.bulk_fetch_invoices(search_prefix="BFS")
+                reference_index = xero_api.build_reference_index(all_bfs_invoices)
+                self.stdout.write(self.style.SUCCESS(
+                    f'  Indexed {len(all_bfs_invoices)} invoices '
+                    f'({len(reference_index)} unique contract refs) '
+                    f'[{xero_api.get_api_call_count()} API calls used]'
+                ))
+            except xero_api.XeroDailyLimitExceeded as exc:
+                self.stderr.write(self.style.ERROR(f'\n{exc}'))
+                return
+        self.stdout.write('')
+
         stats = {
             'sales_with_invoices': 0,
             'invoices_found': 0,
@@ -200,19 +240,33 @@ class Command(BaseCommand):
         }
         error_notes = []
         global_idx = 0
+        daily_limit_hit = False
 
         for pass_label, pass_list in pass_labels:
+            if daily_limit_hit:
+                break
             self.stdout.write(self.style.NOTICE(f'\n-- {pass_label} ({len(pass_list)} sales) --'))
             for idx, (sale_pk, activity_id, cust_name, contract_number) in enumerate(pass_list, start=1):
                 global_idx += 1
                 prefix = f'  [{global_idx}/{total}] {activity_id} - {contract_number}'
                 self.stdout.write(prefix, ending='\r')
 
+                # Use pre-fetched index if available (0 API calls for the search step)
+                prefetched = reference_index.get(contract_number.upper()) if reference_index else None
+
                 try:
                     invoice_data = xero_api.get_sale_payments_from_xero(
                         contract_number=contract_number,
                         contact_name=None if no_name_check else cust_name,
+                        prefetched_invoices=prefetched,
                     )
+                except xero_api.XeroDailyLimitExceeded as exc:
+                    self.stderr.write(self.style.ERROR(f'\n{exc}'))
+                    self.stderr.write(self.style.WARNING(
+                        f'Processed {global_idx - 1}/{total} sales before limit was reached.'
+                    ))
+                    daily_limit_hit = True
+                    break
                 except Exception as exc:
                     self.stderr.write(self.style.ERROR(
                         f'\n  ERROR {activity_id} ({contract_number}): {exc}'
@@ -269,6 +323,7 @@ class Command(BaseCommand):
                         if p.get('status', '').upper() == 'CANCELLED':
                             continue
                         pid = p.get('payment_id') or ''
+                        base_pid = p.get('base_payment_id') or ''
                         defaults = {
                             'source': 'xero',
                             'xero_invoice_id': inv['invoice_id'],
@@ -285,6 +340,17 @@ class Command(BaseCommand):
                         }
 
                         if pid:
+                            # For compound IDs (e.g. overpayment_id + invoice_id),
+                            # check if an old record exists with just the base ID
+                            # from a previous sync format.  Migrate it to the new key.
+                            if base_pid and pid != base_pid:
+                                old_rec = AnthillPayment.objects.filter(
+                                    sale=sale, anthill_payment_id=base_pid,
+                                ).first()
+                                if old_rec:
+                                    old_rec.anthill_payment_id = pid
+                                    old_rec.save(update_fields=['anthill_payment_id'])
+
                             obj, created = AnthillPayment.objects.update_or_create(
                                 sale=sale,
                                 anthill_payment_id=pid,
@@ -347,28 +413,27 @@ class Command(BaseCommand):
                             stats['stale_cleaned'] = stats.get('stale_cleaned', 0) + stale_deleted
 
                 # Recalculate paid_in_full for this sale after syncing payments
+                # Uses the same credit-matching logic as the UI to stay consistent
                 if not dry_run:
-                    xero_payments = sale.payments.filter(source='xero', ignored=False)
-                    total_paid = sum(p.amount for p in xero_payments)
-                    if sale.sale_value and total_paid >= sale.sale_value and not sale.paid_in_full:
-                        sale.paid_in_full = True
-                        sale.balance_payable = 0
-                        sale.save(update_fields=['paid_in_full', 'balance_payable'])
+                    from stock_take.customer_views import _recalculate_sale_financials
+                    _recalculate_sale_financials(sale)
 
-                time.sleep(1.5)  # stay within Xero rate limit (60 req/min; each sale = up to 2 calls)
+                time.sleep(0.3)  # brief pause between sales; rate limiter in xero_api handles throttling
 
         # Final summary
         self.stdout.write('')
+        api_calls = xero_api.get_api_call_count()
         self.stdout.write(self.style.SUCCESS(
             f'\nDone.\n'
-            f'  Sales processed       : {total}\n'
+            f'  Sales processed       : {global_idx}/{total}\n'
             f'  Sales with invoices   : {stats["sales_with_invoices"]}\n'
             f'  Sales without invoices: {stats["no_invoice"]}\n'
             f'  Invoices found        : {stats["invoices_found"]}\n'
             f'  Payments created      : {stats["payments_created"]}\n'
             f'  Payments updated      : {stats["payments_updated"]}\n'
             f'  Stale records cleaned : {stats.get("stale_cleaned", 0)}\n'
-            f'  Errors                : {stats["errors"]}'
+            f'  Errors                : {stats["errors"]}\n'
+            f'  Xero API calls used   : {api_calls}'
         ))
 
         if not dry_run:
