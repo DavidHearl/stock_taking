@@ -233,6 +233,9 @@ class ActivityLoggingMiddleware:
             # Only log mutating methods or server errors
             if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') or response.status_code >= 500:
                 error_message = ''
+                exception_type = ''
+                exception_value = ''
+                exception_location = ''
                 try:
                     content_type = response.get('Content-Type', '')
                     if 'application/json' in content_type:
@@ -244,6 +247,28 @@ class ActivityLoggingMiddleware:
                         from django.contrib.messages import get_messages
                         msgs = [str(m) for m in get_messages(request) if m.level >= 40]  # ERROR level
                         error_message = '; '.join(msgs)
+                    # For 500 errors in DEBUG, extract exception details from the HTML response
+                    if response.status_code >= 500 and 'text/html' in content_type:
+                        try:
+                            html = response.content.decode('utf-8', errors='replace')
+                            import re
+                            # Extract exception type
+                            m = re.search(r'Exception Type:\s*</td>\s*<td[^>]*>\s*([^<]+)', html)
+                            if m:
+                                exception_type = m.group(1).strip()
+                            # Extract exception value
+                            m = re.search(r'Exception Value:\s*</td>\s*<td[^>]*>\s*([^<]+)', html)
+                            if m:
+                                exception_value = m.group(1).strip()
+                            # Extract exception location
+                            m = re.search(r'Exception Location:\s*</td>\s*<td[^>]*>\s*([^<]+)', html)
+                            if m:
+                                exception_location = m.group(1).strip()
+                            # Use exception info as error_message if we didn't get one
+                            if not error_message and exception_type:
+                                error_message = f"{exception_type}: {exception_value}"
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -269,6 +294,9 @@ class ActivityLoggingMiddleware:
                             'method': request.method,
                             'status_code': response.status_code,
                             'error_message': error_message,
+                            'exception_type': exception_type,
+                            'exception_value': exception_value,
+                            'exception_location': exception_location,
                         },
                     )
                 except Exception:

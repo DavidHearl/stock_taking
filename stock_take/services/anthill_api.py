@@ -333,6 +333,74 @@ class AnthillAPI:
         logger.info(f'Anthill: Found {total_sales:,} sales across {len(customer_ids):,} unique customers')
         return customer_ids
 
+    def get_all_sales_since(self, since: str = '2016-02-13T00:00:00', type_id: int = 1) -> list[dict]:
+        """
+        Iterate through all sales modified since a date and return
+        a list of sale dicts including sale ID, customer ID, and metadata.
+
+        This method is important because GetCustomerDetails only returns
+        *top-level* activities — sub-activities (child sales nested under
+        a parent sale in Anthill's UI) are invisible there.
+        GetSalesModifiedSince returns ALL sales including sub-activities.
+
+        Returns:
+            List of dicts: {sale_id, customer_id, customer_name, external_ref,
+                           status, location, created, last_updated, assigned_to}
+        """
+        all_sales = []
+        current_since = since
+
+        while True:
+            body = f'''<GetSalesModifiedSince xmlns="{NAMESPACE}">
+              <typeId>{type_id}</typeId>
+              <since>{current_since}</since>
+            </GetSalesModifiedSince>'''
+
+            root = self._soap_request('GetSalesModifiedSince', body, timeout=120)
+            result_el = root.find(f'.//{{{NAMESPACE}}}GetSalesModifiedSinceResult')
+
+            if result_el is None:
+                break
+
+            result_xml = ET.tostring(result_el, encoding='unicode')
+            try:
+                inner = ET.fromstring(result_xml)
+            except ET.ParseError:
+                inner = result_el
+
+            activities = inner.findall('.//Activity')
+            if not activities:
+                break
+
+            last_date = current_since
+            for act in activities:
+                cust_el = act.find('Customer')
+                loc_el = act.find('Location')
+                assigned_el = act.find('AssignedTo')
+                all_sales.append({
+                    'sale_id': act.get('id', ''),
+                    'customer_id': cust_el.get('id', '') if cust_el is not None else '',
+                    'customer_name': cust_el.text.strip() if cust_el is not None and cust_el.text else '',
+                    'external_ref': act.findtext('ExternalReference', ''),
+                    'status': act.findtext('Status', ''),
+                    'location': loc_el.text.strip() if loc_el is not None and loc_el.text else '',
+                    'created': act.findtext('Created', ''),
+                    'last_updated': act.findtext('LastUpdated', ''),
+                    'assigned_to': assigned_el.text.strip() if assigned_el is not None and assigned_el.text else '',
+                })
+                updated = act.findtext('LastUpdated') or act.findtext('Created') or ''
+                if updated:
+                    last_date = updated
+
+            if len(activities) < 100:
+                break
+            else:
+                current_since = last_date
+                time.sleep(0.05)
+
+        logger.info(f'Anthill: get_all_sales_since({since}): {len(all_sales):,} sales found')
+        return all_sales
+
     # ------------------------------------------------------------------
     # Iterate all customers (generator)
     # ------------------------------------------------------------------

@@ -414,3 +414,7 @@ Production deployment at `atlas-gxbq5.ondigitalocean.app`. Uses DigitalOcean Spa
 |---------|-----|-----|
 | Background | `#272831` | 39, 40, 49 |
 | Accent | `#32323b` | 50, 50, 59 |
+
+
+
+docker compose up -d --build scheduler

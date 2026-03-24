@@ -2216,6 +2216,12 @@ class ActivityLog(models.Model):
         related_name='activity_logs',
     )
     extra_data  = models.JSONField(default=dict, blank=True)
+    resolved    = models.BooleanField(default=False)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='resolved_logs',
+    )
 
     class Meta:
         ordering = ['-timestamp']

@@ -28,7 +28,7 @@ from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.utils import timezone
 
-from stock_take.models import AnthillSale, Order, SyncLog
+from stock_take.models import AnthillSale, Customer, Order, SyncLog
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +187,20 @@ class Command(BaseCommand):
                 Q(activity_date__gte=cutoff) | Q(updated_at__gte=cutoff)
             )
 
+        # ── Discover missing sub-activities ──────────────────────────
+        # Anthill's GetCustomerDetails only returns top-level activities.
+        # Sub-activities (child sales nested under a parent) are invisible
+        # there but DO appear in GetSalesModifiedSince.  This step finds
+        # any such sales and creates the missing AnthillSale records.
+        discovered = self._discover_missing_sales(dry_run=dry_run, days=days)
+        if discovered:
+            # Re-query so newly created records are included in the refresh
+            qs = AnthillSale.objects.filter(category='3')
+            if days:
+                qs = qs.filter(
+                    Q(activity_date__gte=cutoff) | Q(updated_at__gte=cutoff)
+                )
+
         sales_list = list(qs.values_list('pk', 'anthill_activity_id', 'customer_name'))
         total = len(sales_list)
         self.stdout.write(f'Sales to refresh: {total}')
@@ -304,8 +318,101 @@ class Command(BaseCommand):
             SyncLog.objects.create(
                 script_name='sync_anthill_workflow',
                 status=log_status,
-                records_created=0,
+                records_created=discovered,
                 records_updated=stats['updated'],
                 errors=stats['errors'],
                 notes=notes,
             )
+
+    def _discover_missing_sales(self, dry_run: bool = False, days: int = None) -> int:
+        """
+        Use GetSalesModifiedSince to find sales that exist in Anthill but
+        are missing from the local AnthillSale table.
+
+        This catches sub-activities (child sales nested under a parent in
+        Anthill) that GetCustomerDetails doesn't return.
+
+        Returns:
+            Number of newly created AnthillSale records.
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        from stock_take.services.anthill_api import AnthillAPI, AnthillAPIError
+
+        # Determine how far back to look
+        if days:
+            since_dt = timezone.now() - timedelta(days=days)
+        else:
+            since_dt = timezone.now() - timedelta(days=365)
+        since_str = since_dt.strftime('%Y-%m-%dT00:00:00')
+
+        self.stdout.write(f'\nDiscovering missing sub-activities (since {since_str[:10]})...')
+
+        try:
+            api = AnthillAPI()
+            all_sales = api.get_all_sales_since(since=since_str)
+        except AnthillAPIError as e:
+            self.stderr.write(self.style.ERROR(f'  Discovery failed: {e}'))
+            return 0
+
+        # Get existing activity IDs for fast lookup
+        existing_ids = set(
+            AnthillSale.objects.values_list('anthill_activity_id', flat=True)
+        )
+
+        missing = [s for s in all_sales if s['sale_id'] and s['sale_id'] not in existing_ids]
+        if not missing:
+            self.stdout.write(f'  No missing sales found ({len(all_sales):,} checked)')
+            return 0
+
+        self.stdout.write(self.style.WARNING(
+            f'  Found {len(missing)} sales in Anthill not in local DB'
+        ))
+
+        created = 0
+        for sale_info in missing:
+            sale_id = sale_info['sale_id']
+            cust_id = sale_info['customer_id']
+            cust_name = sale_info['customer_name']
+
+            # Parse activity date
+            activity_date = None
+            if sale_info.get('created'):
+                for fmt in ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+                    try:
+                        naive = _dt.strptime(sale_info['created'], fmt)
+                        activity_date = naive.replace(tzinfo=_tz.utc)
+                        break
+                    except ValueError:
+                        continue
+
+            # Link to local customer
+            local_customer = None
+            if cust_id:
+                local_customer = Customer.objects.filter(
+                    anthill_customer_id=cust_id
+                ).first()
+
+            if dry_run:
+                self.stdout.write(
+                    f'  [DRY RUN] Would create: {sale_id} '
+                    f'({cust_name}) ref={sale_info.get("external_ref", "")}'
+                )
+            else:
+                AnthillSale.objects.create(
+                    anthill_activity_id=sale_id,
+                    anthill_customer_id=cust_id,
+                    customer=local_customer,
+                    activity_type='Room Sale',
+                    status=sale_info.get('status', ''),
+                    category='3',
+                    customer_name=cust_name,
+                    location=sale_info.get('location', ''),
+                    activity_date=activity_date,
+                )
+                self.stdout.write(self.style.SUCCESS(
+                    f'  + Created: {sale_id} ({cust_name}) '
+                    f'ref={sale_info.get("external_ref", "")}'
+                ))
+            created += 1
+
+        return created

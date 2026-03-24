@@ -1610,6 +1610,18 @@ def purchase_order_update_status(request, po_id):
         if po.display_number:
             from .models import BoardsPO
             BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=False)
+    elif new_status == 'Cancelled':
+        po.status = 'Cancelled'
+        po.save(update_fields=['status'])
+        # Cancelled POs should not count as incoming stock
+        if po.display_number:
+            from .models import BoardsPO
+            BoardsPO.objects.filter(po_number=po.display_number).update(boards_ordered=False)
+        log_activity(
+            user=request.user,
+            event_type='po_cancelled',
+            description=f'{request.user.get_full_name() or request.user.username} cancelled purchase order {po.display_number}.',
+        )
     else:
         return JsonResponse({'error': f'Invalid status: {new_status}'}, status=400)
 

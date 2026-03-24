@@ -67,6 +67,16 @@
                 <i class="bi bi-box-arrow-in-down"></i> Receive
             </button>
             {% endif %}
+            {% if purchase_order.status != 'Cancelled' and purchase_order.status != 'Received' %}
+            <button class="btn btn-sm btn-cancel-po" onclick="cancelPO()">
+                <i class="bi bi-x-octagon"></i> Cancel PO
+            </button>
+            {% endif %}
+            {% if purchase_order.status == 'Cancelled' %}
+            <button class="btn btn-sm btn-reactivate" onclick="updatePOStatus('Draft')">
+                <i class="bi bi-arrow-counterclockwise"></i> Reactivate
+            </button>
+            {% endif %}
             <button class="btn btn-sm btn-edit" id="edit-toggle-btn" onclick="toggleEditMode()">
                 <i class="bi bi-pencil"></i> Edit
             </button>
@@ -1821,9 +1831,15 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-function updatePOStatus(newStatus) {
-    const action = newStatus === 'Approved' ? 'approve' : 'revert to draft';
-    if (!confirm(`Are you sure you want to ${action} this purchase order?`)) return;
+function cancelPO() {
+    if (!confirm('Are you sure you want to cancel this purchase order? It will no longer count as incoming stock.')) return;
+    updatePOStatus('Cancelled', true);
+}
+
+function updatePOStatus(newStatus, skipConfirm) {
+    const labels = { 'Approved': 'approve', 'Draft': 'revert to draft', 'Cancelled': 'cancel' };
+    const action = labels[newStatus] || newStatus.toLowerCase();
+    if (!skipConfirm && !confirm(`Are you sure you want to ${action} this purchase order?`)) return;
 
     fetch('{% url "purchase_order_update_status" purchase_order.workguru_id %}', {
         method: 'POST',

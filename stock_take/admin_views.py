@@ -913,10 +913,10 @@ def admin_activity_log(request):
     )
     all_choices = list(event_choices) + [(t, t.replace('_', ' ').title()) for t in extra_types]
 
-    # Recent error logs (last 50)
+    # Recent error logs — only unresolved
     error_logs = (
         ActivityLog.objects
-        .filter(event_type='error')
+        .filter(event_type='error', resolved=False)
         .select_related('user', 'order')
         .order_by('-timestamp')[:50]
     )
@@ -931,3 +931,53 @@ def admin_activity_log(request):
         'total_count':   logs.count(),
         'error_logs':    error_logs,
     })
+
+
+@login_required
+def resolve_error_log(request, pk):
+    """Mark an error log entry as resolved."""
+    from django.http import JsonResponse
+    from django.utils import timezone as tz
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    entry = get_object_or_404(ActivityLog, pk=pk, event_type='error')
+    entry.resolved = True
+    entry.resolved_at = tz.now()
+    entry.resolved_by = request.user
+    entry.save(update_fields=['resolved', 'resolved_at', 'resolved_by'])
+    return JsonResponse({'success': True})
+
+
+@login_required
+def error_log_history(request):
+    """Return resolved error logs as JSON for the history modal."""
+    from django.http import JsonResponse
+
+    entries = (
+        ActivityLog.objects
+        .filter(event_type='error', resolved=True)
+        .select_related('user', 'resolved_by')
+        .order_by('-timestamp')[:200]
+    )
+
+    data = []
+    for e in entries:
+        data.append({
+            'id': e.pk,
+            'timestamp': e.timestamp.strftime('%d %b %Y %H:%M'),
+            'user': e.user.get_full_name() or e.user.username if e.user else 'System',
+            'status_code': e.extra_data.get('status_code', ''),
+            'description': e.description,
+            'path': e.extra_data.get('path', ''),
+            'exception_type': e.extra_data.get('exception_type', ''),
+            'exception_value': e.extra_data.get('exception_value', ''),
+            'exception_location': e.extra_data.get('exception_location', ''),
+            'resolved_at': e.resolved_at.strftime('%d %b %Y %H:%M') if e.resolved_at else '',
+            'resolved_by': (
+                e.resolved_by.get_full_name() or e.resolved_by.username
+            ) if e.resolved_by else '',
+        })
+
+    return JsonResponse({'entries': data})

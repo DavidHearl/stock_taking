@@ -16,24 +16,30 @@
 
     <!-- Error Logs Section -->
     {% if error_logs %}
-    <div class="admin-card" style="border-left: 4px solid #dc3545; margin-bottom: 20px;">
-        <div class="admin-card-header" style="background: rgba(220, 53, 69, 0.08);">
-            <h2 style="color: #dc3545;"><i class="bi bi-exclamation-triangle-fill"></i> Error Logs <span style="font-size: 0.75rem; font-weight: 400; opacity: 0.7;">(last 50)</span></h2>
+    <div class="admin-card error-card">
+        <div class="admin-card-header error-card-header">
+            <h2><i class="bi bi-exclamation-triangle-fill"></i> Unresolved Errors <span class="error-count">{{ error_logs|length }}</span></h2>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-error-history">
+                <i class="bi bi-clock-history"></i> History
+            </button>
         </div>
-        <div class="admin-table-wrapper" style="max-height: 400px; overflow-y: auto;">
+        <div class="admin-table-wrapper error-table-wrapper">
             <table class="admin-table">
                 <thead>
                     <tr>
+                        <th style="width:30px;"></th>
                         <th style="width:140px;">Timestamp</th>
                         <th style="width:130px;">User</th>
                         <th style="width:80px;">Status</th>
                         <th>Error Message</th>
                         <th style="width:200px;">Path</th>
+                        <th style="width:90px;"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for entry in error_logs %}
-                    <tr>
+                    <tr class="error-row" data-error-id="{{ entry.pk }}">
+                        <td class="expand-toggle"><i class="bi bi-chevron-right"></i></td>
                         <td class="timestamp-cell">
                             {{ entry.timestamp|date:"d M Y" }}<br>
                             <span style="font-size: 0.72rem; opacity: 0.65;">{{ entry.timestamp|date:"H:i:s" }}</span>
@@ -45,12 +51,51 @@
                             </div>
                         </td>
                         <td>
-                            <span class="event-badge error" style="background: #dc3545; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem;">
+                            <span class="event-badge error-badge">
                                 {{ entry.extra_data.status_code|default:"Error" }}
                             </span>
                         </td>
-                        <td class="desc-cell" style="color: #dc3545;">{{ entry.description }}</td>
-                        <td style="font-size: 0.75rem; color: var(--text-secondary); word-break: break-all;">{{ entry.extra_data.path|default:"" }}</td>
+                        <td class="desc-cell error-desc">{{ entry.description }}</td>
+                        <td class="path-cell">{{ entry.extra_data.path|default:"" }}</td>
+                        <td>
+                            <button type="button" class="btn-resolve" data-pk="{{ entry.pk }}" title="Mark as resolved">
+                                <i class="bi bi-check-lg"></i> Resolve
+                            </button>
+                        </td>
+                    </tr>
+                    <tr class="error-detail-row" data-error-id="{{ entry.pk }}" style="display:none;">
+                        <td colspan="7">
+                            <div class="error-detail-panel">
+                                {% if entry.extra_data.exception_type %}
+                                <div class="error-detail-item">
+                                    <span class="error-detail-label">Exception Type</span>
+                                    <span class="error-detail-value">{{ entry.extra_data.exception_type }}</span>
+                                </div>
+                                {% endif %}
+                                {% if entry.extra_data.exception_value %}
+                                <div class="error-detail-item">
+                                    <span class="error-detail-label">Exception Value</span>
+                                    <span class="error-detail-value">{{ entry.extra_data.exception_value }}</span>
+                                </div>
+                                {% endif %}
+                                {% if entry.extra_data.exception_location %}
+                                <div class="error-detail-item">
+                                    <span class="error-detail-label">Location</span>
+                                    <span class="error-detail-value">{{ entry.extra_data.exception_location }}</span>
+                                </div>
+                                {% endif %}
+                                <div class="error-detail-item">
+                                    <span class="error-detail-label">Full Path</span>
+                                    <span class="error-detail-value">{{ entry.extra_data.method|default:"" }} {{ entry.extra_data.path|default:"" }}</span>
+                                </div>
+                                {% if entry.extra_data.error_message %}
+                                <div class="error-detail-item">
+                                    <span class="error-detail-label">Message</span>
+                                    <span class="error-detail-value">{{ entry.extra_data.error_message }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -58,6 +103,19 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- Error History Modal -->
+    <div class="modal-overlay" id="error-history-modal" style="display:none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3><i class="bi bi-clock-history"></i> Resolved Error History</h3>
+                <button type="button" class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <div class="modal-loading"><i class="bi bi-arrow-clockwise spin"></i> Loading...</div>
+            </div>
+        </div>
+    </div>
 
     <div class="admin-card">
         <div class="admin-card-header">
@@ -187,4 +245,99 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Expandable error rows
+    document.querySelectorAll('.error-row').forEach(function(row) {
+        row.addEventListener('click', function(e) {
+            if (e.target.closest('.btn-resolve')) return;
+            var id = row.dataset.errorId;
+            var detail = document.querySelector('.error-detail-row[data-error-id="' + id + '"]');
+            var icon = row.querySelector('.expand-toggle i');
+            if (detail.style.display === 'none') {
+                detail.style.display = '';
+                icon.className = 'bi bi-chevron-down';
+            } else {
+                detail.style.display = 'none';
+                icon.className = 'bi bi-chevron-right';
+            }
+        });
+    });
+
+    // Resolve button
+    document.querySelectorAll('.btn-resolve').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var pk = btn.dataset.pk;
+            fetch("{% url 'resolve_error_log' pk=0 %}".replace('/0/', '/' + pk + '/'), {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'Content-Type': 'application/json'
+                }
+            }).then(function(resp) { return resp.json(); })
+              .then(function(data) {
+                  if (data.success) {
+                      var row = document.querySelector('.error-row[data-error-id="' + pk + '"]');
+                      var detail = document.querySelector('.error-detail-row[data-error-id="' + pk + '"]');
+                      row.style.transition = 'opacity 0.3s';
+                      row.style.opacity = '0';
+                      if (detail) { detail.style.transition = 'opacity 0.3s'; detail.style.opacity = '0'; }
+                      setTimeout(function() {
+                          row.remove();
+                          if (detail) detail.remove();
+                          var remaining = document.querySelectorAll('.error-row').length;
+                          document.querySelector('.error-count').textContent = remaining;
+                          if (remaining === 0) {
+                              document.querySelector('.error-card').style.display = 'none';
+                          }
+                      }, 300);
+                  }
+              });
+        });
+    });
+
+    // Error History Modal
+    var modal = document.getElementById('error-history-modal');
+    var modalBody = document.getElementById('modal-body');
+
+    document.getElementById('btn-error-history')?.addEventListener('click', function() {
+        modal.style.display = 'flex';
+        modalBody.innerHTML = '<div class="modal-loading"><i class="bi bi-arrow-clockwise spin"></i> Loading...</div>';
+        fetch("{% url 'error_log_history' %}")
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.entries.length) {
+                    modalBody.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:24px;">No resolved errors yet.</p>';
+                    return;
+                }
+                var html = '<table class="admin-table modal-table"><thead><tr>' +
+                    '<th>Timestamp</th><th>Exception</th><th>Path</th><th>Resolved By</th><th>Resolved At</th>' +
+                    '</tr></thead><tbody>';
+                data.entries.forEach(function(e) {
+                    html += '<tr>' +
+                        '<td class="timestamp-cell">' + e.timestamp + '</td>' +
+                        '<td class="error-desc">' + (e.exception_type || e.description || '-') + '</td>' +
+                        '<td class="path-cell">' + (e.path || '-') + '</td>' +
+                        '<td>' + (e.resolved_by || '-') + '</td>' +
+                        '<td class="timestamp-cell">' + (e.resolved_at || '-') + '</td>' +
+                        '</tr>';
+                });
+                html += '</tbody></table>';
+                modalBody.innerHTML = html;
+            });
+    });
+
+    document.getElementById('modal-close')?.addEventListener('click', function() {
+        modal.style.display = 'none';
+    });
+
+    modal?.addEventListener('click', function(e) {
+        if (e.target === modal) modal.style.display = 'none';
+    });
+});
+</script>
 {% endblock %}
