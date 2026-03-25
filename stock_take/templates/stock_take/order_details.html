@@ -148,28 +148,28 @@
                     </div>
                     <div class="card-body padded">
                         <div id="customer-display" class="info-display">
-                            <div>
-                                <div class="field-label">Customer Name</div>
-                                <div class="field-value-large" id="customer-name-display">{{ order.first_name }} {{ order.last_name }}</div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Customer Name</span>
+                                <span class="field-value-large" id="customer-name-display">{{ order.first_name }} {{ order.last_name }}</span>
                             </div>
-                            <div>
-                                <div class="field-label">Anthill Customer ID</div>
-                                <div class="field-row-with-button">
-                                    <div class="field-value" id="anthill-id-display">{{ order.anthill_id|default:"Not specified" }}</div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Anthill Customer ID</span>
+                                <span class="field-value" id="anthill-id-display">
+                                    {{ order.anthill_id|default:"Not specified" }}
                                     {% if order.anthill_id %}
-                                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                            <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
+                                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="external-link-btn-inline" title="Open in Anthill">
+                                            <i class="bi bi-box-arrow-up-right"></i>
                                         </a>
                                     {% endif %}
-                                </div>
+                                </span>
                             </div>
-                            <div>
-                                <div class="field-label">Address</div>
-                                <div class="field-value" id="address-display">{{ order.address|default:"Not set" }}</div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Address</span>
+                                <span class="field-value" id="address-display">{{ order.address|default:"Not set" }}</span>
                             </div>
-                            <div>
-                                <div class="field-label">Postcode</div>
-                                <div class="field-value" id="postcode-display">{{ order.postcode|default:"Not set" }}</div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Postcode</span>
+                                <span class="field-value" id="postcode-display">{{ order.postcode|default:"Not set" }}</span>
                             </div>
                         </div>
                         <div id="customer-edit" class="info-edit">
@@ -200,7 +200,7 @@
                     </div>
                 </div>
 
-                <!-- Card 2: Sale Info -->
+                <!-- Card 2: Sale Info (merged with Anthill) -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
                         <h3><i class="bi bi-receipt"></i> Sale Info</h3>
@@ -215,37 +215,98 @@
                     </div>
                     <div class="card-body padded">
                         <div id="sale-display" class="info-display">
-                            <div>
-                                <div class="field-label">Sale Number</div>
-                                <div class="field-row-with-button">
-                                    <div class="field-value-medium" id="sale-number-display">{{ order.sale_number }}</div>
-                                    {% if order.sale_number %}
-                                        <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                            <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
+                            <div class="field-row-sb">
+                                <span class="field-label">Sale Number</span>
+                                <span class="field-value-medium" id="sale-number-display">
+                                    {{ order.sale_number }}
+                                    {% for sale in anthill_sales %}
+                                        <a href="{% url 'sale_detail' sale.pk %}" class="external-link-btn-inline" title="View Sale">
+                                            <i class="bi bi-eye"></i>
                                         </a>
+                                        <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="external-link-btn-inline" title="Open in Anthill">
+                                            <i class="bi bi-box-arrow-up-right"></i>
+                                        </a>
+                                        <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">{{ sale.status|default:"-" }}</span>
+                                    {% endfor %}
+                                </span>
+                            </div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Customer Number</span>
+                                <span class="field-value" id="customer-number-display">{{ order.customer_number }}</span>
+                            </div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Designer</span>
+                                <span class="field-value" id="designer-display">{{ order.designer|default:"-" }}</span>
+                            </div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Order Date</span>
+                                <span class="field-value {% if not order.order_date %}field-value-missing{% endif %}" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</span>
+                            </div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Fit Date</span>
+                                <span class="field-value {% if not order.fit_date %}field-value-missing{% endif %}" id="fit-date-display">
+                                    {{ order.fit_date|date:"d M Y"|default:"Not set" }}
+                                    {% if not order.fit_date and anthill_sales %}
+                                        <button type="button" class="btn-pull-anthill" onclick="pullAnthillDates({{ order.id }})" title="Pull dates from Anthill">
+                                            <i class="bi bi-cloud-download"></i>
+                                        </button>
                                     {% endif %}
-                                </div>
+                                </span>
                             </div>
-                            <div>
-                                <div class="field-label">Customer Number</div>
-                                <div class="field-value" id="customer-number-display">{{ order.customer_number }}</div>
+                            <div class="field-row-sb">
+                                <span class="field-label">Total Value (Inc VAT)</span>
+                                <span class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</span>
                             </div>
-                            <div>
-                                <div class="field-label">Designer</div>
-                                <div class="field-value" id="designer-display">{{ order.designer|default:"-" }}</div>
+
+                            {% if anthill_sales %}
+                            {% for sale in anthill_sales %}
+                            {% if sale.contract_number or sale.range_name or sale.door_type or sale.source or sale.discount or sale.goods_due_in %}
+                            <div class="info-separator"></div>
+                            {% endif %}
+                            {% if sale.contract_number %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Contract</span>
+                                <span class="field-value"><span class="anthill-sale-contract">{{ sale.contract_number }}</span></span>
                             </div>
-                            <div>
-                                <div class="field-label">Order Date</div>
-                                <div class="field-value" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</div>
+                            {% endif %}
+                            {% if sale.range_name %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Range</span>
+                                <span class="field-value">{{ sale.range_name }}</span>
                             </div>
-                            <div>
-                                <div class="field-label">Fit Date</div>
-                                <div class="field-value" id="fit-date-display">{{ order.fit_date|date:"d M Y"|default:"Not set" }}</div>
+                            {% endif %}
+                            {% if sale.door_type %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Doors</span>
+                                <span class="field-value">{{ sale.door_type }}</span>
                             </div>
-                            <div>
-                                <div class="field-label">Total Value (Inc VAT)</div>
-                                <div class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
+                            {% endif %}
+                            {% if sale.source %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Source</span>
+                                <span class="field-value">{{ sale.source }}</span>
                             </div>
+                            {% endif %}
+                            {% if sale.discount %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Discount</span>
+                                <span class="field-value">£{{ sale.discount|floatformat:2 }}</span>
+                            </div>
+                            {% endif %}
+                            {% if sale.goods_due_in %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Goods Due</span>
+                                <span class="field-value">{{ sale.goods_due_in }}</span>
+                            </div>
+                            {% endif %}
+                            {% if not order.fit_date and sale.fit_from_date %}
+                            <div class="field-row-sb">
+                                <span class="field-label">Anthill Fit Date</span>
+                                <span class="field-value">{{ sale.fit_from_date }}</span>
+                            </div>
+                            {% endif %}
+                            {% endfor %}
+                            {% endif %}
                         </div>
                         <div id="sale-edit" class="info-edit">
                             <div>
@@ -615,41 +676,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Anthill Sale Card -->
-            {% if anthill_sales %}
-            <div class="card anthill-sale-card">
-                <div class="card-header">
-                    <h3><i class="bi bi-bag-check"></i> Anthill Sale{{ anthill_sales|length|pluralize }}</h3>
-                </div>
-                <div class="anthill-sale-body">
-                    {% for sale in anthill_sales %}
-                    <div class="anthill-sale-item">
-                        <div class="anthill-sale-header">
-                            <a href="{% url 'sale_detail' sale.pk %}" class="anthill-sale-link">
-                                #{{ sale.anthill_activity_id }}
-                            </a>
-                            <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">
-                                {{ sale.status|default:"-" }}
-                            </span>
-                        </div>
-                        <div class="anthill-sale-details">
-                            <div><strong>Type:</strong> {{ sale.activity_type|default:"-" }}</div>
-                            {% if sale.assigned_to_name %}<div><strong>Assigned:</strong> {{ sale.assigned_to_name }}</div>{% endif %}
-                            {% if sale.sale_value %}<div><strong>Value:</strong> £{{ sale.sale_value|floatformat:2 }}</div>{% endif %}
-                            {% if sale.contract_number %}<div><strong>Contract:</strong> <span class="anthill-sale-contract">{{ sale.contract_number }}</span></div>{% endif %}
-                            {% if sale.range_name %}<div><strong>Range:</strong> {{ sale.range_name }}</div>{% endif %}
-                            {% if sale.door_type %}<div><strong>Doors:</strong> {{ sale.door_type }}</div>{% endif %}
-                            {% if sale.source %}<div><strong>Source:</strong> {{ sale.source }}</div>{% endif %}
-                            {% if sale.fit_from_date %}<div><strong>Fit Date:</strong> {{ sale.fit_from_date }}</div>{% endif %}
-                            {% if sale.goods_due_in %}<div><strong>Goods Due:</strong> {{ sale.goods_due_in }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-        </div>
     </div>
 
     <div class="full-width-section">
@@ -2565,6 +2591,23 @@ function toggleSaleEdit() {
         edit.style.display = 'flex';
         btn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel';
     }
+}
+
+// Pull dates from Anthill sale
+function pullAnthillDates(orderId) {
+    fetch(`/order/${orderId}/pull-anthill-dates/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'No dates found in Anthill');
+        }
+    })
+    .catch(() => alert('Error pulling dates from Anthill'));
 }
 
 // Save Customer Info

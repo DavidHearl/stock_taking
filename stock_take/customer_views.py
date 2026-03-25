@@ -947,6 +947,88 @@ def toggle_payment_ignored(request, pk, payment_pk):
 
 
 @login_required
+def split_payment(request, pk, payment_pk):
+    """Split a payment between the current sale and another sale (POST).
+
+    Expects JSON body:
+        {
+            "target_sale_pk": int,   # AnthillSale.pk to receive the split portion
+            "amount": "123.45"       # Amount to move to the target sale
+        }
+
+    The original payment is reduced by `amount` and a new payment record
+    is created on the target sale for `amount`, preserving all Xero metadata.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    import json
+    from decimal import Decimal, InvalidOperation
+
+    payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk)
+    source_sale = payment.sale
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    target_sale_pk = data.get('target_sale_pk')
+    if not target_sale_pk:
+        return JsonResponse({'success': False, 'error': 'target_sale_pk required'}, status=400)
+
+    target_sale = get_object_or_404(AnthillSale, pk=target_sale_pk)
+
+    try:
+        move_amount = Decimal(str(data.get('amount', '0')))
+    except (InvalidOperation, TypeError):
+        return JsonResponse({'success': False, 'error': 'Invalid amount'}, status=400)
+
+    if move_amount <= 0:
+        return JsonResponse({'success': False, 'error': 'Amount must be positive'}, status=400)
+
+    if move_amount >= payment.amount:
+        return JsonResponse({
+            'success': False,
+            'error': f'Amount must be less than the full payment (£{payment.amount:.2f})'
+        }, status=400)
+
+    # Reduce the original payment
+    payment.amount -= move_amount
+    payment.save(update_fields=['amount'])
+
+    # Create the split portion on the target sale
+    AnthillPayment.objects.create(
+        sale=target_sale,
+        source=payment.source,
+        xero_invoice_id=payment.xero_invoice_id,
+        xero_invoice_number=payment.xero_invoice_number,
+        invoice_total=payment.invoice_total,
+        invoice_amount_due=payment.invoice_amount_due,
+        invoice_status=payment.invoice_status,
+        anthill_payment_id=(
+            f'{payment.anthill_payment_id}_split' if payment.anthill_payment_id else ''
+        ),
+        payment_type=payment.payment_type,
+        date=payment.date,
+        amount=move_amount,
+        status=payment.status,
+        location=payment.location,
+        user_name=payment.user_name,
+    )
+
+    # Recalculate financials for both sales
+    _recalculate_sale_financials(source_sale)
+    _recalculate_sale_financials(target_sale)
+
+    return JsonResponse({
+        'success': True,
+        'kept_amount': str(payment.amount),
+        'moved_amount': str(move_amount),
+    })
+
+
+@login_required
 def scrape_anthill_payments(request, pk):
     """
     Server-side scrape of the paymentsTable from the Anthill CRM activity page.

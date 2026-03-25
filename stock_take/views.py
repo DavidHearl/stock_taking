@@ -4260,6 +4260,50 @@ def update_sale_info(request, order_id):
         return JsonResponse({'success': False, 'error': str(e)})
 
 @login_required
+def pull_anthill_dates(request, order_id):
+    """Pull order_date and fit_date from linked AnthillSale records."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+
+    order = get_object_or_404(Order, id=order_id)
+    anthill_sales = order.anthill_sale.all().order_by('-activity_date')
+
+    if not anthill_sales.exists():
+        return JsonResponse({'success': False, 'error': 'No Anthill sale linked to this order'})
+
+    updated = []
+    from datetime import date as _date
+    for sale in anthill_sales:
+        if not order.order_date and sale.activity_date:
+            order.order_date = sale.activity_date.date()
+            updated.append('order_date')
+        if not order.fit_date and sale.fit_date:
+            order.fit_date = sale.fit_date
+            updated.append('fit_date')
+        # Also try parsing fit_from_date text field
+        if not order.fit_date and sale.fit_from_date:
+            from datetime import datetime as _dt
+            for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y'):
+                try:
+                    order.fit_date = _dt.strptime(sale.fit_from_date.strip(), fmt).date()
+                    updated.append('fit_date')
+                    break
+                except ValueError:
+                    continue
+
+    # When a fit date is imported, set the order date to today
+    if 'fit_date' in updated:
+        order.order_date = _date.today()
+        if 'order_date' not in updated:
+            updated.append('order_date')
+
+    if updated:
+        order.save()
+        return JsonResponse({'success': True, 'updated': updated})
+    else:
+        return JsonResponse({'success': False, 'error': 'No new dates found in Anthill sale data'})
+
+@login_required
 def update_order_type(request, order_id):
     """Update order type"""
     if request.method != 'POST':
@@ -8720,40 +8764,51 @@ def calendar_weekly(request):
     week_day_list = [week_start + timedelta(days=i) for i in range(6)]
     week_dates_set = set(week_day_list)
     day_index = {d: i for i, d in enumerate(week_day_list)}
-    fitter_codes = ['R', 'G', 'S', 'P']
-    fitter_names = {'R': 'Ross', 'G': 'Gavin', 'S': 'Stuart', 'P': 'Paddy'}
-    appts_map = {}
-    multi_day_rows = []  # [{appt, start_col, end_col, span_cols}]
+    fitter_codes = [code for code, name in FitAppointment.FITTER_CHOICES]
+    fitter_names = {code: name for code, name in FitAppointment.FITTER_CHOICES}
+    # Assign grid column positions to ALL appointments (unified flat layout)
+    fitter_appts = {}   # fitter_code -> [appt]  (flat list, each with grid_col)
     for appt in appointments:
         duration = getattr(appt, 'fit_duration', 1) or 1
+        fitter = appt.fitter or 'R'
+        appt.span_total = duration
+        appt.span_day = 1
         if duration > 1:
-            # Multi-day: compute grid columns (1-based for CSS grid)
             start_date = appt.fit_date
             end_date = appt.fit_date + timedelta(days=duration - 1)
             if start_date not in week_dates_set and end_date not in week_dates_set:
                 continue
-            # Clamp to visible week
             clamped_start = max(start_date, week_start)
             clamped_end = min(end_date, week_end)
             start_col = day_index.get(clamped_start, 0)
             end_col = day_index.get(clamped_end, 5)
-            appt.span_total = duration
-            appt.span_day = 1
-            appt.is_continuation = False
-            appt.is_last_day = True
-            appt.multi_start_col = start_col + 1  # CSS grid is 1-based
-            appt.multi_end_col = end_col + 2       # grid-column-end is exclusive
-            appt.fitter_name = fitter_names.get(appt.fitter, appt.fitter)
-            multi_day_rows.append(appt)
+            appt.grid_col_start = start_col + 1
+            appt.grid_col_end = end_col + 2
+            fitter_appts.setdefault(fitter, []).append(appt)
         else:
-            # Single-day
             if appt.fit_date not in week_dates_set:
                 continue
-            appt.span_day = 1
-            appt.span_total = 1
-            appt.is_continuation = False
-            appt.is_last_day = True
-            appts_map.setdefault(appt.fit_date, {}).setdefault(appt.fitter, []).append(appt)
+            col = day_index[appt.fit_date]
+            appt.grid_col_start = col + 1
+            appt.grid_col_end = col + 2
+            fitter_appts.setdefault(fitter, []).append(appt)
+
+    # Build fitter swim-lane data (all fitters, so any can receive drag & drop)
+    fitter_lanes = []
+    for code in fitter_codes:
+        lane_days = []
+        for d in week_day_list:
+            lane_days.append({
+                'date': d,
+                'is_today': d == today,
+                'date_str': d.strftime('%Y-%m-%d'),
+            })
+        fitter_lanes.append({
+            'code': code,
+            'name': fitter_names[code],
+            'appointments': fitter_appts.get(code, []),
+            'days': lane_days,
+        })
 
     # PO expected deliveries this week (ordered but not received)
     po_date_strings = [d.strftime('%Y-%m-%d') for d in week_day_list]
@@ -8795,28 +8850,13 @@ def calendar_weekly(request):
     for sa in sales_appointments:
         sales_map.setdefault(sa.appointment_date, []).append(sa)
 
-    # Build template-friendly list: one dict per day
+    # Build template-friendly list: one dict per day (for headers, deliveries, sales)
     week_data = []
     for d in week_day_list:
-        day_appts = appts_map.get(d, {})
-        fitter_rows = []
-        has_appointments = False
-        for code in fitter_codes:
-            appt_list = day_appts.get(code, [])
-            if appt_list:
-                has_appointments = True
-            fitter_rows.append({
-                'code': code,
-                'name': fitter_names[code],
-                'appointments': appt_list,
-            })
-
         week_data.append({
             'date': d,
             'is_today': d == today,
             'date_str': d.strftime('%Y-%m-%d'),
-            'fitter_rows': fitter_rows,
-            'has_appointments': has_appointments,
             'pos': pos_map.get(d, []),
             'pos_groups': pos_groups_map.get(d, []),
             'sales': sales_map.get(d, []),
@@ -8827,7 +8867,7 @@ def calendar_weekly(request):
 
     context = {
         'week_data': week_data,
-        'multi_day_rows': multi_day_rows,
+        'fitter_lanes': fitter_lanes,
         'week_start': week_start,
         'week_end': week_end,
         'prev_week': prev_week,

@@ -216,6 +216,9 @@
                                 {% endif %}
                             </td>
                             <td style="white-space:nowrap;">
+                                <button class="btn btn-sm btn-outline-warning" onclick="openSplitModal({{ p.pk }}, '{{ p.xero_invoice_number|default:"" }}', {{ p.amount|default:0 }})" title="Split payment to another sale">
+                                    <i class="bi bi-scissors"></i>
+                                </button>
                                 <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
                                     <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
                                 </button>
@@ -379,6 +382,51 @@
                             Cancel
                         </button>
                         <span id="scrapeMsg" style="font-size:0.82rem;"></span>
+                    </div>
+                </div>
+            </dialog>
+
+            <!-- Split Payment Modal -->
+            <dialog id="splitPaymentModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-scissors" style="color:#f0ad4e;"></i>
+                        <span>Split Payment</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="document.getElementById('splitPaymentModal').close()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-secondary);">
+                        Splitting <strong id="splitInvoiceLabel"></strong> — <strong id="splitOriginalAmount"></strong>
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                            Move to Sale
+                        </label>
+                        <select id="splitTargetSale" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+                            <option value="">-- Select a sale --</option>
+                            {% for related in related_sales %}
+                            <option value="{{ related.pk }}">{{ related.anthill_activity_id }} — {{ related.contract_number|default:"No contract" }} ({{ related.status|default:"?" }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                            Amount to Move (£)
+                        </label>
+                        <input type="number" id="splitAmount" step="0.01" min="0.01" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                            Keeping <strong id="splitKeepAmount">—</strong> on this sale
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button type="button" class="btn btn-sm btn-warning" onclick="confirmSplitPayment()">
+                            <i class="bi bi-scissors"></i> Split
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('splitPaymentModal').close()">
+                            Cancel
+                        </button>
+                        <span id="splitMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
                     </div>
                 </div>
             </dialog>
@@ -728,6 +776,60 @@
                         location.reload();
                     }
                 });
+            }
+
+            // ── Split payment modal ──────────────────────────────────────────
+            let splitPaymentPk = null;
+            let splitPaymentTotal = 0;
+
+            function openSplitModal(paymentPk, invoiceNum, amount) {
+                splitPaymentPk = paymentPk;
+                splitPaymentTotal = parseFloat(amount);
+                document.getElementById('splitInvoiceLabel').textContent = invoiceNum || 'Payment #' + paymentPk;
+                document.getElementById('splitOriginalAmount').textContent = '£' + splitPaymentTotal.toFixed(2);
+                document.getElementById('splitAmount').value = '';
+                document.getElementById('splitAmount').max = (splitPaymentTotal - 0.01).toFixed(2);
+                document.getElementById('splitKeepAmount').textContent = '—';
+                document.getElementById('splitMsg').textContent = '';
+                document.getElementById('splitTargetSale').value = '';
+                document.getElementById('splitPaymentModal').showModal();
+            }
+
+            document.getElementById('splitAmount').addEventListener('input', function() {
+                const moveAmt = parseFloat(this.value) || 0;
+                const keepAmt = splitPaymentTotal - moveAmt;
+                document.getElementById('splitKeepAmount').textContent =
+                    keepAmt > 0 ? '£' + keepAmt.toFixed(2) : '—';
+            });
+
+            function confirmSplitPayment() {
+                const targetPk = document.getElementById('splitTargetSale').value;
+                const moveAmt = parseFloat(document.getElementById('splitAmount').value);
+                const msg = document.getElementById('splitMsg');
+
+                if (!targetPk) { msg.textContent = 'Select a target sale'; msg.style.color = '#ef4444'; return; }
+                if (!moveAmt || moveAmt <= 0) { msg.textContent = 'Enter a valid amount'; msg.style.color = '#ef4444'; return; }
+                if (moveAmt >= splitPaymentTotal) { msg.textContent = 'Amount must be less than the full payment'; msg.style.color = '#ef4444'; return; }
+
+                msg.textContent = 'Splitting…';
+                msg.style.color = 'var(--text-secondary)';
+
+                fetch(DELETE_MANUAL_BASE + splitPaymentPk + '/split/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                    body: JSON.stringify({target_sale_pk: parseInt(targetPk), amount: moveAmt.toFixed(2)}),
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('splitPaymentModal').close();
+                        location.reload();
+                    } else {
+                        msg.textContent = data.error || 'Split failed';
+                        msg.style.color = '#ef4444';
+                    }
+                })
+                .catch(() => { msg.textContent = 'Network error'; msg.style.color = '#ef4444'; });
             }
             </script>
 

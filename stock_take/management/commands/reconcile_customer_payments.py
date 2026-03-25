@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 # Allow £1 tolerance for rounding / VAT differences
 TOLERANCE = Decimal('1.00')
 
+# Statuses that mean a sale is finished and must balance to zero
+COMPLETE_STATUSES = {'won', 'complete'}
+
 
 class Command(BaseCommand):
     help = 'Detect and fix misplaced payments across multiple sales for the same customer'
@@ -136,42 +139,113 @@ class Command(BaseCommand):
                         )
                 continue
 
-            for payment, from_sale, to_sale, reason in moves:
+            # Clean up previous split records before applying
+            if fix and any(
+                len(m) == 5 and m[4] is not None for m in moves
+            ):
+                all_sale_pks = set()
+                for m in moves:
+                    all_sale_pks.add(m[1].pk)
+                    all_sale_pks.add(m[2].pk)
+                deleted = AnthillPayment.objects.filter(
+                    sale_id__in=all_sale_pks,
+                    anthill_payment_id__contains='_split',
+                ).delete()[0]
+                if deleted:
+                    self.stdout.write(
+                        f'  Cleaned up {deleted} previous split records.'
+                    )
+
+            for move_tuple in moves:
+                split_info = None
+                if len(move_tuple) == 5:
+                    payment, from_sale, to_sale, reason, split_info = move_tuple
+                else:
+                    payment, from_sale, to_sale, reason = move_tuple
+
                 date_str = (
                     payment.date.strftime('%d/%m/%Y') if payment.date else '?'
                 )
-                self.stdout.write(self.style.WARNING(
-                    f'\n  PROPOSED MOVE ({reason}):'
-                ))
-                self.stdout.write(
-                    f'    Payment: £{payment.amount:.2f} '
-                    f'({payment.xero_invoice_number or "?"} — '
-                    f'{payment.payment_type}, {date_str})'
-                )
-                self.stdout.write(
-                    f'    FROM  Sale {from_sale.anthill_activity_id} '
-                    f'({from_sale.contract_number})'
-                )
-                self.stdout.write(
-                    f'    TO    Sale {to_sale.anthill_activity_id} '
-                    f'({to_sale.contract_number})'
-                )
 
-                if fix:
-                    payment.sale = to_sale
-                    payment.save(update_fields=['sale'])
-                    self.stdout.write(self.style.SUCCESS(
-                        '    -> Payment moved.'
+                if split_info:
+                    keep_amount, move_amount = split_info
+                    self.stdout.write(self.style.WARNING(
+                        f'\n  PROPOSED SPLIT ({reason}):'
                     ))
+                    self.stdout.write(
+                        f'    Payment: £{payment.amount:.2f} '
+                        f'({payment.xero_invoice_number or "?"} — '
+                        f'{payment.payment_type}, {date_str})'
+                    )
+                    self.stdout.write(
+                        f'    KEEP  £{keep_amount:.2f} on Sale '
+                        f'{from_sale.anthill_activity_id} '
+                        f'({from_sale.contract_number})'
+                    )
+                    self.stdout.write(
+                        f'    MOVE  £{move_amount:.2f} to Sale '
+                        f'{to_sale.anthill_activity_id} '
+                        f'({to_sale.contract_number})'
+                    )
+
+                    if fix:
+                        payment.amount = keep_amount
+                        payment.save(update_fields=['amount'])
+                        AnthillPayment.objects.create(
+                            sale=to_sale,
+                            source=payment.source,
+                            xero_invoice_id=payment.xero_invoice_id,
+                            xero_invoice_number=payment.xero_invoice_number,
+                            invoice_total=payment.invoice_total,
+                            invoice_amount_due=payment.invoice_amount_due,
+                            invoice_status=payment.invoice_status,
+                            anthill_payment_id=(
+                                f'{payment.anthill_payment_id}_split'
+                                if payment.anthill_payment_id else ''
+                            ),
+                            payment_type=payment.payment_type,
+                            date=payment.date,
+                            amount=move_amount,
+                            status=payment.status,
+                            location=payment.location,
+                            user_name=payment.user_name,
+                        )
+                        self.stdout.write(self.style.SUCCESS(
+                            '    -> Payment split applied.'
+                        ))
+                else:
+                    self.stdout.write(self.style.WARNING(
+                        f'\n  PROPOSED MOVE ({reason}):'
+                    ))
+                    self.stdout.write(
+                        f'    Payment: £{payment.amount:.2f} '
+                        f'({payment.xero_invoice_number or "?"} — '
+                        f'{payment.payment_type}, {date_str})'
+                    )
+                    self.stdout.write(
+                        f'    FROM  Sale {from_sale.anthill_activity_id} '
+                        f'({from_sale.contract_number})'
+                    )
+                    self.stdout.write(
+                        f'    TO    Sale {to_sale.anthill_activity_id} '
+                        f'({to_sale.contract_number})'
+                    )
+
+                    if fix:
+                        payment.sale = to_sale
+                        payment.save(update_fields=['sale'])
+                        self.stdout.write(self.style.SUCCESS(
+                            '    -> Payment moved.'
+                        ))
 
                 total_moves += 1
 
             # Recalculate paid_in_full for all affected sales
             if fix and moves:
                 affected_pks = set()
-                for _p, frm, to, _r in moves:
-                    affected_pks.add(frm.pk)
-                    affected_pks.add(to.pk)
+                for m in moves:
+                    affected_pks.add(m[1].pk)
+                    affected_pks.add(m[2].pk)
                 for sale in AnthillSale.objects.filter(pk__in=affected_pks):
                     self._recalc_paid_in_full(sale)
 
@@ -240,9 +314,16 @@ class Command(BaseCommand):
 
         Returns:
             (moves, anomaly)
-            moves  : list of (AnthillPayment, from_sale, to_sale, reason)
+            moves  : list of tuples (AnthillPayment, from_sale, to_sale, reason[, split_info])
             anomaly: bool — True if there's any imbalance worth reporting
         """
+        # ── Pre-pass: detect cross-sale duplicate payments ─────────────
+        # Two different sales for the same customer can end up with the
+        # same Xero payment (same invoice, same amount, same date) because
+        # the invoice reference matched both contracts.  Collect duplicates
+        # and mark which ones should be flagged for removal.
+        self._flag_cross_sale_duplicates(sales)
+
         states = self._sale_states(sales)
 
         overpaid = [s for s in states if s['balance'] < -TOLERANCE]
@@ -320,7 +401,141 @@ class Command(BaseCommand):
                     continue
                 break   # re-evaluate after each move
 
+        # ── Strategy 3 — chronological fill for complete sales ──────
+        # If a complete sale is still overpaid after S1/S2, keep the
+        # oldest payments up to the sale value, split the boundary
+        # payment, and move all surplus to underpaid siblings.
+        for op in overpaid:
+            if op['balance'] >= -TOLERANCE:
+                continue
+            if op['sale'].status not in COMPLETE_STATUSES:
+                continue
+
+            effective_value = op['sale_value']
+            remaining_payments = sorted(
+                [p for p in op['payments'] if p.pk not in moved_ids],
+                key=lambda p: p.date or datetime.min,
+            )
+
+            running_total = Decimal('0')
+            hit_boundary = False
+
+            for i, payment in enumerate(remaining_payments):
+                if hit_boundary:
+                    target = self._pick_surplus_target(underpaid)
+                    if target:
+                        moves.append((
+                            payment, op['sale'], target['sale'],
+                            'complete-sale surplus', None,
+                        ))
+                        moved_ids.add(payment.pk)
+                        op['balance'] += payment.amount
+                        target['balance'] -= payment.amount
+                    continue
+
+                running_total += payment.amount
+
+                if running_total > effective_value + TOLERANCE:
+                    hit_boundary = True
+                    keep_amount = effective_value - (
+                        running_total - payment.amount
+                    )
+                    move_amount = payment.amount - keep_amount
+
+                    if keep_amount < TOLERANCE:
+                        # Whole payment is surplus
+                        target = self._pick_surplus_target(underpaid)
+                        if target:
+                            moves.append((
+                                payment, op['sale'], target['sale'],
+                                'complete-sale surplus', None,
+                            ))
+                            moved_ids.add(payment.pk)
+                            op['balance'] += payment.amount
+                            target['balance'] -= payment.amount
+                    elif move_amount > TOLERANCE:
+                        # Split at the boundary
+                        target = self._pick_surplus_target(underpaid)
+                        if target:
+                            moves.append((
+                                payment, op['sale'], target['sale'],
+                                'complete-sale split',
+                                (keep_amount, move_amount),
+                            ))
+                            moved_ids.add(payment.pk)
+                            op['balance'] += move_amount
+                            target['balance'] -= move_amount
+
         return moves, True
+
+    def _flag_cross_sale_duplicates(self, sales):
+        """Detect and report payments duplicated across or within sales.
+
+        A payment is considered a duplicate when two AnthillPayment records
+        have the same xero_invoice_number, same amount, and same date.
+        This happens when:
+        - An invoice reference matches multiple contracts (cross-sale)
+        - The same payment was imported twice on the same sale
+        """
+        from collections import defaultdict
+
+        # Build fingerprint → list of (sale, payment) tuples
+        fp_map = defaultdict(list)
+        for sale in sales:
+            payments = list(
+                sale.payments
+                .filter(source='xero', ignored=False)
+                .exclude(amount__isnull=True)
+            )
+            for p in payments:
+                key = (
+                    p.xero_invoice_number or '',
+                    p.amount,
+                    p.date.date() if p.date else None,
+                )
+                if key[0]:  # only match on real invoice numbers
+                    fp_map[key].append((sale, p))
+
+        duplicates_found = 0
+        for key, entries in fp_map.items():
+            if len(entries) <= 1:
+                continue
+
+            inv_num, amount, dt = key
+            dt_str = dt.strftime('%d/%m/%Y') if dt else '?'
+
+            # Check if cross-sale or same-sale
+            sale_pks = set(sale.pk for sale, _p in entries)
+            if len(sale_pks) > 1:
+                label = f'appears on {len(sale_pks)} sales'
+            else:
+                label = f'duplicated {len(entries)}x on same sale'
+
+            self.stdout.write(self.style.ERROR(
+                f'\n  DUPLICATE: {inv_num} £{amount:.2f} ({dt_str}) '
+                f'{label}'
+            ))
+            for sale, p in entries:
+                self.stdout.write(
+                    f'    Payment #{p.pk} on Sale {sale.anthill_activity_id} '
+                    f'({sale.contract_number})'
+                )
+
+            duplicates_found += 1
+
+        if duplicates_found:
+            self.stdout.write(self.style.ERROR(
+                f'\n  {duplicates_found} duplicate(s) detected. '
+                f'Delete the extra copy on the sale detail page.'
+            ))
+
+    def _pick_surplus_target(self, underpaid):
+        """Pick the underpaid sale with the largest remaining shortfall."""
+        candidates = [up for up in underpaid if up['balance'] > TOLERANCE]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: c['balance'], reverse=True)
+        return candidates[0]
 
     def _best_recipient(self, payment, underpaid, moved_ids):
         """Pick the underpaid sale that best receives *payment*."""

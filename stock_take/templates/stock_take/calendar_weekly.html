@@ -202,6 +202,9 @@
     </div>
 
     <div class="cal-toolbar-right">
+        <button class="btn btn-sm btn-outline-info" id="toggleDeliveriesBtn" onclick="toggleDeliveries()"><i class="bi bi-truck"></i> Deliveries</button>
+        <button class="btn btn-sm btn-outline-info" id="toggleSalesBtn" onclick="toggleSales()"><i class="bi bi-calendar-event"></i> Design Appts</button>
+        <span style="border-left: 1px solid var(--border-color); height: 20px;"></span>
         <button class="btn btn-secondary btn-sm" id="btnRefreshAnthill" onclick="refreshAnthillDates()" title="Refresh fit dates from Anthill CRM">
             <i class="bi bi-arrow-repeat"></i> Sync Anthill
         </button>
@@ -229,247 +232,204 @@
 
 <div class="calendar-container">
 
-    <!-- Weekly Grid — CSS grid layout with spanning multi-day rows -->
+    <!-- Weekly Grid — Fitter swim-lane layout -->
     <div class="weekly-grid">
-        <!-- Day column headers -->
-        {% for day in week_data %}
-        <div class="weekly-col-header {% if day.is_today %}today{% endif %}" style="grid-column: {{ forloop.counter }};">
-            <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
-            <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
+        <!-- Header row: fitter label + day columns -->
+        <div class="swim-header-row">
+            {% for day in week_data %}
+            <div class="weekly-col-header {% if day.is_today %}today{% endif %}">
+                <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
+                <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
+            </div>
+            {% endfor %}
         </div>
-        {% endfor %}
 
-        <!-- Multi-day appointment rows spanning across columns -->
-        {% for appt in multi_day_rows %}
-        <div class="wk-multi-bar {% if appt.order %}{% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% endif %}{% if appt.remedial %} remedial{% endif %}"
-             style="grid-column: {{ appt.multi_start_col }} / {{ appt.multi_end_col }};"
-             data-appointment-id="{{ appt.id }}"
-             {% if appt.order %}data-order-id="{{ appt.order.id }}"
-             data-customer-name="{{ appt.order.first_name }} {{ appt.order.last_name }}"
-             data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
-             data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
-             data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
-             data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
-             data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
-             data-sale-number="{{ appt.order.sale_number }}"
-             data-customer-number="{{ appt.order.customer_number }}"
-             data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
-             data-address="{{ appt.order.address|default:'-' }}"
-             data-postcode="{{ appt.order.postcode|default:'-' }}"
-             data-designer="{{ appt.order.designer.name|default:'-' }}"
-             data-order-url="/order/{{ appt.order.id }}/"
-             data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
-             {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
-             data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
-             data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
-             data-anthill-sale-pk="{{ appt.fin.anthill_sale_pk }}"
-             data-range-name="{{ appt.fin.range_name }}"
-             data-door-type="{{ appt.fin.door_type }}"
-             data-source="{{ appt.fin.source }}"
-             data-contract-number="{{ appt.fin.contract_number }}"
-             data-assigned-to="{{ appt.fin.assigned_to_name }}"
-             data-discount="{{ appt.fin.discount|floatformat:0 }}"
-             {% endif %}
-             {% elif appt.remedial %}data-remedial-id="{{ appt.remedial.id }}"
-             data-customer-name="{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}"
-             data-sale-number="{{ appt.remedial.remedial_number }}"
-             data-customer-number="{{ appt.remedial.customer_number }}"
-             data-address="{{ appt.remedial.address|default:'-' }}"
-             data-postcode="{{ appt.remedial.postcode|default:'-' }}"
-             {% endif %}
-             data-fitter-code="{{ appt.fitter }}"
-             data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-             data-fit-duration="{{ appt.span_total }}"
-             data-span-day="1"
-             data-span-total="{{ appt.span_total }}"
-             onclick="selectAppointmentFromCard(this)">
-            <span class="wk-multi-name">{% if appt.order %}{{ appt.order.first_name }} {{ appt.order.last_name }}{% elif appt.remedial %}{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}{% endif %}</span>
-            <span class="wk-multi-info">{{ appt.span_total }} days &middot; {{ appt.fitter_name }} &middot; {% if appt.order %}{{ appt.order.sale_number }}{% elif appt.remedial %}{{ appt.remedial.remedial_number }}{% endif %}</span>
-        </div>
-        {% endfor %}
-
-        <!-- Day columns body (single-day appointments + deliveries) -->
-        {% for day in week_data %}
-        <div class="weekly-col-body {% if day.is_today %}today{% endif %}"
-             style="grid-column: {{ forloop.counter }};"
-             data-date="{{ day.date_str }}"
-             ondrop="handleDrop(event)"
-             ondragover="handleDragOver(event)"
-             ondragleave="handleDragLeave(event)">
-
-                {% for fitter in day.fitter_rows %}
-                    {% for appt in fitter.appointments %}
-                        {% if appt.order %}
-                        <div class="wk-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}"
-                             id="appointment-{{ appt.id }}"
-                             draggable="true"
-                             ondragstart="handleDragStart(event)"
-                             ondragend="handleDragEnd(event)"
-                             data-appointment-id="{{ appt.id }}"
-                             data-order-id="{{ appt.order.id }}"
-                             data-customer-name="{{ appt.order.first_name }} {{ appt.order.last_name }}"
-                             data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
-                             data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
-                             data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
-                             data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
-                             data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
-                             data-sale-number="{{ appt.order.sale_number }}"
-                             data-customer-number="{{ appt.order.customer_number }}"
-                             data-fitter="{{ fitter.name }}"
-                             data-fitter-code="{{ fitter.code }}"
-                             data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
-                             data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-                             data-fit-duration="{{ appt.span_total }}"
-                             data-span-day="{{ appt.span_day }}"
-                             data-span-total="{{ appt.span_total }}"
-                             data-address="{{ appt.order.address|default:'-' }}"
-                             data-postcode="{{ appt.order.postcode|default:'-' }}"
-                             data-designer="{{ appt.order.designer.name|default:'-' }}"
-                             data-order-url="/order/{{ appt.order.id }}/"
-                             data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
-                             {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
-                             data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
-                             data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
-                             data-anthill-sale-pk="{{ appt.fin.anthill_sale_pk }}"
-                             data-range-name="{{ appt.fin.range_name }}"
-                             data-door-type="{{ appt.fin.door_type }}"
-                             data-source="{{ appt.fin.source }}"
-                             data-contract-number="{{ appt.fin.contract_number }}"
-                             data-assigned-to="{{ appt.fin.assigned_to_name }}"
-                             data-discount="{{ appt.fin.discount|floatformat:0 }}"
-                             {% endif %}
-                             onclick="selectAppointmentFromCard(this)">
-                            <div class="wk-card-header">
-                                <span class="wk-card-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
-                                <span class="wk-card-salenum">{{ appt.order.sale_number }}</span>
-                            </div>
-                            <div class="wk-card-rows">
-                                <div class="wk-card-row">
-                                    <span class="wk-fin-label">Fitter</span>
-                                    <span class="wk-fin-val">{{ fitter.name }}</span>
-                                </div>
-                                {% if appt.fin and appt.fin.sale_value %}
-                                <div class="wk-card-row">
-                                    <span class="wk-fin-label">Outstanding</span>
-                                    <span class="wk-fin-val {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>
-                                </div>
-                                {% endif %}
-                            </div>
-                        </div>
-                        {% elif appt.remedial %}
-                        <div class="wk-card remedial-card"
-                             id="appointment-{{ appt.id }}"
-                             draggable="true"
-                             ondragstart="handleDragStart(event)"
-                             ondragend="handleDragEnd(event)"
-                             data-appointment-id="{{ appt.id }}"
-                             data-remedial-id="{{ appt.remedial.id }}"
-                             data-customer-name="{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}"
-                             data-sale-number="{{ appt.remedial.remedial_number }}"
-                             data-customer-number="{{ appt.remedial.customer_number }}"
-                             data-fitter="{{ fitter.name }}"
-                             data-fitter-code="{{ fitter.code }}"
-                             data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-                             data-fit-duration="{{ appt.span_total }}"
-                             data-span-day="{{ appt.span_day }}"
-                             data-span-total="{{ appt.span_total }}"
-                             data-address="{{ appt.remedial.address|default:'-' }}"
-                             data-postcode="{{ appt.remedial.postcode|default:'-' }}"
-                             onclick="selectAppointmentFromCard(this)">
-                            <div class="wk-card-header">
-                                <span class="wk-card-name">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
-                                <span class="wk-card-salenum">{{ appt.remedial.remedial_number }}</span>
-                            </div>
-                            <div class="wk-card-rows">
-                                <div class="wk-card-row">
-                                    <span class="wk-fin-label">Fitter</span>
-                                    <span class="wk-fin-val">{{ fitter.name }}</span>
-                                </div>
-                            </div>
-                        </div>
-                        {% endif %}
-                    {% endfor %}
-                {% endfor %}
-
-                {% for group in day.pos_groups %}
-                <div class="wk-delivery-table">
-                    <div class="wk-delivery-header">
-                        <i class="bi bi-truck"></i> {{ group.supplier }}
-                    </div>
-                    <table class="wk-delivery-rows">
-                        {% for po in group.pos %}
-                        <tr class="wk-delivery-row">
-                            <td class="wk-delivery-po"><a href="{% url 'purchase_order_detail' po.workguru_id %}">{{ po.display_number }}</a></td>
-                            <td class="wk-delivery-customer">{{ po.project_name|default:"" }}</td>
-                        </tr>
-                        {% endfor %}
-                    </table>
+        <!-- Fitter swim lanes -->
+        {% for lane in fitter_lanes %}
+        <div class="fitter-lane">
+            <div class="fitter-lane-grid">
+                {# Drop-zone cells (background layer for drag & drop) #}
+                {% for day_data in lane.days %}
+                <div class="fitter-drop-zone {% if day_data.is_today %}today{% endif %}"
+                     style="grid-column: {{ forloop.counter }};"
+                     data-date="{{ day_data.date_str }}"
+                     data-fitter-code="{{ lane.code }}"
+                     ondrop="handleDrop(event)"
+                     ondragover="handleDragOver(event)"
+                     ondragleave="handleDragLeave(event)">
                 </div>
                 {% endfor %}
-
-                {% if not day.has_appointments and not day.pos_groups %}
-                <div class="wk-empty">—</div>
-                {% endif %}
-        </div>
-        {% endfor %}
-    </div>
-
-</div>
-
-<!-- ── Sales Calendar ───────────────────────────────────────── -->
-<div class="calendar-container" style="margin-top: 10px;">
-    <div class="calendar-header" style="margin-bottom: 8px;">
-        <span class="calendar-section-label" style="align-self: center; font-size: 0.78rem;">Sales Appointments</span>
-        <button class="btn btn-primary btn-sm" onclick="openSalesModal()"><i class="bi bi-plus-lg"></i> Add Event</button>
-    </div>
-
-    <div class="weekly-grid sales-grid">
-        {% for day in week_data %}
-        <div class="weekly-col-header {% if day.is_today %}today{% endif %}" style="grid-column: {{ forloop.counter }};">
-            <span class="weekly-col-dayname">{{ day.date|date:"D" }}</span>
-            <span class="weekly-col-date">{{ day.date|date:"d M" }}</span>
-        </div>
-        {% endfor %}
-        {% for day in week_data %}
-        <div class="weekly-col-body {% if day.is_today %}today{% endif %}"
-             style="grid-column: {{ forloop.counter }};"
-             data-date="{{ day.date_str }}"
-             ondrop="handleSalesDrop(event)"
-             ondragover="handleSalesDragOver(event)"
-             ondragleave="handleSalesDragLeave(event)">
-                {% for sa in day.sales %}
-                <div class="wk-sales-card"
-                     data-sales-id="{{ sa.id }}"
-                     data-event-type="{{ sa.event_type }}"
-                     data-designer="{{ sa.designer }}"
-                     data-customer="{{ sa.customer_name }}"
-                     data-postcode="{{ sa.postcode }}"
-                     data-date="{{ sa.appointment_date|date:'Y-m-d' }}"
-                     data-start-time="{{ sa.appointment_time|time:'H:i' }}"
-                     data-end-time="{{ sa.end_time|time:'H:i' }}"
-                     data-notes="{{ sa.notes }}"
+                {# All appointments — flat list, each with grid-column span #}
+                {% for appt in lane.appointments %}
+                {% if appt.order %}
+                <div class="wk-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}"
+                     style="grid-column: {{ appt.grid_col_start }} / {{ appt.grid_col_end }};"
+                     id="appointment-{{ appt.id }}"
                      draggable="true"
-                     ondragstart="handleSalesDragStart(event)"
-                     ondragend="handleSalesDragEnd(event)"
-                     onclick="selectSalesCard(this)">
-                    <div class="wk-sales-line1">
-                        {% if sa.event_type != 'appointment' %}
-                        <span class="wk-sales-type wk-sales-type-{{ sa.event_type }}">{{ sa.get_event_type_display }}</span>
-                        {% else %}
-                        <span class="wk-sales-customer">{{ sa.customer_name }}</span>
+                     ondragstart="handleDragStart(event)"
+                     ondragend="handleDragEnd(event)"
+                     data-appointment-id="{{ appt.id }}"
+                     data-order-id="{{ appt.order.id }}"
+                     data-customer-name="{{ appt.order.first_name }} {{ appt.order.last_name }}"
+                     data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
+                     data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
+                     data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
+                     data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
+                     data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
+                     data-sale-number="{{ appt.order.sale_number }}"
+                     data-customer-number="{{ appt.order.customer_number }}"
+                     data-fitter="{{ lane.name }}"
+                     data-fitter-code="{{ lane.code }}"
+                     data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
+                     data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                     data-fit-duration="{{ appt.span_total }}"
+                     data-span-day="{{ appt.span_day }}"
+                     data-span-total="{{ appt.span_total }}"
+                     data-address="{{ appt.order.address|default:'-' }}"
+                     data-postcode="{{ appt.order.postcode|default:'-' }}"
+                     data-designer="{{ appt.order.designer.name|default:'-' }}"
+                     data-order-url="/order/{{ appt.order.id }}/"
+                     data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
+                     {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
+                     data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
+                     data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
+                     data-anthill-sale-pk="{{ appt.fin.anthill_sale_pk }}"
+                     data-range-name="{{ appt.fin.range_name }}"
+                     data-door-type="{{ appt.fin.door_type }}"
+                     data-source="{{ appt.fin.source }}"
+                     data-contract-number="{{ appt.fin.contract_number }}"
+                     data-assigned-to="{{ appt.fin.assigned_to_name }}"
+                     data-discount="{{ appt.fin.discount|floatformat:0 }}"
+                     {% endif %}
+                     onclick="selectAppointmentFromCard(this)">
+                    <div class="wk-card-header">
+                        <span class="wk-card-fitter">{{ lane.name }}</span>
+                        <span class="wk-card-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
+                        <span class="wk-card-meta">
+                            {% if appt.span_total > 1 %}<span class="wk-card-days">{{ appt.span_total }}d</span>{% endif %}
+                            <span class="wk-card-salenum">{{ appt.order.sale_number }}</span>
+                        </span>
+                    </div>
+                    <div class="wk-card-rows">
+                        {% if appt.fin and appt.fin.sale_value %}
+                        <div class="wk-card-row">
+                            <span class="wk-fin-label">Outstanding</span>
+                            <span class="wk-fin-val {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>
+                        </div>
                         {% endif %}
                     </div>
-                    <div class="wk-sales-line2">
-                        <span class="wk-sales-designer">{{ sa.designer }}</span>
-                        <span class="wk-sales-time">{{ sa.appointment_time|time:"H:i" }}{% if sa.end_time %}–{{ sa.end_time|time:"H:i" }}{% endif %}</span>
+                </div>
+                {% elif appt.remedial %}
+                <div class="wk-card remedial-card"
+                     style="grid-column: {{ appt.grid_col_start }} / {{ appt.grid_col_end }};"
+                     id="appointment-{{ appt.id }}"
+                     draggable="true"
+                     ondragstart="handleDragStart(event)"
+                     ondragend="handleDragEnd(event)"
+                     data-appointment-id="{{ appt.id }}"
+                     data-remedial-id="{{ appt.remedial.id }}"
+                     data-customer-name="{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}"
+                     data-sale-number="{{ appt.remedial.remedial_number }}"
+                     data-customer-number="{{ appt.remedial.customer_number }}"
+                     data-fitter="{{ lane.name }}"
+                     data-fitter-code="{{ lane.code }}"
+                     data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                     data-fit-duration="{{ appt.span_total }}"
+                     data-span-day="{{ appt.span_day }}"
+                     data-span-total="{{ appt.span_total }}"
+                     data-address="{{ appt.remedial.address|default:'-' }}"
+                     data-postcode="{{ appt.remedial.postcode|default:'-' }}"
+                     onclick="selectAppointmentFromCard(this)">
+                    <div class="wk-card-header">
+                        <span class="wk-card-fitter">{{ lane.name }}</span>
+                        <span class="wk-card-name">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
+                        <span class="wk-card-meta">
+                            {% if appt.span_total > 1 %}<span class="wk-card-days">{{ appt.span_total }}d</span>{% endif %}
+                            <span class="wk-card-salenum">{{ appt.remedial.remedial_number }}</span>
+                        </span>
                     </div>
                 </div>
-                {% empty %}
-                <div class="wk-empty">—</div>
+                {% endif %}
                 {% endfor %}
+            </div>
         </div>
         {% endfor %}
+
+        <!-- ── Section Separator: Deliveries ── -->
+        <div class="swim-section-separator" id="deliveriesLane">
+            <div class="swim-section-header">
+                <span class="swim-section-title"><i class="bi bi-truck"></i> Deliveries</span>
+            </div>
+            <div class="fitter-day-cells">
+                {% for day in week_data %}
+                <div class="fitter-day-cell deliveries-cell {% if day.is_today %}today{% endif %}">
+                    {% for group in day.pos_groups %}
+                    <div class="wk-delivery-table">
+                        <div class="wk-delivery-header">
+                            <i class="bi bi-truck"></i> {{ group.supplier }}
+                        </div>
+                        <table class="wk-delivery-rows">
+                            {% for po in group.pos %}
+                            <tr class="wk-delivery-row">
+                                <td class="wk-delivery-po"><a href="{% url 'purchase_order_detail' po.workguru_id %}">{{ po.display_number }}</a></td>
+                                <td class="wk-delivery-customer">{{ po.project_name|default:"" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </table>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- ── Section Separator: Design Appointments ── -->
+        <div class="swim-section-separator" id="salesContainer" style="display: none;">
+            <div class="swim-section-header">
+                <span class="swim-section-title"><i class="bi bi-calendar-event"></i> Design Appointments</span>
+                <button class="btn btn-primary btn-sm" onclick="openSalesModal()" style="padding: 1px 8px; font-size: 0.65rem;"><i class="bi bi-plus-lg"></i> Add</button>
+            </div>
+            <div class="fitter-day-cells">
+                {% for day in week_data %}
+                <div class="fitter-day-cell sales-day-cell {% if day.is_today %}today{% endif %}"
+                     data-date="{{ day.date_str }}"
+                     ondrop="handleSalesDrop(event)"
+                     ondragover="handleSalesDragOver(event)"
+                     ondragleave="handleSalesDragLeave(event)">
+                    {% for sa in day.sales %}
+                    <div class="wk-sales-card"
+                         data-sales-id="{{ sa.id }}"
+                         data-event-type="{{ sa.event_type }}"
+                         data-designer="{{ sa.designer }}"
+                         data-customer="{{ sa.customer_name }}"
+                         data-postcode="{{ sa.postcode }}"
+                         data-date="{{ sa.appointment_date|date:'Y-m-d' }}"
+                         data-start-time="{{ sa.appointment_time|time:'H:i' }}"
+                         data-end-time="{{ sa.end_time|time:'H:i' }}"
+                         data-notes="{{ sa.notes }}"
+                         draggable="true"
+                         ondragstart="handleSalesDragStart(event)"
+                         ondragend="handleSalesDragEnd(event)"
+                         onclick="selectSalesCard(this)">
+                        <div class="wk-sales-line1">
+                            {% if sa.event_type != 'appointment' %}
+                            <span class="wk-sales-type wk-sales-type-{{ sa.event_type }}">{{ sa.get_event_type_display }}</span>
+                            {% else %}
+                            <span class="wk-sales-customer">{{ sa.customer_name }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="wk-sales-line2">
+                            <span class="wk-sales-designer">{{ sa.designer }}</span>
+                            <span class="wk-sales-time">{{ sa.appointment_time|time:"H:i" }}{% if sa.end_time %}–{{ sa.end_time|time:"H:i" }}{% endif %}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
     </div>
+
 </div>
 
 <!-- Sales Appointment Modal -->
@@ -578,7 +538,7 @@ function handleSalesDragStart(event) {
 
 function handleSalesDragEnd(event) {
     event.target.closest('[data-sales-id]')?.classList.remove('dragging');
-    document.querySelectorAll('.weekly-col-body').forEach(c => c.classList.remove('drag-over'));
+    document.querySelectorAll('.sales-day-cell').forEach(c => c.classList.remove('drag-over'));
 }
 
 function handleSalesDragOver(event) {
@@ -612,6 +572,36 @@ function handleSalesDrop(event) {
     .catch(() => alert('Error moving appointment'));
 }
 
+// ── Show/Hide Toggles ──────────────────────────────────────────
+function toggleDeliveries() {
+    const lane = document.getElementById('deliveriesLane');
+    const btn = document.getElementById('toggleDeliveriesBtn');
+    if (lane.style.display === 'none') {
+        lane.style.display = '';
+        btn.classList.add('active');
+    } else {
+        lane.style.display = 'none';
+        btn.classList.remove('active');
+    }
+}
+
+function toggleSales() {
+    const container = document.getElementById('salesContainer');
+    const btn = document.getElementById('toggleSalesBtn');
+    if (container.style.display === 'none') {
+        container.style.display = '';
+        btn.classList.add('active');
+    } else {
+        container.style.display = 'none';
+        btn.classList.remove('active');
+    }
+}
+
+// Start with deliveries hidden
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('deliveriesLane').style.display = 'none';
+});
+
 // ── Fit Drag & Drop ────────────────────────────────────────────
 function handleDragStart(event) {
     draggedAppointmentId = event.target.dataset.appointmentId;
@@ -621,7 +611,7 @@ function handleDragStart(event) {
 
 function handleDragEnd(event) {
     event.target.classList.remove('dragging');
-    document.querySelectorAll('.weekly-col-body').forEach(r => r.classList.remove('drag-over'));
+    document.querySelectorAll('.fitter-day-cell, .fitter-drop-zone').forEach(r => r.classList.remove('drag-over'));
 }
 
 function handleDragOver(event) {
@@ -642,9 +632,8 @@ function handleDrop(event) {
     const newDate = target.dataset.date;
     if (!draggedAppointmentId) return;
 
-    // Keep the same fitter — read from the dragged card
-    const card = document.getElementById(`appointment-${draggedAppointmentId}`);
-    const fitter = card ? card.dataset.fitterCode : null;
+    // Use the fitter from the target swim-lane cell
+    const fitter = target.dataset.fitterCode;
     if (!fitter) return;
 
     fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
