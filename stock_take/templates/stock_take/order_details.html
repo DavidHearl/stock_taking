@@ -139,7 +139,7 @@
                 <!-- Card 1: Customer Info -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-customer">
-                        <h3><i class="bi bi-person"></i> Customer Info</h3>
+                        <h3>Customer Info</h3>
                         <div class="card-header-actions">
                             <button type="button" class="btn btn-sm btn-outline-primary edit-btn-spacing" id="edit-customer-btn" onclick="toggleCustomerEdit()">
                                 <i class="bi bi-pencil"></i> Edit
@@ -150,7 +150,13 @@
                         <div id="customer-display" class="info-display">
                             <div class="field-row-sb">
                                 <span class="field-label">Customer Name</span>
-                                <span class="field-value-large" id="customer-name-display">{{ order.first_name }} {{ order.last_name }}</span>
+                                <span class="field-value-large" id="customer-name-display">
+                                    {% if order.customer %}
+                                        <a href="{% url 'customer_detail' order.customer.id %}" class="customer-name-link">{{ order.first_name }} {{ order.last_name }}</a>
+                                    {% else %}
+                                        {{ order.first_name }} {{ order.last_name }}
+                                    {% endif %}
+                                </span>
                             </div>
                             <div class="field-row-sb">
                                 <span class="field-label">Anthill Customer ID</span>
@@ -203,7 +209,7 @@
                 <!-- Card 2: Sale Info (merged with Anthill) -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
-                        <h3><i class="bi bi-receipt"></i> Sale Info</h3>
+                        <h3>Sale Info</h3>
                         <div class="card-header-actions">
                             <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
                                 <i class="bi bi-pencil"></i> Edit
@@ -262,12 +268,6 @@
                             {% for sale in anthill_sales %}
                             {% if sale.contract_number or sale.range_name or sale.door_type or sale.source or sale.discount or sale.goods_due_in %}
                             <div class="info-separator"></div>
-                            {% endif %}
-                            {% if sale.contract_number %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Contract</span>
-                                <span class="field-value"><span class="anthill-sale-contract">{{ sale.contract_number }}</span></span>
-                            </div>
                             {% endif %}
                             {% if sale.range_name %}
                             <div class="field-row-sb">
@@ -372,7 +372,7 @@
                 <!-- Card 3: Job Info -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-job">
-                        <h3><i class="bi bi-clipboard-check"></i> Job Info</h3>
+                        <h3>Job Info</h3>
                     </div>
                     <div class="card-body padded">
                         <div class="job-info-column">
@@ -565,70 +565,6 @@
                                 <div class="financial-display-value" id="installation_cost_display">
                                     £{{ calculated_installation_cost|floatformat:2 }}
                                 </div>
-                                {% if order.total_value_exc_vat > 0 %}
-                                <div class="financial-progress-wrapper">
-                                    <div class="financial-progress">
-                                        {% if installation_fitter_cost > 0 %}
-                                        <div class="financial-progress-bar-segment installation-fitter-segment" 
-                                             style="width: {% widthratio installation_fitter_cost order.total_value_exc_vat 100 %}%"
-                                             title="Fitter Timesheets: £{{ installation_fitter_cost|floatformat:2 }}"></div>
-                                        {% endif %}
-                                        {% if petrol_cost > 0 %}
-                                        <div class="financial-progress-bar-segment petrol-segment" 
-                                             style="width: {% widthratio petrol_cost order.total_value_exc_vat 100 %}%"
-                                             title="Petrol: £{{ petrol_cost|floatformat:2 }}"></div>
-                                        {% endif %}
-                                        {% if materials_expense_cost > 0 %}
-                                        <div class="financial-progress-bar-segment materials-expense-segment" 
-                                             style="width: {% widthratio materials_expense_cost order.total_value_exc_vat 100 %}%"
-                                             title="Materials Expenses: £{{ materials_expense_cost|floatformat:2 }}"></div>
-                                        {% endif %}
-                                        {% if other_expense_cost > 0 %}
-                                        <div class="financial-progress-bar-segment other-expense-segment" 
-                                             style="width: {% widthratio other_expense_cost order.total_value_exc_vat 100 %}%"
-                                             title="Other Expenses: £{{ other_expense_cost|floatformat:2 }}"></div>
-                                        {% endif %}
-                                        {% if purchase_invoice_ts_cost > 0 %}
-                                        <div class="financial-progress-bar-segment purchase-invoice-segment" 
-                                             style="width: {% widthratio purchase_invoice_ts_cost order.total_value_exc_vat 100 %}%"
-                                             title="Purchase Invoices: £{{ purchase_invoice_ts_cost|floatformat:2 }}"></div>
-                                        {% endif %}
-                                    </div>
-                                    <span class="financial-percentage">{% widthratio calculated_installation_cost order.total_value_exc_vat 100 %}%</span>
-                                </div>
-                                <div class="cost-breakdown-legend">
-                                    {% if installation_fitter_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color installation-fitter-color"></span>
-                                        Fitters: £{{ installation_fitter_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if petrol_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color petrol-color"></span>
-                                        Petrol: £{{ petrol_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if materials_expense_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color materials-expense-color"></span>
-                                        Materials: £{{ materials_expense_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if other_expense_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color other-expense-color"></span>
-                                        Other: £{{ other_expense_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if purchase_invoice_ts_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color purchase-invoice-color"></span>
-                                        Invoices: £{{ purchase_invoice_ts_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                </div>
-                                {% endif %}
                             </div>
                         </div>
 
@@ -644,16 +580,6 @@
                                 <div class="financial-display-value" id="manufacturing_cost_display">
                                     £{{ calculated_manufacturing_cost|floatformat:2 }}
                                 </div>
-                                {% if order.total_value_exc_vat > 0 and calculated_manufacturing_cost > 0 %}
-                                <div class="financial-progress-wrapper">
-                                    <div class="financial-progress">
-                                        <div class="financial-progress-bar-segment manufacturing-worker-segment manufacturing-worker-1" 
-                                             style="width: {% widthratio calculated_manufacturing_cost order.total_value_exc_vat 100 %}%"
-                                             title="Manufacturing: £{{ calculated_manufacturing_cost|floatformat:2 }}"></div>
-                                    </div>
-                                    <span class="financial-percentage">{% widthratio calculated_manufacturing_cost order.total_value_exc_vat 100 %}%</span>
-                                </div>
-                                {% endif %}
                             </div>
                         </div>
 
@@ -771,9 +697,6 @@
                     <div class="pnx-items-header">
                         <p><strong>PNX Items for this Order ({{ bpo_data.pnx_items|length }} items):</strong></p>
                         <div class="btn-row-gap">
-                            <button type="button" class="btn btn-warning btn-sm" onclick="reimportPNX({{ bpo_data.po.id }})">
-                                <i class="bi bi-arrow-clockwise"></i> Reimport from PNX
-                            </button>
                             <button type="button" class="btn btn-danger btn-sm btn-delete-selected" data-boards-po-id="{{ bpo_data.po.id }}">
                                 <i class="bi bi-trash"></i> Delete Selected
                             </button>
@@ -1374,8 +1297,8 @@
                                         {% with remaining=glass|calculate_remaining %}
                                             <div class="accessory-price-info">
                                                 <div><span>Stock</span><span>{{ glass.available_quantity|floatformat:0 }}</span></div>
-                                                <div><span>Allocated</span><span>{{ glass.allocated_quantity|floatformat:0 }}</span></div>
-                                                <div class="{% if glass.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ glass.incoming_quantity|floatformat:0 }}</span></div>
+                                                <div class="stock-detail-row"><span>Allocated</span><span>{{ glass.allocated_quantity|floatformat:0 }}</span></div>
+                                                <div class="stock-detail-row {% if glass.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ glass.incoming_quantity|floatformat:0 }}</span></div>
                                                 <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
                                             </div>
                                         {% endwith %}
@@ -1488,8 +1411,8 @@
                                         {% with remaining=rau|calculate_remaining %}
                                             <div class="accessory-price-info">
                                                 <div><span>Stock</span><span>{{ rau.available_quantity|floatformat:0 }}</span></div>
-                                                <div><span>Allocated</span><span>{{ rau.allocated_quantity|floatformat:0 }}</span></div>
-                                                <div class="{% if rau.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ rau.incoming_quantity|floatformat:0 }}</span></div>
+                                                <div class="stock-detail-row"><span>Allocated</span><span>{{ rau.allocated_quantity|floatformat:0 }}</span></div>
+                                                <div class="stock-detail-row {% if rau.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ rau.incoming_quantity|floatformat:0 }}</span></div>
                                                 <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
                                             </div>
                                         {% endwith %}
@@ -1540,7 +1463,7 @@
     <div class="timesheets-row">
 
         <!-- Installation Card -->
-        <div class="card card-accent-purple">
+        <div class="card">
             <div class="card-header timesheet-card-header">
                 <h3>Installation</h3>
                 <button type="button" class="btn btn-danger btn-sm d-none" id="deleteSelectedInstallationBtn" onclick="deleteSelectedTimesheets('installation')">
@@ -1604,7 +1527,7 @@
         </div>
 
         <!-- Manufacturing Card -->
-        <div class="card card-accent-orange">
+        <div class="card">
             <div class="card-header timesheet-card-header">
                 <h3>Manufacturing</h3>
                 <button type="button" class="btn btn-danger btn-sm d-none" id="deleteSelectedManufacturingBtn" onclick="deleteSelectedTimesheets('manufacturing')">
@@ -1660,7 +1583,7 @@
         </div>
 
         <!-- Expenses Card -->
-        <div class="card card-accent-red">
+        <div class="card">
             <div class="card-header">
                 <h3>Expenses</h3>
             </div>
