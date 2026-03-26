@@ -3261,111 +3261,143 @@ def purchase_order_push_to_xero(request, po_id):
 
     from stock_take.services import xero_api
     from django.utils import timezone
+    import traceback
+
+    try:
+        po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+        # Prevent duplicate pushes
+        if po.xero_purchase_order_id:
+            return JsonResponse({
+                'success': False,
+                'error': f'Already pushed to Xero (ID: {po.xero_purchase_order_id})'
+            }, status=400)
+
+        if not po.supplier_name:
+            return JsonResponse({'success': False, 'error': 'Purchase order has no supplier name'}, status=400)
+
+        # Build line items from PO products
+        products = po.products.all().order_by('sort_order', 'id')
+        if not products.exists():
+            return JsonResponse({'success': False, 'error': 'Purchase order has no line items'}, status=400)
+
+        line_items = []
+        for product in products:
+            line = {
+                'description': product.name or product.description or product.sku or 'Item',
+                'quantity': float(product.order_quantity or product.quantity or 1),
+                'unit_amount': float(product.order_price or 0),
+            }
+            if product.account_code:
+                line['account_code'] = product.account_code
+            if product.tax_type:
+                line['tax_type'] = product.tax_type
+            if product.supplier_code:
+                line['item_code'] = product.supplier_code
+            line_items.append(line)
+
+        # Format dates for Xero (YYYY-MM-DD)
+        issue_date = None
+        if po.issue_date:
+            try:
+                parsed = datetime.strptime(po.issue_date[:10], '%Y-%m-%d')
+                issue_date = parsed.strftime('%Y-%m-%d')
+            except (ValueError, TypeError):
+                pass
+
+        delivery_date = None
+        if po.expected_date:
+            try:
+                parsed = datetime.strptime(po.expected_date[:10], '%Y-%m-%d')
+                delivery_date = parsed.strftime('%Y-%m-%d')
+            except (ValueError, TypeError):
+                pass
+
+        # Build delivery address if available
+        delivery_address = None
+        if any([po.delivery_address_1, po.delivery_address_2, po.suburb, po.state, po.postcode]):
+            delivery_address = {}
+            if po.delivery_address_1:
+                delivery_address['AddressLine1'] = po.delivery_address_1
+            if po.delivery_address_2:
+                delivery_address['AddressLine2'] = po.delivery_address_2
+            if po.suburb:
+                delivery_address['City'] = po.suburb
+            if po.state:
+                delivery_address['Region'] = po.state
+            if po.postcode:
+                delivery_address['PostalCode'] = po.postcode
+
+        # Build reference from project info
+        reference = po.description or ''
+
+        result = xero_api.create_purchase_order(
+            contact_name=po.supplier_name,
+            po_number=po.display_number or f'PO-{po.workguru_id}',
+            line_items=line_items,
+            date=issue_date,
+            delivery_date=delivery_date,
+            reference=reference,
+            currency=po.currency or 'GBP',
+            status='SUBMITTED',
+            delivery_address=delivery_address,
+        )
+
+        if result and 'PurchaseOrders' in result:
+            xero_po = result['PurchaseOrders'][0]
+            xero_po_id = xero_po.get('PurchaseOrderID', '')
+
+            if xero_po_id:
+                po.xero_purchase_order_id = xero_po_id
+                po.xero_pushed_at = timezone.now()
+                po.save(update_fields=['xero_purchase_order_id', 'xero_pushed_at'])
+
+                log_activity(
+                    user=request.user,
+                    event_type='xero_push',
+                    description=f'Pushed {po.display_number} to Xero (ID: {xero_po_id})',
+                )
+
+            return JsonResponse({
+                'success': True,
+                'xero_id': xero_po_id,
+                'xero_po_number': xero_po.get('PurchaseOrderNumber', ''),
+                'xero_status': xero_po.get('Status', ''),
+            })
+        else:
+            error_detail = xero_api.get_last_api_error() or 'Unknown error'
+            return JsonResponse({
+                'success': False,
+                'error': f'Failed to create purchase order in Xero: {error_detail}'
+            }, status=500)
+
+    except Exception as e:
+        logger.error(f"Push to Xero failed: {traceback.format_exc()}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Server error: {str(e)}'
+        }, status=500)
+
+
+@login_required
+def purchase_order_remove_xero_sync(request, po_id):
+    """Remove the Xero sync flag from a purchase order (does not delete from Xero)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
 
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
 
-    # Prevent duplicate pushes
-    if po.xero_purchase_order_id:
-        return JsonResponse({
-            'success': False,
-            'error': f'Already pushed to Xero (ID: {po.xero_purchase_order_id})'
-        }, status=400)
+    if not po.xero_purchase_order_id:
+        return JsonResponse({'success': False, 'error': 'Not synced to Xero'}, status=400)
 
-    if not po.supplier_name:
-        return JsonResponse({'success': False, 'error': 'Purchase order has no supplier name'}, status=400)
+    po.xero_purchase_order_id = None
+    po.xero_pushed_at = None
+    po.save(update_fields=['xero_purchase_order_id', 'xero_pushed_at'])
 
-    # Build line items from PO products
-    products = po.products.all().order_by('sort_order', 'id')
-    if not products.exists():
-        return JsonResponse({'success': False, 'error': 'Purchase order has no line items'}, status=400)
-
-    line_items = []
-    for product in products:
-        line = {
-            'description': product.name or product.description or product.sku or 'Item',
-            'quantity': float(product.order_quantity or product.quantity or 1),
-            'unit_amount': float(product.order_price or 0),
-        }
-        if product.account_code:
-            line['account_code'] = product.account_code
-        if product.tax_type:
-            line['tax_type'] = product.tax_type
-        if product.supplier_code:
-            line['item_code'] = product.supplier_code
-        line_items.append(line)
-
-    # Format dates for Xero (YYYY-MM-DD)
-    issue_date = None
-    if po.issue_date:
-        try:
-            parsed = datetime.strptime(po.issue_date[:10], '%Y-%m-%d')
-            issue_date = parsed.strftime('%Y-%m-%d')
-        except (ValueError, TypeError):
-            pass
-
-    delivery_date = None
-    if po.expected_date:
-        try:
-            parsed = datetime.strptime(po.expected_date[:10], '%Y-%m-%d')
-            delivery_date = parsed.strftime('%Y-%m-%d')
-        except (ValueError, TypeError):
-            pass
-
-    # Build delivery address if available
-    delivery_address = None
-    if any([po.delivery_address_1, po.delivery_address_2, po.suburb, po.state, po.postcode]):
-        delivery_address = {}
-        if po.delivery_address_1:
-            delivery_address['AddressLine1'] = po.delivery_address_1
-        if po.delivery_address_2:
-            delivery_address['AddressLine2'] = po.delivery_address_2
-        if po.suburb:
-            delivery_address['City'] = po.suburb
-        if po.state:
-            delivery_address['Region'] = po.state
-        if po.postcode:
-            delivery_address['PostalCode'] = po.postcode
-
-    # Build reference from project info
-    reference = po.description or ''
-
-    result = xero_api.create_purchase_order(
-        contact_name=po.supplier_name,
-        po_number=po.display_number or f'PO-{po.workguru_id}',
-        line_items=line_items,
-        date=issue_date,
-        delivery_date=delivery_date,
-        reference=reference,
-        currency=po.currency or 'GBP',
-        status='AUTHORISED',
-        delivery_address=delivery_address,
+    log_activity(
+        user=request.user,
+        event_type='xero_unsync',
+        description=f'Removed Xero sync from {po.display_number}',
     )
 
-    if result and 'PurchaseOrders' in result:
-        xero_po = result['PurchaseOrders'][0]
-        xero_po_id = xero_po.get('PurchaseOrderID', '')
-
-        if xero_po_id:
-            po.xero_purchase_order_id = xero_po_id
-            po.xero_pushed_at = timezone.now()
-            po.save(update_fields=['xero_purchase_order_id', 'xero_pushed_at'])
-
-            log_activity(
-                user=request.user,
-                action='xero_push',
-                target_type='purchase_order',
-                target_id=str(po.workguru_id),
-                detail=f'Pushed {po.display_number} to Xero (ID: {xero_po_id})',
-            )
-
-        return JsonResponse({
-            'success': True,
-            'xero_id': xero_po_id,
-            'xero_po_number': xero_po.get('PurchaseOrderNumber', ''),
-            'xero_status': xero_po.get('Status', ''),
-        })
-    else:
-        return JsonResponse({
-            'success': False,
-            'error': 'Failed to create purchase order in Xero. Check server logs for details.'
-        }, status=500)
+    return JsonResponse({'success': True})

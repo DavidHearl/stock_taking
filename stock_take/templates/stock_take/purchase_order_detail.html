@@ -72,11 +72,6 @@
                 <i class="bi bi-box-arrow-in-down"></i> Receive
             </button>
             {% endif %}
-            {% if purchase_order.status != 'Cancelled' and purchase_order.status != 'Received' %}
-            <button class="btn btn-sm btn-cancel-po" onclick="cancelPO()">
-                <i class="bi bi-x-octagon"></i> Cancel PO
-            </button>
-            {% endif %}
             {% if purchase_order.status == 'Cancelled' %}
             <button class="btn btn-sm btn-reactivate" onclick="updatePOStatus('Draft')">
                 <i class="bi bi-arrow-counterclockwise"></i> Reactivate
@@ -102,6 +97,23 @@
                 <i class="bi bi-cloud-upload"></i> Push to Xero
             </button>
             {% endif %}
+            <div class="po-more-menu">
+                <button class="btn btn-sm btn-secondary po-more-btn" onclick="toggleMoreMenu(event)" title="More actions">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <div class="po-more-dropdown" id="po-more-dropdown">
+                    {% if purchase_order.status != 'Cancelled' and purchase_order.status != 'Received' %}
+                    <button class="po-more-item danger" onclick="cancelPO()">
+                        <i class="bi bi-x-octagon"></i> Cancel PO
+                    </button>
+                    {% endif %}
+                    {% if purchase_order.xero_purchase_order_id %}
+                    <button class="po-more-item" onclick="removeXeroSync()">
+                        <i class="bi bi-cloud-slash"></i> Remove Xero Sync
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </div>
 
@@ -403,20 +415,16 @@
                             <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
                         </td>
                         <td class="text-right">
-                            <span class="po-view-val">£{{ product.order_price|floatformat:2 }}</span>
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price }}" style="display:none;" oninput="recalcRowLineTotal(this)">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price }}" oninput="recalcRowLineTotal(this)">
                         </td>
                         <td class="text-right">
-                            <span class="po-view-val">{{ product.order_quantity|floatformat:0 }}</span>
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="1" value="{{ product.order_quantity|floatformat:0 }}" style="display:none;" oninput="recalcRowLineTotal(this)">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="1" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this)">
                         </td>
                         <td class="text-right">
-                            <span class="po-view-val">{{ product.received_quantity|floatformat:2 }}</span>
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="0.01" value="{{ product.received_quantity }}" style="display:none;">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="1" value="{{ product.received_quantity|floatformat:0 }}">
                         </td>
                         <td class="text-right">
-                            <span class="po-view-val">£{{ product.invoice_price|floatformat:2 }}</span>
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price }}" style="display:none;">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price }}">
                         </td>
                         <td class="text-right">
                             <span class="po-line-total-display">£{{ product.line_total|floatformat:2 }}</span>
@@ -1299,7 +1307,7 @@ function removeProject(poId, projectId, btn) {
 function toggleEditMode() {
     editMode = true;
     document.querySelectorAll('.po-view-val').forEach(el => el.style.display = 'none');
-    document.querySelectorAll('.po-edit-val').forEach(el => el.style.display = '');
+    document.querySelectorAll('.po-edit-val:not(.po-edit-number)').forEach(el => el.style.display = '');
     document.getElementById('edit-toggle-btn').style.display = 'none';
     document.getElementById('save-btn').style.display = '';
     document.getElementById('cancel-btn').style.display = '';
@@ -1310,7 +1318,7 @@ function toggleEditMode() {
 function cancelEdit() {
     editMode = false;
     document.querySelectorAll('.po-view-val').forEach(el => el.style.display = '');
-    document.querySelectorAll('.po-edit-val').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.po-edit-val:not(.po-edit-number)').forEach(el => el.style.display = 'none');
     document.getElementById('edit-toggle-btn').style.display = '';
     document.getElementById('save-btn').style.display = 'none';
     document.getElementById('cancel-btn').style.display = 'none';
@@ -1886,7 +1894,12 @@ function pushToXero() {
             'X-CSRFToken': '{{ csrf_token }}',
         },
     })
-    .then(res => res.json())
+    .then(res => {
+        if (!res.ok && res.headers.get('content-type')?.indexOf('application/json') === -1) {
+            throw new Error(`Server error ${res.status}: ${res.statusText}`);
+        }
+        return res.json();
+    })
     .then(result => {
         if (result.success) {
             showNotification('Purchase order pushed to Xero successfully.', 'success');
@@ -1902,6 +1915,42 @@ function pushToXero() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
     });
+}
+
+// ---- More Menu ----
+function toggleMoreMenu(e) {
+    e.stopPropagation();
+    const dropdown = document.getElementById('po-more-dropdown');
+    dropdown.classList.toggle('open');
+}
+
+document.addEventListener('click', function(e) {
+    const dropdown = document.getElementById('po-more-dropdown');
+    if (dropdown && !e.target.closest('.po-more-menu')) {
+        dropdown.classList.remove('open');
+    }
+});
+
+function removeXeroSync() {
+    if (!confirm('Remove the Xero sync for this purchase order? This will not delete it from Xero.')) return;
+
+    fetch('{% url "purchase_order_remove_xero_sync" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Xero sync removed.', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification('Error: ' + (result.error || 'Failed'), 'error');
+        }
+    })
+    .catch(err => showNotification('Network error: ' + err.message, 'error'));
 }
 
 // ---- Attachments ----

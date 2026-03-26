@@ -283,15 +283,28 @@ def _api_post(endpoint, data):
         "Content-Type": "application/json",
     }
 
+    global _last_api_error
     try:
         response = requests.post(url, headers=headers, json=data, timeout=30)
         response.raise_for_status()
+        _last_api_error = None
         return response.json()
     except requests.RequestException as e:
-        logger.error(f"Xero API POST error ({endpoint}): {e}")
+        error_detail = str(e)
         if hasattr(e, 'response') and e.response is not None:
-            logger.error(f"Response body: {e.response.text}")
+            error_detail = e.response.text
+            logger.error(f"Response body: {error_detail}")
+        logger.error(f"Xero API POST error ({endpoint}): {e}")
+        _last_api_error = error_detail
         return None
+
+
+_last_api_error = None
+
+
+def get_last_api_error():
+    """Return the last API error message for user-facing diagnostics."""
+    return _last_api_error
 
 
 def _api_put(endpoint, data):
@@ -313,14 +326,19 @@ def _api_put(endpoint, data):
         "Content-Type": "application/json",
     }
 
+    global _last_api_error
     try:
         response = requests.put(url, headers=headers, json=data, timeout=30)
         response.raise_for_status()
+        _last_api_error = None
         return response.json()
     except requests.RequestException as e:
-        logger.error(f"Xero API PUT error ({endpoint}): {e}")
+        error_detail = str(e)
         if hasattr(e, 'response') and e.response is not None:
-            logger.error(f"Response body: {e.response.text}")
+            error_detail = e.response.text
+            logger.error(f"Response body: {error_detail}")
+        logger.error(f"Xero API PUT error ({endpoint}): {e}")
+        _last_api_error = error_detail
         return None
 
 
@@ -945,22 +963,17 @@ def create_purchase_order(contact_name, po_number, line_items, date=None,
     """
     Create a purchase order in Xero with status AUTHORISED (approved).
 
-    Args:
-        contact_name: Supplier name (must exist as a Xero contact).
-        po_number: PO number string (e.g. "PO-00123").
-        line_items: List of dicts with keys: description, quantity, unit_amount, account_code, tax_type.
-        date: Issue date string "YYYY-MM-DD" (defaults to today).
-        delivery_date: Expected delivery date "YYYY-MM-DD".
-        reference: Reference string.
-        currency: Currency code (default GBP).
-        status: Xero PO status - "AUTHORISED" to go to approved section.
-        delivery_address: Optional dict with AddressLine1, AddressLine2, City, Region, PostalCode, Country.
-
-    Returns:
-        Parsed JSON response or None on failure.
+    Looks up the supplier by name in Xero to get their ContactID.
     """
+    # Look up the contact by name to get the ContactID
+    contact_id = find_contact_by_name(contact_name)
+    if not contact_id:
+        global _last_api_error
+        _last_api_error = f'Supplier "{contact_name}" not found in Xero. Create the contact in Xero first.'
+        return None
+
     po_data = {
-        "Contact": {"Name": contact_name},
+        "Contact": {"ContactID": contact_id},
         "PurchaseOrderNumber": po_number,
         "Status": status,
         "CurrencyCode": currency,
@@ -992,4 +1005,9 @@ def create_purchase_order(contact_name, po_number, line_items, date=None,
         po_data["LineItems"].append(line)
 
     payload = {"PurchaseOrders": [po_data]}
-    return _api_put("PurchaseOrders", payload)
+    result = _api_put("PurchaseOrders", payload)
+    if result is None:
+        # Retry with POST — some Xero configurations prefer POST for creation
+        logger.info("PUT failed for PurchaseOrders, retrying with POST")
+        result = _api_post("PurchaseOrders", payload)
+    return result

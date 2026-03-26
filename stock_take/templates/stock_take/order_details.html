@@ -558,8 +558,8 @@
                             <div class="financial-card-content">
                                 <span class="financial-card-label">
                                     Installation Cost
-                                    <button type="button" class="btn btn-sm btn-primary ms-2 btn-timesheet-add" onclick="openTimesheetModal('installation')">
-                                        <i class="bi bi-plus-circle"></i> Add
+                                    <button type="button" class="btn-add-icon" onclick="openTimesheetModal('installation')" title="Add Installation Cost">
+                                        <i class="bi bi-plus-lg"></i>
                                     </button>
                                 </span>
                                 <div class="financial-display-value" id="installation_cost_display">
@@ -637,8 +637,8 @@
                             <div class="financial-card-content">
                                 <span class="financial-card-label">
                                     Manufacturing Cost
-                                    <button type="button" class="btn btn-sm btn-primary ms-2 btn-timesheet-add" onclick="openTimesheetModal('manufacturing')">
-                                        <i class="bi bi-plus-circle"></i> Add
+                                    <button type="button" class="btn-add-icon" onclick="openTimesheetModal('manufacturing')" title="Add Manufacturing Cost">
+                                        <i class="bi bi-plus-lg"></i>
                                     </button>
                                 </span>
                                 <div class="financial-display-value" id="manufacturing_cost_display">
@@ -731,19 +731,16 @@
                             </label>
                         </span>
                     </div>
+                    <div class="section-actions">
                     {% if order.customer_number %}
                         <button type="button" class="btn btn-sm btn-generate-cad" onclick="analyzePNXGeneration(event, {{ bpo_data.po.id }})">
-                            <i class="bi bi-file-earmark-plus"></i> Generate PNX - CAD
+                            <i class="bi bi-stars"></i> Generate
                         </button>
                     {% endif %}
-                    <div class="section-actions">
-                        <button type="button" class="btn btn-sm btn-add-board" data-boards-po-id="{{ bpo_data.po.id }}" onclick="openAddBoardModal({{ bpo_data.po.id }})">
-                            <i class="bi bi-plus-circle"></i> Add Board
-                        </button>
                         {% if bpo_data.pnx_items and bpo_data.po.po_number %}
                             {% if bpo_data.purchase_order %}
-                                <button type="button" class="btn btn-sm btn-update-files-po" onclick="updateBoardsPO({{ bpo_data.po.id }})" title="Regenerate PNX/CSV files and update PO attachments">
-                                    <i class="bi bi-arrow-repeat"></i> Update Files &amp; PO
+                                <button type="button" class="btn btn-sm btn-update-icon" onclick="updateBoardsPO({{ bpo_data.po.id }})" title="Update Files & PO">
+                                    <i class="bi bi-arrow-repeat"></i>
                                 </button>
                             {% else %}
                                 <a href="{% url 'create_boards_purchase_order' order.id %}?boards_po_id={{ bpo_data.po.id }}" class="btn btn-sm btn-create-po"
@@ -763,6 +760,9 @@
                                 <i class="bi bi-check-lg"></i> Save Changes
                             </button>
                         {% endif %}
+                        <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -931,441 +931,21 @@
         </div>
         {% endif %}
 
-        <!-- OS Doors Section -->
-        <div class="card">
-            <div class="card-header">
-                <div class="boards-header-left">
-                    {% if os_doors_purchase_order %}
-                        <a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
-                            <i class="bi bi-eye"></i> View PO
-                        </a>
-                    {% endif %}
-                    <h3>
-                        {% if order.os_doors_po %}{{ order.os_doors_po }}: {% endif %}OS Doors
-                        {% if order.os_doors_required %}
-                            {% if order.os_doors_po %}
-                                <span class="badge badge-success badge-ml">Ordered</span>
-                            {% else %}
-                                <span class="badge badge-danger badge-ml">Required</span>
-                            {% endif %}
-                        {% endif %}
-                    </h3>
-                </div>
-                <div class="header-actions">
-                    {% if os_doors_purchase_order %}
-                        <button type="button" class="btn btn-sm btn-outline-amber" id="update-os-doors-po-btn"
-                                title="Sync current cost/qty to the linked Purchase Order"
-                                onclick="syncOSDoorsPO({{ order.id }})">
-                            <i class="bi bi-arrow-repeat"></i> Update PO
-                        </button>
-                    {% endif %}
-                    {% if not order.os_doors_po %}
-                    <button type="button"
-                            class="btn btn-sm btn-create-po"
-                            title="Create a local PO for OS Doors"
-                            onclick="createOSDoorsPO({{ order.id }})">
-                        <i class="bi bi-file-earmark-plus"></i> Create PO
-                    </button>
-                    {% endif %}
-                    <button type="button" class="btn btn-sm btn-save-dims" id="save-os-doors-changes" style="display: none;">
-                        <i class="bi bi-save"></i> Save Changes
-                    </button>
-                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-os-doors-selected">
-                        <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
-                    </button>
-                    <button class="btn btn-sm btn-outline-teal" type="button" onclick="openPasteOSDoorModal('{{ order.os_doors_po }}')">
-                        <i class="bi bi-clipboard"></i> Paste OS Door
-                    </button>
-                    <button class="btn btn-sm btn-outline-green" type="button" onclick="openAddOSDoorModal('{{ order.os_doors_po }}')">
-                        <i class="bi bi-plus-lg"></i> Add OS Door
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <!-- Existing OS Doors for this PO -->
-                {% if order.os_doors.all %}
-                <div class="table-container">
-                    <table class="table" id="os-doors-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="os-door-select-all" title="Select all"></th>
-                                <th>Door Style</th>
-                                <th>Style Colour</th>
-                                <th>Height</th>
-                                <th>Width</th>
-                                <th>Colour</th>
-                                <th>Qty</th>
-                                <th>Cost Price</th>
-                                <th>Total Cost</th>
-                                <th>Ordered</th>
-                                <th>Received</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for os_door in order.os_doors.all %}
-                            {% if not os_door.po_number or os_door.po_number == order.os_doors_po %}
-                            <tr data-os-door-id="{{ os_door.id }}">
-                                <td><input type="checkbox" class="checkbox-input os-door-select" data-os-door-id="{{ os_door.id }}"></td>
-                                <td>{{ os_door.door_style }}</td>
-                                <td>{{ os_door.style_colour }}</td>
-                                <td>{{ os_door.height|floatformat:0 }}</td>
-                                <td>{{ os_door.width|floatformat:0 }}</td>
-                                <td>{{ os_door.colour }}</td>
-                                <td>
-                                    <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60" 
-                                           data-os-door-id="{{ os_door.id }}" 
-                                           value="{{ os_door.quantity }}">
-                                </td>
-                                <td>
-                                    <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100" 
-                                           data-os-door-id="{{ os_door.id }}" 
-                                           value="{{ os_door.cost_price }}" 
-                                           placeholder="£0.00">
-                                </td>
-                                <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
-                                    £{{ os_door.cost_price|multiply:os_door.quantity }}
-                                </td>
-                                <td>
-                                    {% if os_door.ordered %}
-                                        <span class="status-icon success">✓</span>
-                                    {% else %}
-                                        <span class="status-icon muted">✕</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <input type="checkbox" class="checkbox-input os-door-received-checkbox" 
-                                           data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
-                                </td>
-                            </tr>
-                            {% endif %}
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-muted">No OS doors added yet.</p>
-                {% endif %}
-
-            </div>
-        </div>
-
-        {% if order.os_doors_po %}
-        {% for apo in additional_os_doors_pos_list %}
-        <div class="card mt-3">
-            <div class="card-header">
-                <div class="boards-header-left">
-                    <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
-                        <i class="bi bi-eye"></i> View PO
-                    </a>
-                    <h3>{{ apo.display_number }}: OS Doors <span class="badge badge-info badge-ml">Additional</span>{% if apo.email_sent_at %} <span class="badge badge-ordered">Ordered</span>{% endif %}</h3>
-                </div>
-                <div class="header-actions">
-                    <button type="button" class="btn btn-sm btn-outline-amber" title="Sync to Purchase Order" onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}')">
-                        <i class="bi bi-arrow-repeat"></i> Update PO
-                    </button>
-                    <button class="btn btn-sm btn-outline-teal" type="button" onclick="openPasteOSDoorModal('{{ apo.display_number }}')">
-                        <i class="bi bi-clipboard"></i> Paste OS Door
-                    </button>
-                    <button class="btn btn-sm btn-outline-green" type="button" onclick="openAddOSDoorModal('{{ apo.display_number }}')">
-                        <i class="bi bi-plus-lg"></i> Add OS Door
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
-                    <thead>
-                        <tr>
-                            <th>Door Style</th>
-                            <th>Style Colour</th>
-                            <th>Height</th>
-                            <th>Width</th>
-                            <th>Colour</th>
-                            <th>Qty</th>
-                            <th>Cost Price</th>
-                            <th>Total Cost</th>
-                            <th>Ordered</th>
-                            <th>Received</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for os_door in order.os_doors.all %}
-                        {% if os_door.po_number == apo.display_number %}
-                        <tr data-os-door-id="{{ os_door.id }}">
-                            <td>{{ os_door.door_style }}</td>
-                            <td>{{ os_door.style_colour }}</td>
-                            <td>{{ os_door.height|floatformat:0 }}</td>
-                            <td>{{ os_door.width|floatformat:0 }}</td>
-                            <td>{{ os_door.colour }}</td>
-                            <td>
-                                <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60"
-                                       data-os-door-id="{{ os_door.id }}"
-                                       value="{{ os_door.quantity }}">
-                            </td>
-                            <td>
-                                <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100"
-                                       data-os-door-id="{{ os_door.id }}"
-                                       value="{{ os_door.cost_price }}"
-                                       placeholder="£0.00">
-                            </td>
-                            <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
-                                £{{ os_door.cost_price|multiply:os_door.quantity }}
-                            </td>
-                            <td>
-                                {% if os_door.ordered %}
-                                    <span class="status-icon success">✓</span>
-                                {% else %}
-                                    <span class="status-icon muted">✕</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <input type="checkbox" class="checkbox-input os-door-received-checkbox"
-                                       data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
-                            </td>
-                        </tr>
-                        {% endif %}
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endfor %}
-        <div class="section-add-row-top">
-            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addAdditionalOSDoorsPO({{ order.id }})">
-                <i class="bi bi-plus-lg"></i> Add Additional OS Doors PO
-            </button>
-        </div>
-        {% endif %}
-
-        <!-- Glass Section -->
-        <div class="card">
-            <div class="card-header">
-                <h3>
-                    Glass
-                    {% if glass_items %}
-                        <span class="badge badge-info badge-ml">{{ glass_items|length }} item{{ glass_items|length|pluralize }}</span>
-                    {% endif %}
-                </h3>
-                <div class="header-actions">
-                    <button class="btn btn-sm btn-primary" type="button" onclick="openModal('addGlassModal')">
-                        <i class="bi bi-plus-lg"></i> Add Glass
-                    </button>
-                    {% if glass_items %}
-                    <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-glass-changes" style="display: none;">
-                        <i class="bi bi-save"></i> Save Changes
-                    </button>
-                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-glass-selected" title="Delete selected">
-                        <i class="bi bi-trash"></i> <span id="glass-selected-count">0</span>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-add-to-po hidden" id="glass-add-to-po" onclick="openAddToPOModal('glass')">
-                        <i class="bi bi-cart-plus"></i> Add to PO
-                    </button>
-                    <button type="button" class="btn btn-sm btn-create-po hidden" id="glass-create-po" onclick="createPOFromSelected('glass')">
-                        <i class="bi bi-file-earmark-plus"></i> Create PO
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="card-body">
-                {% if glass_items %}
-                <div class="table-container">
-                    <table class="table" id="glass-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="glass-select-all" title="Select all"></th>
-                                <th>SKU</th>
-                                <th>Name</th>
-                                <th>Cut Size</th>
-                                <th>Qty</th>
-                                <th>Cost</th>
-                                <th>Stock</th>
-                                <th style="text-align: center;">Replace</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for glass in glass_items %}
-                            <tr data-accessory-id="{{ glass.id }}" {% if glass.is_allocated %}class="allocated-row"{% endif %}>
-                                <td><input type="checkbox" class="checkbox-input glass-select" data-accessory-id="{{ glass.id }}" data-allocated="{{ glass.is_allocated|yesno:'1,0' }}"></td>
-                                <td>{% if glass.stock_item %}<a href="{% url 'product_detail' glass.stock_item.id %}" class="sku-link">{{ glass.sku }}</a>{% else %}{{ glass.sku }}{% endif %}</td>
-                                <td>{{ glass.name }}</td>
-                                <td class="cut-size-cell">
-                                    {% if glass.is_cut_to_size %}
-                                    <div class="cut-size-inputs">
-                                        <input type="number" class="cut-size-input" 
-                                               id="cut-width-{{ glass.id }}" 
-                                               value="{{ glass.cut_width|default_if_none:''|floatformat:0 }}" 
-                                               placeholder="W" min="1" step="1" title="Width (mm)"
-                                               data-accessory-id="{{ glass.id }}" data-field="cut_width">
-                                        <span class="cut-size-x">&times;</span>
-                                        <input type="number" class="cut-size-input" 
-                                               id="cut-height-{{ glass.id }}" 
-                                               value="{{ glass.cut_height|default_if_none:''|floatformat:0 }}" 
-                                               placeholder="H" min="1" step="1" title="Height (mm)"
-                                               data-accessory-id="{{ glass.id }}" data-field="cut_height">
-                                        <span class="cut-size-unit">mm</span>
-                                        <button type="button" class="cut-size-save-btn" onclick="saveCutSize({{ glass.id }})" title="Save dimensions">
-                                            <i class="bi bi-check-lg"></i>
-                                        </button>
-                                    </div>
-                                    {% else %}
-                                    <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <input type="number" class="quantity-input glass-quantity" 
-                                           value="{{ glass.quantity|floatformat:0 }}" 
-                                           data-accessory-id="{{ glass.id }}"
-                                           data-original-quantity="{{ glass.quantity|floatformat:0 }}"
-                                           min="0" step="1">
-                                </td>
-                                <td>£{{ glass.cost_price|floatformat:2 }}</td>
-                                <td>
-                                    {% if glass.stock_item %}
-                                        {% with remaining=glass|calculate_remaining %}
-                                            <div class="accessory-price-info">
-                                                <div><span>Stock</span><span>{{ glass.available_quantity|floatformat:0 }}</span></div>
-                                                <div><span>Allocated</span><span>{{ glass.allocated_quantity|floatformat:0 }}</span></div>
-                                                <div class="{% if glass.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ glass.incoming_quantity|floatformat:0 }}</span></div>
-                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
-                                            </div>
-                                        {% endwith %}
-                                    {% else %}
-                                        <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
-                                <td style="text-align: center;">
-                                    <button type="button" class="btn btn-outline-primary btn-sm" title="Replace Item" 
-                                        onclick="openSwapModal('{{ glass.id }}', '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
-                                        <i class="bi bi-arrow-repeat"></i> Replace
-                                    </button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                            <tr class="table-total-row">
-                                <td colspan="5">Total:</td>
-                                <td>£{{ glass_items|sum_accessory_costs }}</td>
-                                <td colspan="2"></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-muted">No glass items added yet.</p>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Raumplus Section -->
-        <div class="card">
-            <div class="card-header">
-                <h3>
-                    Raumplus
-                    {% if raumplus_accessories %}
-                        <span class="badge badge-info badge-ml">{{ raumplus_accessories|length }} item{{ raumplus_accessories|length|pluralize }}</span>
-                    {% endif %}
-                </h3>
-                <div class="header-actions">
-                    {% if raumplus_accessories %}
-                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-raumplus-selected" title="Delete selected">
-                        <i class="bi bi-trash"></i> <span id="raumplus-selected-count">0</span>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-add-to-po hidden" id="raumplus-add-to-po" onclick="openAddToPOModal('raumplus')">
-                        <i class="bi bi-cart-plus"></i> Add to PO
-                    </button>
-                    <button type="button" class="btn btn-sm btn-create-po hidden" id="raumplus-create-po" onclick="createPOFromSelected('raumplus')">
-                        <i class="bi bi-file-earmark-plus"></i> Create PO
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="card-body">
-                {% if raumplus_accessories %}
-                <div class="table-container">
-                    <table class="table" id="raumplus-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="raumplus-select-all" title="Select all"></th>
-                                <th>SKU</th>
-                                <th>Name</th>
-                                <th>Qty</th>
-                                <th>Cost</th>
-                                <th>Stock</th>
-                                <th style="text-align: center;">Replace</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for rau in raumplus_accessories %}
-                            <tr data-accessory-id="{{ rau.id }}" {% if rau.is_allocated %}class="allocated-row"{% endif %}>
-                                <td><input type="checkbox" class="checkbox-input raumplus-select" data-accessory-id="{{ rau.id }}" data-allocated="{{ rau.is_allocated|yesno:'1,0' }}"></td>
-                                <td class="accessory-sku-cell">
-                                    <div class="accessory-sku-cell-inner">
-                                        {% if rau.stock_item %}
-                                            <a href="{% url 'product_detail' rau.stock_item.id %}" class="sku-link" target="_blank">{{ rau.sku }}</a>
-                                        {% else %}
-                                            {{ rau.sku }}
-                                        {% endif %}
-                                        <button type="button" class="btn-copy-sku" title="Copy SKU" onclick="copyToClipboard('{{ rau.sku|escapejs }}', this)"><i class="bi bi-clipboard"></i></button>
-                                    </div>
-                                </td>
-                                <td>{{ rau.name }}</td>
-                                <td>
-                                    <input type="number" class="quantity-input accessory-quantity" 
-                                           value="{{ rau.quantity|floatformat:0 }}" 
-                                           data-accessory-id="{{ rau.id }}"
-                                           data-original-quantity="{{ rau.quantity|floatformat:0 }}"
-                                           min="0" step="1">
-                                </td>
-                                <td>£{{ rau.cost_price|floatformat:2 }}</td>
-                                <td>
-                                    {% if rau.stock_item %}
-                                        {% with remaining=rau|calculate_remaining %}
-                                            <div class="accessory-price-info">
-                                                <div><span>Stock</span><span>{{ rau.available_quantity|floatformat:0 }}</span></div>
-                                                <div><span>Allocated</span><span>{{ rau.allocated_quantity|floatformat:0 }}</span></div>
-                                                <div class="{% if rau.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ rau.incoming_quantity|floatformat:0 }}</span></div>
-                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
-                                            </div>
-                                        {% endwith %}
-                                    {% else %}
-                                        <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
-                                <td style="text-align: center;">
-                                    <button type="button" class="btn btn-sm btn-outline-primary" title="Replace Item" 
-                                        onclick="openSwapModal({{ rau.id }}, '{{ rau.sku }}', '{{ rau.name|escapejs }}')">
-                                        <i class="bi bi-arrow-repeat"></i> Replace
-                                    </button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                            <tr class="table-total-row">
-                                <td colspan="4">Total:</td>
-                                <td>£{{ raumplus_accessories|sum_accessory_costs }}</td>
-                                <td colspan="2"></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-muted">No Raumplus items added yet.</p>
-                {% endif %}
-            </div>
-        </div>
-
             <!-- Accessories Section -->
             <div class="card">
                 <div class="card-header">
                     <h3>
                         Accessories
                         <button type="button" class="btn btn-sm btn-generate-cad" onclick="generateAccessoriesCSV('{% url 'generate_and_upload_accessories_csv' order.id %}')">
-                            <i class="bi bi-file-earmark-spreadsheet"></i> Generate CSV - CAD
+                            <i class="bi bi-stars"></i> Generate
                         </button>
                     </h3>
                     <div class="header-actions">
                         <button type="button" class="btn btn-sm btn-toggle-stock" id="toggle-stock-detail" onclick="toggleStockDetail()" title="Show/hide Allocated & Incoming">
                             <i class="bi bi-eye-slash"></i> Stock Detail
                         </button>
-                        <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('addItemModal')">
-                            <i class="bi bi-plus-lg"></i> Add Item
+                        <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addItemModal')" title="Add Item">
+                            <i class="bi bi-plus-lg"></i>
                         </button>
                         {% if order.original_csv %}
                         <button class="btn btn-sm btn-update-files-po" type="button" onclick="regenerateCSV({{ order.id }})">
@@ -1483,6 +1063,477 @@
                     {% endif %}
                 </div>
             </div>
+
+        <!-- OS Doors Section -->
+        {% if order.os_doors.all or order.os_doors_required %}
+        <div class="card">
+            <div class="card-header">
+                <div class="boards-header-left">
+                    {% if os_doors_purchase_order %}
+                        <a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
+                            <i class="bi bi-eye"></i> View PO
+                        </a>
+                    {% endif %}
+                    <h3>
+                        {% if order.os_doors_po %}{{ order.os_doors_po }}: {% endif %}OS Doors
+                        {% if order.os_doors_required %}
+                            {% if order.os_doors_po %}
+                                <span class="badge badge-success badge-ml">Ordered</span>
+                            {% else %}
+                                <span class="badge badge-danger badge-ml">Required</span>
+                            {% endif %}
+                        {% endif %}
+                    </h3>
+                </div>
+                <div class="header-actions">
+                    {% if os_doors_purchase_order %}
+                        <button type="button" class="btn btn-sm btn-update-icon" id="update-os-doors-po-btn"
+                                title="Sync current cost/qty to the linked Purchase Order"
+                                onclick="syncOSDoorsPO({{ order.id }})">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                    {% endif %}
+                    {% if not order.os_doors_po %}
+                    <button type="button"
+                            class="btn btn-sm btn-create-po-icon"
+                            title="Create a local PO for OS Doors"
+                            onclick="createOSDoorsPO({{ order.id }})">
+                        <i class="bi bi-file-earmark-plus"></i>
+                    </button>
+                    {% endif %}
+                    <button type="button" class="btn btn-sm btn-save-dims" id="save-os-doors-changes" style="display: none;">
+                        <i class="bi bi-save"></i> Save Changes
+                    </button>
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-os-doors-selected">
+                        <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
+                    </button>
+                    <button class="btn btn-sm btn-paste-icon" type="button" onclick="openPasteOSDoorModal('{{ order.os_doors_po }}')" title="Paste OS Door">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                    <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('{{ order.os_doors_po }}')" title="Add OS Door">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Existing OS Doors for this PO -->
+                {% if order.os_doors.all %}
+                <div class="table-container">
+                    <table class="table" id="os-doors-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="os-door-select-all" title="Select all"></th>
+                                <th>Door Style</th>
+                                <th>Style Colour</th>
+                                <th>Height</th>
+                                <th>Width</th>
+                                <th>Colour</th>
+                                <th>Qty</th>
+                                <th>Cost Price</th>
+                                <th>Total Cost</th>
+                                <th>Ordered</th>
+                                <th>Received</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for os_door in order.os_doors.all %}
+                            {% if not os_door.po_number or os_door.po_number == order.os_doors_po %}
+                            <tr data-os-door-id="{{ os_door.id }}">
+                                <td><input type="checkbox" class="checkbox-input os-door-select" data-os-door-id="{{ os_door.id }}"></td>
+                                <td>{{ os_door.door_style }}</td>
+                                <td>{{ os_door.style_colour }}</td>
+                                <td>{{ os_door.height|floatformat:0 }}</td>
+                                <td>{{ os_door.width|floatformat:0 }}</td>
+                                <td>{{ os_door.colour }}</td>
+                                <td>
+                                    <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60" 
+                                           data-os-door-id="{{ os_door.id }}" 
+                                           value="{{ os_door.quantity }}">
+                                </td>
+                                <td>
+                                    <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100" 
+                                           data-os-door-id="{{ os_door.id }}" 
+                                           value="{{ os_door.cost_price }}" 
+                                           placeholder="£0.00">
+                                </td>
+                                <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
+                                    £{{ os_door.cost_price|multiply:os_door.quantity }}
+                                </td>
+                                <td>
+                                    {% if os_door.ordered %}
+                                        <span class="status-icon success">✓</span>
+                                    {% else %}
+                                        <span class="status-icon muted">✕</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <input type="checkbox" class="checkbox-input os-door-received-checkbox" 
+                                           data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No OS doors added yet.</p>
+                {% endif %}
+
+            </div>
+        </div>
+
+        {% if order.os_doors_po %}
+        {% for apo in additional_os_doors_pos_list %}
+        <div class="card mt-3">
+            <div class="card-header">
+                <div class="boards-header-left">
+                    <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
+                        <i class="bi bi-eye"></i> View PO
+                    </a>
+                    <h3>{{ apo.display_number }}: OS Doors <span class="badge badge-info badge-ml">Additional</span>{% if apo.email_sent_at %} <span class="badge badge-ordered">Ordered</span>{% endif %}</h3>
+                </div>
+                <div class="header-actions">
+                    <button type="button" class="btn btn-sm btn-update-icon" title="Sync to Purchase Order" onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}')">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+                    <button class="btn btn-sm btn-paste-icon" type="button" onclick="openPasteOSDoorModal('{{ apo.display_number }}')" title="Paste OS Door">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                    <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('{{ apo.display_number }}')" title="Add OS Door">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
+                    <thead>
+                        <tr>
+                            <th>Door Style</th>
+                            <th>Style Colour</th>
+                            <th>Height</th>
+                            <th>Width</th>
+                            <th>Colour</th>
+                            <th>Qty</th>
+                            <th>Cost Price</th>
+                            <th>Total Cost</th>
+                            <th>Ordered</th>
+                            <th>Received</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for os_door in order.os_doors.all %}
+                        {% if os_door.po_number == apo.display_number %}
+                        <tr data-os-door-id="{{ os_door.id }}">
+                            <td>{{ os_door.door_style }}</td>
+                            <td>{{ os_door.style_colour }}</td>
+                            <td>{{ os_door.height|floatformat:0 }}</td>
+                            <td>{{ os_door.width|floatformat:0 }}</td>
+                            <td>{{ os_door.colour }}</td>
+                            <td>
+                                <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60"
+                                       data-os-door-id="{{ os_door.id }}"
+                                       value="{{ os_door.quantity }}">
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100"
+                                       data-os-door-id="{{ os_door.id }}"
+                                       value="{{ os_door.cost_price }}"
+                                       placeholder="£0.00">
+                            </td>
+                            <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
+                                £{{ os_door.cost_price|multiply:os_door.quantity }}
+                            </td>
+                            <td>
+                                {% if os_door.ordered %}
+                                    <span class="status-icon success">✓</span>
+                                {% else %}
+                                    <span class="status-icon muted">✕</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <input type="checkbox" class="checkbox-input os-door-received-checkbox"
+                                       data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+        <div class="section-add-row-top">
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addAdditionalOSDoorsPO({{ order.id }})">
+                <i class="bi bi-plus-lg"></i> Add Additional OS Doors PO
+            </button>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
+            <span class="section-divider-label"><i class="bi bi-chevron-down"></i> OS Doors</span>
+        </div>
+        <div class="section-divider-content collapsed">
+            <div class="card">
+                <div class="card-header">
+                    <h3>OS Doors</h3>
+                    <div class="header-actions">
+                        <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">No OS doors added yet.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Glass Section -->
+        {% if glass_items %}
+        <div class="card">
+            <div class="card-header">
+                <h3>
+                    Glass
+                    <span class="badge badge-info badge-ml">{{ glass_items|length }} item{{ glass_items|length|pluralize }}</span>
+                </h3>
+                <div class="header-actions">
+                    <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-glass-changes" style="display: none;">
+                        <i class="bi bi-save"></i> Save Changes
+                    </button>
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-glass-selected" title="Delete selected">
+                        <i class="bi bi-trash"></i> <span id="glass-selected-count">0</span>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-add-to-po hidden" id="glass-add-to-po" onclick="openAddToPOModal('glass')">
+                        <i class="bi bi-cart-plus"></i> Add to PO
+                    </button>
+                    <button type="button" class="btn btn-sm btn-create-po hidden" id="glass-create-po" onclick="createPOFromSelected('glass')">
+                        <i class="bi bi-file-earmark-plus"></i> Create PO
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if glass_items %}
+                <div class="table-container">
+                    <table class="table" id="glass-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="glass-select-all" title="Select all"></th>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Cut Size</th>
+                                <th>Qty</th>
+                                <th>Cost</th>
+                                <th>Stock</th>
+                                <th style="text-align: center;">Replace</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for glass in glass_items %}
+                            <tr data-accessory-id="{{ glass.id }}" {% if glass.is_allocated %}class="allocated-row"{% endif %}>
+                                <td><input type="checkbox" class="checkbox-input glass-select" data-accessory-id="{{ glass.id }}" data-allocated="{{ glass.is_allocated|yesno:'1,0' }}"></td>
+                                <td>{% if glass.stock_item %}<a href="{% url 'product_detail' glass.stock_item.id %}" class="sku-link">{{ glass.sku }}</a>{% else %}{{ glass.sku }}{% endif %}</td>
+                                <td>{{ glass.name }}</td>
+                                <td class="cut-size-cell">
+                                    {% if glass.is_cut_to_size %}
+                                    <div class="cut-size-inputs">
+                                        <input type="number" class="cut-size-input" 
+                                               id="cut-width-{{ glass.id }}" 
+                                               value="{{ glass.cut_width|default_if_none:''|floatformat:0 }}" 
+                                               placeholder="W" min="1" step="1" title="Width (mm)"
+                                               data-accessory-id="{{ glass.id }}" data-field="cut_width">
+                                        <span class="cut-size-x">&times;</span>
+                                        <input type="number" class="cut-size-input" 
+                                               id="cut-height-{{ glass.id }}" 
+                                               value="{{ glass.cut_height|default_if_none:''|floatformat:0 }}" 
+                                               placeholder="H" min="1" step="1" title="Height (mm)"
+                                               data-accessory-id="{{ glass.id }}" data-field="cut_height">
+                                        <span class="cut-size-unit">mm</span>
+                                        <button type="button" class="cut-size-save-btn" onclick="saveCutSize({{ glass.id }})" title="Save dimensions">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                    </div>
+                                    {% else %}
+                                    <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <input type="number" class="quantity-input glass-quantity" 
+                                           value="{{ glass.quantity|floatformat:0 }}" 
+                                           data-accessory-id="{{ glass.id }}"
+                                           data-original-quantity="{{ glass.quantity|floatformat:0 }}"
+                                           min="0" step="1">
+                                </td>
+                                <td>£{{ glass.cost_price|floatformat:2 }}</td>
+                                <td>
+                                    {% if glass.stock_item %}
+                                        {% with remaining=glass|calculate_remaining %}
+                                            <div class="accessory-price-info">
+                                                <div><span>Stock</span><span>{{ glass.available_quantity|floatformat:0 }}</span></div>
+                                                <div><span>Allocated</span><span>{{ glass.allocated_quantity|floatformat:0 }}</span></div>
+                                                <div class="{% if glass.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ glass.incoming_quantity|floatformat:0 }}</span></div>
+                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
+                                            </div>
+                                        {% endwith %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td style="text-align: center;">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" title="Replace Item" 
+                                        onclick="openSwapModal('{{ glass.id }}', '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
+                                        <i class="bi bi-arrow-repeat"></i> Replace
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="table-total-row">
+                                <td colspan="5">Total:</td>
+                                <td>£{{ glass_items|sum_accessory_costs }}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No glass items added yet.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
+            <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Glass</span>
+        </div>
+        <div class="section-divider-content collapsed">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Glass</h3>
+                    <div class="header-actions">
+                        <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">No glass items added yet.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Raumplus Section -->
+        {% if raumplus_accessories %}
+        <div class="card">
+            <div class="card-header">
+                <h3>
+                    Raumplus
+                    <span class="badge badge-info badge-ml">{{ raumplus_accessories|length }} item{{ raumplus_accessories|length|pluralize }}</span>
+                </h3>
+                <div class="header-actions">
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-raumplus-selected" title="Delete selected">
+                        <i class="bi bi-trash"></i> <span id="raumplus-selected-count">0</span>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-add-to-po hidden" id="raumplus-add-to-po" onclick="openAddToPOModal('raumplus')">
+                        <i class="bi bi-cart-plus"></i> Add to PO
+                    </button>
+                    <button type="button" class="btn btn-sm btn-create-po hidden" id="raumplus-create-po" onclick="createPOFromSelected('raumplus')">
+                        <i class="bi bi-file-earmark-plus"></i> Create PO
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if raumplus_accessories %}
+                <div class="table-container">
+                    <table class="table" id="raumplus-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="raumplus-select-all" title="Select all"></th>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Qty</th>
+                                <th>Cost</th>
+                                <th>Stock</th>
+                                <th style="text-align: center;">Replace</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rau in raumplus_accessories %}
+                            <tr data-accessory-id="{{ rau.id }}" {% if rau.is_allocated %}class="allocated-row"{% endif %}>
+                                <td><input type="checkbox" class="checkbox-input raumplus-select" data-accessory-id="{{ rau.id }}" data-allocated="{{ rau.is_allocated|yesno:'1,0' }}"></td>
+                                <td class="accessory-sku-cell">
+                                    <div class="accessory-sku-cell-inner">
+                                        {% if rau.stock_item %}
+                                            <a href="{% url 'product_detail' rau.stock_item.id %}" class="sku-link" target="_blank">{{ rau.sku }}</a>
+                                        {% else %}
+                                            {{ rau.sku }}
+                                        {% endif %}
+                                        <button type="button" class="btn-copy-sku" title="Copy SKU" onclick="copyToClipboard('{{ rau.sku|escapejs }}', this)"><i class="bi bi-clipboard"></i></button>
+                                    </div>
+                                </td>
+                                <td>{{ rau.name }}</td>
+                                <td>
+                                    <input type="number" class="quantity-input accessory-quantity" 
+                                           value="{{ rau.quantity|floatformat:0 }}" 
+                                           data-accessory-id="{{ rau.id }}"
+                                           data-original-quantity="{{ rau.quantity|floatformat:0 }}"
+                                           min="0" step="1">
+                                </td>
+                                <td>£{{ rau.cost_price|floatformat:2 }}</td>
+                                <td>
+                                    {% if rau.stock_item %}
+                                        {% with remaining=rau|calculate_remaining %}
+                                            <div class="accessory-price-info">
+                                                <div><span>Stock</span><span>{{ rau.available_quantity|floatformat:0 }}</span></div>
+                                                <div><span>Allocated</span><span>{{ rau.allocated_quantity|floatformat:0 }}</span></div>
+                                                <div class="{% if rau.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ rau.incoming_quantity|floatformat:0 }}</span></div>
+                                                <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
+                                            </div>
+                                        {% endwith %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td style="text-align: center;">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" title="Replace Item" 
+                                        onclick="openSwapModal({{ rau.id }}, '{{ rau.sku }}', '{{ rau.name|escapejs }}')">
+                                        <i class="bi bi-arrow-repeat"></i> Replace
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="table-total-row">
+                                <td colspan="4">Total:</td>
+                                <td>£{{ raumplus_accessories|sum_accessory_costs }}</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No Raumplus items added yet.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
+            <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Raumplus</span>
+        </div>
+        <div class="section-divider-content collapsed">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Raumplus</h3>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">No Raumplus items added yet.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         </div>
 
     <!-- Timesheets and Expenses Section -->
@@ -2578,6 +2629,13 @@
 </div>
 
 <script>
+// Toggle collapsible section divider
+function toggleSectionDivider(divider) {
+    const content = divider.nextElementSibling;
+    divider.classList.toggle('collapsed');
+    if (content) content.classList.toggle('collapsed');
+}
+
 // Toggle Allocated & Incoming rows in accessories stock column
 function toggleStockDetail() {
     const rows = document.querySelectorAll('.stock-detail-row');
