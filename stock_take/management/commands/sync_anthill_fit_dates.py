@@ -97,14 +97,6 @@ class Command(BaseCommand):
             except Exception:
                 pass
 
-    def handle(self, *args, **options):
-        # Force UTF-8 output on Windows
-        if hasattr(sys.stdout, 'reconfigure'):
-            try:
-                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-            except Exception:
-                pass
-
         dry_run = options['dry_run']
         missing_only = options['missing_only']
         days = options['days']
@@ -131,6 +123,12 @@ class Command(BaseCommand):
 
         if total == 0:
             self.stdout.write('Nothing to do.')
+            if not dry_run:
+                SyncLog.objects.create(
+                    script_name='sync_anthill_fit_dates',
+                    status='success',
+                    notes='No sales with fit_from_date to process.',
+                )
             return
 
         stats = {'set': 0, 'unchanged': 0, 'unparseable': 0}

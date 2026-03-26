@@ -94,6 +94,13 @@ class Command(BaseCommand):
                 'No valid Xero connection.\n'
                 'Please connect via /xero/status/ first.'
             ))
+            if not dry_run:
+                SyncLog.objects.create(
+                    script_name='sync_xero_sale_payments',
+                    status='error',
+                    errors=1,
+                    notes='No valid Xero connection — token missing or expired.',
+                )
             return
 
         # Build queryset
@@ -203,6 +210,12 @@ class Command(BaseCommand):
                 '(run sync_anthill_workflow first if needed). '
                 + ('' if include_paid else 'All matching sales may already be fully paid - use --include-paid to re-check them.')
             ))
+            if not dry_run:
+                SyncLog.objects.create(
+                    script_name='sync_xero_sale_payments',
+                    status='success',
+                    notes='No sales matched the criteria — nothing to process.',
+                )
             return
 
         self.stdout.write(f'Sales to process: {total}\n')
@@ -227,6 +240,13 @@ class Command(BaseCommand):
                 ))
             except xero_api.XeroDailyLimitExceeded as exc:
                 self.stderr.write(self.style.ERROR(f'\n{exc}'))
+                if not dry_run:
+                    SyncLog.objects.create(
+                        script_name='sync_xero_sale_payments',
+                        status='error',
+                        errors=1,
+                        notes=f'Xero daily API limit exceeded during bulk fetch: {exc}',
+                    )
                 return
         self.stdout.write('')
 

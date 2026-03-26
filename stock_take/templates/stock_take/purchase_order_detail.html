@@ -39,6 +39,11 @@
                     <i class="bi bi-envelope-check"></i> Emailed
                 </span>
                 {% endif %}
+                {% if purchase_order.xero_purchase_order_id %}
+                <span class="po-xero-badge pushed" title="Pushed to Xero {{ purchase_order.xero_pushed_at|date:'d/m/Y H:i' }}">
+                    <i class="bi bi-cloud-check"></i> Xero
+                </span>
+                {% endif %}
                 {% if purchase_order.creator_name %}
                 <span class="po-meta-sep">|</span>
                 <span>Created by {{ purchase_order.creator_name }}</span>
@@ -92,6 +97,11 @@
             <button class="btn btn-sm btn-send" id="send-btn" onclick="openSendModal()">
                 <i class="bi bi-envelope"></i> Send
             </button>
+            {% if not purchase_order.xero_purchase_order_id %}
+            <button class="btn btn-sm btn-xero" id="xero-push-btn" onclick="pushToXero()">
+                <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+            {% endif %}
         </div>
     </div>
 
@@ -1859,6 +1869,39 @@ function updatePOStatus(newStatus, skipConfirm) {
         }
     })
     .catch(err => showNotification('Network error: ' + err.message, 'error'));
+}
+
+// ---- Push to Xero ----
+function pushToXero() {
+    if (!confirm('Push this purchase order to Xero? It will be created as an approved purchase order.')) return;
+
+    const btn = document.getElementById('xero-push-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing...';
+
+    fetch('{% url "purchase_order_push_to_xero" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success) {
+            showNotification('Purchase order pushed to Xero successfully.', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification('Error: ' + (result.error || 'Failed to push to Xero'), 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
+        }
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
+    });
 }
 
 // ---- Attachments ----

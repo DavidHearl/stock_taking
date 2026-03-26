@@ -340,6 +340,7 @@ class BoardsPO(models.Model):
     po_number = models.CharField(max_length=50, unique=True)
     file = models.FileField(upload_to='boards_po_files/', blank=True, null=True)
     csv_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='CSV version of the PNX file')
+    dwg_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='DWG drawing file for manufacturer')
     boards_ordered = models.BooleanField(default=False)
 
     def __str__(self):
@@ -1000,6 +1001,10 @@ class PurchaseOrder(models.Model):
     approved_by_name = models.CharField(max_length=200, blank=True, null=True)
     creation_time_wg = models.CharField(max_length=50, blank=True, null=True, help_text='WorkGuru creation timestamp')
     last_modification_time_wg = models.CharField(max_length=50, blank=True, null=True, help_text='WorkGuru last modification timestamp')
+    
+    # Xero integration
+    xero_purchase_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='Xero PurchaseOrder ID (GUID)')
+    xero_pushed_at = models.DateTimeField(null=True, blank=True, help_text='When PO was pushed to Xero')
     
     # Local tracking
     last_synced = models.DateTimeField(auto_now=True)

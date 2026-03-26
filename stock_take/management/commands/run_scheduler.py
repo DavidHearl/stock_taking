@@ -67,6 +67,20 @@ def _run_job(command: str, kwargs: dict, stdout, style) -> None:
     except Exception as exc:
         stdout.write(style.ERROR(f'[{ts()}] {command} FAILED: {exc}'))
         logger.exception('Scheduler: %s failed', command)
+        # Write an error SyncLog so the admin page always reflects the last
+        # attempt, even when the command crashes before writing its own log.
+        try:
+            from stock_take.models import SyncLog
+            SyncLog.objects.create(
+                script_name=command,
+                status='error',
+                records_created=0,
+                records_updated=0,
+                errors=1,
+                notes=f'Scheduler caught unhandled exception: {exc}',
+            )
+        except Exception:
+            pass  # DB may be down — nothing more we can do
 
 
 class Command(BaseCommand):

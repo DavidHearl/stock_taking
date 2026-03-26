@@ -93,6 +93,13 @@ class Command(BaseCommand):
             api = AnthillAPI()
         except AnthillAPIError as e:
             self.stderr.write(self.style.ERROR(f'Failed to initialise Anthill API: {e}'))
+            if not dry_run:
+                SyncLog.objects.create(
+                    script_name='sync_recent_customers',
+                    status='error',
+                    errors=1,
+                    notes=f'Failed to initialise Anthill API: {e}',
+                )
             return
 
         # Pre-load existing Anthill IDs for fast duplicate checking

@@ -1,0 +1,850 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Manage Payments - {{ customer.name }}{% endblock %}
+
+{% block nav_customers_active %}active{% endblock %}
+
+{% block page_title %}
+<span class="page-title-row">
+    <a href="{% url 'customer_detail' customer.pk %}" class="back-link" title="Back to Customer"><i class="bi bi-arrow-left"></i></a>
+    Manage Payments
+</span>
+{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/order_details.css' %}" rel="stylesheet">
+<link href="{% static 'css/customers.css' %}" rel="stylesheet">
+<style>
+/* ── Payment Management Page ── */
+.pm-customer-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    margin-bottom: 24px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+}
+.pm-customer-name {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.pm-customer-sub {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* Summary cards */
+.pm-summary-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.pm-summary-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+}
+.pm-summary-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+.pm-summary-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.pm-summary-value.success { color: var(--success-color); }
+.pm-summary-value.danger { color: var(--danger-color); }
+
+/* Sales grid */
+.pm-sales-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+.pm-sales-grid .pm-sale.expanded {
+    grid-column: 1 / -1;
+}
+@media (max-width: 1100px) {
+    .pm-sales-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Sale accordion */
+.pm-sale {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    transition: box-shadow 0.15s;
+    box-shadow: var(--shadow-sm);
+}
+.pm-sale.drag-over {
+    box-shadow: 0 0 0 2px var(--primary-color);
+}
+.pm-sale-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+}
+.pm-sale-header:hover {
+    background: var(--bg-tertiary);
+}
+.pm-sale-chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+.pm-sale.expanded .pm-sale-chevron {
+    transform: rotate(90deg);
+}
+.pm-sale-contract {
+    font-weight: 700;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+    min-width: 0;
+}
+.pm-sale-contract a {
+    color: inherit;
+    text-decoration: none;
+}
+.pm-sale-contract a:hover {
+    color: var(--primary-color);
+}
+.pm-sale-type {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.pm-anthill-link {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    transition: color 0.15s;
+}
+.pm-anthill-link:hover {
+    color: var(--success-color);
+}
+.pm-xero-link {
+    font-size: 0.75rem;
+    color: var(--info-color);
+    text-decoration: none;
+    margin-left: 4px;
+}
+.pm-xero-link:hover {
+    text-decoration: underline;
+}
+.pm-sale-financials {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.pm-sale-fin-item {
+    text-align: right;
+}
+.pm-sale-fin-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+.pm-sale-fin-value {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.pm-sale-fin-value.success { color: var(--success-color); }
+.pm-sale-fin-value.danger { color: var(--danger-color); }
+.pm-sale-fin-value.warning { color: var(--warning-color); }
+
+/* Progress mini-bar in header */
+.pm-progress-mini {
+    width: 60px;
+    height: 5px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.pm-progress-mini-bar {
+    height: 100%;
+    background: var(--success-color);
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+.pm-progress-mini-bar.overpaid {
+    background: var(--warning-color);
+}
+
+/* Sale body (payments table) */
+.pm-sale-body {
+    display: none;
+    border-top: 1px solid var(--border-color);
+}
+.pm-sale.expanded .pm-sale-body {
+    display: block;
+}
+.pm-payments-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.pm-payments-table thead th {
+    padding: 8px 14px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+}
+.pm-payments-table tbody td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.pm-payments-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.pm-payments-table tbody tr.payment-ignored td {
+    opacity: 0.4;
+    text-decoration: line-through;
+}
+.pm-payments-table tbody tr {
+    cursor: grab;
+    transition: background 0.1s;
+}
+.pm-payments-table tbody tr:hover {
+    background: var(--bg-hover);
+}
+.pm-payments-table tbody tr.dragging {
+    opacity: 0.4;
+}
+.pm-payment-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    font-weight: 600;
+}
+.pm-payment-source.xero {
+    background: var(--info-subtle);
+    color: var(--info-color);
+}
+.pm-payment-source.manual {
+    background: var(--purple-subtle);
+    color: var(--purple-color);
+}
+
+/* No-payments placeholder */
+.pm-no-payments {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+/* Action buttons */
+.pm-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 0.82rem;
+}
+.pm-action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.pm-action-btn.move { border-color: var(--primary-color); color: var(--primary-color); }
+.pm-action-btn.move:hover { background: var(--primary-subtle); }
+.pm-action-btn.split { border-color: var(--warning-color); color: var(--warning-color); }
+.pm-action-btn.split:hover { background: var(--warning-subtle); }
+.pm-action-btn.delete { border-color: var(--danger-color); color: var(--danger-color); }
+.pm-action-btn.delete:hover { background: var(--danger-subtle); }
+
+/* Drop zone highlight */
+.pm-sale.drop-target .pm-sale-header {
+    background: var(--primary-subtle);
+}
+
+/* Modal styles (reuse dialog pattern from sale_detail) */
+.pm-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+.pm-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+.pm-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+}
+.pm-modal-close:hover { color: var(--text-primary); }
+.pm-modal-body {
+    padding: 20px;
+}
+
+dialog {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lg);
+    padding: 0;
+    max-width: 480px;
+    width: 90vw;
+}
+dialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+/* Info/help text */
+.pm-help-text {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <!-- Customer Banner -->
+    <div class="pm-customer-banner">
+        <div>
+            <div class="pm-customer-name">{{ customer.name }}</div>
+            <div class="pm-customer-sub">
+                {{ sales_data|length }} sale{{ sales_data|length|pluralize }}
+                {% if customer.anthill_customer_id %} &middot; Anthill #{{ customer.anthill_customer_id }}{% endif %}
+            </div>
+        </div>
+        {% if customer.anthill_customer_id %}
+        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ customer.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success" onclick="event.stopPropagation()" style="margin-left:auto;">
+            <i class="bi bi-box-arrow-up-right"></i> View in Anthill
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- Summary Row -->
+    <div class="pm-summary-row">
+        <div class="pm-summary-card">
+            <div class="pm-summary-label">Total Sale Value</div>
+            <div class="pm-summary-value">£{{ grand_total_value|floatformat:2 }}</div>
+        </div>
+        <div class="pm-summary-card">
+            <div class="pm-summary-label">Total Paid</div>
+            <div class="pm-summary-value success">£{{ grand_total_paid|floatformat:2 }}</div>
+        </div>
+        <div class="pm-summary-card">
+            <div class="pm-summary-label">Total Outstanding</div>
+            <div class="pm-summary-value {% if grand_total_outstanding > 0 %}danger{% else %}success{% endif %}">£{{ grand_total_outstanding|floatformat:2 }}</div>
+        </div>
+    </div>
+
+    <!-- Help text -->
+    <div class="pm-help-text">
+        <i class="bi bi-info-circle"></i>
+        Drag payments between sales to move them, or use the action buttons to move/split individual payments.
+    </div>
+
+    <!-- Sales Grid -->
+    <div class="pm-sales-grid">
+    {% for entry in sales_data %}
+    {% with sale=entry.sale %}
+    <div class="pm-sale" id="pm-sale-{{ sale.pk }}" data-sale-pk="{{ sale.pk }}"
+         ondragover="handleDragOver(event, this)" ondragleave="handleDragLeave(this)" ondrop="handleDrop(event, this)">
+
+        <div class="pm-sale-header" onclick="togglePmSale({{ sale.pk }})">
+            <div class="pm-sale-chevron"><i class="bi bi-chevron-right"></i></div>
+            <div>
+                <div class="pm-sale-contract">
+                    <a href="{% url 'sale_detail' sale.pk %}" onclick="event.stopPropagation()">
+                        {{ sale.contract_number|default:sale.anthill_activity_id }}
+                    </a>
+                </div>
+                <div class="pm-sale-type">
+                    {{ sale.activity_type|default:"" }}{% if sale.location %} &middot; {{ sale.location }}{% endif %}{% if sale.activity_date %} &middot; {{ sale.activity_date|date:"d M Y" }}{% endif %}
+                    {% if sale.anthill_activity_id %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="pm-anthill-link" onclick="event.stopPropagation()" title="Open in Anthill">
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="pm-sale-financials">
+                <div class="pm-sale-fin-item">
+                    <div class="pm-sale-fin-label">Value</div>
+                    <div class="pm-sale-fin-value">{% if entry.effective_value %}£{{ entry.effective_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                </div>
+                <div class="pm-sale-fin-item">
+                    <div class="pm-sale-fin-label">Paid</div>
+                    <div class="pm-sale-fin-value success">£{{ entry.total_paid|floatformat:2 }}</div>
+                </div>
+                <div class="pm-sale-fin-item">
+                    <div class="pm-sale-fin-label">Outstanding</div>
+                    <div class="pm-sale-fin-value {% if entry.outstanding > 0 %}danger{% elif entry.overpayment > 0 %}warning{% else %}success{% endif %}">
+                        {% if entry.overpayment > 0 %}
+                            +£{{ entry.overpayment|floatformat:2 }}
+                        {% else %}
+                            £{{ entry.outstanding|floatformat:2 }}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="pm-progress-mini">
+                    <div class="pm-progress-mini-bar {% if entry.overpayment > 0 %}overpaid{% endif %}" style="width:{{ entry.payment_pct }}%;"></div>
+                </div>
+                <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
+                    {{ sale.status|default:"unknown" }}
+                </span>
+            </div>
+        </div>
+
+        <div class="pm-sale-body">
+            {% if entry.payments %}
+            <table class="pm-payments-table">
+                <thead>
+                    <tr>
+                        <th style="width:5%;"></th>
+                        <th>Source</th>
+                        <th>Type / Reference</th>
+                        <th>Date</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th style="width:10%;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in entry.payments %}
+                    <tr id="pm-payment-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}
+                        draggable="true"
+                        data-payment-pk="{{ p.pk }}"
+                        data-sale-pk="{{ sale.pk }}"
+                        data-amount="{{ p.amount|default:0 }}"
+                        ondragstart="handleDragStart(event, this)"
+                        ondragend="handleDragEnd(this)">
+                        <td style="color:var(--text-muted); cursor:grab;"><i class="bi bi-grip-vertical"></i></td>
+                        <td>
+                            <span class="pm-payment-source {% if p.source == 'manual' %}manual{% else %}xero{% endif %}">
+                                <i class="bi {% if p.source == 'manual' %}bi-pencil{% else %}bi-cloud{% endif %}"></i>
+                                {{ p.source|default:"xero" }}
+                            </span>
+                        </td>
+                        <td>
+                            {{ p.payment_type|default:"-" }}
+                            {% if p.xero_invoice_number %}
+                                {% if p.xero_invoice_id %}
+                                <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ p.xero_invoice_id }}" target="_blank" class="pm-xero-link" onclick="event.stopPropagation()" title="View invoice in Xero">
+                                    {{ p.xero_invoice_number }} <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                                {% else %}
+                                <span style="color:var(--text-muted); font-size:0.75rem;">({{ p.xero_invoice_number }})</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>{{ p.date|date:"d/m/Y"|default:"-" }}</td>
+                        <td style="font-weight:600; {% if p.amount < 0 %}color:var(--danger-color);{% endif %}">
+                            {% if p.amount %}£{{ p.amount|floatformat:2 }}{% else %}-{% endif %}
+                        </td>
+                        <td>
+                            {% if p.ignored %}
+                                <span class="customer-active-badge inactive">Ignored</span>
+                            {% elif p.status %}
+                                <span class="customer-active-badge {% if p.status|lower == 'paid' or p.status|lower == 'confirmed' %}active{% else %}inactive{% endif %}">{{ p.status }}</span>
+                            {% else %}
+                                <span style="color:var(--text-muted);">-</span>
+                            {% endif %}
+                        </td>
+                        <td style="white-space:nowrap;">
+                            <button class="pm-action-btn move" onclick="event.stopPropagation(); openMoveModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Move to another sale">
+                                <i class="bi bi-arrow-right-circle"></i>
+                            </button>
+                            <button class="pm-action-btn split" onclick="event.stopPropagation(); openSplitModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Split between sales">
+                                <i class="bi bi-scissors"></i>
+                            </button>
+                            <button class="pm-action-btn delete" onclick="event.stopPropagation(); deletePayment({{ p.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Delete payment">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="pm-no-payments">
+                <i class="bi bi-inbox" style="font-size:1.2rem; display:block; margin-bottom:6px;"></i>
+                No payments — drop a payment here to assign it to this sale
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+    {% endwith %}
+    {% endfor %}
+    </div>
+
+    {% if not sales_data %}
+    <div class="card">
+        <div class="card-body padded" style="text-align:center; padding:40px;">
+            <i class="bi bi-receipt" style="font-size:2rem; display:block; margin-bottom:8px; opacity:0.35;"></i>
+            <p style="color:var(--text-secondary); margin:0;">No sales found for this customer.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Move Payment Modal -->
+<dialog id="movePaymentModal">
+    <div class="pm-modal-header">
+        <div class="pm-modal-title">
+            <i class="bi bi-arrow-right-circle" style="color:var(--primary-color);"></i>
+            <span>Move Payment</span>
+        </div>
+        <button class="pm-modal-close" onclick="document.getElementById('movePaymentModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pm-modal-body">
+        <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-secondary);">
+            Moving <strong id="movePaymentLabel"></strong> — <strong id="movePaymentAmount"></strong>
+        </div>
+        <div style="margin-bottom:14px;">
+            <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                Move to Sale
+            </label>
+            <select id="moveTargetSale" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+                <option value="">-- Select a sale --</option>
+                {% for entry in sales_data %}
+                <option value="{{ entry.sale.pk }}" data-sale-pk="{{ entry.sale.pk }}">
+                    {{ entry.sale.contract_number|default:entry.sale.anthill_activity_id }} — {{ entry.sale.activity_type|default:"" }} ({{ entry.sale.status|default:"?" }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="btn btn-sm btn-primary" onclick="confirmMovePayment()">
+                <i class="bi bi-arrow-right-circle"></i> Move
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('movePaymentModal').close()">
+                Cancel
+            </button>
+            <span id="moveMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+        </div>
+    </div>
+</dialog>
+
+<!-- Split Payment Modal -->
+<dialog id="splitPaymentModal">
+    <div class="pm-modal-header">
+        <div class="pm-modal-title">
+            <i class="bi bi-scissors" style="color:var(--warning-color);"></i>
+            <span>Split Payment</span>
+        </div>
+        <button class="pm-modal-close" onclick="document.getElementById('splitPaymentModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pm-modal-body">
+        <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-secondary);">
+            Splitting <strong id="splitPaymentLabel"></strong> — <strong id="splitOriginalAmount"></strong>
+        </div>
+        <div style="margin-bottom:14px;">
+            <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                Move to Sale
+            </label>
+            <select id="splitTargetSale" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+                <option value="">-- Select a sale --</option>
+                {% for entry in sales_data %}
+                <option value="{{ entry.sale.pk }}" data-sale-pk="{{ entry.sale.pk }}">
+                    {{ entry.sale.contract_number|default:entry.sale.anthill_activity_id }} — {{ entry.sale.activity_type|default:"" }} ({{ entry.sale.status|default:"?" }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="margin-bottom:14px;">
+            <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                Amount to Split (£)
+            </label>
+            <input type="number" id="splitAmount" step="0.01" min="0.01"
+                   style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                Keeping <strong id="splitKeepAmount">—</strong> on the current sale
+            </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="btn btn-sm btn-warning" onclick="confirmSplitPayment()">
+                <i class="bi bi-scissors"></i> Split
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('splitPaymentModal').close()">
+                Cancel
+            </button>
+            <span id="splitMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+        </div>
+    </div>
+</dialog>
+
+<script>
+const CUSTOMER_PK = {{ customer.pk }};
+const CSRF_TOKEN = '{{ csrf_token }}';
+const MOVE_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/move/';
+const SPLIT_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/split/';
+const DELETE_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/delete/';
+
+// ── Accordion ────────────────────────────────────────────────────────────────
+function togglePmSale(salePk) {
+    const el = document.getElementById('pm-sale-' + salePk);
+    el.classList.toggle('expanded');
+}
+
+// ── Drag & Drop ──────────────────────────────────────────────────────────────
+let dragPaymentPk = null;
+let dragSourceSalePk = null;
+
+function handleDragStart(e, row) {
+    dragPaymentPk = row.dataset.paymentPk;
+    dragSourceSalePk = row.dataset.salePk;
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', dragPaymentPk);
+}
+
+function handleDragEnd(row) {
+    row.classList.remove('dragging');
+    document.querySelectorAll('.pm-sale.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+function handleDragOver(e, saleEl) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const targetSalePk = saleEl.dataset.salePk;
+    if (targetSalePk !== dragSourceSalePk) {
+        saleEl.classList.add('drag-over');
+    }
+}
+
+function handleDragLeave(saleEl) {
+    saleEl.classList.remove('drag-over');
+}
+
+function handleDrop(e, saleEl) {
+    e.preventDefault();
+    saleEl.classList.remove('drag-over');
+    const targetSalePk = saleEl.dataset.salePk;
+    if (!dragPaymentPk || targetSalePk === dragSourceSalePk) return;
+
+    // Move the payment via API
+    const url = MOVE_URL_TPL.replace('{paymentPk}', dragPaymentPk);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({target_sale_pk: parseInt(targetSalePk)}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to move payment');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+
+// ── Move Modal ───────────────────────────────────────────────────────────────
+let movePaymentPk = null;
+let moveSourceSalePk = null;
+
+function openMoveModal(paymentPk, salePk, label, amount) {
+    movePaymentPk = paymentPk;
+    moveSourceSalePk = salePk;
+    document.getElementById('movePaymentLabel').textContent = label;
+    document.getElementById('movePaymentAmount').textContent = '£' + parseFloat(amount).toFixed(2);
+    document.getElementById('moveMsg').textContent = '';
+
+    // Hide the source sale from the dropdown
+    const sel = document.getElementById('moveTargetSale');
+    sel.value = '';
+    for (const opt of sel.options) {
+        opt.style.display = opt.dataset.salePk == salePk ? 'none' : '';
+    }
+
+    document.getElementById('movePaymentModal').showModal();
+}
+
+function confirmMovePayment() {
+    const targetPk = document.getElementById('moveTargetSale').value;
+    if (!targetPk) {
+        document.getElementById('moveMsg').textContent = 'Please select a target sale';
+        document.getElementById('moveMsg').style.color = 'var(--danger-color)';
+        return;
+    }
+
+    document.getElementById('moveMsg').textContent = 'Moving...';
+    document.getElementById('moveMsg').style.color = 'var(--text-secondary)';
+
+    const url = MOVE_URL_TPL.replace('{paymentPk}', movePaymentPk);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({target_sale_pk: parseInt(targetPk)}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('movePaymentModal').close();
+            location.reload();
+        } else {
+            document.getElementById('moveMsg').textContent = data.error || 'Failed';
+            document.getElementById('moveMsg').style.color = 'var(--danger-color)';
+        }
+    })
+    .catch(() => {
+        document.getElementById('moveMsg').textContent = 'Network error';
+        document.getElementById('moveMsg').style.color = 'var(--danger-color)';
+    });
+}
+
+// ── Split Modal ──────────────────────────────────────────────────────────────
+let splitPaymentPk = null;
+let splitSourceSalePk = null;
+let splitOrigAmount = 0;
+
+function openSplitModal(paymentPk, salePk, label, amount) {
+    splitPaymentPk = paymentPk;
+    splitSourceSalePk = salePk;
+    splitOrigAmount = Math.abs(parseFloat(amount));
+    document.getElementById('splitPaymentLabel').textContent = label;
+    document.getElementById('splitOriginalAmount').textContent = '£' + splitOrigAmount.toFixed(2);
+    document.getElementById('splitAmount').value = '';
+    document.getElementById('splitAmount').max = (splitOrigAmount - 0.01).toFixed(2);
+    document.getElementById('splitKeepAmount').textContent = '£' + splitOrigAmount.toFixed(2);
+    document.getElementById('splitMsg').textContent = '';
+
+    // Hide the source sale from the dropdown
+    const sel = document.getElementById('splitTargetSale');
+    sel.value = '';
+    for (const opt of sel.options) {
+        opt.style.display = opt.dataset.salePk == salePk ? 'none' : '';
+    }
+
+    document.getElementById('splitPaymentModal').showModal();
+}
+
+// Update "keeping" amount as user types
+document.getElementById('splitAmount').addEventListener('input', function() {
+    const val = parseFloat(this.value) || 0;
+    const keep = splitOrigAmount - val;
+    document.getElementById('splitKeepAmount').textContent = '£' + Math.max(keep, 0).toFixed(2);
+});
+
+function confirmSplitPayment() {
+    const targetPk = document.getElementById('splitTargetSale').value;
+    const amount = document.getElementById('splitAmount').value;
+    if (!targetPk) {
+        document.getElementById('splitMsg').textContent = 'Please select a target sale';
+        document.getElementById('splitMsg').style.color = 'var(--danger-color)';
+        return;
+    }
+    if (!amount || parseFloat(amount) <= 0) {
+        document.getElementById('splitMsg').textContent = 'Please enter an amount';
+        document.getElementById('splitMsg').style.color = 'var(--danger-color)';
+        return;
+    }
+
+    document.getElementById('splitMsg').textContent = 'Splitting...';
+    document.getElementById('splitMsg').style.color = 'var(--text-secondary)';
+
+    const url = SPLIT_URL_TPL.replace('{paymentPk}', splitPaymentPk);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({target_sale_pk: parseInt(targetPk), amount: amount}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('splitPaymentModal').close();
+            location.reload();
+        } else {
+            document.getElementById('splitMsg').textContent = data.error || 'Failed';
+            document.getElementById('splitMsg').style.color = 'var(--danger-color)';
+        }
+    })
+    .catch(() => {
+        document.getElementById('splitMsg').textContent = 'Network error';
+        document.getElementById('splitMsg').style.color = 'var(--danger-color)';
+    });
+}
+
+// ── Delete Payment ───────────────────────────────────────────────────────────
+function deletePayment(paymentPk, label, amount) {
+    const amountStr = '£' + Math.abs(parseFloat(amount)).toFixed(2);
+    if (!confirm('Delete ' + label + ' (' + amountStr + ')? This cannot be undone.')) return;
+
+    const url = DELETE_URL_TPL.replace('{paymentPk}', paymentPk);
+    fetch(url, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF_TOKEN},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to delete payment');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+</script>
+{% endblock %}

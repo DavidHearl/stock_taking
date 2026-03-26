@@ -465,7 +465,7 @@
                             <!-- Add Additional Boards PO -->
                             {% if order.boards_po %}
                             <div class="section-add-row">
-                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAdditionalBoardsPO({{ order.id }})" title="Create an additional boards PO for this order">
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="openModal('addAdditionalPOModal')" title="Create an additional boards PO for this order">
                                     <i class="bi bi-plus-circle"></i> Add Additional Boards PO
                                 </button>
                             </div>
@@ -688,7 +688,7 @@
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} <span class="badge badge-info badge-ml">Additional</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
+                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
                 </div>
                 <div class="header-actions">
                     <!-- File status indicators -->
@@ -714,6 +714,21 @@
                             {% else %}
                                 <i class="bi bi-x-circle-fill text-danger"></i>
                             {% endif %}
+                        </span>
+                        <span class="file-status" title="DWG Drawing File">
+                            DWG
+                            {% if bpo_data.po.dwg_file %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                                <a href="{{ bpo_data.po.dwg_file.url }}" download class="btn-icon" title="Download DWG">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                            {% endif %}
+                            <label class="btn-icon btn-upload-dwg" title="Upload DWG file">
+                                <i class="bi bi-upload"></i>
+                                <input type="file" accept=".dwg,.DWG" style="display:none" onchange="uploadDWG({{ bpo_data.po.id }}, this)">
+                            </label>
                         </span>
                     </div>
                     {% if order.customer_number %}
@@ -1346,6 +1361,9 @@
                         </button>
                     </h3>
                     <div class="header-actions">
+                        <button type="button" class="btn btn-sm btn-toggle-stock" id="toggle-stock-detail" onclick="toggleStockDetail()" title="Show/hide Allocated & Incoming">
+                            <i class="bi bi-eye-slash"></i> Stock Detail
+                        </button>
                         <button class="btn btn-sm btn-add-board" type="button" onclick="openModal('addItemModal')">
                             <i class="bi bi-plus-lg"></i> Add Item
                         </button>
@@ -1419,8 +1437,8 @@
                                             {% with remaining=accessory|calculate_remaining %}
                                                 <div class="accessory-price-info">
                                                     <div><span>Stock</span><span>{{ accessory.available_quantity|floatformat:0 }}</span></div>
-                                                    <div><span>Allocated</span><span>{{ accessory.allocated_quantity|floatformat:0 }}</span></div>
-                                                    <div class="{% if accessory.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ accessory.incoming_quantity|floatformat:0 }}</span></div>
+                                                    <div class="stock-detail-row"><span>Allocated</span><span>{{ accessory.allocated_quantity|floatformat:0 }}</span></div>
+                                                    <div class="stock-detail-row {% if accessory.incoming_quantity %}incoming-highlight{% else %}incoming-zero{% endif %}"><span>Incoming</span><span>{{ accessory.incoming_quantity|floatformat:0 }}</span></div>
                                                     <div class="accessory-remaining {% if remaining < 0 %}accessory-remaining-negative{% elif remaining == 0 %}accessory-remaining-zero{% else %}accessory-remaining-positive{% endif %}"><span>Remaining</span><span>{{ remaining|floatformat:0 }}</span></div>
                                                 </div>
                                             {% endwith %}
@@ -2373,6 +2391,37 @@
     </div>
 </div>
 
+<!-- Modal for Adding Additional Boards PO with DWG -->
+<div class="modal" id="addAdditionalPOModal">
+    <div class="modal-overlay" onclick="closeModal('addAdditionalPOModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="add-additional-po-form" onsubmit="submitAdditionalBoardsPO(event)">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h3>Add Additional Boards PO</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('addAdditionalPOModal')">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="additional-po-number">PO Number (leave blank to auto-generate)</label>
+                        <input type="text" id="additional-po-number" name="po_number" class="form-input" placeholder="e.g., PO1234">
+                    </div>
+                    <div class="form-group">
+                        <label for="additional-po-dwg">Attach DWG File (Optional)</label>
+                        <input type="file" id="additional-po-dwg" name="dwg_file" class="form-input" accept=".dwg,.DWG">
+                        <small class="form-help">DWG drawing file to send to the manufacturer</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addAdditionalPOModal')">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Create PO</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for Stock Allocation Confirmation -->
 <div class="modal" id="allocationModal">
     <div class="modal-overlay" onclick="cancelAllocation()"></div>
@@ -2527,6 +2576,30 @@
         </div>
     </div>
 </div>
+
+<script>
+// Toggle Allocated & Incoming rows in accessories stock column
+function toggleStockDetail() {
+    const rows = document.querySelectorAll('.stock-detail-row');
+    const btn = document.getElementById('toggle-stock-detail');
+    const isHidden = rows.length > 0 && rows[0].classList.contains('stock-detail-hidden');
+    rows.forEach(r => r.classList.toggle('stock-detail-hidden', !isHidden));
+    btn.innerHTML = isHidden
+        ? '<i class="bi bi-eye-slash"></i> Stock Detail'
+        : '<i class="bi bi-eye"></i> Stock Detail';
+    localStorage.setItem('showStockDetail', isHidden ? '1' : '0');
+}
+
+// Restore preference on load
+(function() {
+    if (localStorage.getItem('showStockDetail') !== '1') {
+        document.querySelectorAll('.stock-detail-row').forEach(r => r.classList.add('stock-detail-hidden'));
+    } else {
+        const btn = document.getElementById('toggle-stock-detail');
+        if (btn) btn.innerHTML = '<i class="bi bi-eye-slash"></i> Stock Detail';
+    }
+})();
+</script>
 
 <script>
 // Generate Accessories CSV - open confirm/loading modal
@@ -6053,21 +6126,24 @@ function addAdditionalOSDoorsPO(orderId) {
     });
 }
 
-// Add Additional Boards PO to an order
-function addAdditionalBoardsPO(orderId) {
-    if (!confirm('Create an additional Boards PO for this order?')) return;
-    
+// Add Additional Boards PO to an order (via modal with DWG upload)
+function submitAdditionalBoardsPO(event) {
+    event.preventDefault();
+    const form = document.getElementById('add-additional-po-form');
+    const formData = new FormData(form);
+    const orderId = {{ order.id }};
+
     fetch(`/order/${orderId}/add-additional-boards-po/`, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
         },
-        body: JSON.stringify({ auto_next: true })
+        body: formData
     })
     .then(r => r.json())
     .then(result => {
         if (result.success) {
+            closeModal('addAdditionalPOModal');
             showAlert(`Additional Boards PO ${result.po_number} added`, 'success');
             location.reload();
         } else {
@@ -6078,6 +6154,35 @@ function addAdditionalBoardsPO(orderId) {
         console.error('Error:', error);
         showAlert('Error adding additional PO: ' + error.message, 'danger');
     });
+}
+
+// Upload or replace DWG file on an existing BoardsPO
+function uploadDWG(boardsPoId, input) {
+    if (!input.files.length) return;
+    const formData = new FormData();
+    formData.append('dwg_file', input.files[0]);
+
+    fetch(`/stock-take/boards-po/${boardsPoId}/upload-dwg/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: formData
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`DWG file "${result.filename}" uploaded`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error uploading DWG: ' + error.message, 'danger');
+    });
+    input.value = '';
 }
 
 // Remove Additional Boards PO from order

@@ -54,9 +54,10 @@ XERO_TOKEN_URL = "https://login.xero.com/identity/connect/token"
 XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
 
-# Scopes — includes write access for contacts
+# Scopes — includes write access for contacts and transactions (purchase orders)
 XERO_SCOPES = (
     "openid profile email offline_access "
+    "accounting.transactions "
     "accounting.transactions.read "
     "accounting.contacts.read "
     "accounting.contacts "
@@ -936,3 +937,59 @@ def create_contact(name, first_name="", last_name="", email="", phone="",
 
     payload = {"Contacts": [contact_data]}
     return _api_post("Contacts", payload)
+
+
+def create_purchase_order(contact_name, po_number, line_items, date=None,
+                          delivery_date=None, reference="", currency="GBP",
+                          status="AUTHORISED", delivery_address=None):
+    """
+    Create a purchase order in Xero with status AUTHORISED (approved).
+
+    Args:
+        contact_name: Supplier name (must exist as a Xero contact).
+        po_number: PO number string (e.g. "PO-00123").
+        line_items: List of dicts with keys: description, quantity, unit_amount, account_code, tax_type.
+        date: Issue date string "YYYY-MM-DD" (defaults to today).
+        delivery_date: Expected delivery date "YYYY-MM-DD".
+        reference: Reference string.
+        currency: Currency code (default GBP).
+        status: Xero PO status - "AUTHORISED" to go to approved section.
+        delivery_address: Optional dict with AddressLine1, AddressLine2, City, Region, PostalCode, Country.
+
+    Returns:
+        Parsed JSON response or None on failure.
+    """
+    po_data = {
+        "Contact": {"Name": contact_name},
+        "PurchaseOrderNumber": po_number,
+        "Status": status,
+        "CurrencyCode": currency,
+        "LineItems": [],
+    }
+
+    if date:
+        po_data["Date"] = date
+    if delivery_date:
+        po_data["DeliveryDate"] = delivery_date
+    if reference:
+        po_data["Reference"] = reference
+
+    if delivery_address:
+        po_data["DeliveryAddress"] = delivery_address
+
+    for item in line_items:
+        line = {
+            "Description": item.get("description", ""),
+            "Quantity": str(item.get("quantity", 1)),
+            "UnitAmount": str(item.get("unit_amount", 0)),
+        }
+        if item.get("account_code"):
+            line["AccountCode"] = item["account_code"]
+        if item.get("tax_type"):
+            line["TaxType"] = item["tax_type"]
+        if item.get("item_code"):
+            line["ItemCode"] = item["item_code"]
+        po_data["LineItems"].append(line)
+
+    payload = {"PurchaseOrders": [po_data]}
+    return _api_put("PurchaseOrders", payload)

@@ -5,8 +5,8 @@ from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_monthly_stock_history, dashboard_outstanding_report, dashboard_outstanding_pdf, dashboard_outstanding_xero_check, dashboard_outstanding_xero_check_single, dashboard_week_report, dashboard_week_pdf, dashboard_monthly_report, dashboard_monthly_pdf, dashboard_avg_report, dashboard_avg_pdf
 from .product_view import product_detail, add_product, upload_product_image
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items
-from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items, purchase_order_push_to_xero
+from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage
 from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log, resolve_error_log, error_log_history, admin_design_rules
 from .about_views import about_page
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
@@ -122,6 +122,7 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/unlink-purchase-invoice/<int:invoice_id>/', po_unlink_purchase_invoice, name='po_unlink_purchase_invoice'),
     path('purchase-order/<int:po_id>/link-invoice/', po_link_invoice, name='po_link_invoice'),
     path('purchase-order/<int:po_id>/unlink-invoice/', po_unlink_invoice, name='po_unlink_invoice'),
+    path('purchase-order/<int:po_id>/push-to-xero/', purchase_order_push_to_xero, name='purchase_order_push_to_xero'),
     
     # Suppliers
     path('suppliers/', suppliers_list, name='suppliers_list'),
@@ -150,6 +151,10 @@ urlpatterns = [
     path('customer/<int:pk>/delete/', customer_delete, name='customer_delete'),
     path('customers/bulk-delete/', customers_bulk_delete, name='customers_bulk_delete'),
     path('customers/merge/', customer_merge, name='customer_merge'),
+    path('customer/<int:pk>/manage-payments/', customer_manage_payments, name='customer_manage_payments'),
+    path('customer/<int:pk>/manage-payments/<int:payment_pk>/move/', move_payment, name='move_payment'),
+    path('customer/<int:pk>/manage-payments/<int:payment_pk>/split/', cross_sale_split_payment, name='cross_sale_split_payment'),
+    path('customer/<int:pk>/manage-payments/<int:payment_pk>/delete/', delete_payment_from_manage, name='delete_payment_from_manage'),
     
     # Leads
     path('leads/', leads_list, name='leads_list'),
@@ -221,6 +226,7 @@ urlpatterns = [
     path('stock-take/boards-po/<int:boards_po_id>/update-both-files/', views.update_both_files, name='update_both_files'),
     path('stock-take/boards-po/<int:boards_po_id>/update-pnx/', views.update_pnx_file, name='update_pnx_file'),
     path('stock-take/boards-po/<int:boards_po_id>/update-csv/', views.update_csv_file, name='update_csv_file'),
+    path('stock-take/boards-po/<int:boards_po_id>/upload-dwg/', views.upload_dwg_file, name='upload_dwg_file'),
     path('stock-take/boards-po/<int:boards_po_id>/generate-csv/', views.generate_csv_file, name='generate_csv_file'),
     path('stock-take/boards-po/<int:boards_po_id>/download-csv/', views.download_pnx_as_csv_boardspo, name='download_pnx_as_csv'),
     path('stock-take/boards-po/<int:boards_po_id>/reimport-pnx/', views.reimport_pnx, name='reimport_pnx'),

@@ -3298,6 +3298,7 @@ def _sync_boards_files_to_po(boards_po):
     for file_field, extension, description in [
         (boards_po.file, '.pnx', 'PNX board order file'),
         (boards_po.csv_file, '.csv', 'CSV board order file'),
+        (boards_po.dwg_file, '.dwg', 'DWG drawing file'),
     ]:
         if not file_field:
             continue
@@ -3918,6 +3919,27 @@ def update_pnx_file(request, boards_po_id):
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
+
+@login_required
+def upload_dwg_file(request, boards_po_id):
+    """Upload or replace the DWG file on a BoardsPO."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    dwg_file = request.FILES.get('dwg_file')
+    if not dwg_file:
+        return JsonResponse({'success': False, 'error': 'No file provided'})
+
+    # Delete old file if replacing
+    if boards_po.dwg_file:
+        boards_po.dwg_file.delete(save=False)
+
+    boards_po.dwg_file = dwg_file
+    boards_po.save(update_fields=['dwg_file'])
+    return JsonResponse({'success': True, 'filename': dwg_file.name})
+
+
 @login_required
 def update_csv_file(request, boards_po_id):
     """Update CSV file content from edited table data"""
@@ -4462,8 +4484,14 @@ def add_additional_boards_po(request, order_id):
 
     order = get_object_or_404(Order, id=order_id)
     try:
-        data = json.loads(request.body)
-        po_number = data.get('po_number', '').strip()
+        # Support both JSON and multipart form data (for DWG file upload)
+        if request.content_type and 'multipart' in request.content_type:
+            po_number = request.POST.get('po_number', '').strip()
+            dwg_file = request.FILES.get('dwg_file')
+        else:
+            data = json.loads(request.body)
+            po_number = data.get('po_number', '').strip()
+            dwg_file = None
 
         if not po_number:
             # Auto-generate next number
@@ -4495,6 +4523,11 @@ def add_additional_boards_po(request, order_id):
         )
         order.additional_boards_pos.add(boards_po)
 
+        # Attach DWG file if provided
+        if dwg_file:
+            boards_po.dwg_file = dwg_file
+            boards_po.save(update_fields=['dwg_file'])
+
         # Create a full PurchaseOrder record if one doesn't already exist
         if not PurchaseOrder.objects.filter(display_number=po_number).exists():
             from .models import Supplier
@@ -4520,7 +4553,7 @@ def add_additional_boards_po(request, order_id):
                 project_name=customer_name,
                 delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
                 status='Draft',
-                currency='GBP',
+                currency=supplier.currency.strip().upper() if supplier and supplier.currency else 'GBP',
                 creator_name=request.user.get_full_name() or request.user.username,
             )
 

@@ -78,6 +78,13 @@ class Command(BaseCommand):
             api = AnthillAPI()
         except AnthillAPIError as e:
             self.stderr.write(self.style.ERROR(f'Failed to initialise Anthill API: {e}'))
+            if not dry_run:
+                SyncLog.objects.create(
+                    script_name='upgrade_leads',
+                    status='error',
+                    errors=1,
+                    notes=f'Failed to initialise Anthill API: {e}',
+                )
             return
 
         # Only check leads that have an Anthill ID and are not already converted

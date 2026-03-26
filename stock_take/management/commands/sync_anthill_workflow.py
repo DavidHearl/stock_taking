@@ -175,6 +175,13 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(
                 'ANTHILL_USERNAME not set in environment.'
             ))
+            if not dry_run:
+                SyncLog.objects.create(
+                    script_name='sync_anthill_workflow',
+                    status='error',
+                    errors=1,
+                    notes='ANTHILL_USERNAME not set in environment.',
+                )
             return
 
         if dry_run:

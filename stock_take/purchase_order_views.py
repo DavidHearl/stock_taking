@@ -1690,6 +1690,15 @@ def purchase_order_list_media_files(request, po_id):
                 'description': 'CSV board order file',
                 'already_attached': fname in already_attached,
             })
+        if boards_po.dwg_file:
+            fname = boards_po.dwg_file.name.split('/')[-1]
+            files.append({
+                'source': 'boards_po',
+                'field': 'dwg_file',
+                'filename': fname,
+                'description': 'DWG drawing file',
+                'already_attached': fname in already_attached,
+            })
 
     # 2. Linked Order files
     linked_order = None
@@ -1783,6 +1792,9 @@ def purchase_order_attach_media_file(request, po_id):
         elif field == 'csv_file':
             file_obj = boards_po.csv_file
             description = 'CSV board order file'
+        elif field == 'dwg_file':
+            file_obj = boards_po.dwg_file
+            description = 'DWG drawing file'
     elif source == 'order' and order_id:
         order = get_object_or_404(Order, id=order_id)
         if field == 'original_csv':
@@ -2148,6 +2160,24 @@ def purchase_order_attach_boards_files(request, po_id):
         except Exception as e:
             logger.error(f'Error attaching CSV file: {e}')
 
+    if boards_po.dwg_file:
+        try:
+            boards_po.dwg_file.open('rb')
+            content = boards_po.dwg_file.read()
+            boards_po.dwg_file.close()
+            fname = boards_po.dwg_file.name.split('/')[-1]
+            att = PurchaseOrderAttachment(
+                purchase_order=po,
+                filename=fname,
+                description='DWG drawing file',
+                uploaded_by=request.user.get_full_name() or request.user.username,
+            )
+            att.file.save(fname, ContentFile(content), save=False)
+            att.save()
+            attached.append(fname)
+        except Exception as e:
+            logger.error(f'Error attaching DWG file: {e}')
+
     if not attached:
         return JsonResponse({'error': 'No files available to attach'}, status=400)
 
@@ -2216,7 +2246,7 @@ def create_boards_purchase_order(request, order_id):
         project_name=customer_name,
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
         status='Draft',
-        currency='GBP',
+        currency=supplier.currency.strip().upper() if supplier and supplier.currency else 'GBP',
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
@@ -2263,6 +2293,24 @@ def _attach_boards_files_to_po(po, boards_po, user):
                     purchase_order=po,
                     filename=fname,
                     description='CSV board order file',
+                    uploaded_by=user_name,
+                )
+                att.file.save(fname, ContentFile(content), save=False)
+                att.save()
+        except Exception:
+            pass
+
+    if boards_po.dwg_file:
+        try:
+            boards_po.dwg_file.open('rb')
+            content = boards_po.dwg_file.read()
+            boards_po.dwg_file.close()
+            fname = boards_po.dwg_file.name.split('/')[-1]
+            if not po.attachments.filter(filename=fname).exists():
+                att = PurchaseOrderAttachment(
+                    purchase_order=po,
+                    filename=fname,
+                    description='DWG drawing file',
                     uploaded_by=user_name,
                 )
                 att.file.save(fname, ContentFile(content), save=False)
@@ -3200,3 +3248,124 @@ def carnehill_summary(request):
     response = HttpResponse(buffer, content_type='application/pdf')
     response['Content-Disposition'] = f'inline; filename="carnehill_summary_{_dt.now().strftime("%Y%m%d")}.pdf"'
     return response
+
+
+@login_required
+def purchase_order_push_to_xero(request, po_id):
+    """
+    Push a purchase order to Xero as an AUTHORISED purchase order.
+    Manual action triggered from the PO detail page.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    from stock_take.services import xero_api
+    from django.utils import timezone
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    # Prevent duplicate pushes
+    if po.xero_purchase_order_id:
+        return JsonResponse({
+            'success': False,
+            'error': f'Already pushed to Xero (ID: {po.xero_purchase_order_id})'
+        }, status=400)
+
+    if not po.supplier_name:
+        return JsonResponse({'success': False, 'error': 'Purchase order has no supplier name'}, status=400)
+
+    # Build line items from PO products
+    products = po.products.all().order_by('sort_order', 'id')
+    if not products.exists():
+        return JsonResponse({'success': False, 'error': 'Purchase order has no line items'}, status=400)
+
+    line_items = []
+    for product in products:
+        line = {
+            'description': product.name or product.description or product.sku or 'Item',
+            'quantity': float(product.order_quantity or product.quantity or 1),
+            'unit_amount': float(product.order_price or 0),
+        }
+        if product.account_code:
+            line['account_code'] = product.account_code
+        if product.tax_type:
+            line['tax_type'] = product.tax_type
+        if product.supplier_code:
+            line['item_code'] = product.supplier_code
+        line_items.append(line)
+
+    # Format dates for Xero (YYYY-MM-DD)
+    issue_date = None
+    if po.issue_date:
+        try:
+            parsed = datetime.strptime(po.issue_date[:10], '%Y-%m-%d')
+            issue_date = parsed.strftime('%Y-%m-%d')
+        except (ValueError, TypeError):
+            pass
+
+    delivery_date = None
+    if po.expected_date:
+        try:
+            parsed = datetime.strptime(po.expected_date[:10], '%Y-%m-%d')
+            delivery_date = parsed.strftime('%Y-%m-%d')
+        except (ValueError, TypeError):
+            pass
+
+    # Build delivery address if available
+    delivery_address = None
+    if any([po.delivery_address_1, po.delivery_address_2, po.suburb, po.state, po.postcode]):
+        delivery_address = {}
+        if po.delivery_address_1:
+            delivery_address['AddressLine1'] = po.delivery_address_1
+        if po.delivery_address_2:
+            delivery_address['AddressLine2'] = po.delivery_address_2
+        if po.suburb:
+            delivery_address['City'] = po.suburb
+        if po.state:
+            delivery_address['Region'] = po.state
+        if po.postcode:
+            delivery_address['PostalCode'] = po.postcode
+
+    # Build reference from project info
+    reference = po.description or ''
+
+    result = xero_api.create_purchase_order(
+        contact_name=po.supplier_name,
+        po_number=po.display_number or f'PO-{po.workguru_id}',
+        line_items=line_items,
+        date=issue_date,
+        delivery_date=delivery_date,
+        reference=reference,
+        currency=po.currency or 'GBP',
+        status='AUTHORISED',
+        delivery_address=delivery_address,
+    )
+
+    if result and 'PurchaseOrders' in result:
+        xero_po = result['PurchaseOrders'][0]
+        xero_po_id = xero_po.get('PurchaseOrderID', '')
+
+        if xero_po_id:
+            po.xero_purchase_order_id = xero_po_id
+            po.xero_pushed_at = timezone.now()
+            po.save(update_fields=['xero_purchase_order_id', 'xero_pushed_at'])
+
+            log_activity(
+                user=request.user,
+                action='xero_push',
+                target_type='purchase_order',
+                target_id=str(po.workguru_id),
+                detail=f'Pushed {po.display_number} to Xero (ID: {xero_po_id})',
+            )
+
+        return JsonResponse({
+            'success': True,
+            'xero_id': xero_po_id,
+            'xero_po_number': xero_po.get('PurchaseOrderNumber', ''),
+            'xero_status': xero_po.get('Status', ''),
+        })
+    else:
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to create purchase order in Xero. Check server logs for details.'
+        }, status=500)
