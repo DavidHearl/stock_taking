@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, log_activity
+from .models import BoardsPO, Fitter, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -170,6 +170,9 @@ def purchase_orders_list(request):
     # Supplier objects for the create PO modal
     supplier_objects = Supplier.objects.filter(is_active=True).order_by('name')
 
+    # Fitter objects for the create PO modal
+    fitter_objects = Fitter.objects.filter(active=True).order_by('name')
+
     # Carnehill approved POs for the summary modal
     carnehill_pos = (
         PurchaseOrder.objects
@@ -241,6 +244,7 @@ def purchase_orders_list(request):
         'excluded_suppliers': excluded_suppliers,
         'all_suppliers': all_suppliers,
         'supplier_objects': supplier_objects,
+        'fitter_objects': fitter_objects,
         'show_zero': show_zero,
         'zero_count': zero_count,
         'draft_count': status_counts.get('Draft', 0),
@@ -929,21 +933,33 @@ def purchase_order_create(request):
     from django.contrib import messages
     from django.shortcuts import redirect
 
+    po_type = request.POST.get('po_type', 'supplier').strip()
     supplier_id = request.POST.get('supplier_id', '').strip()
+    fitter_id = request.POST.get('fitter_id', '').strip()
     description = request.POST.get('description', '').strip()
-    expected_date = request.POST.get('expected_date', '').strip()
-    delivery_address = request.POST.get('delivery_address', '').strip()
-    delivery_instructions = request.POST.get('delivery_instructions', '').strip()
+    order_id = request.POST.get('order_id', '').strip()
 
-    if not supplier_id:
-        messages.error(request, 'Please select a supplier.')
-        return redirect('purchase_orders_list')
+    supplier = None
+    fitter = None
 
-    try:
-        supplier = Supplier.objects.get(workguru_id=int(supplier_id))
-    except (Supplier.DoesNotExist, ValueError):
-        messages.error(request, 'Supplier not found.')
-        return redirect('purchase_orders_list')
+    if po_type == 'fitter':
+        if not fitter_id:
+            messages.error(request, 'Please select a fitter.')
+            return redirect('purchase_orders_list')
+        try:
+            fitter = Fitter.objects.get(id=int(fitter_id))
+        except (Fitter.DoesNotExist, ValueError):
+            messages.error(request, 'Fitter not found.')
+            return redirect('purchase_orders_list')
+    else:
+        if not supplier_id:
+            messages.error(request, 'Please select a supplier.')
+            return redirect('purchase_orders_list')
+        try:
+            supplier = Supplier.objects.get(workguru_id=int(supplier_id))
+        except (Supplier.DoesNotExist, ValueError):
+            messages.error(request, 'Supplier not found.')
+            return redirect('purchase_orders_list')
 
     # Generate a unique workguru_id in the 800000+ range for manual POs
     max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
@@ -963,20 +979,33 @@ def purchase_order_create(request):
         number=display_number,
         display_number=display_number,
         description=description or None,
-        supplier_id=supplier.workguru_id,
-        supplier_name=supplier.name,
-        expected_date=expected_date or None,
-        delivery_address_1=delivery_address or '61 Boucher Crescent, BT126HU, Belfast',
-        delivery_instructions=delivery_instructions or None,
+        po_type=po_type,
+        supplier_id=supplier.workguru_id if supplier else None,
+        supplier_name=supplier.name if supplier else fitter.name,
+        fitter=fitter,
         status='Draft',
         currency='GBP',
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
+    # If a fitter PO with an order assigned, create the project link
+    if po_type == 'fitter' and order_id:
+        try:
+            order = Order.objects.get(id=int(order_id))
+            PurchaseOrderProject.objects.create(
+                purchase_order=po,
+                project_type='customer',
+                order=order,
+                label=f'{order.sale_number} - {order.first_name} {order.last_name}'.strip(),
+            )
+        except (Order.DoesNotExist, ValueError):
+            pass  # Order link failed but PO still created
+
+    entity_name = fitter.name if fitter else supplier.name
     log_activity(
         user=request.user,
         event_type='po_created',
-        description=f'{request.user.get_full_name() or request.user.username} created purchase order {display_number} (supplier: {supplier.name}).',
+        description=f'{request.user.get_full_name() or request.user.username} created {po_type} purchase order {display_number} ({entity_name}).',
     )
 
     messages.success(request, f'Purchase order {display_number} created.')
@@ -2245,6 +2274,7 @@ def create_boards_purchase_order(request, order_id):
         project_number=order.sale_number,
         project_name=customer_name,
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        po_type='supplier',
         status='Draft',
         currency=supplier.currency.strip().upper() if supplier and supplier.currency else 'GBP',
         creator_name=request.user.get_full_name() or request.user.username,
@@ -2395,6 +2425,7 @@ def create_os_doors_purchase_order(request, order_id):
         project_number=order.sale_number,
         project_name=customer_name,
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        po_type='supplier',
         status='Draft',
         currency='GBP',
         creator_name=request.user.get_full_name() or request.user.username,
@@ -2486,6 +2517,7 @@ def add_additional_os_doors_po(request, order_id):
         project_number=order.sale_number,
         project_name=customer_name,
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        po_type='supplier',
         status='Draft',
         currency='GBP',
         creator_name=request.user.get_full_name() or request.user.username,
@@ -2543,6 +2575,7 @@ def create_raumplus_po(request):
         supplier_id=supplier.workguru_id if supplier else None,
         supplier_name=supplier.name if supplier else 'Raumplus',
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        po_type='supplier',
         status='Draft',
         currency='GBP',
         creator_name=request.user.get_full_name() or request.user.username,
@@ -2638,6 +2671,7 @@ def create_stock_shortage_po(request):
         supplier_id=None,
         supplier_name='',
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+        po_type='supplier',
         status='Draft',
         currency='GBP',
         creator_name=request.user.get_full_name() or request.user.username,

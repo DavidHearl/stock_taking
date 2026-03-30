@@ -370,9 +370,15 @@
                         </div>
                         <table class="wk-delivery-rows">
                             {% for po in group.pos %}
-                            <tr class="wk-delivery-row">
-                                <td class="wk-delivery-po"><a href="{% url 'purchase_order_detail' po.workguru_id %}">{{ po.display_number }}</a></td>
-                                <td class="wk-delivery-customer">{{ po.project_name|default:"" }}</td>
+                            <tr class="wk-delivery-row" onclick="openDeliveryDetail({{ po.workguru_id }}, '{{ po.display_number|escapejs }}', '{{ po.supplier_name|escapejs }}', '{{ po.project_name|default:""|escapejs }}')" style="cursor:pointer;">
+                                <td class="wk-delivery-po"><a href="{% url 'purchase_order_detail' po.workguru_id %}" onclick="event.stopPropagation();">{{ po.display_number }}</a></td>
+                                <td class="wk-delivery-customer">
+                                    {% for proj in po.projects.all %}
+                                        <span class="wk-delivery-order-tag" data-project-id="{{ proj.id }}" title="{{ proj.label }}">{{ proj.label }}</span>
+                                    {% empty %}
+                                        {{ po.project_name|default:"" }}
+                                    {% endfor %}
+                                </td>
                             </tr>
                             {% endfor %}
                         </table>
@@ -513,6 +519,47 @@
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('fitterManagementModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delivery Order Assignment Modal -->
+<div id="deliveryDetailModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3 id="deliveryModalTitle">Delivery</h3>
+            <span class="close" onclick="closeModal('deliveryDetailModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="detail-section-label">PO Details</div>
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <label>PO Number</label>
+                    <span id="deliveryPoNumber">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Supplier</label>
+                    <span id="deliverySupplier">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Project</label>
+                    <span id="deliveryProject">-</span>
+                </div>
+            </div>
+
+            <div class="detail-section-label">Assigned Orders</div>
+            <div id="deliveryLinkedOrders" class="delivery-linked-orders"></div>
+
+            <div class="detail-section-label">Assign Order</div>
+            <div style="position:relative;">
+                <input type="text" class="modal-select" id="delivery-order-search" placeholder="Search by sale number or customer name&hellip;" autocomplete="off" style="font-size:0.85rem; width:100%; margin-bottom:0;">
+                <input type="hidden" id="delivery-order-id">
+                <div id="delivery-order-results" class="autocomplete-dropdown" style="display:none;"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a id="deliveryPoLink" href="#" class="btn btn-secondary" target="_blank"><i class="bi bi-box-arrow-up-right"></i> View PO</a>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('deliveryDetailModal')">Close</button>
         </div>
     </div>
 </div>
@@ -1055,5 +1102,127 @@ function refreshAnthillDates() {
         alert('Error contacting Anthill');
     });
 }
+// ── Delivery Order Assignment ──────────────────────────────────
+let _deliveryPoId = null;
+let _deliverySearchTimer = null;
+
+function openDeliveryDetail(poId, poNumber, supplier, projectName) {
+    _deliveryPoId = poId;
+    document.getElementById('deliveryModalTitle').textContent = poNumber + ' — Assign Order';
+    document.getElementById('deliveryPoNumber').textContent = poNumber;
+    document.getElementById('deliverySupplier').textContent = supplier;
+    document.getElementById('deliveryProject').textContent = projectName || '-';
+    document.getElementById('deliveryPoLink').href = '/purchase-order/' + poId + '/';
+    document.getElementById('delivery-order-search').value = '';
+    document.getElementById('delivery-order-id').value = '';
+    document.getElementById('delivery-order-results').style.display = 'none';
+    loadDeliveryLinkedOrders(poId);
+    openModal('deliveryDetailModal');
+}
+
+function loadDeliveryLinkedOrders(poId) {
+    const container = document.getElementById('deliveryLinkedOrders');
+    container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem;">Loading…</span>';
+    fetch('/purchase-order/' + poId + '/', { headers: { 'Accept': 'text/html' } })
+        .then(() => {
+            // Use a lightweight approach: parse the projects from the DOM data we already have
+            // Re-query by building from the delivery rows
+            rebuildLinkedOrdersFromDOM(poId, container);
+        })
+        .catch(() => {
+            container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem;">Error loading</span>';
+        });
+}
+
+function rebuildLinkedOrdersFromDOM(poId, container) {
+    // Get linked orders from the delivery row's order tags
+    const row = document.querySelector(`tr.wk-delivery-row[onclick*="openDeliveryDetail(${poId},"]`);
+    const tags = row ? row.querySelectorAll('.wk-delivery-order-tag') : [];
+    container.innerHTML = '';
+    if (tags.length === 0) {
+        container.innerHTML = '<span class="delivery-no-orders">No orders assigned yet</span>';
+        return;
+    }
+    tags.forEach(tag => {
+        const label = tag.textContent.trim();
+        const projId = tag.dataset.projectId;
+        const div = document.createElement('div');
+        div.className = 'delivery-linked-order-item';
+        div.innerHTML = `<span>${label}</span>` +
+            (projId ? `<button class="delivery-unlink-btn" onclick="unlinkDeliveryOrder(${poId}, ${projId})" title="Remove"><i class="bi bi-x-lg"></i></button>` : '');
+        container.appendChild(div);
+    });
+}
+
+function assignDeliveryOrder(poId, orderId) {
+    fetch('/purchase-order/' + poId + '/add-project/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ project_type: 'customer', order_id: orderId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to assign order');
+        }
+    })
+    .catch(() => alert('Error assigning order'));
+}
+
+function unlinkDeliveryOrder(poId, projectId) {
+    if (!confirm('Remove this order from the delivery?')) return;
+    fetch('/purchase-order/' + poId + '/remove-project/' + projectId + '/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to remove order');
+        }
+    })
+    .catch(() => alert('Error removing order'));
+}
+
+// Delivery order search autocomplete
+(function() {
+    const input = document.getElementById('delivery-order-search');
+    const results = document.getElementById('delivery-order-results');
+    if (!input) return;
+
+    input.addEventListener('input', function() {
+        clearTimeout(_deliverySearchTimer);
+        const q = this.value.trim();
+        document.getElementById('delivery-order-id').value = '';
+        if (q.length < 2) { results.style.display = 'none'; return; }
+        _deliverySearchTimer = setTimeout(() => {
+            fetch('/api/order-search/?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(data => {
+                    results.innerHTML = '';
+                    if (data.results && data.results.length) {
+                        data.results.forEach(o => {
+                            const div = document.createElement('div');
+                            div.className = 'autocomplete-item';
+                            div.innerHTML = '<span class="sale-num">' + o.sale_number + '</span> — ' + (o.customer_name || 'Unknown');
+                            div.addEventListener('click', () => {
+                                assignDeliveryOrder(_deliveryPoId, o.id);
+                            });
+                            results.appendChild(div);
+                        });
+                        results.style.display = 'block';
+                    } else {
+                        results.innerHTML = '<div class="autocomplete-item" style="color:var(--text-muted);">No orders found</div>';
+                        results.style.display = 'block';
+                    }
+                })
+                .catch(() => { results.style.display = 'none'; });
+        }, 280);
+    });
+})();
 </script>
 {% endblock %}

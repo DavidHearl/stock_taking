@@ -73,9 +73,11 @@
                         <td>{{ substitution.replacement_sku }}</td>
                         <td class="actions-col">
                             <div class="action-buttons">
-                                <a href="{% url 'edit_substitution' substitution.id %}" class="action-btn primary" title="Edit">
+                                <button class="action-btn primary edit-substitution-btn"
+                                        data-id="{{ substitution.id }}"
+                                        title="Edit">
                                     <span><i class="bi bi-pencil"></i></span>
-                                </a>
+                                </button>
                                 <button class="action-btn danger delete-substitution-btn"
                                         data-id="{{ substitution.id }}"
                                         data-missing="{{ substitution.missing_name }}"
@@ -166,10 +168,45 @@
         </div>
     </div>
 </div>
+
+<!-- Edit Substitution Modal -->
+<div class="modal-overlay" id="editSubstitutionModal" style="display:none;" onclick="closeEditModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-pencil-square"></i> Edit Substitution</h3>
+            <button class="modal-close" onclick="closeEditModal()">&times;</button>
+        </div>
+        <form id="editSubstitutionForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="edit-missing-sku">Missing SKU</label>
+                    <input type="text" id="edit-missing-sku" name="missing_sku" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-missing-name">Missing Name</label>
+                    <input type="text" id="edit-missing-name" name="missing_name" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-replacement-sku">Replacement SKU</label>
+                    <input type="text" id="edit-replacement-sku" name="replacement_sku" class="form-control" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+                <button type="submit" class="btn-save"><i class="bi bi-check-lg"></i> Save</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+function closeEditModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('editSubstitutionModal').style.display = 'none';
+}
+
 // Live search for substitutions
 const substitutionsSearch = document.getElementById('substitutionsSearch');
 const substitutionsTableBody = document.getElementById('substitutionsTableBody');
@@ -245,6 +282,46 @@ document.addEventListener('DOMContentLoaded', function() {
                 form.appendChild(csrfInput);
                 document.body.appendChild(form);
                 form.submit();
+            }
+        });
+    });
+
+    // Edit substitution modal
+    let editingSubstitutionId = null;
+
+    document.querySelectorAll('.edit-substitution-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            editingSubstitutionId = this.dataset.id;
+            const url = '{% url "edit_substitution" 0 %}'.replace('0', editingSubstitutionId);
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('edit-missing-sku').value = data.missing_sku;
+                    document.getElementById('edit-missing-name').value = data.missing_name;
+                    document.getElementById('edit-replacement-sku').value = data.replacement_sku;
+                    document.getElementById('editSubstitutionModal').style.display = 'flex';
+                });
+        });
+    });
+
+    document.getElementById('editSubstitutionForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const url = '{% url "edit_substitution" 0 %}'.replace('0', editingSubstitutionId);
+        const formData = new FormData(this);
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+        fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken },
+            body: formData,
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert('Error saving: ' + JSON.stringify(data.errors));
             }
         });
     });

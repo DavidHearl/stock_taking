@@ -3,6 +3,18 @@
 
 {% block title %}Edit {{ role.get_name_display }} Role - Admin{% endblock %}
 
+{% block page_title %}
+<a href="{% url 'admin_roles' %}" class="page-title-back" title="Back to Roles"><i class="bi bi-arrow-left"></i></a>
+Edit Role <span class="role-badge {{ role.name }}">{{ role.get_name_display }}</span>
+{% endblock %}
+
+{% block page_actions %}
+<a href="{% url 'admin_roles' %}" class="btn btn-sm btn-secondary">Cancel</a>
+<button type="submit" form="permissionsForm" class="btn btn-sm btn-save-nav">
+    <i class="bi bi-check-lg"></i> Save
+</button>
+{% endblock %}
+
 {% block nav_admin_roles_active %}active{% endblock %}
 
 {% block extra_css %}
@@ -12,45 +24,9 @@
 
 {% block content %}
 <div class="admin-page">
-    <div class="role-edit-header">
-        <div>
-            <a href="{% url 'admin_roles' %}" class="back-link">
-                <i class="bi bi-arrow-left"></i> Back to Roles
-            </a>
-            <h1 style="margin: 8px 0 4px; font-size: 1.6rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 12px;">
-                <i class="bi bi-shield-lock" style="color: var(--accent-color);"></i>
-                Edit Role
-                <span class="role-badge {{ role.name }}">{{ role.get_name_display }}</span>
-            </h1>
-            <p class="page-subtitle" style="margin:0; color: var(--text-secondary); font-size: 0.9rem;">
-                Configure page access and CRUD permissions
-            </p>
-        </div>
-    </div>
 
-    <form method="post" id="permissionsForm">
+    <form method="post" id="permissionsForm" class="role-edit-form">
         {% csrf_token %}
-
-        <!-- Description -->
-        <div class="admin-card" style="margin-bottom: 20px;">
-            <div class="admin-card-header">
-                <h2>Role Description</h2>
-            </div>
-            <div class="admin-card-body">
-                <textarea name="description" class="description-field" placeholder="Describe the purpose of this role...">{{ role.description }}</textarea>
-            </div>
-        </div>
-
-        {% if role.name == 'admin' %}
-        <div class="admin-card" style="margin-bottom: 20px;">
-            <div class="admin-card-body" style="padding: 20px; display: flex; align-items: center; gap: 12px;">
-                <i class="bi bi-info-circle" style="font-size: 1.2rem; color: var(--accent-color);"></i>
-                <span style="color: var(--text-secondary); font-size: 0.85rem;">
-                    The <strong>Admin</strong> role always has full access to all pages and CRUD operations. Permissions below are shown for reference but cannot be restricted.
-                </span>
-            </div>
-        </div>
-        {% endif %}
 
         <!-- Quick Actions -->
         {% if role.name != 'admin' %}
@@ -65,6 +41,27 @@
         </div>
         {% endif %}
 
+        <!-- Description -->
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <h2>Role Description</h2>
+            </div>
+            <div class="admin-card-body">
+                <textarea name="description" class="description-field" placeholder="Describe the purpose of this role...">{{ role.description }}</textarea>
+            </div>
+        </div>
+
+        {% if role.name == 'admin' %}
+        <div class="admin-card">
+            <div class="admin-card-body" style="padding: 20px; display: flex; align-items: center; gap: 12px;">
+                <i class="bi bi-info-circle" style="font-size: 1.2rem; color: var(--accent-color);"></i>
+                <span style="color: var(--text-secondary); font-size: 0.85rem;">
+                    The <strong>Admin</strong> role always has full access to all pages and CRUD operations. Permissions below are shown for reference but cannot be restricted.
+                </span>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Permissions by section -->
         {% for section in sections_data %}
         <div class="perm-section">
@@ -75,8 +72,8 @@
                 </h3>
                 {% if role.name != 'admin' %}
                 <div class="section-toggle-all" onclick="event.stopPropagation();">
-                    <button type="button" class="section-toggle-btn" onclick="toggleSection('{{ section.name }}', true)">All</button>
-                    <button type="button" class="section-toggle-btn" onclick="toggleSection('{{ section.name }}', false)">None</button>
+                    <button type="button" class="section-toggle-btn" onclick="togglePermSection('{{ section.name }}', true)">All</button>
+                    <button type="button" class="section-toggle-btn" onclick="togglePermSection('{{ section.name }}', false)">None</button>
                 </div>
                 {% endif %}
             </div>
@@ -144,14 +141,6 @@
             </table>
         </div>
         {% endfor %}
-
-        <!-- Save bar -->
-        <div class="save-bar">
-            <a href="{% url 'admin_roles' %}" class="btn-cancel">Cancel</a>
-            <button type="submit" class="btn-save">
-                <i class="bi bi-check-lg"></i> Save Permissions
-            </button>
-        </div>
     </form>
 </div>
 {% endblock %}
@@ -170,7 +159,7 @@
         });
     }
 
-    function toggleSection(sectionName, checked) {
+    function togglePermSection(sectionName, checked) {
         const table = document.querySelector(`table[data-section="${sectionName}"]`);
         if (table) {
             table.querySelectorAll('.perm-checkbox:not(:disabled)').forEach(cb => {

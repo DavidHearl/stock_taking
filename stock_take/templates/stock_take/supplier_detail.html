@@ -5,6 +5,8 @@
 
 {% block nav_suppliers_active %}active{% endblock %}
 
+{% block page_title %}Supplier Details{% endblock %}
+
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/suppliers.css' %}">
 <link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
@@ -310,6 +312,23 @@
 </div>
 
 <script>
+function formatMoney(value) {
+    var num = parseFloat(value);
+    if (isNaN(num)) return value;
+    return num.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Format monetary values on page load
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.supplier-info-value').forEach(function(el) {
+        var text = el.textContent.trim();
+        if (text.startsWith('£')) {
+            var num = parseFloat(text.replace('£', '').replace(/,/g, ''));
+            if (!isNaN(num)) el.textContent = '£' + formatMoney(num);
+        }
+    });
+});
+
 function toggleEditMode() {
     document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
@@ -361,7 +380,7 @@ function saveSupplier() {
                     } else if (field === 'website' && input.value) {
                         viewVal.innerHTML = '<a href="' + input.value + '" target="_blank">' + input.value + '</a>';
                     } else if (field === 'credit_limit') {
-                        viewVal.textContent = '£' + parseFloat(input.value || 0).toFixed(2);
+                        viewVal.textContent = '£' + formatMoney(input.value || 0);
                     } else {
                         viewVal.textContent = val;
                     }

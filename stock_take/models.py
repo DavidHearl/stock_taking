@@ -922,12 +922,21 @@ class SupplierContact(models.Model):
 
 class PurchaseOrder(models.Model):
     """Local copy of WorkGuru Purchase Orders"""
+    PO_TYPE_CHOICES = [
+        ('supplier', 'Supplier'),
+        ('fitter', 'Fitter'),
+    ]
+
     workguru_id = models.IntegerField(unique=True, help_text='WorkGuru PO ID')
     number = models.CharField(max_length=50, blank=True, null=True)
     display_number = models.CharField(max_length=50, blank=True, null=True)
     revision = models.IntegerField(default=0)
     description = models.TextField(blank=True, null=True)
     
+    # PO type & fitter link
+    po_type = models.CharField(max_length=10, choices=PO_TYPE_CHOICES, default='supplier')
+    fitter = models.ForeignKey('Fitter', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_orders')
+
     # Project/Customer
     project_id = models.IntegerField(null=True, blank=True)
     project_number = models.CharField(max_length=100, blank=True, null=True)
@@ -1937,6 +1946,7 @@ PAGE_SECTIONS = [
     ('Other', [
         ('tickets', 'Tickets'),
         ('claim_service', 'Claim Service'),
+        ('about', 'About'),
         ('admin_panel', 'Admin Panel'),
     ]),
 ]

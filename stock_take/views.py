@@ -3608,6 +3608,7 @@ def add_accessories_to_po(request):
                 project_number=order.sale_number if order else None,
                 supplier_id=acc_supplier.workguru_id if acc_supplier else None,
                 supplier_name=acc_supplier.name if acc_supplier else None,
+                po_type='supplier',
                 status='Draft',
                 currency='GBP',
                 creator_name=request.user.get_full_name() or request.user.username,
@@ -4427,6 +4428,7 @@ def update_boards_po(request, order_id):
                 project_number=order.sale_number,
                 project_name=customer_name,
                 delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+                po_type='supplier',
                 status='Draft',
                 currency='GBP',
                 creator_name=request.user.get_full_name() or request.user.username,
@@ -4552,6 +4554,7 @@ def add_additional_boards_po(request, order_id):
                 project_number=order.sale_number,
                 project_name=customer_name,
                 delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
+                po_type='supplier',
                 status='Draft',
                 currency=supplier.currency.strip().upper() if supplier and supplier.currency else 'GBP',
                 creator_name=request.user.get_full_name() or request.user.username,
@@ -5726,22 +5729,25 @@ def delete_substitution(request, substitution_id):
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 def edit_substitution(request, substitution_id):
-    """Edit a substitution"""
+    """Edit a substitution via AJAX"""
     substitution = get_object_or_404(Substitution, id=substitution_id)
+    
+    if request.method == 'GET':
+        return JsonResponse({
+            'id': substitution.id,
+            'missing_sku': substitution.missing_sku,
+            'missing_name': substitution.missing_name,
+            'replacement_sku': substitution.replacement_sku,
+        })
     
     if request.method == 'POST':
         form = SubstitutionForm(request.POST, instance=substitution)
         if form.is_valid():
             form.save()
-            messages.success(request, 'Substitution updated successfully.')
-            return redirect('substitutions')
-    else:
-        form = SubstitutionForm(instance=substitution)
+            return JsonResponse({'success': True})
+        return JsonResponse({'success': False, 'errors': form.errors}, status=400)
     
-    return render(request, 'stock_take/edit_substitution.html', {
-        'form': form,
-        'substitution': substitution,
-    })
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 def stock_take_group_create(request):
     """Create or update a stock take group"""
@@ -8849,6 +8855,7 @@ def calendar_weekly(request):
         PurchaseOrder.objects
         .filter(expected_date__in=po_date_strings)
         .exclude(status__in=['Received', 'Cancelled'])
+        .prefetch_related('projects__order')
         .order_by('expected_date', 'supplier_name')
     )
 

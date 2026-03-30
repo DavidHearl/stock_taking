@@ -12,7 +12,11 @@ from django.db.models import Sum
 @login_required
 def product_detail(request, item_id):
     """Display detailed product information"""
-    product = get_object_or_404(StockItem, id=item_id)
+    product = StockItem.objects.filter(id=item_id).first()
+    if not product:
+        from django.contrib import messages
+        messages.warning(request, 'That product no longer exists.')
+        return redirect('stock_list')
     
     # Get categories and groups for the edit dropdowns
     categories = list(Category.objects.values('id', 'name').order_by('name'))
@@ -348,3 +352,30 @@ def upload_product_image(request, item_id):
         return JsonResponse({'success': True})
     
     return JsonResponse({'success': False, 'error': 'Invalid method'}, status=405)
+
+
+@login_required
+def delete_product(request, item_id):
+    """Delete a stock item / product"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    product = get_object_or_404(StockItem, id=item_id)
+    sku = product.sku
+    name = product.name
+
+    # Delete the image file if it exists
+    if product.image:
+        product.image.delete(save=False)
+
+    product.delete()
+
+    log_activity(
+        user=request.user,
+        event_type='delete',
+        description=f'{request.user.get_full_name() or request.user.username} deleted product {sku} ({name}).',
+    )
+
+    from django.contrib import messages
+    messages.success(request, f'Product {sku} deleted.')
+    return redirect('stock_list')

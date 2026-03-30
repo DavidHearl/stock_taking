@@ -120,6 +120,7 @@
                     <th class="text-right">Total</th>
                     <th>Status</th>
                     <th class="text-center">Emailed</th>
+                    <th class="text-center">Xero</th>
                 </tr>
             </thead>
             <tbody>
@@ -155,6 +156,8 @@
                             <i class="bi bi-envelope-check"></i>
                         </span>
                         {% endif %}
+                    </td>
+                    <td class="text-center">
                         {% if po.xero_purchase_order_id %}
                         <span class="po-xero-badge pushed" title="Pushed to Xero {{ po.xero_pushed_at|date:'d/m/Y H:i' }}">
                             <i class="bi bi-cloud-check"></i>
@@ -334,38 +337,58 @@ function startSync() {
 <div class="modal-overlay" id="createPOModal" style="display:none;">
     <div class="modal-box">
         <div class="modal-header">
-            <h2><i class="bi bi-clipboard-plus"></i> New Purchase Order</h2>
+            <h2>New Purchase Order</h2>
             <button class="modal-close" onclick="document.getElementById('createPOModal').style.display='none'">&times;</button>
         </div>
         <form method="POST" action="{% url 'purchase_order_create' %}">
             {% csrf_token %}
+            <input type="hidden" name="po_type" id="po-type-input" value="supplier">
+            <input type="hidden" name="order_id" id="po-order-id" value="">
             <div class="modal-body">
-                <div class="form-group">
+                <!-- PO Type Toggle -->
+                <div class="po-type-toggle">
+                    <button type="button" class="po-type-btn active" data-type="supplier" onclick="setPOType('supplier')">Supplier</button>
+                    <button type="button" class="po-type-btn" data-type="fitter" onclick="setPOType('fitter')">Fitter</button>
+                </div>
+
+                <!-- Supplier Select (shown for supplier POs) -->
+                <div class="form-group" id="supplier-group">
                     <label for="po-supplier">Supplier <span class="required">*</span></label>
-                    <select id="po-supplier" name="supplier_id" required>
+                    <select id="po-supplier" name="supplier_id">
                         <option value="">— Select a supplier —</option>
                         {% for s in supplier_objects %}
                         <option value="{{ s.workguru_id }}">{{ s.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
+
+                <!-- Fitter Select (shown for fitter POs) -->
+                <div class="form-group" id="fitter-group" style="display:none;">
+                    <label for="po-fitter">Fitter <span class="required">*</span></label>
+                    <select id="po-fitter" name="fitter_id">
+                        <option value="">— Select a fitter —</option>
+                        {% for f in fitter_objects %}
+                        <option value="{{ f.id }}">{{ f.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
                 <div class="form-group">
                     <label for="po-description">Description</label>
                     <input type="text" id="po-description" name="description" placeholder="Brief description of the order">
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="po-expected-date">Expected Date</label>
-                        <input type="date" id="po-expected-date" name="expected_date">
+
+                <!-- Order Assignment (shown for fitter POs) -->
+                <div class="form-group" id="order-assign-group" style="display:none;">
+                    <label for="po-order-search">Assign to Order</label>
+                    <div class="po-order-search-wrap">
+                        <input type="text" id="po-order-search" placeholder="Search by sale number or customer name..." autocomplete="off">
+                        <div class="po-order-dropdown" id="po-order-dropdown"></div>
                     </div>
-                    <div class="form-group">
-                        <label for="po-delivery-address">Delivery Address</label>
-                        <input type="text" id="po-delivery-address" name="delivery_address" placeholder="Delivery address" value="61 Boucher Crescent, BT126HU, Belfast">
+                    <div class="po-assigned-order" id="po-assigned-order" style="display:none;">
+                        <span id="po-assigned-label"></span>
+                        <button type="button" class="po-assigned-remove" onclick="clearAssignedOrder()">&times;</button>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label for="po-delivery-instructions">Delivery Instructions</label>
-                    <input type="text" id="po-delivery-instructions" name="delivery_instructions" placeholder="Special instructions...">
                 </div>
             </div>
             <div class="modal-footer">
@@ -375,6 +398,82 @@ function startSync() {
         </form>
     </div>
 </div>
+
+<script>
+function setPOType(type) {
+    document.getElementById('po-type-input').value = type;
+    document.querySelectorAll('.po-type-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.po-type-btn[data-type="${type}"]`).classList.add('active');
+
+    const isSupplier = type === 'supplier';
+    document.getElementById('supplier-group').style.display = isSupplier ? '' : 'none';
+    document.getElementById('fitter-group').style.display = isSupplier ? 'none' : '';
+    document.getElementById('order-assign-group').style.display = isSupplier ? 'none' : '';
+
+    // Toggle required
+    document.getElementById('po-supplier').required = isSupplier;
+    document.getElementById('po-fitter').required = !isSupplier;
+
+    // Clear the other selection
+    if (isSupplier) {
+        document.getElementById('po-fitter').value = '';
+        clearAssignedOrder();
+    } else {
+        document.getElementById('po-supplier').value = '';
+    }
+}
+
+function clearAssignedOrder() {
+    document.getElementById('po-order-id').value = '';
+    document.getElementById('po-assigned-order').style.display = 'none';
+    document.getElementById('po-assigned-label').textContent = '';
+    document.getElementById('po-order-search').value = '';
+}
+
+// Order search autocomplete for fitter POs
+(function() {
+    const input = document.getElementById('po-order-search');
+    const dropdown = document.getElementById('po-order-dropdown');
+    let debounceTimer;
+
+    if (!input) return;
+
+    input.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        const q = this.value.trim();
+        if (q.length < 2) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; return; }
+        debounceTimer = setTimeout(() => {
+            fetch(`/api/order-search/?q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.results || !data.results.length) {
+                        dropdown.innerHTML = '<div class="po-order-dropdown-item" style="color:var(--text-muted);">No results</div>';
+                        dropdown.style.display = 'block';
+                        return;
+                    }
+                    dropdown.innerHTML = data.results.map(r =>
+                        `<div class="po-order-dropdown-item" onclick="selectOrder(${r.id}, '${r.sale_number}', '${r.customer_name.replace(/'/g, "\\'")}')">
+                            <strong>${r.sale_number}</strong> — ${r.customer_name}
+                        </div>`
+                    ).join('');
+                    dropdown.style.display = 'block';
+                });
+        }, 250);
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.po-order-search-wrap')) dropdown.style.display = 'none';
+    });
+})();
+
+function selectOrder(id, saleNumber, customerName) {
+    document.getElementById('po-order-id').value = id;
+    document.getElementById('po-order-search').value = '';
+    document.getElementById('po-order-dropdown').style.display = 'none';
+    document.getElementById('po-assigned-label').textContent = `${saleNumber} — ${customerName}`;
+    document.getElementById('po-assigned-order').style.display = 'flex';
+}
+</script>
 
 <!-- Carnehill Summary Modal -->
 <div class="modal-overlay" id="carnehillModal" style="display:none;">

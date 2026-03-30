@@ -37,9 +37,19 @@
             <a href="{% url 'add_product' %}?copy_from={{ product.id }}" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-files"></i> Copy Product
             </a>
-            <a href="{% url 'stock_items_manager' %}" class="btn btn-sm btn-secondary">
+            <a href="{% url 'stock_list' %}" class="btn btn-sm btn-secondary">
                 <i class="bi bi-arrow-left"></i> Back to Products
             </a>
+            <div class="product-more-menu">
+                <button class="btn btn-sm btn-secondary product-more-btn" onclick="toggleProductMoreMenu(event)" title="More actions">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <div class="product-more-dropdown" id="product-more-dropdown">
+                    <button class="product-more-item danger" onclick="deleteProduct()">
+                        <i class="bi bi-trash"></i> Delete Product
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1110,4 +1120,50 @@ document.addEventListener('keydown', function(e) {
         </div>
     </div>
 </div>
+
+<!-- Delete Product Modal -->
+<div class="modal-overlay" id="delete-product-modal" style="display:none;" onclick="if(event.target===this)closeDeleteModal()">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3><i class="bi bi-trash"></i> Delete Product</h3>
+            <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete <strong>{{ product.sku }}</strong>?</p>
+            <p style="color: var(--text-secondary); font-size: 0.85rem;">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-sm btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+            <form method="POST" action="{% url 'delete_product' product.id %}" id="delete-product-form" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-danger" id="confirm-delete-btn">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleProductMoreMenu(e) {
+    e.stopPropagation();
+    document.getElementById('product-more-dropdown').classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+    const dd = document.getElementById('product-more-dropdown');
+    if (dd && !e.target.closest('.product-more-menu')) dd.classList.remove('open');
+});
+function deleteProduct() {
+    document.getElementById('product-more-dropdown').classList.remove('open');
+    document.getElementById('delete-product-modal').style.display = 'flex';
+}
+function closeDeleteModal() {
+    document.getElementById('delete-product-modal').style.display = 'none';
+}
+document.getElementById('delete-product-form').addEventListener('submit', function() {
+    const btn = document.getElementById('confirm-delete-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Deleting...';
+});
+</script>
 {% endblock %}
