@@ -438,12 +438,61 @@ Examples:
                         help='Run Phase 1.5: re-check existing Leads and promote any with a sale to Customer')
     parser.add_argument('--skip-upgrade', action='store_true',
                         help='Skip Phase 1.5 (lead upgrade check) — faster when you only want new imports')
+    parser.add_argument('--customer-id', type=str, nargs='+', default=None,
+                        help='Sync specific customer(s) by Anthill customer ID (skips all other phases)')
+    parser.add_argument('--refresh-gap', action='store_true',
+                        help='Run Phase 1A: directly refresh activities for DB customers that '
+                             'are too old to appear in FindCustomers results')
+    parser.add_argument('--gap-batch', type=int, default=500,
+                        help='Max number of gap customers to process per run (default: 500)')
     args = parser.parse_args()
 
     # ── Validate credentials ──
     if not ANTHILL_USERNAME or not ANTHILL_PASSWORD:
         print('ERROR: Set ANTHILL_USERNAME and ANTHILL_PASSWORD in your .env file')
         sys.exit(1)
+
+    # ════════════════════════════════════════════════════════════════════
+    # TARGETED SYNC — if --customer-id is provided, just sync those and exit
+    # ════════════════════════════════════════════════════════════════════
+    if args.customer_id:
+        print('=' * 65)
+        print(f'  Targeted sync for {len(args.customer_id)} customer(s)')
+        print('=' * 65)
+        total_sales = 0
+        for cid in args.customer_id:
+            print(f'\n  Fetching customer {cid}...')
+            try:
+                detail = get_customer_detail(int(cid))
+                if not detail:
+                    print(f'  [WARN] No data returned for customer {cid}')
+                    continue
+                print(f'    Name: {detail.get("name", "?")}')
+                acts = detail.get('activities', [])
+                print(f'    Activities: {len(acts)}')
+                for act in acts:
+                    print(f'      ID={act["id"]} Type={act["type"]} Status={act["status"]}')
+
+                customer_obj = Customer.objects.filter(anthill_customer_id=str(cid)).first()
+                if not customer_obj:
+                    # Customer not in DB — classify and create
+                    summary = {'id': cid, 'name': detail.get('name', ''), 'location': '', 'created': ''}
+                    if is_sale(detail):
+                        save_as_customer(detail, summary)
+                        customer_obj = Customer.objects.filter(anthill_customer_id=str(cid)).first()
+                        print(f'    Created new Customer record')
+                    else:
+                        save_as_lead(detail, summary)
+                        print(f'    Created new Lead record')
+
+                created = save_sales_from_activities(detail, {'id': cid, 'name': detail.get('name', ''), 'location': ''}, customer_obj)
+                total_sales += created
+                print(f'    Sales created: {created}')
+            except Exception as e:
+                print(f'  [ERROR] {e}')
+
+        print(f'\n  Done. Total sales created: {total_sales}')
+        return
 
     # ── Calculate days from date range if provided ──
     days = args.days
@@ -513,6 +562,7 @@ Examples:
 
     page_range_label = f'{args.start_page} → {end_page}'
     start_time = time.time()
+    phase1_seen_ids = set()  # Populated by Phase 1; used by Phase 1A
 
     # ════════════════════════════════════════════════════════════════════
     # PHASE 1 — Sync sales for existing customers
@@ -559,6 +609,8 @@ Examples:
                 if anthill_id not in existing_customer_ids:
                     continue
 
+                phase1_seen_ids.add(anthill_id)
+
                 if args.dry_run or args.skip_detail:
                     phase1_processed += 1
                     continue
@@ -596,6 +648,61 @@ Examples:
         phase1_elapsed = time.time() - start_time
         print(f'\n  Phase 1 complete in {_format_time(phase1_elapsed)}')
         print(f'  Sales created: {stats["sales_created"]:,}')
+        print(f'  Customers seen in FindCustomers: {len(phase1_seen_ids):,}')
+
+    # ════════════════════════════════════════════════════════════════════
+    # PHASE 1A — Refresh gap customers (too old for FindCustomers)
+    # ════════════════════════════════════════════════════════════════════
+    # Gap = local DB customers whose Anthill ID was NOT returned by
+    # FindCustomers (likely created >10 years ago).  These customers
+    # may have new sales that Phase 1 will never see.
+    run_gap = args.refresh_gap and not args.skip_sales and not args.dry_run
+    if run_gap:
+        gap_ids = existing_customer_ids - (phase1_seen_ids if not args.skip_sales else set())
+        gap_list = list(gap_ids)
+        random.shuffle(gap_list)
+        gap_batch = gap_list[:args.gap_batch]
+
+        print(f'\n' + '=' * 65)
+        print(f'  PHASE 1A - Refreshing {len(gap_batch):,} gap customers '
+              f'(of {len(gap_ids):,} total outside FindCustomers)')
+        print('=' * 65 + '\n')
+
+        phase1a_start = time.time()
+        phase1a_sales = 0
+
+        for idx, anthill_id in enumerate(gap_batch, 1):
+            try:
+                detail = get_customer_detail(int(anthill_id))
+                if detail and detail.get('activities'):
+                    customer_obj = Customer.objects.filter(
+                        anthill_customer_id=anthill_id
+                    ).first()
+                    created_count = save_sales_from_activities(
+                        detail,
+                        {'id': anthill_id, 'name': detail.get('name', ''), 'location': ''},
+                        customer_obj,
+                    )
+                    stats['sales_created'] += created_count
+                    phase1a_sales += created_count
+            except Exception as e:
+                stats['errors'] += 1
+                print(f'  [ERROR] Gap customer {anthill_id}: {e}')
+
+            if idx % 50 == 0 or idx == len(gap_batch):
+                elapsed = time.time() - phase1a_start
+                rate = idx / elapsed if elapsed > 0 else 0
+                remaining = (len(gap_batch) - idx) / rate if rate > 0 else 0
+                print(
+                    f'  {idx:>5,}/{len(gap_batch):,} | '
+                    f'Sales: {phase1a_sales:>4} | '
+                    f'Rate: {rate:.0f}/s | '
+                    f'ETA: {_format_time(remaining)}'
+                )
+
+        phase1a_elapsed = time.time() - phase1a_start
+        print(f'\n  Phase 1A complete in {_format_time(phase1a_elapsed)}')
+        print(f'  Gap sales created: {phase1a_sales:,}')
 
     # ════════════════════════════════════════════════════════════════════
     # PHASE 1.5 — Upgrade Leads that now have a qualifying sale activity

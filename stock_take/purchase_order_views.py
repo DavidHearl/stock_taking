@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Fitter, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, log_activity
+from .models import BoardsPO, Expense, Fitter, Order, OSDoor, PNXItem, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, Timesheet, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -483,6 +483,43 @@ def purchase_order_detail(request, po_id):
     _pi_agg_total = _pi_agg['t'] or 0
     _pi_agg_outstanding = (_pi_agg['t'] or 0) - (_pi_agg['p'] or 0)
 
+    # ── Fitter PO: timesheets & expenses ─────────────────────────
+    po_timesheets = []
+    po_expenses = []
+    po_timesheets_total = 0
+    po_expenses_total = 0
+    unlinked_timesheets = []
+    if purchase_order.po_type == 'fitter':
+        po_timesheets = list(
+            purchase_order.timesheets.select_related('order', 'fitter')
+            .order_by('order__sale_number', 'date')
+        )
+        for ts in po_timesheets:
+            ts.line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
+        po_timesheets_total = sum(ts.line_total for ts in po_timesheets)
+        po_expenses = list(
+            purchase_order.expenses.select_related('order', 'fitter')
+            .order_by('-date')
+        )
+        po_expenses_total = sum(float(e.amount or 0) for e in po_expenses)
+
+        # Fetch timesheets on linked orders that are NOT yet linked to this PO
+        linked_order_ids = [
+            p.order_id for p in po_projects if p.order_id
+        ]
+        if linked_order_ids:
+            linked_ts_ids = set(ts.id for ts in po_timesheets)
+            unlinked_timesheets = list(
+                Timesheet.objects.filter(
+                    order_id__in=linked_order_ids,
+                    purchase_order__isnull=True,
+                )
+                .select_related('order', 'fitter')
+                .order_by('order__sale_number', 'date')
+            )
+            for ts in unlinked_timesheets:
+                ts.line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -515,6 +552,11 @@ def purchase_order_detail(request, po_id):
         'po_vat_amount': po_vat_amount,
         'po_gross_total': po_gross_total,
         'staff_users': staff_users,
+        'po_timesheets': po_timesheets,
+        'po_expenses': po_expenses,
+        'po_timesheets_total': po_timesheets_total,
+        'po_expenses_total': po_expenses_total,
+        'unlinked_timesheets': unlinked_timesheets,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -934,7 +976,7 @@ def purchase_order_create(request):
     supplier_id = request.POST.get('supplier_id', '').strip()
     fitter_id = request.POST.get('fitter_id', '').strip()
     description = request.POST.get('description', '').strip()
-    order_id = request.POST.get('order_id', '').strip()
+    order_ids = request.POST.getlist('order_ids')
 
     supplier = None
     fitter = None
@@ -985,18 +1027,19 @@ def purchase_order_create(request):
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
-    # If a fitter PO with an order assigned, create the project link
-    if po_type == 'fitter' and order_id:
-        try:
-            order = Order.objects.get(id=int(order_id))
-            PurchaseOrderProject.objects.create(
-                purchase_order=po,
-                project_type='customer',
-                order=order,
-                label=f'{order.sale_number} - {order.first_name} {order.last_name}'.strip(),
-            )
-        except (Order.DoesNotExist, ValueError):
-            pass  # Order link failed but PO still created
+    # If a fitter PO with orders assigned, create the project links
+    if po_type == 'fitter' and order_ids:
+        for oid in order_ids:
+            try:
+                order = Order.objects.get(id=int(oid))
+                PurchaseOrderProject.objects.create(
+                    purchase_order=po,
+                    project_type='customer',
+                    order=order,
+                    label=f'{order.sale_number} - {order.first_name} {order.last_name}'.strip(),
+                )
+            except (Order.DoesNotExist, ValueError):
+                pass  # Order link failed but PO still created
 
     entity_name = fitter.name if fitter else supplier.name
     log_activity(
@@ -1088,6 +1131,227 @@ def purchase_order_delete_product(request, po_id, product_id):
     po.save(update_fields=['total'])
 
     return JsonResponse({'success': True, 'po_total': str(new_total)})
+
+
+@login_required
+def po_add_timesheet(request, po_id):
+    """Add a timesheet entry to a fitter purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    if po.po_type != 'fitter':
+        return JsonResponse({'error': 'Not a fitter PO'}, status=400)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    order_id = data.get('order_id')
+    date_str = data.get('date', '')
+    description = data.get('description', '').strip()
+    hours = data.get('hours', 0)
+    hourly_rate = data.get('hourly_rate', 0)
+
+    if not date_str:
+        return JsonResponse({'error': 'Date is required'}, status=400)
+
+    try:
+        hours = float(hours or 0)
+        hourly_rate = float(hourly_rate or 0)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid hours or rate'}, status=400)
+
+    order = None
+    if order_id:
+        try:
+            order = Order.objects.get(id=int(order_id))
+        except (Order.DoesNotExist, ValueError):
+            pass
+
+    ts = Timesheet.objects.create(
+        order=order,
+        timesheet_type='installation',
+        fitter=po.fitter,
+        date=date_str,
+        purchase_order=po,
+        hours=hours,
+        hourly_rate=hourly_rate,
+        description=description,
+    )
+
+    line_total = round(hours * hourly_rate, 2)
+
+    return JsonResponse({
+        'success': True,
+        'timesheet': {
+            'id': ts.id,
+            'date': str(ts.date),
+            'description': ts.description,
+            'hours': str(ts.hours),
+            'hourly_rate': str(ts.hourly_rate),
+            'line_total': f'{line_total:.2f}',
+            'order_id': order.id if order else None,
+            'order_sale_number': order.sale_number if order else '',
+        },
+    })
+
+
+@login_required
+def po_delete_timesheet(request, po_id, timesheet_id):
+    """Delete a timesheet entry from a fitter purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    ts = get_object_or_404(Timesheet, id=timesheet_id, purchase_order=po)
+    ts.delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def po_link_timesheet(request, po_id, timesheet_id):
+    """Link an existing timesheet to this purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    if po.po_type != 'fitter':
+        return JsonResponse({'error': 'Not a fitter PO'}, status=400)
+
+    ts = get_object_or_404(Timesheet, id=timesheet_id)
+
+    # Only link if not already linked to another PO
+    if ts.purchase_order and ts.purchase_order != po:
+        return JsonResponse({'error': 'Timesheet already linked to another PO'}, status=400)
+
+    ts.purchase_order = po
+    ts.save(update_fields=['purchase_order'])
+    return JsonResponse({'success': True})
+
+
+@login_required
+def po_unlink_timesheet(request, po_id, timesheet_id):
+    """Unlink a timesheet from this purchase order without deleting it (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    ts = get_object_or_404(Timesheet, id=timesheet_id, purchase_order=po)
+
+    ts.purchase_order = None
+    ts.save(update_fields=['purchase_order'])
+    return JsonResponse({'success': True})
+
+
+@login_required
+def po_update_timesheet(request, po_id, timesheet_id):
+    """Update hours/rate on a timesheet entry linked to a fitter PO (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    ts = get_object_or_404(Timesheet, id=timesheet_id, purchase_order=po)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    hours = data.get('hours')
+    hourly_rate = data.get('hourly_rate')
+
+    try:
+        if hours is not None:
+            ts.hours = float(hours)
+        if hourly_rate is not None:
+            ts.hourly_rate = float(hourly_rate)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid hours or rate'}, status=400)
+
+    ts.save(update_fields=['hours', 'hourly_rate'])
+
+    line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
+
+    return JsonResponse({
+        'success': True,
+        'hours': str(ts.hours),
+        'hourly_rate': str(ts.hourly_rate),
+        'line_total': f'{line_total:.2f}',
+    })
+
+
+@login_required
+def po_add_expense(request, po_id):
+    """Add an expense entry to a fitter purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    if po.po_type != 'fitter':
+        return JsonResponse({'error': 'Not a fitter PO'}, status=400)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    expense_type = data.get('expense_type', 'petrol').strip()
+    date_str = data.get('date', '')
+    amount = data.get('amount', 0)
+    description = data.get('description', '').strip()
+    order_id = data.get('order_id')
+
+    if not date_str:
+        return JsonResponse({'error': 'Date is required'}, status=400)
+
+    try:
+        amount = float(amount or 0)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid amount'}, status=400)
+
+    order = None
+    if order_id:
+        try:
+            order = Order.objects.get(id=int(order_id))
+        except (Order.DoesNotExist, ValueError):
+            pass
+
+    exp = Expense.objects.create(
+        order=order,
+        fitter=po.fitter,
+        purchase_order=po,
+        expense_type=expense_type,
+        date=date_str,
+        amount=amount,
+        description=description,
+    )
+
+    return JsonResponse({
+        'success': True,
+        'expense': {
+            'id': exp.id,
+            'expense_type': exp.expense_type,
+            'date': str(exp.date),
+            'amount': f'{amount:.2f}',
+            'description': exp.description,
+            'order_id': order.id if order else None,
+            'order_sale_number': order.sale_number if order else '',
+        },
+    })
+
+
+@login_required
+def po_delete_expense(request, po_id, expense_id):
+    """Delete an expense entry from a fitter purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    exp = get_object_or_404(Expense, id=expense_id, purchase_order=po)
+    exp.delete()
+    return JsonResponse({'success': True})
 
 
 @login_required

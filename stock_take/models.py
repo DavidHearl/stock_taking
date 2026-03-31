@@ -1605,7 +1605,7 @@ class Timesheet(models.Model):
         parts = raw.split('||')
         if len(parts) == 4:
             # Format: "start_slot||span_len||order_label||user_desc"
-            return parts[3].strip() or ''
+            return parts[3].strip() or parts[2].strip() or ''
         if len(parts) == 3:
             return parts[2].strip() or ''
         return raw
@@ -1616,12 +1616,12 @@ class Timesheet(models.Model):
         if self.timesheet_type == 'installation' and self.purchase_invoice_line_id:
             # Installation sourced from a purchase invoice line
             return self.purchase_invoice_line.line_total
-        elif self.timesheet_type == 'installation' and self.purchase_order:
-            # Installation uses linked PO total
-            return self.purchase_order.total
         elif self.hours and self.hourly_rate:
-            # Manufacturing uses hours × hourly_rate
+            # Individual hours × hourly_rate (installation or manufacturing)
             return self.hours * self.hourly_rate
+        elif self.timesheet_type == 'installation' and self.purchase_order:
+            # Fallback: use linked PO total when no hours/rate set
+            return self.purchase_order.total
         return 0
     
     def __str__(self):
@@ -1644,8 +1644,9 @@ class Expense(models.Model):
         ('other', 'Other'),
     ]
     
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='expenses')
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
     fitter = models.ForeignKey(Fitter, on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
+    purchase_order = models.ForeignKey('PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses', help_text='Associated PO for this expense')
     
     expense_type = models.CharField(max_length=20, choices=EXPENSE_TYPE_CHOICES, default='petrol')
     date = models.DateField()

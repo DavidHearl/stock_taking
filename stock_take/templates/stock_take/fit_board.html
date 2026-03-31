@@ -81,28 +81,63 @@
     </div>
 </div>
 
-<div class="calendar-container">
-    <div class="calendar-header">
-        <div class="calendar-nav">
-            <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="btn btn-secondary">
-                ← Previous
-            </a>
-            <h2 class="calendar-date">{{ month_name }} {{ current_year }}</h2>
-            <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="btn btn-secondary">
-                Next →
-            </a>
-        </div>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <div class="view-toggle">
-                <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn active">Monthly</a>
-                <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn">Weekly</a>
+<div class="cal-toolbar">
+    <div class="calendar-nav">
+        <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="btn btn-secondary">&larr;</a>
+        <h2 class="calendar-date">{{ month_name }} {{ current_year }}</h2>
+        <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="btn btn-secondary">&rarr;</a>
+        <a href="?year={{ today.year }}&month={{ today.month }}" class="btn btn-primary">Today</a>
+        <button class="btn btn-success" onclick="bulkImportFitDates()" title="Import All Fit Dates">
+            <i class="bi bi-arrow-repeat"></i> Sync
+        </button>
+        <div class="cal-more-menu">
+            <button class="btn btn-secondary cal-more-btn" onclick="toggleCalMenu(event)" title="More options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="cal-more-dropdown" id="cal-more-dropdown">
+                <button class="cal-more-item" id="togglePOsBtn" onclick="togglePOs()">
+                    <i class="bi bi-truck"></i> Hide POs
+                </button>
+                <button class="cal-more-item" onclick="openModal('manageFittersModal')">
+                    <i class="bi bi-people"></i> Manage Fitters
+                </button>
             </div>
-            <button class="btn btn-info" onclick="bulkImportFitDates()">Import All Fit Dates</button>
-            <button class="btn btn-secondary" onclick="openModal('manageFittersModal')"><i class="bi bi-people"></i> Manage Fitters</button>
-            <a href="?year={{ today.year }}&month={{ today.month }}" class="btn btn-primary">Today</a>
         </div>
     </div>
-    
+    <div class="view-toggle">
+        <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn active">Monthly</a>
+        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn">Weekly</a>
+    </div>
+</div>
+
+{% if total_fits > 0 %}
+<div class="cal-balance-bar">
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Fits</span>
+        <span class="cal-balance-val">{{ total_fits }}</span>
+    </div>
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Total Value</span>
+        <span class="cal-balance-val">&pound;{{ total_sale_value|floatformat:0 }}</span>
+    </div>
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Paid</span>
+        <span class="cal-balance-val cal-balance-paid">&pound;{{ total_paid|floatformat:0 }}</span>
+    </div>
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Outstanding</span>
+        <span class="cal-balance-val {% if total_outstanding > 0 %}cal-balance-due{% else %}cal-balance-paid{% endif %}">&pound;{{ total_outstanding|floatformat:0 }}</span>
+    </div>
+    {% if fits_with_balance > 0 %}
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">In Arrears</span>
+        <span class="cal-balance-val cal-balance-due">{{ fits_with_balance }}</span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="calendar-container">
     <table class="calendar-table">
         <thead>
             <tr>
@@ -114,22 +149,22 @@
         <tbody>
             {% for week in month_days %}
             <tr>
-                {% for day in week %}
-                <td class="calendar-day {% if day == 0 %}empty{% elif day == today.day and current_month == today.month and current_year == today.year %}today{% endif %}"
-                    {% if day != 0 %}data-date="{{ current_year }}-{{ current_month|stringformat:'02d' }}-{{ day|stringformat:'02d' }}"
+                {% for cell in week %}
+                <td class="calendar-day {% if not cell.in_month %}other-month{% elif cell.day == today.day and current_month == today.month and current_year == today.year %}today{% endif %}"
+                    {% if cell.in_month %}data-date="{{ current_year }}-{{ current_month|stringformat:'02d' }}-{{ cell.day|stringformat:'02d' }}"
                     ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"{% endif %}>
-                    {% if day != 0 %}
+                    {% if cell.in_month %}
                         <div class="day-header">
-                            <span class="day-number">{{ day }}</span>
-                            <button class="add-btn-inline" onclick="openAddAppointment({{ current_year }}, {{ current_month }}, {{ day }}, 'R')" title="Add appointment">+</button>
+                            <span class="day-number">{{ cell.day }}</span>
+                            <button class="add-btn-inline" onclick="openAddAppointment({{ current_year }}, {{ current_month }}, {{ cell.day }}, 'R')" title="Add appointment">+</button>
                         </div>
 
                         <div class="day-jobs">
-                            {% for entry in appointments_flat|get_item:day %}
+                            {% for entry in appointments_flat|get_item:cell.day %}
                             {% with appt=entry.appointment is_cont=entry.is_continuation sp=entry.span_pos %}
                             {% if appt.order %}
                             <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %} span-{{ sp }}"
-                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ day }}{% endif %}"
+                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ cell.day }}{% endif %}"
                                  {% if not is_cont %}draggable="true"
                                  ondragstart="handleDragStart(event)"
                                  ondragend="handleDragEnd(event)"{% endif %}
@@ -149,19 +184,37 @@
                                  data-address="{{ appt.order.address|default:'-'|escapejs }}"
                                  data-postcode="{{ appt.order.postcode|default:'-'|escapejs }}"
                                  onclick="selectAppointmentFromCard(this)">
-                                <span class="job-fitter">{{ appt.fitter }}</span>
-                                {% if not is_cont %}
-                                <span class="job-name">{{ appt.order.first_name|slice:":1" }}. {{ appt.order.last_name }}</span>
-                                {% if appt.fit_duration > 1 %}
-                                <span class="job-duration">{{ appt.fit_duration }}d</span>
+                                {% if sp == 'start' %}
+                                <div class="wk-card-header">
+                                    <span class="wk-card-fitter">{{ appt.fitter }}</span>
+                                    <span class="wk-card-name">{{ appt.order.first_name|slice:":1" }}. {{ appt.order.last_name }}</span>
+                                    <span class="wk-card-meta">
+                                        <span class="wk-card-days">{{ appt.fit_duration }}d</span>
+                                        <span class="wk-card-salenum">{{ appt.order.sale_number }}</span>
+                                    </span>
+                                </div>
+                                {% if appt.fin and appt.fin.sale_value %}
+                                <div class="wk-card-rows">
+                                    <div class="wk-card-row">
+                                        <span class="wk-fin-label">Outstanding</span>
+                                        <span class="wk-fin-val {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>
+                                    </div>
+                                </div>
                                 {% endif %}
+                                {% elif is_cont %}
                                 {% else %}
-                                <span class="job-name cont-label">cont.</span>
+                                <span class="job-fitter">{{ appt.fitter }}</span>
+                                <span class="job-name">{{ appt.order.first_name|slice:":1" }}. {{ appt.order.last_name }}</span>
+                                {% if appt.fin and appt.fin.outstanding > 0 %}
+                                <span class="job-balance">£{{ appt.fin.outstanding|floatformat:0 }}</span>
+                                {% elif appt.fin and appt.fin.outstanding <= 0 %}
+                                <span class="job-balance paid">Paid</span>
+                                {% endif %}
                                 {% endif %}
                             </div>
                             {% elif appt.remedial %}
                             <div class="job-card remedial span-{{ sp }}"
-                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ day }}{% endif %}"
+                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ cell.day }}{% endif %}"
                                  {% if not is_cont %}draggable="true"
                                  ondragstart="handleDragStart(event)"
                                  ondragend="handleDragEnd(event)"{% endif %}
@@ -175,11 +228,18 @@
                                  data-address="{{ appt.remedial.address|default:'-'|escapejs }}"
                                  data-postcode="{{ appt.remedial.postcode|default:'-'|escapejs }}"
                                  onclick="selectAppointmentFromCard(this)">
-                                <span class="job-fitter">{{ appt.fitter }}</span>
-                                {% if not is_cont %}
-                                <span class="job-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name|slice:":1" }}. {{ appt.remedial.last_name }}</span>
+                                {% if sp == 'start' %}
+                                <div class="wk-card-header">
+                                    <span class="wk-card-fitter">{{ appt.fitter }}</span>
+                                    <span class="wk-card-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name|slice:":1" }}. {{ appt.remedial.last_name }}</span>
+                                    <span class="wk-card-meta">
+                                        <span class="wk-card-days">{{ appt.fit_duration }}d</span>
+                                    </span>
+                                </div>
+                                {% elif is_cont %}
                                 {% else %}
-                                <span class="job-name cont-label">cont.</span>
+                                <span class="job-fitter">{{ appt.fitter }}</span>
+                                <span class="job-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name|slice:":1" }}. {{ appt.remedial.last_name }}</span>
                                 {% endif %}
                             </div>
                             {% endif %}
@@ -187,9 +247,9 @@
                             {% endfor %}
                         </div>
 
-                        {% if day in pos_by_day %}
+                        {% if cell.day in pos_by_day %}
                         <div class="monthly-po-rows">
-                            {% for po in pos_by_day|get_item:day %}
+                            {% for po in pos_by_day|get_item:cell.day %}
                             <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="monthly-po-card" title="{{ po.display_number }} — {{ po.supplier_name|default:'Unknown' }}">
                                 <i class="bi bi-truck"></i>
                                 <span class="monthly-po-text">{{ po.display_number }}</span>
@@ -197,6 +257,10 @@
                             {% endfor %}
                         </div>
                         {% endif %}
+                    {% else %}
+                        <div class="day-header">
+                            <span class="day-number">{{ cell.day }}</span>
+                        </div>
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -362,9 +426,111 @@
 
 {% block extra_js %}
 <script>
+/* ── Toolbar dropdown ─────────────────────────────────────── */
+function toggleCalMenu(e) {
+    e.stopPropagation();
+    document.getElementById('cal-more-dropdown').classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+    const dd = document.getElementById('cal-more-dropdown');
+    if (dd && !e.target.closest('.cal-more-menu')) dd.classList.remove('open');
+});
+
 let selectedAppointmentId = null;
 let draggedAppointmentId = null;
 let draggedFitter = '';
+
+/* ── PO toggle ─────────────────────────────────────────── */
+function togglePOs() {
+    const table = document.querySelector('.calendar-table');
+    const btn = document.getElementById('togglePOsBtn');
+    table.classList.toggle('hide-pos');
+    const hidden = table.classList.contains('hide-pos');
+    btn.innerHTML = hidden
+        ? '<i class="bi bi-truck"></i> Show POs'
+        : '<i class="bi bi-truck"></i> Hide POs';
+    localStorage.setItem('fitBoardHidePOs', hidden ? '1' : '0');
+}
+// Restore saved preference
+document.addEventListener('DOMContentLoaded', function() {
+    if (localStorage.getItem('fitBoardHidePOs') === '1') {
+        const table = document.querySelector('.calendar-table');
+        const btn = document.getElementById('togglePOsBtn');
+        if (table && btn) {
+            table.classList.add('hide-pos');
+            btn.innerHTML = '<i class="bi bi-truck"></i> Show POs';
+        }
+    }
+    clearSpanBorders();
+    initSpanHover();
+    syncSpanHeights();
+});
+
+/* ── Linked hover for multi-day spans ──────────────────── */
+function initSpanHover() {
+    document.querySelectorAll('.job-card.span-start, .job-card.span-mid, .job-card.span-end').forEach(card => {
+        const apptId = card.dataset.appointmentId;
+        if (!apptId) return;
+        card.addEventListener('mouseenter', () => {
+            document.querySelectorAll('.job-card[data-appointment-id="' + apptId + '"]').forEach(c => c.classList.add('span-hover'));
+        });
+        card.addEventListener('mouseleave', () => {
+            document.querySelectorAll('.job-card[data-appointment-id="' + apptId + '"]').forEach(c => c.classList.remove('span-hover'));
+        });
+    });
+}
+
+/* ── Sync multi-day span heights across cells ────────── */
+function syncSpanHeights() {
+    // Group span cards by appointment ID
+    const groups = {};
+    document.querySelectorAll('.job-card.span-start, .job-card.span-mid, .job-card.span-end').forEach(card => {
+        const id = card.dataset.appointmentId;
+        if (!id) return;
+        if (!groups[id]) groups[id] = [];
+        groups[id].push(card);
+    });
+    // For each group, find the tallest card and apply that height to all
+    Object.values(groups).forEach(cards => {
+        // Reset heights first so we get natural sizes
+        cards.forEach(c => c.style.minHeight = '');
+        let maxH = 0;
+        cards.forEach(c => { maxH = Math.max(maxH, c.offsetHeight); });
+        if (maxH > 0) {
+            cards.forEach(c => c.style.minHeight = maxH + 'px');
+        }
+    });
+}
+
+/* ── Clear cell borders where multi-day bars cross ─────── */
+function clearSpanBorders() {
+    // Reset all cells first
+    document.querySelectorAll('.calendar-day').forEach(td => {
+        td.style.borderRightColor = '';
+        td.style.borderLeftColor = '';
+    });
+    // For each row, scan for span-start / span-mid / span-end cards
+    document.querySelectorAll('.calendar-table tbody tr').forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll('.calendar-day:not(.other-month)'));
+        for (let i = 0; i < cells.length - 1; i++) {
+            const thisCell = cells[i];
+            const nextCell = cells[i + 1];
+            // Check if any appointment bleeds from this cell into the next
+            const rightCards = thisCell.querySelectorAll('.job-card.span-start, .job-card.span-mid');
+            const leftCards = nextCell.querySelectorAll('.job-card.span-mid, .job-card.span-end');
+            let matched = false;
+            rightCards.forEach(rc => {
+                leftCards.forEach(lc => {
+                    if (rc.dataset.appointmentId === lc.dataset.appointmentId) matched = true;
+                });
+            });
+            if (matched) {
+                thisCell.style.borderRightColor = 'transparent';
+                nextCell.style.borderLeftColor = 'transparent';
+            }
+        }
+    });
+}
 
 function bulkImportFitDates() {
     if (!confirm('This will create appointments for all unfinished orders based on their fit dates. Continue?')) {

@@ -164,69 +164,62 @@
 
 <!-- Page-level calendar toolbar -->
 <div class="cal-toolbar">
-    <div class="legend" style="margin-bottom:0; flex-wrap:wrap;">
-        <div class="legend-item">
-            <div class="legend-box today"></div>
-            <span>Today</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-box completed"></div>
-            <span>Completed</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-box" style="border-color: #ff9800; background: rgba(255,152,0,0.1);"></div>
-            <span>Remedial</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-box" style="border-color: var(--info-color); background: rgba(90,180,220,0.1);"></div>
-            <span>PO Delivery</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-box" style="border-color: #9c74c8; background: rgba(156,116,200,0.1);"></div>
-            <span>Appointment</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-box" style="border-color: #2196f3; background: rgba(33,150,243,0.1);"></div>
-            <span>Showroom Cover</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-box" style="border-color: #d9534f; background: rgba(217,83,79,0.1);"></div>
-            <span>Unavailable</span>
-        </div>
-    </div>
-
-    <div class="cal-toolbar-center">
-        <a href="?year={{ prev_week.year }}&month={{ prev_week.month }}&day={{ prev_week.day }}" class="btn btn-secondary btn-sm">&larr;</a>
-        <span class="cal-toolbar-date">{{ week_start|date:"j M" }} &ndash; {{ week_end|date:"j M Y" }}</span>
-        <a href="?year={{ next_week.year }}&month={{ next_week.month }}&day={{ next_week.day }}" class="btn btn-secondary btn-sm">&rarr;</a>
-    </div>
-
-    <div class="cal-toolbar-right">
-        <button class="btn btn-sm btn-outline-info" id="toggleDeliveriesBtn" onclick="toggleDeliveries()"><i class="bi bi-truck"></i> Deliveries</button>
-        <button class="btn btn-sm btn-outline-info" id="toggleSalesBtn" onclick="toggleSales()"><i class="bi bi-calendar-event"></i> Design Appts</button>
-        <span style="border-left: 1px solid var(--border-color); height: 20px;"></span>
-        <button class="btn btn-secondary btn-sm" id="btnRefreshAnthill" onclick="refreshAnthillDates()" title="Refresh fit dates from Anthill CRM">
-            <i class="bi bi-arrow-repeat"></i> Sync Anthill
+    <div class="calendar-nav">
+        <a href="?year={{ prev_week.year }}&month={{ prev_week.month }}&day={{ prev_week.day }}" class="btn btn-secondary">&larr;</a>
+        <h2 class="calendar-date">{{ week_start|date:"j M" }} &ndash; {{ week_end|date:"j M Y" }}</h2>
+        <a href="?year={{ next_week.year }}&month={{ next_week.month }}&day={{ next_week.day }}" class="btn btn-secondary">&rarr;</a>
+        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="btn btn-primary">Today</a>
+        <button class="btn btn-success" id="btnRefreshAnthill" onclick="refreshAnthillDates()" title="Sync fit dates from Anthill CRM">
+            <i class="bi bi-arrow-repeat"></i> Sync
         </button>
-        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="btn btn-primary btn-sm">Today</a>
-        <div class="view-toggle">
-            <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn">Monthly</a>
-            <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn active">Weekly</a>
+        <div class="cal-more-menu">
+            <button class="btn btn-secondary cal-more-btn" onclick="toggleCalMenu(event)" title="More options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="cal-more-dropdown" id="cal-more-dropdown">
+                <button class="cal-more-item" id="toggleDeliveriesBtn" onclick="toggleDeliveries()">
+                    <i class="bi bi-truck"></i> Deliveries
+                </button>
+                <button class="cal-more-item" id="toggleSalesBtn" onclick="toggleSales()">
+                    <i class="bi bi-calendar-event"></i> Design Appts
+                </button>
+                <div class="cal-more-separator"></div>
+                <button class="cal-more-item" onclick="openModal('fitterManagementModal')">
+                    <i class="bi bi-people"></i> Manage Fitters
+                </button>
+            </div>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="openModal('fitterManagementModal')"><i class="bi bi-people"></i> Fitters</button>
+    </div>
+    <div class="view-toggle">
+        <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn">Monthly</a>
+        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn active">Weekly</a>
     </div>
 </div>
 
-{% if last_anthill_sync %}
-<div class="wk-sync-banner">
-    <i class="bi bi-cloud-check"></i>
-    Last synced with Anthill: {{ last_anthill_sync.ran_at|timesince }} ago
-    {% if last_anthill_sync.notes %}<span class="wk-sync-by">{{ last_anthill_sync.notes }}</span>{% endif %}
-</div>
-{% else %}
-<div class="wk-sync-banner wk-sync-never">
-    <i class="bi bi-cloud-slash"></i>
-    Anthill data has not been synced yet
+{% if total_fits > 0 %}
+<div class="cal-balance-bar">
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Fits</span>
+        <span class="cal-balance-val">{{ total_fits }}</span>
+    </div>
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Total Value</span>
+        <span class="cal-balance-val">&pound;{{ total_sale_value|floatformat:0 }}</span>
+    </div>
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Paid</span>
+        <span class="cal-balance-val cal-balance-paid">&pound;{{ total_paid|floatformat:0 }}</span>
+    </div>
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">Outstanding</span>
+        <span class="cal-balance-val {% if total_outstanding > 0 %}cal-balance-due{% else %}cal-balance-paid{% endif %}">&pound;{{ total_outstanding|floatformat:0 }}</span>
+    </div>
+    {% if fits_with_balance > 0 %}
+    <div class="cal-balance-item">
+        <span class="cal-balance-label">In Arrears</span>
+        <span class="cal-balance-val cal-balance-due">{{ fits_with_balance }}</span>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -438,6 +431,19 @@
 
 </div>
 
+{% if last_anthill_sync %}
+<div class="wk-sync-banner">
+    <i class="bi bi-cloud-check"></i>
+    Last synced with Anthill: {{ last_anthill_sync.ran_at|timesince }} ago
+    {% if last_anthill_sync.notes %}<span class="wk-sync-by">{{ last_anthill_sync.notes }}</span>{% endif %}
+</div>
+{% else %}
+<div class="wk-sync-banner wk-sync-never">
+    <i class="bi bi-cloud-slash"></i>
+    Anthill data has not been synced yet
+</div>
+{% endif %}
+
 <!-- Sales Appointment Modal -->
 <div id="salesAppointmentModal" class="modal">
     <div class="modal-content" style="max-width: 480px;">
@@ -567,6 +573,16 @@
 
 {% block extra_js %}
 <script>
+/* ── Toolbar dropdown ─────────────────────────────────────── */
+function toggleCalMenu(e) {
+    e.stopPropagation();
+    document.getElementById('cal-more-dropdown').classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+    const dd = document.getElementById('cal-more-dropdown');
+    if (dd && !e.target.closest('.cal-more-menu')) dd.classList.remove('open');
+});
+
 let selectedAppointmentId = null;
 let draggedAppointmentId = null;
 let draggedSalesId = null;

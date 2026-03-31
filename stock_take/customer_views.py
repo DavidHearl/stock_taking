@@ -742,6 +742,51 @@ def sales_list(request):
 
 
 @login_required
+def sale_save(request, pk):
+    """Save edited sale details via AJAX POST."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    from decimal import Decimal, InvalidOperation
+
+    editable_fields = [
+        'contract_number', 'location', 'assigned_to_name', 'source',
+        'status', 'range_name', 'door_type', 'products_included',
+        'fit_from_date', 'goods_due_in',
+    ]
+    decimal_fields = ['sale_value', 'profit', 'deposit_required', 'balance_payable']
+
+    update_fields = []
+    for field in editable_fields:
+        if field in data:
+            val = data[field] or ''
+            setattr(sale, field, val)
+            update_fields.append(field)
+
+    for field in decimal_fields:
+        if field in data:
+            raw = str(data[field]).replace('£', '').replace(',', '').strip()
+            try:
+                val = Decimal(raw) if raw else None
+            except InvalidOperation:
+                val = None
+            setattr(sale, field, val)
+            update_fields.append(field)
+
+    if update_fields:
+        sale.save(update_fields=update_fields)
+
+    return JsonResponse({'success': True})
+
+
+@login_required
 def sale_detail(request, pk):
     """Display detailed view of a single Anthill event."""
     sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)

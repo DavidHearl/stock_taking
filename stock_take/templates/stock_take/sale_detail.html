@@ -14,11 +14,57 @@
 
 {% block extra_css %}
 <link href="{% static 'css/order_details.css' %}" rel="stylesheet">
+<link href="{% static 'css/customer_detail.css' %}" rel="stylesheet">
+<link href="{% static 'css/sale_detail.css' %}" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
 {% endblock %}
 
 {% block content %}
 <div class="page-content">
+
+    <!-- ===== CUSTOMER HERO CARD ===== -->
+    <div class="card sale-hero-card">
+        <div class="card-header card-header-customer sale-hero-header">
+            <div class="sale-hero-layout">
+                <div class="sale-hero-avatar">
+                    <i class="bi bi-person-fill"></i>
+                </div>
+                <div>
+                    <h3 class="sale-hero-name">
+                        {% if sale.customer %}
+                        <a href="{% url 'customer_detail' sale.customer.pk %}">{{ sale.customer.name }}</a>
+                        {% else %}
+                        {{ sale.customer_name|default:"Unknown Customer" }}
+                        {% endif %}
+                    </h3>
+                    <div class="sale-hero-meta">
+                        {% if sale.customer %}
+                            {% if sale.customer.phone %}<span><i class="bi bi-telephone"></i> {{ sale.customer.phone }}</span>{% endif %}
+                            {% if sale.customer.email %}<span><i class="bi bi-envelope"></i> {{ sale.customer.email }}</span>{% endif %}
+                            {% if sale.customer.address_1 or sale.customer.city or sale.customer.postcode %}
+                            <span><i class="bi bi-geo-alt"></i>
+                                {{ sale.customer.address_1 }}{% if sale.customer.address_2 %}, {{ sale.customer.address_2 }}{% endif %}{% if sale.customer.city %}, {{ sale.customer.city }}{% endif %}{% if sale.customer.postcode %}, {{ sale.customer.postcode }}{% endif %}
+                            </span>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="sale-hero-actions">
+                {% if sale.anthill_customer_id %}
+                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success" title="View customer in Anthill CRM">
+                    <i class="bi bi-box-arrow-up-right"></i> Anthill
+                </a>
+                {% endif %}
+                {% if sale.customer %}
+                <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary" title="View full customer record">
+                    <i class="bi bi-person"></i> Customer Profile
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     <div class="order-details-grid">
 
         <!-- ===== MAIN COLUMN ===== -->
@@ -31,15 +77,25 @@
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
                         <h3><i class="bi bi-receipt"></i> Sale Details</h3>
-                        <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
-                            {{ sale.status|default:"Unknown" }}
-                        </span>
+                        <div class="header-actions">
+                            <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
+                                {{ sale.status|default:"Unknown" }}
+                            </span>
+                            <button class="btn btn-sm btn-outline-primary" id="btn-edit" onclick="toggleEditMode()">
+                                <i class="bi bi-pencil"></i> Edit</button>
+                            <button class="btn btn-sm btn-outline-success" id="btn-save" style="display:none;" onclick="saveSale()">
+                                <i class="bi bi-check-lg"></i> Save</button>
+                            <button class="btn btn-sm btn-outline-secondary" id="btn-cancel" style="display:none;" onclick="cancelEdit()">
+                                <i class="bi bi-x-lg"></i> Cancel</button>
+                        </div>
                     </div>
                     <div class="card-body padded">
+                        <div id="save-notification" class="save-notification" style="display:none;"></div>
                         <div class="info-display">
                             <div>
                                 <div class="field-label">Contract Number</div>
-                                <div class="field-value field-value-large">{{ sale.contract_number|default:"-" }}</div>
+                                <div class="field-value field-value-large view-val">{{ sale.contract_number|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="contract_number" value="{{ sale.contract_number|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Activity ID</div>
@@ -51,15 +107,28 @@
                             </div>
                             <div>
                                 <div class="field-label">Location</div>
-                                <div class="field-value">{{ sale.location|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.location|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="location" value="{{ sale.location|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Assigned To</div>
-                                <div class="field-value">{{ sale.assigned_to_name|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.assigned_to_name|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="assigned_to_name" value="{{ sale.assigned_to_name|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Source</div>
-                                <div class="field-value">{{ sale.source|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.source|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="source" value="{{ sale.source|default:'' }}" style="display:none;">
+                            </div>
+                            <div>
+                                <div class="field-label">Status</div>
+                                <div class="field-value view-val">{{ sale.status|default:"-" }}</div>
+                                <select class="customer-edit-input edit-val" data-field="status" style="display:none;">
+                                    <option value="open" {% if sale.status == 'open' %}selected{% endif %}>Open</option>
+                                    <option value="won" {% if sale.status == 'won' %}selected{% endif %}>Won</option>
+                                    <option value="dead" {% if sale.status == 'dead' %}selected{% endif %}>Dead</option>
+                                    <option value="cancelled" {% if sale.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                                </select>
                             </div>
                         </div>
                     </div>
@@ -75,14 +144,15 @@
                             <div class="financial-card-vertical">
                                 <div class="financial-card-content">
                                     <span class="financial-card-label">Sale Value (Inc VAT)</span>
-                                    <div class="financial-display">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                    <div class="financial-display view-val">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                    <input class="customer-edit-input edit-val sale-value-edit" data-field="sale_value" value="{{ sale.sale_value|default:'' }}" placeholder="0.00" style="display:none;">
                                 </div>
                             </div>
                             {% if discount %}
                             <div class="financial-card-vertical">
                                 <div class="financial-card-content">
                                     <span class="financial-card-label">Sliderobes Credit</span>
-                                    <div class="financial-display" style="color: var(--warning-color);">-£{{ discount|floatformat:2 }}</div>
+                                    <div class="financial-display sale-financial-warning">-£{{ discount|floatformat:2 }}</div>
                                 </div>
                             </div>
                             <div class="financial-card-vertical">
@@ -104,29 +174,29 @@
                                 <div class="financial-card-content">
                                     <span class="financial-card-label">Payment Progress</span>
                                     {% if effective_value %}
-                                    <div class="financial-progress-wrapper" style="margin-top: 4px;">
+                                    <div class="financial-progress-wrapper sale-progress-row">
                                         <div class="financial-progress">
                                             <div class="financial-progress-bar" style="width: {{ payment_pct }}%;"></div>
                                         </div>
                                         <span class="financial-percentage">{{ payment_pct }}%</span>
                                     </div>
-                                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                                        <span class="financial-display" style="font-size: 14px; color: var(--success-color);">£{{ payments_total|floatformat:2 }} of £{{ effective_value|floatformat:2 }} paid</span>
-                                        <span class="financial-display" style="font-size: 14px; color: {% if outstanding > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};">£{{ outstanding|floatformat:2 }} remaining</span>
+                                    <div class="sale-payment-summary">
+                                        <span class="financial-display sale-financial-success">£{{ payments_total|floatformat:2 }} of £{{ effective_value|floatformat:2 }} paid</span>
+                                        <span class="financial-display {% if outstanding > 0 %}sale-financial-danger{% else %}sale-financial-success{% endif %}">£{{ outstanding|floatformat:2 }} remaining</span>
                                     </div>
                                     {% if overpayment %}
-                                    <div class="financial-progress-wrapper" style="margin-top: 6px;">
+                                    <div class="financial-progress-wrapper sale-progress-row">
                                         <div class="financial-progress">
-                                            <div class="financial-progress-bar" style="width: {{ overpayment_pct }}%; background: linear-gradient(90deg, var(--warning-color) 0%, #e67e22 100%);"></div>
+                                            <div class="financial-progress-bar sale-overpayment-bar" style="width: {{ overpayment_pct }}%;"></div>
                                         </div>
                                         <span class="financial-percentage">+{{ overpayment_pct }}%</span>
                                     </div>
-                                    <div style="margin-top: 2px;">
-                                        <span class="financial-display" style="font-size: 14px; color: var(--warning-color);">£{{ overpayment|floatformat:2 }} overpaid</span>
+                                    <div class="sale-overpayment-row">
+                                        <span class="financial-display sale-financial-warning-sm">£{{ overpayment|floatformat:2 }} overpaid</span>
                                     </div>
                                     {% endif %}
                                     {% else %}
-                                    <div class="financial-display" style="color: var(--text-secondary);">-</div>
+                                    <div class="financial-display sale-financial-muted">-</div>
                                     {% endif %}
                                 </div>
                             </div>
@@ -143,23 +213,28 @@
                         <div class="info-display">
                             <div>
                                 <div class="field-label">Range</div>
-                                <div class="field-value">{{ sale.range_name|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.range_name|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="range_name" value="{{ sale.range_name|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Door Type</div>
-                                <div class="field-value">{{ sale.door_type|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.door_type|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="door_type" value="{{ sale.door_type|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Products Included</div>
-                                <div class="field-value">{{ sale.products_included|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.products_included|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="products_included" value="{{ sale.products_included|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Fit From Date</div>
-                                <div class="field-value">{{ sale.fit_from_date|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.fit_from_date|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="fit_from_date" value="{{ sale.fit_from_date|default:'' }}" style="display:none;">
                             </div>
                             <div>
                                 <div class="field-label">Goods Due In</div>
-                                <div class="field-value">{{ sale.goods_due_in|default:"-" }}</div>
+                                <div class="field-value view-val">{{ sale.goods_due_in|default:"-" }}</div>
+                                <input class="customer-edit-input edit-val" data-field="goods_due_in" value="{{ sale.goods_due_in|default:'' }}" style="display:none;">
                             </div>
                         </div>
                     </div>
@@ -171,7 +246,7 @@
             <div class="card">
                 <div class="card-header">
                     <h3>Payment History</h3>
-                    <div style="display:flex; align-items:center; gap:8px;">
+                    <div class="sale-payment-header-actions">
                         {% if payments %}<span class="tab-count">{{ payments|length }}</span>{% endif %}
                         <button type="button" class="btn btn-sm btn-outline-success" onclick="openScrapeAnthillModal()">
                             <i class="bi bi-cloud-download"></i> Scrape from Anthill
@@ -208,14 +283,14 @@
                                 {% if p.status|lower == 'authorised' %}
                                 <span class="customer-active-badge active">Authorised</span>
                                 {% elif p.status|lower == 'paid' %}
-                                <span class="customer-active-badge" style="background:#10b981; color:#fff;">Paid</span>
+                                <span class="customer-active-badge sale-badge-paid">Paid</span>
                                 {% elif p.status %}
                                 <span class="customer-active-badge inactive">{{ p.status }}</span>
                                 {% else %}
                                 <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
-                            <td style="white-space:nowrap;">
+                            <td class="sale-actions-cell">
                                 <button class="btn btn-sm btn-outline-warning" onclick="openSplitModal({{ p.pk }}, '{{ p.xero_invoice_number|default:"" }}', {{ p.amount|default:0 }})" title="Split payment to another sale">
                                     <i class="bi bi-scissors"></i>
                                 </button>
@@ -231,8 +306,8 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="3" style="text-align:right; font-weight:600; padding:10px 12px; font-size:0.78rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">Total</td>
-                            <td style="font-weight:700; padding:10px 8px;">
+                            <td colspan="3" class="sale-tfoot-label">Total</td>
+                            <td class="sale-tfoot-value">
                                 {% if xero_payments_total %}£{{ xero_payments_total|floatformat:2 }}{% else %}-{% endif %}
                             </td>
                             <td colspan="3"></td>
@@ -268,7 +343,7 @@
                                 <span class="customer-active-badge {% if p.status|lower == 'confirmed' %}active{% else %}inactive{% endif %}">{{ p.status }}</span>
                                 {% else %}<span class="text-muted">-</span>{% endif %}
                             </td>
-                            <td style="white-space:nowrap;">
+                            <td class="sale-actions-cell">
                                 <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
                                     <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
                                 </button>
@@ -281,8 +356,8 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="4" style="text-align:right; font-weight:600; padding:10px 12px; font-size:0.78rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">Total</td>
-                            <td style="font-weight:700; padding:10px 8px;">
+                            <td colspan="4" class="sale-tfoot-label">Total</td>
+                            <td class="sale-tfoot-value">
                                 {% if manual_payments_total %}£{{ manual_payments_total|floatformat:2 }}{% else %}-{% endif %}
                             </td>
                             <td colspan="2"></td>
@@ -293,10 +368,10 @@
 
                 {% if not xero_payments and not manual_payments %}
                 <div class="card-body padded">
-                    <div style="text-align:center; padding: 24px 0; color: var(--text-secondary);">
-                        <i class="bi bi-cash-stack" style="font-size: 2rem; display:block; margin-bottom:8px; opacity:0.4;"></i>
-                        <p style="margin: 0 0 6px;">No payment records found for this sale.</p>
-                        <small style="color: var(--text-muted);">
+                    <div class="sale-empty-payments">
+                        <i class="bi bi-cash-stack"></i>
+                        <p>No payment records found for this sale.</p>
+                        <small>
                             Run <code>python manage.py sync_xero_sale_payments --sale-id {{ sale.anthill_activity_id }}</code> to fetch from Xero, or use the button above to add manual payments.
                         </small>
                     </div>
@@ -309,20 +384,20 @@
             <dialog id="addManualPaymentModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
-                        <i class="bi bi-cash-stack" style="color:#4a9eff;"></i>
+                        <i class="bi bi-cash-stack sale-modal-icon-blue"></i>
                         <span>Add Manual Payments</span>
                     </div>
                     <button class="manual-modal-close" onclick="closeAddManualModal()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
-                    <div style="margin-bottom:16px;">
-                        <label style="display:block; font-size:0.8rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                    <div class="sale-modal-section">
+                        <label class="sale-modal-label">
                             <i class="bi bi-clipboard"></i> Paste from Anthill (optional)
                         </label>
                         <textarea id="anthillPasteArea" rows="4"
                             placeholder="Paste the payment table from Anthill CRM here and click Parse..."
-                            style="width:100%; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; padding:8px 10px; font-size:0.82rem; font-family:monospace; resize:vertical;"></textarea>
-                        <div style="display:flex; gap:8px; margin-top:8px;">
+                            class="sale-paste-textarea"></textarea>
+                        <div class="sale-modal-btn-row">
                             <button type="button" class="btn btn-sm btn-outline-primary" onclick="parseAnthillPaste()">
                                 <i class="bi bi-magic"></i> Parse
                             </button>
@@ -332,7 +407,7 @@
                         </div>
                     </div>
 
-                    <div style="overflow-x:auto;">
+                    <div class="sale-modal-table-wrap">
                         <table class="manual-entry-table">
                             <thead>
                                 <tr>
@@ -348,7 +423,7 @@
                             <tbody id="manualEntryBody"></tbody>
                         </table>
                     </div>
-                    <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
+                    <div class="sale-modal-footer">
                         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addManualRow()">
                             <i class="bi bi-plus"></i> Add Row
                         </button>
@@ -358,7 +433,7 @@
                         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeAddManualModal()">
                             Cancel
                         </button>
-                        <span id="manualSaveMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+                        <span id="manualSaveMsg" class="sale-modal-msg"></span>
                     </div>
                 </div>
             </dialog>
@@ -367,21 +442,21 @@
             <dialog id="scrapeAnthillModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
-                        <i class="bi bi-cloud-download" style="color:#28a745;"></i>
+                        <i class="bi bi-cloud-download sale-modal-icon-green"></i>
                         <span>Sync Payments from Anthill</span>
                     </div>
                     <button class="manual-modal-close" onclick="document.getElementById('scrapeAnthillModal').close()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
                     <div id="scrapeModalBody"></div>
-                    <div style="display:flex; gap:8px; margin-top:14px; align-items:center;">
+                    <div class="sale-scrape-footer">
                         <button type="button" class="btn btn-sm btn-success" id="scrapeImportBtn" onclick="importScrapeSelected()" style="display:none;">
                             <i class="bi bi-check-lg"></i> Import
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('scrapeAnthillModal').close()">
                             Cancel
                         </button>
-                        <span id="scrapeMsg" style="font-size:0.82rem;"></span>
+                        <span id="scrapeMsg" class="sale-modal-msg"></span>
                     </div>
                 </div>
             </dialog>
@@ -390,43 +465,43 @@
             <dialog id="splitPaymentModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
-                        <i class="bi bi-scissors" style="color:#f0ad4e;"></i>
+                        <i class="bi bi-scissors sale-modal-icon-amber"></i>
                         <span>Split Payment</span>
                     </div>
                     <button class="manual-modal-close" onclick="document.getElementById('splitPaymentModal').close()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
-                    <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-secondary);">
+                    <div class="sale-split-info">
                         Splitting <strong id="splitInvoiceLabel"></strong> — <strong id="splitOriginalAmount"></strong>
                     </div>
-                    <div style="margin-bottom:14px;">
-                        <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                    <div class="sale-split-field">
+                        <label class="sale-modal-label-sm">
                             Move to Sale
                         </label>
-                        <select id="splitTargetSale" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+                        <select id="splitTargetSale" class="sale-modal-select">
                             <option value="">-- Select a sale --</option>
                             {% for related in related_sales %}
                             <option value="{{ related.pk }}">{{ related.anthill_activity_id }} — {{ related.contract_number|default:"No contract" }} ({{ related.status|default:"?" }})</option>
                             {% endfor %}
                         </select>
                     </div>
-                    <div style="margin-bottom:14px;">
-                        <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+                    <div class="sale-split-field">
+                        <label class="sale-modal-label-sm">
                             Amount to Move (£)
                         </label>
-                        <input type="number" id="splitAmount" step="0.01" min="0.01" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
-                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                        <input type="number" id="splitAmount" step="0.01" min="0.01" class="sale-modal-input">
+                        <div class="sale-split-hint">
                             Keeping <strong id="splitKeepAmount">—</strong> on this sale
                         </div>
                     </div>
-                    <div style="display:flex; gap:8px; align-items:center;">
+                    <div class="sale-split-actions">
                         <button type="button" class="btn btn-sm btn-warning" onclick="confirmSplitPayment()">
                             <i class="bi bi-scissors"></i> Split
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('splitPaymentModal').close()">
                             Cancel
                         </button>
-                        <span id="splitMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+                        <span id="splitMsg" class="sale-modal-msg"></span>
                     </div>
                 </div>
             </dialog>
@@ -445,7 +520,7 @@
                 const importBtn = document.getElementById('scrapeImportBtn');
                 const msg = document.getElementById('scrapeMsg');
 
-                body.innerHTML = '<div style="text-align:center;padding:28px 0;color:var(--text-secondary);"><i class="bi bi-arrow-repeat" style="font-size:1.6rem;animation:spin 1s linear infinite;"></i><p style="margin-top:12px;">Fetching payments from Anthill&hellip;</p></div>';
+                body.innerHTML = '<div class="sale-scrape-loading"><i class="bi bi-arrow-repeat"></i><p>Fetching payments from Anthill&hellip;</p></div>';
                 importBtn.style.display = 'none';
                 msg.textContent = '';
                 modal.showModal();
@@ -460,46 +535,45 @@
                         const d = data.diag || {};
                         let diagHtml = '';
                         if (d.final_url || d.page_title || d.raw_has_payments_table !== undefined) {
-                            diagHtml += '<details style="margin-top:12px;font-size:0.78rem;color:var(--text-secondary);">' +
-                                '<summary style="cursor:pointer;font-weight:600;color:var(--text-secondary);">Diagnostic info</summary>' +
-                                '<div style="margin-top:8px;padding:10px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border-color);font-family:monospace;line-height:1.6;">';
+                            diagHtml += '<details class="sale-scrape-diag">' +
+                                '<summary>Diagnostic info</summary>' +
+                                '<div class="sale-scrape-diag-body">';
                             if (d.http_status)           diagHtml += 'HTTP status: <b>' + escHtml(String(d.http_status)) + '</b><br>';
                             if (d.final_url)             diagHtml += 'Fetched URL: <b>' + escHtml(d.final_url) + '</b><br>';
                             if (d.page_title)            diagHtml += 'Page title: <b>' + escHtml(d.page_title) + '</b><br>';
                             diagHtml += '"paymentsTable" in HTML: <b>' + (d.raw_has_payments_table ? 'YES ✓' : 'NO ✗') + '</b><br>';
-                            if (d.html_sample) diagHtml += '<br><b>First 5000 chars of response:</b><br><span style="font-size:0.7rem;word-break:break-all;">' + escHtml(d.html_sample) + '</span>';
+                            if (d.html_sample) diagHtml += '<br><b>First 5000 chars of response:</b><br><span class="sale-scrape-diag-sample">' + escHtml(d.html_sample) + '</span>';
                             diagHtml += '</div></details>';
                         }
-                        body.innerHTML = '<p style="color:#dc3545;padding:12px 0 4px;"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>' + diagHtml;
+                        body.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>' + diagHtml;
                         return;
                     }
                     if (!data.payments.length) {
-                        body.innerHTML = '<p style="color:var(--text-secondary);padding:12px 0;">No payments found on the Anthill page.</p>';
+                        body.innerHTML = '<p class="sale-scrape-empty">No payments found on the Anthill page.</p>';
                         return;
                     }
                     renderScrapeResults(data.payments);
                     importBtn.style.display = '';
                 })
                 .catch(() => {
-                    body.innerHTML = '<p style="color:#dc3545;padding:12px 0;"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach the server.</p>';
+                    body.innerHTML = '<p class="sale-scrape-network-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach the server.</p>';
                 });
             }
 
             function renderScrapeResults(payments) {
                 const body = document.getElementById('scrapeModalBody');
-                let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;">Review the payments below and check the ones you want to import.</p>';
-                html += '<div style="border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">';
+                let html = '<p class="sale-scrape-results-intro">Review the payments below and check the ones you want to import.</p>';
+                html += '<div class="sale-scrape-results-list">';
                 payments.forEach((p, idx) => {
-                    const border = idx > 0 ? 'border-top:1px solid var(--border-color);' : '';
-                    html += `<label style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;${border}" class="scrape-row">`;
-                    html += `<input type="checkbox" class="scrape-check" checked data-idx="${idx}" style="flex-shrink:0;width:16px;height:16px;cursor:pointer;">`;
-                    html += `<div style="flex:1;min-width:0;">`;
-                    html += `<div style="font-weight:600;font-size:0.88rem;">${escHtml(p.type)}</div>`;
-                    html += `<div style="font-size:0.75rem;color:var(--text-secondary);">${escHtml(p.date)} &nbsp;&bull;&nbsp; ${escHtml(p.location)} &nbsp;&bull;&nbsp; ${escHtml(p.user)}</div>`;
+                    html += `<label class="sale-scrape-row scrape-row">`;
+                    html += `<input type="checkbox" class="scrape-check sale-scrape-check" checked data-idx="${idx}">`;
+                    html += `<div class="sale-scrape-detail">`;
+                    html += `<div class="sale-scrape-type">${escHtml(p.type)}</div>`;
+                    html += `<div class="sale-scrape-meta">${escHtml(p.date)} &nbsp;&bull;&nbsp; ${escHtml(p.location)} &nbsp;&bull;&nbsp; ${escHtml(p.user)}</div>`;
                     html += `</div>`;
-                    html += `<div style="text-align:right;white-space:nowrap;">`;
-                    html += `<div style="font-weight:600;font-size:0.9rem;">&pound;${escHtml(p.amount)}</div>`;
-                    if (p.status) html += `<div style="font-size:0.72rem;color:#28a745;">${escHtml(p.status)}</div>`;
+                    html += `<div class="sale-scrape-amount-col">`;
+                    html += `<div class="sale-scrape-amount">&pound;${escHtml(p.amount)}</div>`;
+                    if (p.status) html += `<div class="sale-scrape-status">${escHtml(p.status)}</div>`;
                     html += `</div></label>`;
                 });
                 html += '</div>';
@@ -588,16 +662,16 @@
             function addManualRow(data) {
                 const tbody = document.getElementById('manualEntryBody');
                 const d = data || {};
-                const inputStyle = 'width:100%; box-sizing:border-box;';
+                const inputStyle = '';
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><input class="manual-input" type="text" placeholder="e.g. Deposit" value="${escHtml(d.type||'')}" style="${inputStyle}"></td>
-                    <td><input class="manual-input" type="text" placeholder="dd/mm/yy HH:MM" value="${escHtml(d.date||'')}" style="${inputStyle}"></td>
-                    <td><input class="manual-input" type="text" placeholder="Belfast" value="${escHtml(d.location||'')}" style="${inputStyle}"></td>
-                    <td><input class="manual-input" type="text" placeholder="User.Name" value="${escHtml(d.user||'')}" style="${inputStyle}"></td>
-                    <td><input class="manual-input" type="number" step="0.01" min="0" placeholder="0.00" value="${escHtml(d.amount||'')}" style="${inputStyle}"></td>
-                    <td><input class="manual-input" type="text" placeholder="Confirmed" value="${escHtml(d.status||'')}" style="${inputStyle}"></td>
-                    <td style="text-align:center;"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); updateSaveBtn()"><i class="bi bi-trash"></i></button></td>
+                    <td><input class="manual-input" type="text" placeholder="e.g. Deposit" value="${escHtml(d.type||'')}"></td>
+                    <td><input class="manual-input" type="text" placeholder="dd/mm/yy HH:MM" value="${escHtml(d.date||'')}"></td>
+                    <td><input class="manual-input" type="text" placeholder="Belfast" value="${escHtml(d.location||'')}"></td>
+                    <td><input class="manual-input" type="text" placeholder="User.Name" value="${escHtml(d.user||'')}"></td>
+                    <td><input class="manual-input" type="number" step="0.01" min="0" placeholder="0.00" value="${escHtml(d.amount||'')}"></td>
+                    <td><input class="manual-input" type="text" placeholder="Confirmed" value="${escHtml(d.status||'')}"></td>
+                    <td class="sale-manual-delete-cell"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); updateSaveBtn()"><i class="bi bi-trash"></i></button></td>
                 `;
                 tbody.appendChild(tr);
                 tr.querySelectorAll('.manual-input').forEach(el => el.addEventListener('input', updateSaveBtn));
@@ -831,6 +905,73 @@
                 })
                 .catch(() => { msg.textContent = 'Network error'; msg.style.color = '#ef4444'; });
             }
+
+            // ── Edit / Save / Cancel ─────────────────────────────────────────
+            const SALE_SAVE_URL = "{% url 'sale_save' sale.pk %}";
+
+            function toggleEditMode() {
+                document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
+                document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
+                document.getElementById('btn-edit').style.display = 'none';
+                document.getElementById('btn-save').style.display = 'inline-flex';
+                document.getElementById('btn-cancel').style.display = 'inline-flex';
+            }
+
+            function cancelEdit() {
+                document.querySelectorAll('.view-val').forEach(el => el.style.display = '');
+                document.querySelectorAll('.edit-val').forEach(el => {
+                    el.style.display = 'none';
+                    if (el.tagName === 'SELECT') {
+                        el.querySelectorAll('option').forEach(o => { o.selected = o.defaultSelected; });
+                    } else {
+                        el.value = el.defaultValue;
+                    }
+                });
+                document.getElementById('btn-edit').style.display = '';
+                document.getElementById('btn-save').style.display = 'none';
+                document.getElementById('btn-cancel').style.display = 'none';
+            }
+
+            function saveSale() {
+                const data = {};
+                document.querySelectorAll('.edit-val[data-field]').forEach(input => {
+                    data[input.getAttribute('data-field')] = input.value;
+                });
+
+                const btn = document.getElementById('btn-save');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Saving\u2026';
+
+                fetch(SALE_SAVE_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                    body: JSON.stringify(data),
+                })
+                .then(r => r.json())
+                .then(result => {
+                    const notif = document.getElementById('save-notification');
+                    if (result.success) {
+                        notif.className = 'save-notification success';
+                        notif.innerHTML = '<i class="bi bi-check-circle"></i> Changes saved';
+                        notif.style.display = 'flex';
+                        setTimeout(() => location.reload(), 800);
+                    } else {
+                        notif.className = 'save-notification error';
+                        notif.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + (result.error || 'Save failed');
+                        notif.style.display = 'flex';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+                    }
+                })
+                .catch(() => {
+                    const notif = document.getElementById('save-notification');
+                    notif.className = 'save-notification error';
+                    notif.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error';
+                    notif.style.display = 'flex';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+                });
+            }
             </script>
 
             <!-- Related Sales Card -->
@@ -838,7 +979,7 @@
             <div class="card">
                 <div class="card-header">
                     <h3>Other Sales for this Customer</h3>
-                    <span class="tab-count" style="margin-left: 6px;">{{ related_sales|length }}</span>
+                    <span class="tab-count sale-related-count">{{ related_sales|length }}</span>
                 </div>
                 <table class="table orders-table">
                     <thead>
@@ -859,7 +1000,7 @@
                                     {{ related.anthill_activity_id }}
                                 </a>
                             </td>
-                            <td><span class="customer-mono" style="font-size:0.8rem;">{{ related.contract_number|default:"-" }}</span></td>
+                            <td><span class="customer-mono sale-contract-mono">{{ related.contract_number|default:"-" }}</span></td>
                             <td>{{ related.activity_type|default:"-" }}</td>
                             <td>
                                 <span class="customer-active-badge {% if related.status|lower == 'complete' or related.status|lower == 'completed' %}active{% elif related.status|lower == 'dead' %}danger{% else %}inactive{% endif %}">
@@ -888,55 +1029,30 @@
         <!-- ===== SIDEBAR COLUMN ===== -->
         <div class="sidebar-column">
 
-            <!-- Customer Card -->
-            <div class="card" style="margin-bottom: 24px;">
+            <!-- Quick Links Card -->
+            <div class="card sale-sidebar-card">
                 <div class="card-header">
-                    <h3><i class="bi bi-person"></i> Customer</h3>
+                    <h3><i class="bi bi-link-45deg"></i> Quick Links</h3>
                 </div>
-                <div class="card-body padded">
-                    <div class="info-display">
-                        <div>
-                            <div class="field-label">Customer Name</div>
-                            <div class="field-value field-value-large">
-                                {% if sale.customer %}
-                                <a href="{% url 'customer_detail' sale.customer.pk %}" class="field-link">{{ sale.customer.name }}</a>
-                                {% else %}
-                                {{ sale.customer_name|default:"-" }}
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div>
-                            <div class="field-label">Anthill Customer ID</div>
-                            <div class="field-row-with-button">
-                                <div class="field-value customer-mono">{{ sale.anthill_customer_id|default:"-" }}</div>
-                                {% if sale.anthill_customer_id %}
-                                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success external-link-btn">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </a>
-                                {% endif %}
-                            </div>
-                        </div>
-                        {% if sale.customer %}
-                        <div>
-                            <div class="field-label">Email</div>
-                            <div class="field-value" style="word-break:break-all;">{{ sale.customer.email|default:"-" }}</div>
-                        </div>
-                        <div>
-                            <div class="field-label">Phone</div>
-                            <div class="field-value">{{ sale.customer.phone|default:"-" }}</div>
-                        </div>
-                        {% endif %}
-                        <div style="margin-top: 10px;">
-                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success" style="width:100%; text-align:center; display:block;">
-                                <i class="bi bi-box-arrow-up-right"></i> Open in Anthill CRM
-                            </a>
-                        </div>
-                    </div>
+                <div class="card-body padded sale-sidebar-links">
+                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Open Sale in Anthill
+                    </a>
+                    {% if sale.anthill_customer_id %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Open Customer in Anthill
+                    </a>
+                    {% endif %}
+                    {% if sale.customer %}
+                    <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
+                        <i class="bi bi-person"></i> Customer Profile
+                    </a>
+                    {% endif %}
                 </div>
             </div>
 
             <!-- Linked Order Card -->
-            <div class="card" style="margin-bottom: 24px;">
+            <div class="card sale-sidebar-card">
                 <div class="card-header">
                     <h3><i class="bi bi-folder"></i> Linked Order</h3>
                 </div>
@@ -963,16 +1079,16 @@
                                 {% endif %}
                             </div>
                         </div>
-                        <div style="margin-top: 10px;">
-                            <a href="{% url 'order_details' sale.order.id %}" class="btn btn-sm btn-outline-primary" style="width:100%; text-align:center; display:block;">
+                        <div class="sale-order-view-btn">
+                            <a href="{% url 'order_details' sale.order.id %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
                                 <i class="bi bi-eye"></i> View Full Order
                             </a>
                         </div>
                     </div>
                     {% else %}
-                    <div style="text-align:center; padding: 20px 0; color: var(--text-secondary);">
-                        <i class="bi bi-folder" style="font-size:1.8rem; display:block; margin-bottom:8px; opacity:0.35;"></i>
-                        <p style="margin:0; font-size:0.85rem;">No local order linked to this sale.</p>
+                    <div class="sale-no-order">
+                        <i class="bi bi-folder"></i>
+                        <p>No local order linked to this sale.</p>
                     </div>
                     {% endif %}
                 </div>

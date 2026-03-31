@@ -343,7 +343,6 @@ function startSync() {
         <form method="POST" action="{% url 'purchase_order_create' %}">
             {% csrf_token %}
             <input type="hidden" name="po_type" id="po-type-input" value="supplier">
-            <input type="hidden" name="order_id" id="po-order-id" value="">
             <div class="modal-body">
                 <!-- PO Type Toggle -->
                 <div class="po-type-toggle">
@@ -380,15 +379,12 @@ function startSync() {
 
                 <!-- Order Assignment (shown for fitter POs) -->
                 <div class="form-group" id="order-assign-group" style="display:none;">
-                    <label for="po-order-search">Assign to Order</label>
+                    <label for="po-order-search">Assign Orders</label>
                     <div class="po-order-search-wrap">
                         <input type="text" id="po-order-search" placeholder="Search by sale number or customer name..." autocomplete="off">
                         <div class="po-order-dropdown" id="po-order-dropdown"></div>
                     </div>
-                    <div class="po-assigned-order" id="po-assigned-order" style="display:none;">
-                        <span id="po-assigned-label"></span>
-                        <button type="button" class="po-assigned-remove" onclick="clearAssignedOrder()">&times;</button>
-                    </div>
+                    <div class="po-assigned-orders" id="po-assigned-orders"></div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -400,6 +396,8 @@ function startSync() {
 </div>
 
 <script>
+const assignedOrders = [];
+
 function setPOType(type) {
     document.getElementById('po-type-input').value = type;
     document.querySelectorAll('.po-type-btn').forEach(b => b.classList.remove('active'));
@@ -417,17 +415,39 @@ function setPOType(type) {
     // Clear the other selection
     if (isSupplier) {
         document.getElementById('po-fitter').value = '';
-        clearAssignedOrder();
+        clearAllAssignedOrders();
     } else {
         document.getElementById('po-supplier').value = '';
     }
 }
 
-function clearAssignedOrder() {
-    document.getElementById('po-order-id').value = '';
-    document.getElementById('po-assigned-order').style.display = 'none';
-    document.getElementById('po-assigned-label').textContent = '';
+function clearAllAssignedOrders() {
+    assignedOrders.length = 0;
+    renderAssignedOrders();
     document.getElementById('po-order-search').value = '';
+}
+
+function removeAssignedOrder(orderId) {
+    const idx = assignedOrders.findIndex(o => o.id === orderId);
+    if (idx !== -1) assignedOrders.splice(idx, 1);
+    renderAssignedOrders();
+}
+
+function renderAssignedOrders() {
+    const container = document.getElementById('po-assigned-orders');
+    // Remove old hidden inputs
+    container.querySelectorAll('input[name="order_ids"]').forEach(el => el.remove());
+    if (!assignedOrders.length) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = assignedOrders.map(o =>
+        `<div class="po-assigned-order">
+            <input type="hidden" name="order_ids" value="${o.id}">
+            <span>${o.saleNumber} — ${o.customerName}</span>
+            <button type="button" class="po-assigned-remove" onclick="removeAssignedOrder(${o.id})">&times;</button>
+        </div>`
+    ).join('');
 }
 
 // Order search autocomplete for fitter POs
@@ -467,11 +487,12 @@ function clearAssignedOrder() {
 })();
 
 function selectOrder(id, saleNumber, customerName) {
-    document.getElementById('po-order-id').value = id;
+    // Prevent duplicates
+    if (assignedOrders.some(o => o.id === id)) return;
+    assignedOrders.push({ id, saleNumber, customerName });
+    renderAssignedOrders();
     document.getElementById('po-order-search').value = '';
     document.getElementById('po-order-dropdown').style.display = 'none';
-    document.getElementById('po-assigned-label').textContent = `${saleNumber} — ${customerName}`;
-    document.getElementById('po-assigned-order').style.display = 'flex';
 }
 </script>
 

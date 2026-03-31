@@ -7313,6 +7313,19 @@ def allocate_accessories(request, order_id):
 
 
 @login_required
+def clear_os_doors_ordered(request, order_id):
+    """Clear the OS Doors ordered mark from an order, resetting all door items."""
+    if request.method == 'POST':
+        order = get_object_or_404(Order, id=order_id)
+        order.os_doors.update(ordered=False, po_number='')
+        order.os_doors_po = ''
+        order.save(update_fields=['os_doors_po'])
+        messages.success(request, f'OS Doors ordered mark cleared for order {order.sale_number}.')
+        return redirect('order_details', order_id=order_id)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
 def update_os_doors_po(request, order_id):
     """Update OS Doors PO for an order"""
     if request.method == 'POST':
@@ -8630,10 +8643,32 @@ def calendar_view(request):
             fitter='R',  # Default fitter
         )
 
-    appointments = FitAppointment.objects.filter(
+    appointments = list(FitAppointment.objects.filter(
         fit_date__year=current_year,
         fit_date__month=current_month
-    ).select_related('order')
+    ).select_related('order', 'remedial'))
+
+    # Attach payment info (sale value / paid / outstanding) from linked AnthillSale
+    sale_numbers = [a.order.sale_number for a in appointments if a.order]
+    if sale_numbers:
+        _sale_rows = (
+            AnthillSale.objects
+            .filter(anthill_activity_id__in=sale_numbers)
+            .annotate(payments_sum=Sum('payments__amount'))
+            .values('anthill_activity_id', 'sale_value', 'payments_sum')
+        )
+        _fin_map = {}
+        for row in _sale_rows:
+            sv = row['sale_value'] or Decimal('0')
+            pt = row['payments_sum'] or Decimal('0')
+            _fin_map[row['anthill_activity_id']] = {
+                'sale_value': sv,
+                'payments_total': pt,
+                'outstanding': sv - pt,
+            }
+        for appt in appointments:
+            if appt.order:
+                appt.fin = _fin_map.get(appt.order.sale_number)
     
     # Get all orders with fit dates in this month (for quick add)
     orders_this_month = Order.objects.filter(
@@ -8675,9 +8710,44 @@ def calendar_view(request):
                 'span_pos': span_pos,
             })
     
-    # Build calendar structure
+    # Build calendar structure with adjacent-month fill
     cal = calendar.Calendar(firstweekday=0)  # Monday as first day
-    month_days = cal.monthdayscalendar(current_year, current_month)
+    raw_weeks = cal.monthdayscalendar(current_year, current_month)
+
+    # Work out prev/next month day numbers for the zero-cells
+    if current_month == 1:
+        prev_m_year, prev_m_month = current_year - 1, 12
+    else:
+        prev_m_year, prev_m_month = current_year, current_month - 1
+    _, prev_m_days = monthrange(prev_m_year, prev_m_month)
+
+    if current_month == 12:
+        next_m_year, next_m_month = current_year + 1, 1
+    else:
+        next_m_year, next_m_month = current_year, current_month + 1
+
+    month_days = []
+    for wi, week in enumerate(raw_weeks):
+        week_out = []
+        for di, day in enumerate(week):
+            if day != 0:
+                week_out.append({'day': day, 'in_month': True,
+                                 'year': current_year, 'month': current_month})
+            elif wi == 0:
+                # First week — fill from previous month
+                # Count how many leading zeros
+                leading = week.index(next(d for d in week if d != 0))
+                fill_day = prev_m_days - (leading - 1 - di)
+                week_out.append({'day': fill_day, 'in_month': False,
+                                 'year': prev_m_year, 'month': prev_m_month})
+            else:
+                # Last week(s) — fill from next month
+                # Count position past the last in-month day
+                last_in = max(i for i, d in enumerate(week) if d != 0)
+                fill_day = di - last_in
+                week_out.append({'day': fill_day, 'in_month': False,
+                                 'year': next_m_year, 'month': next_m_month})
+        month_days.append(week_out)
     
     # Get day names
     day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -8713,6 +8783,26 @@ def calendar_view(request):
             continue
         pos_by_day.setdefault(d, []).append(po)
 
+    # Outstanding balance summary — unique appointments only (no continuation dupes)
+    total_sale_value = Decimal('0')
+    total_paid = Decimal('0')
+    total_outstanding = Decimal('0')
+    total_fits = 0
+    fits_with_balance = 0
+    seen_appt_ids = set()
+    for appt in appointments:
+        if appt.id in seen_appt_ids:
+            continue
+        seen_appt_ids.add(appt.id)
+        if appt.order and hasattr(appt, 'fin') and appt.fin:
+            total_fits += 1
+            total_sale_value += appt.fin['sale_value']
+            total_paid += appt.fin['payments_total']
+            outs = appt.fin['outstanding']
+            total_outstanding += outs
+            if outs > 0:
+                fits_with_balance += 1
+
     context = {
         'current_year': current_year,
         'current_month': current_month,
@@ -8728,6 +8818,11 @@ def calendar_view(request):
         'today': today,
         'fitters': fitters,
         'pos_by_day': pos_by_day,
+        'total_sale_value': total_sale_value,
+        'total_paid': total_paid,
+        'total_outstanding': total_outstanding,
+        'total_fits': total_fits,
+        'fits_with_balance': fits_with_balance,
     }
     
     return render(request, 'stock_take/fit_board.html', context)
@@ -8931,6 +9026,22 @@ def calendar_weekly(request):
     # Get last Anthill sync timestamp
     anthill_sync = SyncLog.objects.filter(script_name='anthill_fit_dates').first()
 
+    # Outstanding balance summary — unique appointments only
+    total_sale_value = Decimal('0')
+    total_paid = Decimal('0')
+    total_outstanding = Decimal('0')
+    total_fits = 0
+    fits_with_balance = 0
+    for appt in appointments:
+        if appt.order and hasattr(appt, 'fin') and appt.fin:
+            total_fits += 1
+            total_sale_value += appt.fin['sale_value']
+            total_paid += appt.fin['payments_total']
+            outs = appt.fin['outstanding']
+            total_outstanding += outs
+            if outs > 0:
+                fits_with_balance += 1
+
     context = {
         'week_data': week_data,
         'fitter_lanes': fitter_lanes,
@@ -8944,6 +9055,11 @@ def calendar_weekly(request):
         'fitters': list(zip(fitter_codes, [fitter_names[c] for c in fitter_codes])),
         'designers': Designer.objects.all().order_by('name'),
         'last_anthill_sync': anthill_sync,
+        'total_sale_value': total_sale_value,
+        'total_paid': total_paid,
+        'total_outstanding': total_outstanding,
+        'total_fits': total_fits,
+        'fits_with_balance': fits_with_balance,
     }
 
     return render(request, 'stock_take/calendar_weekly.html', context)

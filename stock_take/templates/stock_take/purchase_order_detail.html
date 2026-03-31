@@ -547,6 +547,234 @@
         </div>
     </div>
 
+    {% if purchase_order.po_type == 'fitter' %}
+    <!-- Timesheets Section (Fitter POs) -->
+    <div class="po-products-section" id="timesheets-section">
+        <div class="po-products-header-row">
+            <h3><i class="bi bi-clock-history"></i> Timesheets
+                {% if po_timesheets %}
+                <span class="po-board-count-badge">{{ po_timesheets|length }} entries &middot; £{{ po_timesheets_total|floatformat:2 }}</span>
+                {% endif %}
+            </h3>
+            <button class="btn btn-sm btn-add-product" onclick="toggleAddTimesheetRow()">
+                <i class="bi bi-plus-lg"></i> Add Timesheet
+            </button>
+        </div>
+        <div class="po-table-container">
+            <table class="po-products-table" id="timesheets-table">
+                <thead>
+                    <tr>
+                        <th class="text-left">Date</th>
+                        <th class="text-left">Order</th>
+                        <th class="text-left">Description</th>
+                        <th class="text-right">Hours</th>
+                        <th class="text-right">Rate (£/hr)</th>
+                        <th class="text-right">Total</th>
+                        <th class="text-center" style="width: 90px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Add Timesheet Row (hidden) -->
+                    <tr id="add-timesheet-row" style="display:none;" class="add-product-row">
+                        <td><input type="date" class="po-inline-input" id="new-ts-date" value=""></td>
+                        <td>
+                            <select class="po-inline-input" id="new-ts-order">
+                                <option value="">— No order —</option>
+                                {% for proj in po_projects %}
+                                {% if proj.order %}
+                                <option value="{{ proj.order.id }}">{{ proj.order.sale_number }} — {{ proj.label }}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td><input type="text" class="po-inline-input" id="new-ts-description" placeholder="Description of work..."></td>
+                        <td><input type="number" class="po-inline-input text-right" id="new-ts-hours" placeholder="0" step="0.5" min="0" onchange="calcNewTsTotal()"></td>
+                        <td><input type="number" class="po-inline-input text-right" id="new-ts-rate" placeholder="0.00" step="0.01" min="0" value="{% if purchase_order.fitter and purchase_order.fitter.hourly_rate %}{{ purchase_order.fitter.hourly_rate }}{% endif %}" onchange="calcNewTsTotal()"></td>
+                        <td class="text-right" id="new-ts-total">£0.00</td>
+                        <td class="text-center">
+                            <button class="btn-inline-save" onclick="saveNewTimesheet()" title="Save"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn-inline-cancel" onclick="toggleAddTimesheetRow()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </td>
+                    </tr>
+                    {% for ts in po_timesheets %}
+                    <tr data-timesheet-id="{{ ts.id }}">
+                        <td>{{ ts.date|date:"d/m/Y" }}</td>
+                        <td>
+                            {% if ts.order %}
+                            <a href="{% url 'order_details' ts.order.id %}">{{ ts.order.sale_number }}</a>
+                            {% else %}
+                            <span style="color: var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="ts-desc-cell">{{ ts.display_description|default:"-" }}</td>
+                        <td class="text-right ts-hours-cell">{{ ts.hours|floatformat:1 }}</td>
+                        <td class="text-right ts-rate-cell">£{{ ts.hourly_rate|floatformat:2 }}</td>
+                        <td class="text-right ts-total-cell">£{{ ts.line_total|floatformat:2 }}</td>
+                        <td class="text-center">
+                            <button class="btn-inline-edit" onclick="editTimesheet({{ ts.id }}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
+                            <button class="btn-inline-link" onclick="unlinkTimesheet({{ ts.id }}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
+                            <button class="btn-inline-delete" onclick="deleteTimesheet({{ ts.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="no-timesheets-row">
+                        <td colspan="7" class="text-center" style="padding: 24px; color: var(--text-secondary);">
+                            <i class="bi bi-clock" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                            No timesheet entries yet. Click <strong>Add Timesheet</strong> above to add one.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if po_timesheets %}
+        <div class="po-totals">
+            <div class="po-totals-table">
+                <div class="po-totals-row total">
+                    <div class="po-totals-label">Timesheets Total</div>
+                    <div class="po-totals-value" id="ts-total-display">£{{ po_timesheets_total|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        {% if unlinked_timesheets %}
+        <div class="po-unlinked-timesheets">
+            <h4 class="po-unlinked-header"><i class="bi bi-link-45deg"></i> Available Timesheets from Linked Orders</h4>
+            <div class="po-table-container">
+                <table class="po-products-table" id="unlinked-timesheets-table">
+                    <thead>
+                        <tr>
+                            <th class="text-left">Date</th>
+                            <th class="text-left">Order</th>
+                            <th class="text-left">Fitter</th>
+                            <th class="text-left">Description</th>
+                            <th class="text-right">Hours</th>
+                            <th class="text-right">Rate (£/hr)</th>
+                            <th class="text-right">Total</th>
+                            <th class="text-center" style="width: 50px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ts in unlinked_timesheets %}
+                        <tr data-timesheet-id="{{ ts.id }}">
+                            <td>{{ ts.date|date:"d/m/Y" }}</td>
+                            <td>
+                                {% if ts.order %}
+                                <a href="{% url 'order_details' ts.order.id %}">{{ ts.order.sale_number }}</a>
+                                {% else %}
+                                <span style="color: var(--text-muted);">—</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ ts.worker_name }}</td>
+                            <td>{{ ts.display_description|default:ts.description|default:"-" }}</td>
+                            <td class="text-right">{{ ts.hours|floatformat:1|default:"-" }}</td>
+                            <td class="text-right">{% if ts.hourly_rate %}£{{ ts.hourly_rate|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td class="text-right">{% if ts.line_total %}£{{ ts.line_total|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td class="text-center">
+                                <button class="btn-inline-link" onclick="linkTimesheet({{ ts.id }}, this)" title="Link to this PO"><i class="bi bi-link-45deg"></i></button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Expenses Section (Fitter POs) -->
+    <div class="po-products-section" id="expenses-section">
+        <div class="po-products-header-row">
+            <h3><i class="bi bi-fuel-pump"></i> Expenses
+                {% if po_expenses %}
+                <span class="po-board-count-badge">{{ po_expenses|length }} entries &middot; £{{ po_expenses_total|floatformat:2 }}</span>
+                {% endif %}
+            </h3>
+            <button class="btn btn-sm btn-add-product" onclick="toggleAddExpenseRow()">
+                <i class="bi bi-plus-lg"></i> Add Expense
+            </button>
+        </div>
+        <div class="po-table-container">
+            <table class="po-products-table" id="expenses-table">
+                <thead>
+                    <tr>
+                        <th class="text-left">Date</th>
+                        <th class="text-left">Type</th>
+                        <th class="text-left">Order</th>
+                        <th class="text-left">Description</th>
+                        <th class="text-right">Amount</th>
+                        <th class="text-center" style="width: 50px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Add Expense Row (hidden) -->
+                    <tr id="add-expense-row" style="display:none;" class="add-product-row">
+                        <td><input type="date" class="po-inline-input" id="new-exp-date" value=""></td>
+                        <td>
+                            <select class="po-inline-input" id="new-exp-type">
+                                <option value="petrol">Petrol</option>
+                                <option value="materials">Materials</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </td>
+                        <td>
+                            <select class="po-inline-input" id="new-exp-order">
+                                <option value="">— No order —</option>
+                                {% for proj in po_projects %}
+                                {% if proj.order %}
+                                <option value="{{ proj.order.id }}">{{ proj.order.sale_number }} — {{ proj.label }}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td><input type="text" class="po-inline-input" id="new-exp-description" placeholder="Description..."></td>
+                        <td><input type="number" class="po-inline-input text-right" id="new-exp-amount" placeholder="0.00" step="0.01" min="0"></td>
+                        <td class="text-center">
+                            <button class="btn-inline-save" onclick="saveNewExpense()" title="Save"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn-inline-cancel" onclick="toggleAddExpenseRow()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </td>
+                    </tr>
+                    {% for exp in po_expenses %}
+                    <tr data-expense-id="{{ exp.id }}">
+                        <td>{{ exp.date|date:"d/m/Y" }}</td>
+                        <td><span class="po-expense-type-badge {{ exp.expense_type }}">{{ exp.get_expense_type_display }}</span></td>
+                        <td>
+                            {% if exp.order %}
+                            <a href="{% url 'order_details' exp.order.id %}">{{ exp.order.sale_number }}</a>
+                            {% else %}
+                            <span style="color: var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ exp.description|default:"-" }}</td>
+                        <td class="text-right">£{{ exp.amount|floatformat:2 }}</td>
+                        <td class="text-center">
+                            <button class="btn-inline-delete" onclick="deleteExpense({{ exp.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="no-expenses-row">
+                        <td colspan="6" class="text-center" style="padding: 24px; color: var(--text-secondary);">
+                            <i class="bi bi-fuel-pump" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                            No expenses yet. Click <strong>Add Expense</strong> above to add one.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if po_expenses %}
+        <div class="po-totals">
+            <div class="po-totals-table">
+                <div class="po-totals-row total">
+                    <div class="po-totals-label">Expenses Total</div>
+                    <div class="po-totals-value" id="exp-total-display">£{{ po_expenses_total|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if os_door_items %}
     <!-- OS Door Products -->
     <div class="po-products-section">
@@ -3005,5 +3233,231 @@ function syncCurrencyFromSupplier(supplierCurrency) {
         });
     });
 })();
+
+/* ── Timesheet & Expense AJAX functions ── */
+{% if purchase_order.po_type == 'fitter' %}
+function toggleAddTimesheetRow() {
+    const row = document.getElementById('add-timesheet-row');
+    row.style.display = row.style.display === 'none' ? '' : 'none';
+    if (row.style.display !== 'none') {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('new-ts-date').value = today;
+        document.getElementById('new-ts-hours').value = '';
+        document.getElementById('new-ts-description').value = '';
+        document.getElementById('new-ts-total').textContent = '£0.00';
+    }
+}
+
+function calcNewTsTotal() {
+    const h = parseFloat(document.getElementById('new-ts-hours').value) || 0;
+    const r = parseFloat(document.getElementById('new-ts-rate').value) || 0;
+    document.getElementById('new-ts-total').textContent = '£' + (h * r).toFixed(2);
+}
+
+function saveNewTimesheet() {
+    const date = document.getElementById('new-ts-date').value;
+    const orderId = document.getElementById('new-ts-order').value;
+    const description = document.getElementById('new-ts-description').value;
+    const hours = document.getElementById('new-ts-hours').value;
+    const hourlyRate = document.getElementById('new-ts-rate').value;
+
+    if (!date) { showNotification('Date is required', 'error'); return; }
+
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch('{% url "po_add_timesheet" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ date, order_id: orderId || null, description, hours, hourly_rate: hourlyRate }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Timesheet entry added');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showNotification(data.error || 'Failed to add timesheet', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+
+function deleteTimesheet(tsId, btn) {
+    if (!confirm('Delete this timesheet entry?')) return;
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-timesheet/${tsId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            btn.closest('tr').remove();
+            showNotification('Timesheet entry deleted');
+        } else {
+            showNotification(data.error || 'Failed to delete', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+
+function linkTimesheet(tsId, btn) {
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/link-timesheet/${tsId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Timesheet linked to PO');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showNotification(data.error || 'Failed to link', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+
+function unlinkTimesheet(tsId, btn) {
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/unlink-timesheet/${tsId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Timesheet unlinked from PO');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showNotification(data.error || 'Failed to unlink', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+
+function editTimesheet(tsId, btn) {
+    const row = btn.closest('tr');
+    const hoursCell = row.querySelector('.ts-hours-cell');
+    const rateCell = row.querySelector('.ts-rate-cell');
+    const actionsCell = row.querySelector('td:last-child');
+
+    // Store original values
+    const origHours = hoursCell.textContent.trim();
+    const origRate = rateCell.textContent.replace('£', '').trim();
+
+    // Replace cells with inputs
+    hoursCell.innerHTML = `<input type="number" class="po-inline-input text-right" value="${origHours}" step="0.5" min="0" style="width:70px;">`;
+    rateCell.innerHTML = `<input type="number" class="po-inline-input text-right" value="${origRate}" step="0.01" min="0" style="width:80px;">`;
+
+    // Replace actions with save/cancel
+    actionsCell.innerHTML = `
+        <button class="btn-inline-save" onclick="saveTimesheetEdit(${tsId}, this)" title="Save"><i class="bi bi-check-lg"></i></button>
+        <button class="btn-inline-cancel" onclick="cancelTimesheetEdit(${tsId}, this, '${origHours}', '${origRate}')" title="Cancel"><i class="bi bi-x-lg"></i></button>
+    `;
+}
+
+function saveTimesheetEdit(tsId, btn) {
+    const row = btn.closest('tr');
+    const hoursInput = row.querySelector('.ts-hours-cell input');
+    const rateInput = row.querySelector('.ts-rate-cell input');
+    const hours = parseFloat(hoursInput.value) || 0;
+    const hourlyRate = parseFloat(rateInput.value) || 0;
+
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/update-timesheet/${tsId}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ hours, hourly_rate: hourlyRate }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            row.querySelector('.ts-hours-cell').textContent = parseFloat(data.hours).toFixed(1);
+            row.querySelector('.ts-rate-cell').textContent = '£' + parseFloat(data.hourly_rate).toFixed(2);
+            row.querySelector('.ts-total-cell').textContent = '£' + parseFloat(data.line_total).toFixed(2);
+            // Restore action buttons
+            row.querySelector('td:last-child').innerHTML = `
+                <button class="btn-inline-edit" onclick="editTimesheet(${tsId}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
+                <button class="btn-inline-link" onclick="unlinkTimesheet(${tsId}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
+                <button class="btn-inline-delete" onclick="deleteTimesheet(${tsId}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+            `;
+            showNotification('Timesheet updated');
+        } else {
+            showNotification(data.error || 'Failed to update', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+
+function cancelTimesheetEdit(tsId, btn, origHours, origRate) {
+    const row = btn.closest('tr');
+    row.querySelector('.ts-hours-cell').textContent = origHours;
+    row.querySelector('.ts-rate-cell').textContent = '£' + parseFloat(origRate).toFixed(2);
+    row.querySelector('td:last-child').innerHTML = `
+        <button class="btn-inline-edit" onclick="editTimesheet(${tsId}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="btn-inline-link" onclick="unlinkTimesheet(${tsId}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
+        <button class="btn-inline-delete" onclick="deleteTimesheet(${tsId}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+    `;
+}
+
+function toggleAddExpenseRow() {
+    const row = document.getElementById('add-expense-row');
+    row.style.display = row.style.display === 'none' ? '' : 'none';
+    if (row.style.display !== 'none') {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('new-exp-date').value = today;
+        document.getElementById('new-exp-amount').value = '';
+        document.getElementById('new-exp-description').value = '';
+    }
+}
+
+function saveNewExpense() {
+    const date = document.getElementById('new-exp-date').value;
+    const expenseType = document.getElementById('new-exp-type').value;
+    const orderId = document.getElementById('new-exp-order').value;
+    const description = document.getElementById('new-exp-description').value;
+    const amount = document.getElementById('new-exp-amount').value;
+
+    if (!date) { showNotification('Date is required', 'error'); return; }
+    if (!amount || parseFloat(amount) <= 0) { showNotification('Amount is required', 'error'); return; }
+
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch('{% url "po_add_expense" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ date, expense_type: expenseType, order_id: orderId || null, description, amount }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('Expense added');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showNotification(data.error || 'Failed to add expense', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+
+function deleteExpense(expId, btn) {
+    if (!confirm('Delete this expense?')) return;
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-expense/${expId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            btn.closest('tr').remove();
+            showNotification('Expense deleted');
+        } else {
+            showNotification(data.error || 'Failed to delete', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
+}
+{% endif %}
 </script>
 {% endblock %}
