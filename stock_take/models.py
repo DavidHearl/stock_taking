@@ -1512,6 +1512,7 @@ class TaskCompletion(models.Model):
 
 class Fitter(models.Model):
     """Model for installation fitters"""
+    code = models.CharField(max_length=1, blank=True, default='', help_text='Single-letter code used on the calendar (e.g. R, G)')
     name = models.CharField(max_length=100)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=20, blank=True)

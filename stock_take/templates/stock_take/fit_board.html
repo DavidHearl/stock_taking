@@ -98,6 +98,7 @@
                 <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn">Weekly</a>
             </div>
             <button class="btn btn-info" onclick="bulkImportFitDates()">Import All Fit Dates</button>
+            <button class="btn btn-secondary" onclick="openModal('manageFittersModal')"><i class="bi bi-people"></i> Manage Fitters</button>
             <a href="?year={{ today.year }}&month={{ today.month }}" class="btn btn-primary">Today</a>
         </div>
     </div>
@@ -114,102 +115,75 @@
             {% for week in month_days %}
             <tr>
                 {% for day in week %}
-                <td class="calendar-day {% if day == 0 %}empty{% elif day == today.day and current_month == today.month and current_year == today.year %}today{% endif %}">
+                <td class="calendar-day {% if day == 0 %}empty{% elif day == today.day and current_month == today.month and current_year == today.year %}today{% endif %}"
+                    {% if day != 0 %}data-date="{{ current_year }}-{{ current_month|stringformat:'02d' }}-{{ day|stringformat:'02d' }}"
+                    ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"{% endif %}>
                     {% if day != 0 %}
-                        <div class="day-number">{{ day }}</div>
-                        
-                        <div class="fitter-rows">
-                            {% for fitter_code, fitter_name in fitters %}
-                            <div class="fitter-row" 
-                                 data-fitter="{{ fitter_code }}"
-                                 data-date="{{ current_year }}-{{ current_month|stringformat:'02d' }}-{{ day|stringformat:'02d' }}"
-                                 ondrop="handleDrop(event)"
-                                 ondragover="handleDragOver(event)"
-                                 ondragleave="handleDragLeave(event)">
-                                <button class="add-appointment-btn-row" onclick="openAddAppointment({{ current_year }}, {{ current_month }}, {{ day }}, '{{ fitter_code }}')" title="Add appointment for {{ fitter_name }}">+</button>
-                                <span class="fitter-label">{{ fitter_code }}</span>
-                                {% if day in appointments_by_date and fitter_code in appointments_by_date|get_item:day %}
-                                    {% for appointment in appointments_by_date|get_item:day|get_item:fitter_code %}
-                                    {% if appointment.order %}
-                                    <div class="appointment-card {% if appointment.order.interior_completed and appointment.order.door_completed and appointment.order.accessories_completed and appointment.order.materials_completed %}completed{% endif %}" 
-                                         id="appointment-{{ appointment.id }}"
-                                         draggable="true"
-                                         ondragstart="handleDragStart(event)"
-                                         ondragend="handleDragEnd(event)"
-                                         data-appointment-id="{{ appointment.id }}"
-                                         data-order-id="{{ appointment.order.id }}"
-                                         data-customer-name="{{ appointment.order.first_name|escapejs }} {{ appointment.order.last_name|escapejs }}"
-                                         data-interior="{{ appointment.order.interior_completed|yesno:'true,false' }}"
-                                         data-door="{{ appointment.order.door_completed|yesno:'true,false' }}"
-                                         data-accessories="{{ appointment.order.accessories_completed|yesno:'true,false' }}"
-                                         data-materials="{{ appointment.order.materials_completed|yesno:'true,false' }}"
-                                         data-paperwork="{{ appointment.order.paperwork_completed|yesno:'true,false' }}"
-                                         data-sale-number="{{ appointment.order.sale_number|escapejs }}"
-                                         data-customer-number="{{ appointment.order.customer_number|escapejs }}"
-                                         data-fitter="{{ fitter_name|escapejs }}"
-                                         data-order-date="{{ appointment.order.order_date|date:'d/m/Y' }}"
-                                         data-fit-date="{{ appointment.fit_date|date:'d/m/Y' }}"
-                                         data-address="{{ appointment.order.address|default:'-'|escapejs }}"
-                                         data-postcode="{{ appointment.order.postcode|default:'-'|escapejs }}"
-                                         onclick="selectAppointmentFromCard(this)">
-                                        <div class="appointment-customer">
-                                            {{ appointment.order.first_name|slice:":1" }}. {{ appointment.order.last_name }}
-                                        </div>
-                                        <div class="appointment-checkboxes">
-                                            <div class="checkbox-item">
-                                                <input type="checkbox" 
-                                                       id="interior-{{ appointment.order.id }}" 
-                                                       {% if appointment.order.interior_completed %}checked{% endif %}
-                                                       onclick="event.stopPropagation();"
-                                                       onchange="updateOrderStatus({{ appointment.order.id }}, 'interior', this.checked)"
-                                                       title="Interior">
-                                            </div>
-                                            <div class="checkbox-item">
-                                                <input type="checkbox" 
-                                                       id="door-{{ appointment.order.id }}" 
-                                                       {% if appointment.order.door_completed %}checked{% endif %}
-                                                       onclick="event.stopPropagation();"
-                                                       onchange="updateOrderStatus({{ appointment.order.id }}, 'door', this.checked)"
-                                                       title="Door">
-                                            </div>
-                                            <div class="checkbox-item">
-                                                <input type="checkbox" 
-                                                       id="accessories-{{ appointment.order.id }}" 
-                                                       {% if appointment.order.accessories_completed %}checked{% endif %}
-                                                       onclick="event.stopPropagation();"
-                                                       onchange="updateOrderStatus({{ appointment.order.id }}, 'accessories', this.checked)"
-                                                       title="Accessories">
-                                            </div>
-                                        </div>
-                                        <div class="appointment-indicators">
-                                            <span class="indicator {% if appointment.order.materials_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Materials">M</span>
-                                            <span class="indicator {% if appointment.order.paperwork_completed %}indicator-complete{% else %}indicator-missing{% endif %}" title="Paperwork">P</span>
-                                        </div>
-                                    </div>
-                                    {% elif appointment.remedial %}
-                                    <div class="appointment-card remedial-card" 
-                                         id="appointment-{{ appointment.id }}"
-                                         draggable="true"
-                                         ondragstart="handleDragStart(event)"
-                                         ondragend="handleDragEnd(event)"
-                                         data-appointment-id="{{ appointment.id }}"
-                                         data-remedial-id="{{ appointment.remedial.id }}"
-                                         data-customer-name="{{ appointment.remedial.remedial_number|escapejs }} - {{ appointment.remedial.first_name|escapejs }} {{ appointment.remedial.last_name|escapejs }}"
-                                         data-sale-number="{{ appointment.remedial.remedial_number|escapejs }}"
-                                         data-customer-number="{{ appointment.remedial.customer_number|escapejs }}"
-                                         data-fitter="{{ fitter_name|escapejs }}"
-                                         data-fit-date="{{ appointment.fit_date|date:'d/m/Y' }}"
-                                         data-address="{{ appointment.remedial.address|default:'-'|escapejs }}"
-                                         data-postcode="{{ appointment.remedial.postcode|default:'-'|escapejs }}"
-                                         onclick="selectAppointmentFromCard(this)">
-                                        <div class="appointment-customer">
-                                            {{ appointment.remedial.remedial_number }} - {{ appointment.remedial.first_name|slice:":1" }}. {{ appointment.remedial.last_name }}
-                                        </div>
-                                    </div>
-                                    {% endif %}
-                                    {% endfor %}
+                        <div class="day-header">
+                            <span class="day-number">{{ day }}</span>
+                            <button class="add-btn-inline" onclick="openAddAppointment({{ current_year }}, {{ current_month }}, {{ day }}, 'R')" title="Add appointment">+</button>
+                        </div>
+
+                        <div class="day-jobs">
+                            {% for entry in appointments_flat|get_item:day %}
+                            {% with appt=entry.appointment is_cont=entry.is_continuation sp=entry.span_pos %}
+                            {% if appt.order %}
+                            <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %} span-{{ sp }}"
+                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ day }}{% endif %}"
+                                 {% if not is_cont %}draggable="true"
+                                 ondragstart="handleDragStart(event)"
+                                 ondragend="handleDragEnd(event)"{% endif %}
+                                 data-appointment-id="{{ appt.id }}"
+                                 data-order-id="{{ appt.order.id }}"
+                                 data-customer-name="{{ appt.order.first_name|escapejs }} {{ appt.order.last_name|escapejs }}"
+                                 data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
+                                 data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
+                                 data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
+                                 data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
+                                 data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
+                                 data-sale-number="{{ appt.order.sale_number|escapejs }}"
+                                 data-customer-number="{{ appt.order.customer_number|escapejs }}"
+                                 data-fitter="{{ appt.get_fitter_display|escapejs }}"
+                                 data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
+                                 data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                                 data-address="{{ appt.order.address|default:'-'|escapejs }}"
+                                 data-postcode="{{ appt.order.postcode|default:'-'|escapejs }}"
+                                 onclick="selectAppointmentFromCard(this)">
+                                <span class="job-fitter">{{ appt.fitter }}</span>
+                                {% if not is_cont %}
+                                <span class="job-name">{{ appt.order.first_name|slice:":1" }}. {{ appt.order.last_name }}</span>
+                                {% if appt.fit_duration > 1 %}
+                                <span class="job-duration">{{ appt.fit_duration }}d</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="job-name cont-label">cont.</span>
                                 {% endif %}
                             </div>
+                            {% elif appt.remedial %}
+                            <div class="job-card remedial span-{{ sp }}"
+                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ day }}{% endif %}"
+                                 {% if not is_cont %}draggable="true"
+                                 ondragstart="handleDragStart(event)"
+                                 ondragend="handleDragEnd(event)"{% endif %}
+                                 data-appointment-id="{{ appt.id }}"
+                                 data-remedial-id="{{ appt.remedial.id }}"
+                                 data-customer-name="{{ appt.remedial.remedial_number|escapejs }} - {{ appt.remedial.first_name|escapejs }} {{ appt.remedial.last_name|escapejs }}"
+                                 data-sale-number="{{ appt.remedial.remedial_number|escapejs }}"
+                                 data-customer-number="{{ appt.remedial.customer_number|escapejs }}"
+                                 data-fitter="{{ appt.get_fitter_display|escapejs }}"
+                                 data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                                 data-address="{{ appt.remedial.address|default:'-'|escapejs }}"
+                                 data-postcode="{{ appt.remedial.postcode|default:'-'|escapejs }}"
+                                 onclick="selectAppointmentFromCard(this)">
+                                <span class="job-fitter">{{ appt.fitter }}</span>
+                                {% if not is_cont %}
+                                <span class="job-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name|slice:":1" }}. {{ appt.remedial.last_name }}</span>
+                                {% else %}
+                                <span class="job-name cont-label">cont.</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            {% endwith %}
                             {% endfor %}
                         </div>
 
@@ -261,10 +235,9 @@
         <div class="modal-body">
             <label for="fitterSelect">Select Fitter:</label>
             <select id="fitterSelect" class="modal-select">
-                <option value="R">Ross (R)</option>
-                <option value="G">Gavin (G)</option>
-                <option value="S">Stuart (S)</option>
-                <option value="P">Paddy (P)</option>
+                {% for code, name in fitters %}
+                <option value="{{ code }}">{{ name }} ({{ code }})</option>
+                {% endfor %}
             </select>
             
             <label for="appointmentType">Appointment Type:</label>
@@ -318,10 +291,9 @@
         <div class="modal-body">
             <label for="moveFitterSelect">Select New Fitter:</label>
             <select id="moveFitterSelect" class="modal-select">
-                <option value="R">Ross (R)</option>
-                <option value="G">Gavin (G)</option>
-                <option value="S">Stuart (S)</option>
-                <option value="P">Paddy (P)</option>
+                {% for code, name in fitters %}
+                <option value="{{ code }}">{{ name }} ({{ code }})</option>
+                {% endfor %}
             </select>
             
             <label for="moveDateInput">Select New Date:</label>
@@ -333,12 +305,66 @@
         </div>
     </div>
 </div>
+
+<!-- Manage Fitters Modal -->
+<div id="manageFittersModal" class="modal">
+    <div class="modal-content" style="max-width:520px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-people"></i> Manage Fitters</h3>
+            <span class="close" onclick="closeModal('manageFittersModal')">&times;</span>
+        </div>
+        <div class="modal-body" style="padding:0;">
+            <table class="table" style="margin:0;font-size:0.85rem;" id="fitterTable">
+                <thead><tr><th style="width:40px;">Code</th><th>Name</th><th style="width:70px;">Status</th><th style="width:60px;"></th></tr></thead>
+                <tbody>
+                    {% for code, name in fitters %}
+                    <tr>
+                        <td><strong>{{ code }}</strong></td>
+                        <td>{{ name }}</td>
+                        <td><span class="badge badge-success">Active</span></td>
+                        <td><button class="btn btn-secondary btn-sm" onclick="editFitterRow(this, '{{ code }}', '{{ name|escapejs }}')" title="Edit"><i class="bi bi-pencil"></i></button></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('manageFittersModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Fitter Modal -->
+<div id="editFitterModal" class="modal">
+    <div class="modal-content" style="max-width:400px;">
+        <div class="modal-header">
+            <h3>Edit Fitter</h3>
+            <span class="close" onclick="closeModal('editFitterModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editFitterOldCode">
+            <div style="margin-bottom:12px;">
+                <label for="editFitterCode" style="font-size:0.82rem;font-weight:600;">Code (single letter)</label>
+                <input type="text" id="editFitterCode" class="modal-select" maxlength="1" style="width:60px;text-transform:uppercase;">
+            </div>
+            <div>
+                <label for="editFitterName" style="font-size:0.82rem;font-weight:600;">Name</label>
+                <input type="text" id="editFitterName" class="modal-select">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('editFitterModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveFitterEdit()">Save</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 let selectedAppointmentId = null;
 let draggedAppointmentId = null;
+let draggedFitter = '';
 
 function bulkImportFitDates() {
     if (!confirm('This will create appointments for all unfinished orders based on their fit dates. Continue?')) {
@@ -368,6 +394,7 @@ function bulkImportFitDates() {
 // Drag and Drop Functions
 function handleDragStart(event) {
     draggedAppointmentId = event.target.dataset.appointmentId;
+    draggedFitter = event.target.querySelector('.job-fitter')?.textContent?.trim() || '';
     event.target.classList.add('dragging');
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/html', event.target.innerHTML);
@@ -375,9 +402,8 @@ function handleDragStart(event) {
 
 function handleDragEnd(event) {
     event.target.classList.remove('dragging');
-    // Remove drag-over class from all fitter rows
-    document.querySelectorAll('.fitter-row').forEach(row => {
-        row.classList.remove('drag-over');
+    document.querySelectorAll('.calendar-day').forEach(cell => {
+        cell.classList.remove('drag-over');
     });
 }
 
@@ -400,17 +426,16 @@ function handleDrop(event) {
     }
     event.preventDefault();
     
-    const targetRow = event.currentTarget;
-    targetRow.classList.remove('drag-over');
+    const targetCell = event.currentTarget;
+    targetCell.classList.remove('drag-over');
     
-    const newFitter = targetRow.dataset.fitter;
-    const newDate = targetRow.dataset.date;
+    const newDate = targetCell.dataset.date;
     
     if (!draggedAppointmentId) {
         return false;
     }
     
-    // Move the appointment
+    // Move the appointment (keep same fitter, change date)
     fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
         method: 'POST',
         headers: {
@@ -418,7 +443,7 @@ function handleDrop(event) {
             'X-CSRFToken': '{{ csrf_token }}',
         },
         body: JSON.stringify({
-            fitter: newFitter,
+            fitter: draggedFitter,
             fit_date: newDate
         })
     })
@@ -480,7 +505,7 @@ function selectAppointmentFromCard(cardElement) {
 
 function selectAppointment(appointmentId, orderId, customerName, interior, door, accessories, materials, paperwork, saleNumber, customerNumber, fitter, orderDate, fitDate, address, postcode) {
     // Remove previous selection
-    document.querySelectorAll('.appointment-card.selected').forEach(card => {
+    document.querySelectorAll('.job-card.selected').forEach(card => {
         card.classList.remove('selected');
     });
     
@@ -518,7 +543,7 @@ function selectAppointment(appointmentId, orderId, customerName, interior, door,
 
 function closeSummary() {
     document.getElementById('appointmentSummary').classList.remove('active');
-    document.querySelectorAll('.appointment-card.selected').forEach(card => {
+    document.querySelectorAll('.job-card.selected').forEach(card => {
         card.classList.remove('selected');
     });
     selectedAppointmentId = null;
@@ -807,6 +832,40 @@ function moveAppointment() {
         console.error('Error:', error);
         alert('Error moving appointment');
     });
+}
+
+// ── Manage Fitters ──────────────────────────────────────
+function editFitterRow(btn, code, name) {
+    // Fetch fitter by code to get its id
+    fetch('/api/get-fitters/')
+        .then(r => r.json())
+        .then(data => {
+            const f = data.fitters.find(f => f.code === code && f.name === name);
+            if (!f) { alert('Fitter not found'); return; }
+            document.getElementById('editFitterOldCode').value = f.id;
+            document.getElementById('editFitterCode').value = f.code || '';
+            document.getElementById('editFitterName').value = f.name;
+            openModal('editFitterModal');
+        });
+}
+
+function saveFitterEdit() {
+    const fitterId = document.getElementById('editFitterOldCode').value;
+    const newCode = document.getElementById('editFitterCode').value.trim().toUpperCase();
+    const newName = document.getElementById('editFitterName').value.trim();
+    if (!newCode || !newName) { alert('Code and name are required.'); return; }
+
+    fetch(`/api/fitter/${fitterId}/update/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ code: newCode, name: newName })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { location.reload(); }
+        else { alert('Error: ' + (data.error || 'Unknown error')); }
+    })
+    .catch(err => { console.error(err); alert('Error saving fitter'); });
 }
 
 </script>

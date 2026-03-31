@@ -100,6 +100,7 @@
                 <strong id="week-label" style="font-size:0.95rem;min-width:230px;text-align:center;"></strong>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="nextWeek()"><i class="bi bi-chevron-right"></i></button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="goToCurrentWeek()">Today</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="weekend-toggle" onclick="toggleWeekend()" title="Show/Hide Saturday & Sunday"><i class="bi bi-calendar-week"></i> Sat/Sun</button>
                 <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
                     <span style="font-size:0.75rem;color:var(--text-secondary);" id="manufacturing-legend">
                         <span class="legend-break"></span> Break
@@ -138,6 +139,7 @@
                 <strong id="week-label-fitter" style="font-size:0.95rem;min-width:230px;text-align:center;"></strong>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="nextWeek()"><i class="bi bi-chevron-right"></i></button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="goToCurrentWeek()">Today</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="weekend-toggle-fitter" onclick="toggleWeekend()" title="Show/Hide Saturday & Sunday"><i class="bi bi-calendar-week"></i> Sat/Sun</button>
                 <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
                     <span id="fitter-legend" style="font-size:0.75rem;color:var(--text-secondary);"></span>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllFitterAssignments()"><i class="bi bi-x-circle"></i> Clear</button>
@@ -361,7 +363,7 @@ function switchTab(tab) {
     document.getElementById('tab-add-btn').classList.toggle('active', tab === 'add');
     document.getElementById('tab-fitter-btn').classList.toggle('active', tab === 'fitter');
     if(tab === 'fitter'){
-        if(!_fitterGridBuilt){ buildFitterGrid(); buildFitterLegend(); _fitterGridBuilt = true; }
+        if(!_fitterGridBuilt){ buildFitterGrid(); buildFitterLegend(); _fitterGridBuilt = true; applyWeekendVisibility(); }
         else loadFitterTimesheets();
     }
 }
@@ -430,6 +432,30 @@ const BREAK_SLOTS = new Set(['10:00','13:00','13:30']);
 const DAY_NAMES   = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const DAY_SHORT   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
+// ── Weekend toggle ─────────────────────────────────
+let _showWeekend = false;
+
+function toggleWeekend(){
+    _showWeekend = !_showWeekend;
+    applyWeekendVisibility();
+    // Update button active state
+    document.querySelectorAll('#weekend-toggle, #weekend-toggle-fitter').forEach(btn => {
+        btn.classList.toggle('btn-primary', _showWeekend);
+        btn.classList.toggle('btn-secondary', !_showWeekend);
+    });
+}
+
+function applyWeekendVisibility(){
+    ['schedule-grid', 'schedule-grid-fitter'].forEach(gridId => {
+        const tbody = document.querySelector(`#${gridId} tbody`);
+        if(!tbody) return;
+        tbody.querySelectorAll('tr').forEach(tr => {
+            const di = parseInt(tr.dataset.dayIdx);
+            if(di >= 5) tr.style.display = _showWeekend ? '' : 'none';
+        });
+    });
+}
+
 // Workers injected from Django at bottom of script
 const WORKERS = [];
 
@@ -483,6 +509,7 @@ function buildGrid(){
     for(let dayIdx=0;dayIdx<7;dayIdx++){
         WORKERS.forEach((worker,wi)=>{
             const tr=document.createElement('tr');
+            tr.dataset.dayIdx=dayIdx;
             if(wi===nW-1) tr.classList.add('day-last-row');
 
             // Date cell  only for first worker of this day, rowspan = nW
@@ -998,6 +1025,7 @@ document.addEventListener('DOMContentLoaded',function(){
     buildManufacturingLegend();
     updateWeekDisplay();
     loadWeekTimesheets();
+    applyWeekendVisibility();
 
     const input=document.getElementById('popover-order-search');
     const results=document.getElementById('popover-order-results');
@@ -1168,6 +1196,7 @@ function buildFitterGrid(){
     for(let dayIdx=0;dayIdx<7;dayIdx++){
         FITTERS.forEach((worker,wi)=>{
             const tr=document.createElement('tr');
+            tr.dataset.dayIdx=dayIdx;
             if(wi===nW-1) tr.classList.add('day-last-row');
 
             if(wi===0){

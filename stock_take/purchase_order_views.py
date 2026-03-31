@@ -471,11 +471,8 @@ def purchase_order_detail(request, po_id):
         po_vat_rate = supplier_obj.vat_rate
     if po_vat_rate is not None:
         net = purchase_order.total or 0
-        # Use WorkGuru tax_total if available, otherwise calculate
-        if purchase_order.tax_total:
-            vat_amt = purchase_order.tax_total
-        else:
-            vat_amt = round(float(net) * float(po_vat_rate) / 100, 2)
+        # Always calculate VAT from the supplier's rate
+        vat_amt = round(float(net) * float(po_vat_rate) / 100, 2)
         po_net_total = net
         po_vat_amount = vat_amt
         po_gross_total = round(float(net) + float(vat_amt), 2)
@@ -1375,7 +1372,9 @@ def purchase_order_download_pdf(request, po_id):
     if not products:
         products = _get_board_product_rows_for_pdf(po)
 
-    pdf_buffer = generate_purchase_order_pdf(po, products)
+    supplier_obj = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
+    supplier_vat_rate = supplier_obj.vat_rate if supplier_obj and supplier_obj.vat_rate is not None else None
+    pdf_buffer = generate_purchase_order_pdf(po, products, supplier_vat_rate=supplier_vat_rate)
 
     response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
     filename = f'Purchase_Order_{po.display_number}.pdf'
@@ -1544,7 +1543,10 @@ def purchase_order_send_email(request, po_id):
     if not products:
         products = _get_board_product_rows_for_pdf(po)
 
-    pdf_buffer = generate_purchase_order_pdf(po, products)
+    # Resolve supplier for VAT rate
+    _send_supplier = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
+    supplier_vat_rate = _send_supplier.vat_rate if _send_supplier and _send_supplier.vat_rate is not None else None
+    pdf_buffer = generate_purchase_order_pdf(po, products, supplier_vat_rate=supplier_vat_rate)
     pdf_filename = f'Purchase_Order_{po.display_number}.pdf'
 
     try:
@@ -1686,6 +1688,188 @@ def purchase_order_delete(request, po_id):
 
     messages.success(request, f'Purchase Order {display_number} deleted.')
     return redirect('purchase_orders_list')
+
+
+@login_required
+def purchase_order_split(request, po_id):
+    """
+    Split a purchase order into two new child POs.
+    Expects JSON body:
+    {
+        "splits": {
+            "<product_id>": { "po1_qty": <int>, "po2_qty": <int> }
+        }
+    }
+    Products with po1_qty > 0 go to PO_1, po2_qty > 0 go to PO_2.
+    The original PO is marked Cancelled after the split.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    import re
+    from decimal import Decimal
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    splits = data.get('splits', {})
+    if not splits:
+        return JsonResponse({'error': 'No split data provided'}, status=400)
+
+    products = list(po.products.all().order_by('sort_order', 'id'))
+    if not products:
+        return JsonResponse({'error': 'PO has no products to split'}, status=400)
+
+    # Determine the next split suffix
+    base_display = po.display_number or ''
+    # Strip existing _N suffix to find the root PO number
+    root_match = re.match(r'^(PO\d+)(?:_\d+)?$', base_display)
+    root_number = root_match.group(1) if root_match else base_display
+
+    # Find the highest existing suffix for this root
+    existing = PurchaseOrder.objects.filter(
+        display_number__startswith=root_number + '_'
+    ).values_list('display_number', flat=True)
+
+    max_suffix = 0
+    for dn in existing:
+        suffix_match = re.match(r'^' + re.escape(root_number) + r'_(\d+)$', dn)
+        if suffix_match:
+            max_suffix = max(max_suffix, int(suffix_match.group(1)))
+
+    suffix_1 = max_suffix + 1
+    suffix_2 = max_suffix + 2
+    display_1 = f'{root_number}_{suffix_1}'
+    display_2 = f'{root_number}_{suffix_2}'
+
+    # Generate unique workguru_ids for the new POs
+    max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    wg_id_1 = max(max_wg_id + 1, 800000)
+    wg_id_2 = wg_id_1 + 1
+
+    # Collect product lines for each new PO
+    po1_lines = []
+    po2_lines = []
+
+    for product in products:
+        pid = str(product.id)
+        info = splits.get(pid, {})
+        qty1 = Decimal(str(info.get('po1_qty', 0)))
+        qty2 = Decimal(str(info.get('po2_qty', 0)))
+
+        if qty1 > 0:
+            po1_lines.append((product, qty1))
+        if qty2 > 0:
+            po2_lines.append((product, qty2))
+
+    if not po1_lines and not po2_lines:
+        return JsonResponse({'error': 'Split would result in empty POs'}, status=400)
+
+    def _create_child_po(display_number, wg_id, lines):
+        """Create a child PO with the given product lines."""
+        child = PurchaseOrder.objects.create(
+            workguru_id=wg_id,
+            number=display_number,
+            display_number=display_number,
+            description=f'Split from {po.display_number}',
+            po_type=po.po_type,
+            supplier_id=po.supplier_id,
+            supplier_name=po.supplier_name,
+            fitter=po.fitter,
+            project_id=po.project_id,
+            project_number=po.project_number,
+            project_name=po.project_name,
+            status='Draft',
+            currency=po.currency,
+            exchange_rate=po.exchange_rate,
+            warehouse_id=po.warehouse_id,
+            warehouse_name=po.warehouse_name,
+            delivery_address_1=po.delivery_address_1,
+            delivery_address_2=po.delivery_address_2,
+            delivery_instructions=po.delivery_instructions,
+            suburb=po.suburb,
+            state=po.state,
+            postcode=po.postcode,
+            client_id_wg=po.client_id_wg,
+            client_name=po.client_name,
+            contact_name=po.contact_name,
+            creator_name=request.user.get_full_name() or request.user.username,
+        )
+
+        total = Decimal('0')
+        for idx, (product, qty) in enumerate(lines):
+            line_total = product.order_price * qty
+            PurchaseOrderProduct.objects.create(
+                purchase_order=child,
+                product_id=product.product_id,
+                sku=product.sku,
+                supplier_code=product.supplier_code,
+                name=product.name,
+                description=product.description,
+                notes=product.notes,
+                order_price=product.order_price,
+                order_quantity=qty,
+                quantity=qty,
+                received_quantity=0,
+                invoice_price=product.invoice_price,
+                line_total=line_total,
+                unit_cost=product.unit_cost,
+                tax_type=product.tax_type,
+                tax_name=product.tax_name,
+                tax_rate=product.tax_rate,
+                account_code=product.account_code,
+                expense_account_code=product.expense_account_code,
+                sort_order=idx,
+                stock_item=product.stock_item,
+            )
+            total += line_total
+
+        child.total = total
+        child.save(update_fields=['total'])
+
+        # Copy project links
+        for proj in po.projects.all():
+            PurchaseOrderProject.objects.create(
+                purchase_order=child,
+                project_type=proj.project_type,
+                order=proj.order,
+                label=proj.label,
+                sort_order=proj.sort_order,
+            )
+
+        return child
+
+    created = []
+
+    if po1_lines:
+        child1 = _create_child_po(display_1, wg_id_1, po1_lines)
+        created.append({'display_number': child1.display_number, 'workguru_id': child1.workguru_id})
+
+    if po2_lines:
+        child2 = _create_child_po(display_2, wg_id_2, po2_lines)
+        created.append({'display_number': child2.display_number, 'workguru_id': child2.workguru_id})
+
+    # Mark the original PO as cancelled
+    po.status = 'Cancelled'
+    po.save(update_fields=['status'])
+
+    user_display = request.user.get_full_name() or request.user.username
+    child_labels = ', '.join(c['display_number'] for c in created)
+    log_activity(
+        user=request.user,
+        event_type='po_split',
+        description=f'{user_display} split {po.display_number} into {child_labels}.',
+    )
+
+    return JsonResponse({
+        'success': True,
+        'created': created,
+        'message': f'Split into {child_labels}',
+    })
 
 
 @login_required
@@ -3310,6 +3494,10 @@ def purchase_order_push_to_xero(request, po_id):
         if not po.supplier_name:
             return JsonResponse({'success': False, 'error': 'Purchase order has no supplier name'}, status=400)
 
+        # Look up the supplier to get their tax rate for Xero
+        supplier_obj = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
+        supplier_tax_type = supplier_obj.supplier_tax_rate if supplier_obj and supplier_obj.supplier_tax_rate else None
+
         # Build line items from PO products
         products = po.products.all().order_by('sort_order', 'id')
         if not products.exists():
@@ -3324,8 +3512,8 @@ def purchase_order_push_to_xero(request, po_id):
             }
             if product.account_code:
                 line['account_code'] = product.account_code
-            if product.tax_type:
-                line['tax_type'] = product.tax_type
+            if supplier_tax_type:
+                line['tax_type'] = supplier_tax_type
             if product.supplier_code:
                 line['item_code'] = product.supplier_code
             line_items.append(line)

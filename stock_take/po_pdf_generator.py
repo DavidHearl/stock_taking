@@ -157,13 +157,14 @@ def _currency_symbol(currency):
     return symbols.get(currency, currency + ' ')
 
 
-def generate_purchase_order_pdf(purchase_order, products):
+def generate_purchase_order_pdf(purchase_order, products, supplier_vat_rate=None):
     """
     Generate a Purchase Order PDF.
 
     Args:
         purchase_order: PurchaseOrder model instance
         products: QuerySet of PurchaseOrderProduct items
+        supplier_vat_rate: Decimal or None — VAT rate from the supplier (e.g. 20.00 for 20%)
 
     Returns:
         BytesIO buffer containing the PDF
@@ -417,21 +418,19 @@ def generate_purchase_order_pdf(purchase_order, products):
     elements.append(Spacer(1, 4 * mm))
 
     # ─── TOTALS ───────────────────────────────────────────────
-    # Calculate VAT (use tax_total from PO if available, else estimate at 23%)
-    tax_total = purchase_order.tax_total or Decimal('0')
-    if not tax_total and subtotal:
-        tax_total = subtotal * Decimal('0.23')
-
-    grand_total = subtotal + tax_total
-
-    # Use actual PO total if it differs (trust the PO data)
+    # Use actual PO total if it differs from line-item sum (trust the PO data)
     if purchase_order.total and abs(purchase_order.total - subtotal) > Decimal('0.01'):
         subtotal = purchase_order.total
-        if purchase_order.tax_total:
-            tax_total = purchase_order.tax_total
-        else:
-            tax_total = subtotal * Decimal('0.23')
-        grand_total = subtotal + tax_total
+
+    # Calculate VAT from the supplier's rate (set on supplier page)
+    if supplier_vat_rate is not None:
+        vat_pct = Decimal(str(supplier_vat_rate)) / Decimal('100')
+        tax_total = (subtotal * vat_pct).quantize(Decimal('0.01'))
+    else:
+        # Fallback: use WorkGuru tax_total if available, otherwise 0
+        tax_total = purchase_order.tax_total or Decimal('0')
+
+    grand_total = subtotal + tax_total
 
     totals_data = [
         [

@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, SyncLog, log_activity
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, SyncLog, log_activity, Fitter, FactoryWorker
 
 import copy
 import csv
@@ -8642,13 +8642,38 @@ def calendar_view(request):
         job_finished=False
     ).order_by('fit_date', 'last_name')
     
-    # Create appointments dict by date and fitter
+    # Create appointments dict by date and fitter (for backwards compat / modals)
     appointments_by_date = {}
     for appointment in appointments:
         date_key = appointment.fit_date.day
         if date_key not in appointments_by_date:
             appointments_by_date[date_key] = {'R': [], 'G': [], 'S': [], 'P': []}
         appointments_by_date[date_key][appointment.fitter].append(appointment)
+
+    # Flat list per day (for the monthly grid display)
+    from calendar import monthrange as _mr
+    _, num_month_days = _mr(current_year, current_month)
+    appointments_flat = {}  # day -> list of {appointment, is_continuation, span_pos}
+    for appointment in appointments:
+        duration = appointment.fit_duration or 1
+        start_day = appointment.fit_date.day
+        for offset in range(duration):
+            d = start_day + offset
+            if d < 1 or d > num_month_days:
+                continue
+            if duration == 1:
+                span_pos = 'single'
+            elif offset == 0:
+                span_pos = 'start'
+            elif offset == duration - 1:
+                span_pos = 'end'
+            else:
+                span_pos = 'mid'
+            appointments_flat.setdefault(d, []).append({
+                'appointment': appointment,
+                'is_continuation': offset > 0,
+                'span_pos': span_pos,
+            })
     
     # Build calendar structure
     cal = calendar.Calendar(firstweekday=0)  # Monday as first day
@@ -8663,8 +8688,9 @@ def calendar_view(request):
         job_finished=False
     ).order_by('fit_date', 'last_name')
     
-    # Fitter choices
-    fitters = [('R', 'Ross'), ('G', 'Gavin'), ('S', 'Stuart'), ('P', 'Paddy')]
+    # Fitter choices (from Fitter model)
+    fitter_qs = Fitter.objects.filter(active=True).order_by('name')
+    fitters = [(f.code, f.name) for f in fitter_qs]
 
     # PO expected deliveries this month (pending only)
     from stock_take.models import PurchaseOrder
@@ -8694,6 +8720,7 @@ def calendar_view(request):
         'month_days': month_days,
         'day_names': day_names,
         'appointments_by_date': appointments_by_date,
+        'appointments_flat': appointments_flat,
         'orders_this_month': orders_this_month,
         'all_orders': all_orders,
         'prev_month': prev_month,
@@ -10550,7 +10577,7 @@ def generate_and_upload_accessories_csv(request, order_id):
 def get_fitters(request):
     """Get all active fitters"""
     from .models import Fitter
-    fitters = Fitter.objects.filter(active=True).values('id', 'name', 'hourly_rate')
+    fitters = Fitter.objects.filter(active=True).values('id', 'code', 'name', 'hourly_rate')
     return JsonResponse({'fitters': list(fitters)})
 
 
@@ -11375,6 +11402,8 @@ def update_fitter(request, fitter_id):
         
         if 'name' in data:
             fitter.name = data['name'].strip()
+        if 'code' in data:
+            fitter.code = data['code'].strip().upper()[:1]
         if 'hourly_rate' in data:
             fitter.hourly_rate = data['hourly_rate']
         if 'active' in data:
@@ -11386,6 +11415,7 @@ def update_fitter(request, fitter_id):
             'success': True,
             'fitter': {
                 'id': fitter.id,
+                'code': fitter.code,
                 'name': fitter.name,
                 'hourly_rate': str(fitter.hourly_rate),
                 'active': fitter.active,

@@ -62,6 +62,22 @@ def parse_fit_date(text: str) -> date | None:
     return None
 
 
+LOG_DIR = 'logs'
+LOG_FILE = 'sync_anthill_fit_dates.log'
+
+
+def _ensure_file_logger():
+    """Attach a FileHandler to our module logger (once) so runs are logged to disk."""
+    import os
+    if any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+        return
+    os.makedirs(LOG_DIR, exist_ok=True)
+    fh = logging.FileHandler(os.path.join(LOG_DIR, LOG_FILE), encoding='utf-8')
+    fh.setFormatter(logging.Formatter('%(asctime)s  %(levelname)-8s  %(message)s'))
+    logger.addHandler(fh)
+    logger.setLevel(logging.DEBUG)
+
+
 class Command(BaseCommand):
     help = (
         'Parse AnthillSale.fit_from_date (text) into AnthillSale.fit_date (date). '
