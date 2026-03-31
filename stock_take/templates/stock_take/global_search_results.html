@@ -3,265 +3,208 @@
 
 {% block page_title %}Search Results{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/search_results.css' %}">
+{% endblock %}
+
 {% block content %}
-<div class="container-fluid">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h2>Search Results for "{{ query }}"</h2>
-            {% if not orders and not products and not purchase_orders and not customers and not suppliers and not leads %}
-                <p class="text-muted mt-3">No results found.</p>
-            {% endif %}
-        </div>
+<div class="search-page">
+    <div class="search-summary">
+        Results for "<strong>{{ query }}</strong>"
     </div>
 
+    {% if not orders and not products and not purchase_orders and not customers and not suppliers and not leads %}
+        <p class="no-results">No results found.</p>
+    {% endif %}
+
     {% if orders %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-cart3"></i> Orders ({{ orders|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Order ID</th>
-                                    <th>Customer</th>
-                                    <th>Site Address</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in orders %}
-                                <tr>
-                                    <td>{{ order.id }}</td>
-                                    <td>{{ order.customer_name }}</td>
-                                    <td>{{ order.site_address|truncatewords:8 }}</td>
-                                    <td>
-                                        <span class="badge bg-{% if order.status == 'completed' %}success{% elif order.status == 'in_progress' %}primary{% else %}secondary{% endif %}">
-                                            {{ order.get_status_display }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <div class="search-section">
+        <div class="search-section-header">
+            <h3><i class="bi bi-cart3"></i> Orders ({{ orders|length }})</h3>
+        </div>
+        <div class="search-table-wrapper">
+            <table class="search-table">
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Customer</th>
+                        <th>Site Address</th>
+                        <th>Status</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr onclick="window.location='{% url 'order_details' order.id %}'" style="cursor:pointer;">
+                        <td><strong>{{ order.id }}</strong></td>
+                        <td>{{ order.customer_name }}</td>
+                        <td>{{ order.site_address|truncatewords:8 }}</td>
+                        <td><span class="status-pill">{{ order.get_status_display }}</span></td>
+                        <td class="text-center"><a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-primary">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}
 
     {% if products %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-box-seam"></i> Products ({{ products|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>SKU</th>
-                                    <th>Name</th>
-                                    <th>Supplier</th>
-                                    <th>Stock Level</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for product in products %}
-                                <tr>
-                                    <td>{{ product.sku }}</td>
-                                    <td>{{ product.name }}</td>
-                                    <td>{{ product.supplier|default:"—" }}</td>
-                                    <td>
-                                        <span class="badge bg-{% if product.quantity > product.reorder_level %}success{% elif product.quantity > 0 %}warning{% else %}danger{% endif %}">
-                                            {{ product.quantity }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <a href="{% url 'product_detail' product.id %}" class="btn btn-sm btn-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <div class="search-section">
+        <div class="search-section-header">
+            <h3><i class="bi bi-box-seam"></i> Products ({{ products|length }})</h3>
+        </div>
+        <div class="search-table-wrapper">
+            <table class="search-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th>Supplier</th>
+                        <th class="text-center">Stock Level</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for product in products %}
+                    <tr onclick="window.location='{% url 'product_detail' product.id %}'" style="cursor:pointer;">
+                        <td><strong>{{ product.sku }}</strong></td>
+                        <td>{{ product.name }}</td>
+                        <td>{{ product.supplier|default:"—" }}</td>
+                        <td class="text-center">
+                            <span class="stock-pill {% if product.quantity > product.reorder_level %}stock-ok{% elif product.quantity > 0 %}stock-low{% else %}stock-out{% endif %}">
+                                {{ product.quantity }}
+                            </span>
+                        </td>
+                        <td class="text-center"><a href="{% url 'product_detail' product.id %}" class="btn btn-sm btn-primary">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}
 
     {% if purchase_orders %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-receipt"></i> Purchase Orders ({{ purchase_orders|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>PO Number</th>
-                                    <th>Supplier</th>
-                                    <th>Order Date</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for po in purchase_orders %}
-                                <tr>
-                                    <td>{{ po.po_number }}</td>
-                                    <td>{{ po.supplier_name }}</td>
-                                    <td>{{ po.order_date|date:"d M Y" }}</td>
-                                    <td>
-                                        <span class="badge bg-{% if po.status == 'received' %}success{% elif po.status == 'ordered' %}primary{% else %}secondary{% endif %}">
-                                            {{ po.get_status_display }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <a href="{% url 'purchase_order_detail' po.id %}" class="btn btn-sm btn-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <div class="search-section">
+        <div class="search-section-header">
+            <h3><i class="bi bi-receipt"></i> Purchase Orders ({{ purchase_orders|length }})</h3>
+        </div>
+        <div class="search-table-wrapper">
+            <table class="search-table">
+                <thead>
+                    <tr>
+                        <th>PO Number</th>
+                        <th>Supplier</th>
+                        <th>Order Date</th>
+                        <th>Status</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for po in purchase_orders %}
+                    <tr onclick="window.location='{% url 'purchase_order_detail' po.id %}'" style="cursor:pointer;">
+                        <td><strong>{{ po.po_number }}</strong></td>
+                        <td>{{ po.supplier_name }}</td>
+                        <td>{{ po.order_date|date:"d M Y" }}</td>
+                        <td><span class="status-pill">{{ po.get_status_display }}</span></td>
+                        <td class="text-center"><a href="{% url 'purchase_order_detail' po.id %}" class="btn btn-sm btn-primary">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}
 
     {% if customers %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-people"></i> Customers ({{ customers|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Email</th>
-                                    <th>Phone</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for customer in customers %}
-                                <tr>
-                                    <td>{{ customer.name }}</td>
-                                    <td>{{ customer.email|default:"—" }}</td>
-                                    <td>{{ customer.phone|default:"—" }}</td>
-                                    <td>
-                                        <a href="{% url 'customer_detail' customer.pk %}" class="btn btn-sm btn-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <div class="search-section">
+        <div class="search-section-header">
+            <h3><i class="bi bi-people"></i> Customers ({{ customers|length }})</h3>
+        </div>
+        <div class="search-table-wrapper">
+            <table class="search-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for customer in customers %}
+                    <tr onclick="window.location='{% url 'customer_detail' customer.pk %}'" style="cursor:pointer;">
+                        <td><strong>{{ customer.name }}</strong></td>
+                        <td>{{ customer.email|default:"—" }}</td>
+                        <td>{{ customer.phone|default:"—" }}</td>
+                        <td class="text-center"><a href="{% url 'customer_detail' customer.pk %}" class="btn btn-sm btn-primary">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}
 
     {% if suppliers %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-truck"></i> Suppliers ({{ suppliers|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Email</th>
-                                    <th>Phone</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for supplier in suppliers %}
-                                <tr>
-                                    <td>{{ supplier.name }}</td>
-                                    <td>{{ supplier.email|default:"—" }}</td>
-                                    <td>{{ supplier.phone|default:"—" }}</td>
-                                    <td>
-                                        <a href="{% url 'supplier_detail' supplier.id %}" class="btn btn-sm btn-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <div class="search-section">
+        <div class="search-section-header">
+            <h3><i class="bi bi-truck"></i> Suppliers ({{ suppliers|length }})</h3>
+        </div>
+        <div class="search-table-wrapper">
+            <table class="search-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for supplier in suppliers %}
+                    <tr onclick="window.location='{% url 'supplier_detail' supplier.id %}'" style="cursor:pointer;">
+                        <td><strong>{{ supplier.name }}</strong></td>
+                        <td>{{ supplier.email|default:"—" }}</td>
+                        <td>{{ supplier.phone|default:"—" }}</td>
+                        <td class="text-center"><a href="{% url 'supplier_detail' supplier.id %}" class="btn btn-sm btn-primary">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}
 
     {% if leads %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-person-plus"></i> Leads ({{ leads|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Email</th>
-                                    <th>Phone</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for lead in leads %}
-                                <tr>
-                                    <td>{{ lead.name }}</td>
-                                    <td>{{ lead.email|default:"—" }}</td>
-                                    <td>{{ lead.phone|default:"—" }}</td>
-                                    <td>
-                                        <span class="badge bg-{% if lead.status == 'converted' %}success{% elif lead.status == 'lost' %}danger{% elif lead.status == 'new' %}info{% else %}secondary{% endif %}">
-                                            {{ lead.get_status_display }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <a href="{% url 'lead_detail' lead.pk %}" class="btn btn-sm btn-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <div class="search-section">
+        <div class="search-section-header">
+            <h3><i class="bi bi-person-plus"></i> Leads ({{ leads|length }})</h3>
+        </div>
+        <div class="search-table-wrapper">
+            <table class="search-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Status</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lead in leads %}
+                    <tr onclick="window.location='{% url 'lead_detail' lead.pk %}'" style="cursor:pointer;">
+                        <td><strong>{{ lead.name }}</strong></td>
+                        <td>{{ lead.email|default:"—" }}</td>
+                        <td>{{ lead.phone|default:"—" }}</td>
+                        <td><span class="status-pill">{{ lead.get_status_display }}</span></td>
+                        <td class="text-center"><a href="{% url 'lead_detail' lead.pk %}" class="btn btn-sm btn-primary">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}

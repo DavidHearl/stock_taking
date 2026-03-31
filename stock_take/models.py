@@ -1598,6 +1598,18 @@ class Timesheet(models.Model):
         return 'unknown'
     
     @property
+    def display_description(self):
+        """Human-readable description, stripping the internal lossless format."""
+        raw = self.description or ''
+        parts = raw.split('||')
+        if len(parts) == 4:
+            # Format: "start_slot||span_len||order_label||user_desc"
+            return parts[3].strip() or ''
+        if len(parts) == 3:
+            return parts[2].strip() or ''
+        return raw
+
+    @property
     def total_cost(self):
         """Calculate total cost for this timesheet entry"""
         if self.timesheet_type == 'installation' and self.purchase_invoice_line_id:
@@ -1915,8 +1927,6 @@ PAGE_SECTIONS = [
         ('purchase_order_details', 'Purchase Order Details'),
         ('suppliers', 'Suppliers'),
         ('supplier_details', 'Supplier Details'),
-        ('boards_summary', 'Boards Summary'),
-        ('os_doors_summary', 'OS Doors Summary'),
         ('material_shortage', 'Stock Shortage Report'),
         ('raumplus_storage', 'Raumplus Shortage'),
     ]),

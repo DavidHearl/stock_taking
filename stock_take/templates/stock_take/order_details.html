@@ -1709,6 +1709,26 @@
     </div>
 </div>
 
+<!-- Modal for Confirming Additional OS Doors PO -->
+<div class="modal" id="confirmAdditionalOSDoorsModal" style="display:none;">
+    <div class="modal-overlay" onclick="document.getElementById('confirmAdditionalOSDoorsModal').style.display='none'"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Additional OS Doors PO</h3>
+                <button type="button" class="modal-close" onclick="document.getElementById('confirmAdditionalOSDoorsModal').style.display='none'">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>This will create an additional OS Doors purchase order for this order. Are you sure you want to continue?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('confirmAdditionalOSDoorsModal').style.display='none'">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmAdditionalOSDoorsPO()">Create PO</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for Uploading Accessories CSV -->
 <div class="modal" id="uploadAccessoriesModal">
     <div class="modal-overlay" onclick="closeModal('uploadAccessoriesModal')"></div>
@@ -6082,7 +6102,16 @@ function syncOSDoorsPO(orderId, poDisplayNumber, tableId) {
 
 // Add Additional OS Doors PO to an order
 function addAdditionalOSDoorsPO(orderId) {
-    if (!confirm('Create an additional OS Doors PO for this order?')) return;
+    document.getElementById('confirmAdditionalOSDoorsModal').style.display = 'flex';
+    document.getElementById('confirmAdditionalOSDoorsModal').dataset.orderId = orderId;
+}
+
+function confirmAdditionalOSDoorsPO() {
+    const modal = document.getElementById('confirmAdditionalOSDoorsModal');
+    const orderId = modal.dataset.orderId;
+    const btn = modal.querySelector('.btn-primary');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating...';
 
     fetch(`/order/${orderId}/add-additional-os-doors-po/`, {
         method: 'POST',
@@ -6099,11 +6128,17 @@ function addAdditionalOSDoorsPO(orderId) {
             location.reload();
         } else {
             showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+            btn.disabled = false;
+            btn.innerHTML = 'Create PO';
+            modal.style.display = 'none';
         }
     })
     .catch(error => {
         console.error('Error:', error);
         showAlert('Error adding additional OS Doors PO: ' + error.message, 'danger');
+        btn.disabled = false;
+        btn.innerHTML = 'Create PO';
+        modal.style.display = 'none';
     });
 }
 

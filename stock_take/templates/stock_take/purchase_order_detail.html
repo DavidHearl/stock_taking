@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 {% load custom_filters %}
+{% load humanize %}
 
 {% block title %}{{ purchase_order.display_number }} - Purchase Order{% endblock %}
 
@@ -59,11 +60,6 @@
                 <i class="bi bi-check-circle"></i> Approve
             </button>
             {% endif %}
-            {% if purchase_order.status == 'Approved' %}
-            <button class="btn btn-sm btn-revert" id="revert-btn" onclick="updatePOStatus('Draft')">
-                <i class="bi bi-arrow-counterclockwise"></i> Revert to Draft
-            </button>
-            {% endif %}
             {% if purchase_order.status == 'Approved' or purchase_order.status == 'Partially Received' %}
             <button class="btn btn-sm btn-receive" id="receive-btn" onclick="receivePO()">
                 <i class="bi bi-box-arrow-in-down"></i> Receive
@@ -99,6 +95,11 @@
                     <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <div class="po-more-dropdown" id="po-more-dropdown">
+                    {% if purchase_order.status == 'Approved' %}
+                    <button class="po-more-item" onclick="updatePOStatus('Draft')">
+                        <i class="bi bi-arrow-counterclockwise"></i> Revert to Draft
+                    </button>
+                    {% endif %}
                     {% if purchase_order.status != 'Cancelled' and purchase_order.status != 'Received' %}
                     <button class="po-more-item danger" onclick="cancelPO()">
                         <i class="bi bi-x-octagon"></i> Cancel PO
@@ -109,6 +110,7 @@
                         <i class="bi bi-cloud-slash"></i> Remove Xero Sync
                     </button>
                     {% endif %}
+                    <div class="po-more-separator"></div>
                     <button class="po-more-item danger" onclick="deletePO()">
                         <i class="bi bi-trash"></i> Delete PO
                     </button>
@@ -120,202 +122,166 @@
     <!-- Save Notification -->
     <div class="po-save-notification" id="save-notification" style="display: none;"></div>
 
-    <!-- Overview Grid - 3 columns -->
-    <div class="po-overview-grid" id="po-overview">
-        <div class="po-overview-row">
-            <div class="po-overview-item">
-                <span class="po-overview-label">Supplier</span>
+    <!-- Overview Card -->
+    <div class="card po-info-card" id="po-overview">
+        <div class="card-header po-card-header">
+            <h3>
                 {% if supplier_obj %}
-                <a class="po-overview-value highlight po-view-val" data-field="supplier_name" href="{% url 'supplier_detail' supplier_obj.workguru_id %}">{{ purchase_order.supplier_name|default:"-" }}</a>
+                <a href="{% url 'supplier_detail' supplier_obj.workguru_id %}" class="po-supplier-link po-view-val" data-field="supplier_name">{{ purchase_order.supplier_name|default:"No Supplier" }}</a>
                 {% else %}
-                <span class="po-overview-value highlight po-view-val" data-field="supplier_name">{{ purchase_order.supplier_name|default:"-" }}</span>
+                <span class="po-view-val" data-field="supplier_name">{{ purchase_order.supplier_name|default:"No Supplier" }}</span>
                 {% endif %}
-                <select class="po-edit-input po-edit-val" data-field="supplier_name" style="display:none;">
+            </h3>
+            <div class="po-supplier-select-wrapper po-edit-val" style="display:none;">
+                <span class="field-label">Supplier</span>
+                <select class="po-edit-input po-edit-val" data-field="supplier_name">
                     <option value="">-- Select supplier --</option>
                     {% for s in all_suppliers %}
                     <option value="{{ s.name }}" {% if s.name == purchase_order.supplier_name %}selected{% endif %}>{{ s.name }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Supplier Invoice #</span>
-                <span class="po-overview-value po-view-val" data-field="supplier_invoice_number">{{ purchase_order.supplier_invoice_number|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="supplier_invoice_number" value="{{ purchase_order.supplier_invoice_number|default:'' }}" style="display:none;">
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Description</span>
-                <span class="po-overview-value po-view-val" data-field="description">{{ purchase_order.description|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="description" value="{{ purchase_order.description|default:'' }}" style="display:none;">
-            </div>
-        </div>
-        <div class="po-overview-row">
-            <div class="po-overview-item po-projects-section">
-                <span class="po-overview-label">Project
-                    <button class="btn-project-add" id="project-add-stock-btn"
-                        data-po-id="{{ purchase_order.workguru_id }}"
-                        onclick="addProjectStock()"
-                        title="Add Stock entry">
-                        <i class="bi bi-box-seam"></i>
-                    </button>
-                    <button class="btn-project-add" id="project-add-customer-btn"
-                        data-po-id="{{ purchase_order.workguru_id }}"
-                        onclick="toggleProjectCustomerSearch()"
-                        title="Link a customer order">
-                        <i class="bi bi-person-plus"></i>
-                    </button>
-                </span>
-                <div class="po-projects-list" id="project-display">
-                    {% for proj in po_projects %}
-                    <div class="po-project-entry {% if proj.project_type == 'stock' %}is-stock{% endif %}" data-project-id="{{ proj.id }}">
-                        {% if proj.project_type == 'stock' %}
-                            <span class="po-stock-badge">Stock</span>
-                        {% elif proj.order %}
-                            <a href="{% url 'order_details' proj.order.id %}" class="po-project-link" title="View order {{ proj.order.sale_number }}">
-                                <i class="bi bi-box-arrow-up-right"></i> {{ proj.label }}
-                            </a>
-                        {% else %}
-                            <span>{{ proj.label }}</span>
-                        {% endif %}
-                        <button class="btn-project-remove" onclick="removeProject({{ purchase_order.workguru_id }}, {{ proj.id }}, this)" title="Remove"><i class="bi bi-x-lg"></i></button>
-                    </div>
-                    {% empty %}
-                    <span class="po-projects-empty">No projects assigned</span>
-                    {% endfor %}
-                </div>
-                {# Inline search for adding a customer order #}
-                <div class="po-project-search-wrapper" id="project-customer-search" style="display:none;">
-                    <input type="text" class="po-project-search-input" id="project-search-input"
-                        placeholder="Search by name or order number..." autocomplete="off"
-                        oninput="searchProjectOrders(this.value)">
-                    <input type="hidden" id="project-search-order-id">
-                    <div class="po-project-search-results" id="project-search-results"></div>
-                    <div class="po-project-search-actions">
-                        <button class="alloc-save-btn" onclick="addProjectCustomer()" title="Add"><i class="bi bi-check-lg"></i></button>
-                        <button class="alloc-sub-remove" onclick="toggleProjectCustomerSearch()" title="Cancel"><i class="bi bi-x-lg"></i></button>
-                    </div>
-                </div>
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Issue Date</span>
-                <span class="po-overview-value po-view-val" data-field="issue_date">{{ purchase_order.issue_date|format_date_str|default:"-" }}</span>
+            <span class="po-header-date">
+                <span class="po-header-date-label">Issue Date</span>
+                <span class="po-view-val" data-field="issue_date">{{ purchase_order.issue_date|format_date_str|default:"-" }}</span>
                 <input class="po-edit-input po-edit-val" data-field="issue_date" type="date" id="po-issue-date" value="{{ purchase_order.issue_date|date_for_input }}" style="display:none;" oninput="autoCalcExpectedDate()">
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Expected Date{% if supplier_obj and supplier_obj.estimate_lead_time %} <small class="po-lead-time-hint">(lead time: {{ supplier_obj.estimate_lead_time }} days)</small>{% endif %}</span>
-                <span class="po-overview-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|format_date_str|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="expected_date" type="date" id="po-expected-date" value="{{ purchase_order.expected_date|date_for_input }}" style="display:none;">
-            </div>
+            </span>
         </div>
-        <div class="po-overview-row">
-            <div class="po-overview-item">
-                <span class="po-overview-label">Received Date</span>
-                <span class="po-overview-value po-view-val" data-field="received_date">{{ purchase_order.received_date|format_date_str|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="received_date" type="date" value="{{ purchase_order.received_date|date_for_input }}" style="display:none;">
+        <div class="card-body padded">
+            <div class="po-info-description">
+                <span class="field-label">Description</span>
+                <span class="field-value po-view-val" data-field="description">{{ purchase_order.description|default:"-" }}</span>
+                <textarea class="po-edit-input po-edit-val" data-field="description" rows="2" style="display:none;">{{ purchase_order.description|default:'' }}</textarea>
             </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Invoice Date</span>
-                <span class="po-overview-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|format_date_str|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="invoice_date" type="date" value="{{ purchase_order.invoice_date|date_for_input }}" style="display:none;">
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Received By</span>
-                <span class="po-overview-value po-view-val" data-field="received_by_name">{{ purchase_order.received_by_name|default:"-" }}</span>
-                <div class="po-received-by-wrapper po-edit-val" style="display:none; position:relative;">
-                    <input class="po-edit-input" type="text" id="received-by-input" value="{{ purchase_order.received_by_name|default:'' }}" autocomplete="off" placeholder="Type or select a user...">
-                    <input type="hidden" class="po-edit-val" data-field="received_by_name" id="received-by-hidden" value="{{ purchase_order.received_by_name|default:'' }}">
-                    <div class="po-received-by-dropdown" id="received-by-dropdown">
-                        {% for u in staff_users %}
-                        <div class="po-received-by-option" data-value="{{ u.get_full_name|default:u.username }}">{{ u.get_full_name|default:u.username }}</div>
+            <div class="po-info-grid">
+                <div class="po-info-col po-projects-col">
+                    <div class="po-info-col-header">
+                        <span class="field-label">Project</span>
+                        <div class="po-project-buttons">
+                            <button class="btn-project-add" id="project-add-stock-btn"
+                                data-po-id="{{ purchase_order.workguru_id }}"
+                                onclick="addProjectStock()"
+                                title="Add Stock entry">
+                                <i class="bi bi-box-seam"></i>
+                            </button>
+                            <button class="btn-project-add" id="project-add-customer-btn"
+                                data-po-id="{{ purchase_order.workguru_id }}"
+                                onclick="toggleProjectCustomerSearch()"
+                                title="Link a customer order">
+                                <i class="bi bi-person-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="po-projects-list" id="project-display">
+                        {% for proj in po_projects %}
+                        <div class="po-project-entry {% if proj.project_type == 'stock' %}is-stock{% endif %}" data-project-id="{{ proj.id }}">
+                            {% if proj.project_type == 'stock' %}
+                                <span class="po-stock-badge">Stock</span>
+                            {% elif proj.order %}
+                                <a href="{% url 'order_details' proj.order.id %}" class="po-project-link" title="View order {{ proj.order.sale_number }}">
+                                    <i class="bi bi-box-arrow-up-right"></i> {{ proj.label }}
+                                </a>
+                            {% else %}
+                                <span>{{ proj.label }}</span>
+                            {% endif %}
+                            <button class="btn-project-remove" onclick="removeProject({{ purchase_order.workguru_id }}, {{ proj.id }}, this)" title="Remove"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                        {% empty %}
+                        <span class="po-projects-empty">No projects assigned</span>
                         {% endfor %}
                     </div>
+                    {# Inline search for adding a customer order #}
+                    <div class="po-project-search-wrapper" id="project-customer-search" style="display:none;">
+                        <input type="text" class="po-project-search-input" id="project-search-input"
+                            placeholder="Search by name or order number..." autocomplete="off"
+                            oninput="searchProjectOrders(this.value)">
+                        <input type="hidden" id="project-search-order-id">
+                        <div class="po-project-search-results" id="project-search-results"></div>
+                        <div class="po-project-search-actions">
+                            <button class="alloc-save-btn" onclick="addProjectCustomer()" title="Add"><i class="bi bi-check-lg"></i></button>
+                            <button class="alloc-sub-remove" onclick="toggleProjectCustomerSearch()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="po-info-col">
+                    <div class="field-row-sb">
+                        <span class="field-label">Supplier Invoice #</span>
+                        <span class="field-value po-view-val" data-field="supplier_invoice_number">{{ purchase_order.supplier_invoice_number|default:"-" }}</span>
+                        <input class="po-edit-input po-edit-val" data-field="supplier_invoice_number" value="{{ purchase_order.supplier_invoice_number|default:'' }}" style="display:none;">
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Expected Date{% if supplier_obj and supplier_obj.estimate_lead_time %} <small class="po-lead-time-hint">({{ supplier_obj.estimate_lead_time }}d lead)</small>{% endif %}</span>
+                        <span class="field-value po-view-val" data-field="expected_date">{{ purchase_order.expected_date|format_date_str|default:"-" }}</span>
+                        <input class="po-edit-input po-edit-val" data-field="expected_date" type="date" id="po-expected-date" value="{{ purchase_order.expected_date|date_for_input }}" style="display:none;">
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Currency</span>
+                        <span class="field-value po-view-val" data-field="currency">
+                            {{ purchase_order.currency|default:"GBP" }}
+                            {% if supplier_obj and supplier_obj.currency and supplier_obj.currency|upper != purchase_order.currency|upper %}
+                            <button class="po-currency-sync-btn" title="Supplier uses {{ supplier_obj.currency }} — click to sync" onclick="syncCurrencyFromSupplier('{{ supplier_obj.currency|upper }}')">⚠ {{ supplier_obj.currency|upper }}</button>
+                            {% endif %}
+                        </span>
+                        <select class="po-edit-input po-edit-val" data-field="currency" style="display:none;">
+                            <option value="GBP" {% if purchase_order.currency == 'GBP' or not purchase_order.currency %}selected{% endif %}>GBP (£)</option>
+                            <option value="EUR" {% if purchase_order.currency == 'EUR' %}selected{% endif %}>EUR (€)</option>
+                            <option value="USD" {% if purchase_order.currency == 'USD' %}selected{% endif %}>USD ($)</option>
+                        </select>
+                    </div>
+                    {% if purchase_order.currency and purchase_order.currency != 'GBP' %}
+                    <div class="field-row-sb">
+                        <span class="field-label">Exchange Rate</span>
+                        <span class="field-value">{{ purchase_order.exchange_rate }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Base Currency Total (GBP)</span>
+                        <span class="field-value">£{{ purchase_order.base_currency_total|floatformat:2 }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="po-info-col">
+                    <div class="field-row-sb">
+                        <span class="field-label">Received Date</span>
+                        <span class="field-value po-view-val" data-field="received_date">{{ purchase_order.received_date|format_date_str|default:"-" }}</span>
+                        <input class="po-edit-input po-edit-val" data-field="received_date" type="date" value="{{ purchase_order.received_date|date_for_input }}" style="display:none;">
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Invoice Date</span>
+                        <span class="field-value po-view-val" data-field="invoice_date">{{ purchase_order.invoice_date|format_date_str|default:"-" }}</span>
+                        <input class="po-edit-input po-edit-val" data-field="invoice_date" type="date" value="{{ purchase_order.invoice_date|date_for_input }}" style="display:none;">
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Received By</span>
+                        <span class="field-value po-view-val" data-field="received_by_name">{{ purchase_order.received_by_name|default:"-" }}</span>
+                        <div class="po-received-by-wrapper po-edit-val" style="display:none; position:relative;">
+                            <input class="po-edit-input" type="text" id="received-by-input" value="{{ purchase_order.received_by_name|default:'' }}" autocomplete="off" placeholder="Type or select a user...">
+                            <input type="hidden" class="po-edit-val" data-field="received_by_name" id="received-by-hidden" value="{{ purchase_order.received_by_name|default:'' }}">
+                            <div class="po-received-by-dropdown" id="received-by-dropdown">
+                                {% for u in staff_users %}
+                                <div class="po-received-by-option" data-value="{{ u.get_full_name|default:u.username }}">{{ u.get_full_name|default:u.username }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% if purchase_order.approved_by_name or purchase_order.approved_date %}
+                    <div class="field-row-sb">
+                        <span class="field-label">Approved By</span>
+                        <span class="field-value">{{ purchase_order.approved_by_name|default:"-" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Approved Date</span>
+                        <span class="field-value">{{ purchase_order.approved_date|default:"-" }}</span>
+                    </div>
+                    {% endif %}
+                    {% if purchase_order.contact_name %}
+                    <div class="field-row-sb">
+                        <span class="field-label">Contact</span>
+                        <span class="field-value">{{ purchase_order.contact_name }}</span>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
-        <div class="po-overview-row">
-            <div class="po-overview-item">
-                <span class="po-overview-label">Delivery Instructions</span>
-                <span class="po-overview-value po-view-val" data-field="delivery_instructions">{{ purchase_order.delivery_instructions|default:"-" }}</span>
-                <input class="po-edit-input po-edit-val" data-field="delivery_instructions" value="{{ purchase_order.delivery_instructions|default:'' }}" style="display:none;">
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Delivery Address</span>
-                <span class="po-overview-value po-view-val" data-field="delivery_address_1">
-                    {% if purchase_order.delivery_address_1 %}
-                        {{ purchase_order.delivery_address_1 }}{% if purchase_order.delivery_address_2 %}<br>{{ purchase_order.delivery_address_2 }}{% endif %}
-                    {% else %}
-                        -
-                    {% endif %}
-                </span>
-                <input class="po-edit-input po-edit-val" data-field="delivery_address_1" value="{{ purchase_order.delivery_address_1|default:'' }}" style="display:none;" placeholder="Address line 1">
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Billable</span>
-                <span class="po-overview-value po-view-val" data-field="billable">{% if purchase_order.billable %}Yes{% else %}No{% endif %}</span>
-                <label class="po-edit-checkbox po-edit-val" data-field="billable" style="display:none;">
-                    <input type="checkbox" id="billable-check" {% if purchase_order.billable %}checked{% endif %}>
-                    <span>Billable</span>
-                </label>
-            </div>
-        </div>
-        {% if purchase_order.currency and purchase_order.currency != 'GBP' %}
-        <div class="po-overview-row">
-            <div class="po-overview-item">
-                <span class="po-overview-label">Currency</span>
-                <span class="po-overview-value po-view-val" data-field="currency">
-                    {{ purchase_order.currency|default:"GBP" }}
-                    {% if supplier_obj and supplier_obj.currency and supplier_obj.currency|upper != purchase_order.currency|upper %}
-                    <button class="po-currency-sync-btn" title="Supplier uses {{ supplier_obj.currency }} — click to sync" onclick="syncCurrencyFromSupplier('{{ supplier_obj.currency|upper }}')">⚠ Supplier uses {{ supplier_obj.currency|upper }} — Sync</button>
-                    {% endif %}
-                </span>
-                <select class="po-edit-input po-edit-val" data-field="currency" style="display:none;">
-                    <option value="GBP" {% if purchase_order.currency == 'GBP' or not purchase_order.currency %}selected{% endif %}>GBP (£)</option>
-                    <option value="EUR" {% if purchase_order.currency == 'EUR' %}selected{% endif %}>EUR (€)</option>
-                    <option value="USD" {% if purchase_order.currency == 'USD' %}selected{% endif %}>USD ($)</option>
-                </select>
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Exchange Rate</span>
-                <span class="po-overview-value">{{ purchase_order.exchange_rate }}</span>
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Base Currency Total (GBP)</span>
-                <span class="po-overview-value">£{{ purchase_order.base_currency_total|floatformat:2 }}</span>
-            </div>
-        </div>
-        {% else %}
-        <div class="po-overview-row">
-            <div class="po-overview-item">
-                <span class="po-overview-label">Currency</span>
-                <span class="po-overview-value po-view-val" data-field="currency">
-                    {{ purchase_order.currency|default:"GBP" }}
-                    {% if supplier_obj and supplier_obj.currency and supplier_obj.currency|upper != purchase_order.currency|upper %}
-                    <button class="po-currency-sync-btn" title="Supplier uses {{ supplier_obj.currency }} — click to sync" onclick="syncCurrencyFromSupplier('{{ supplier_obj.currency|upper }}')">⚠ Supplier uses {{ supplier_obj.currency|upper }} — Sync</button>
-                    {% endif %}
-                </span>
-                <select class="po-edit-input po-edit-val" data-field="currency" style="display:none;">
-                    <option value="GBP" {% if purchase_order.currency == 'GBP' or not purchase_order.currency %}selected{% endif %}>GBP (£)</option>
-                    <option value="EUR" {% if purchase_order.currency == 'EUR' %}selected{% endif %}>EUR (€)</option>
-                    <option value="USD" {% if purchase_order.currency == 'USD' %}selected{% endif %}>USD ($)</option>
-                </select>
-            </div>
-        </div>
-        {% endif %}
-        {% if purchase_order.approved_by_name or purchase_order.approved_date or purchase_order.contact_name %}
-        <div class="po-overview-row">
-            <div class="po-overview-item">
-                <span class="po-overview-label">Approved By</span>
-                <span class="po-overview-value">{{ purchase_order.approved_by_name|default:"-" }}</span>
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Approved Date</span>
-                <span class="po-overview-value">{{ purchase_order.approved_date|default:"-" }}</span>
-            </div>
-            <div class="po-overview-item">
-                <span class="po-overview-label">Contact</span>
-                <span class="po-overview-value">{{ purchase_order.contact_name|default:"-" }}</span>
-            </div>
-        </div>
-        {% endif %}
     </div>
 
     <!-- Products Section -->
@@ -360,12 +326,12 @@
             <table class="po-products-table" id="products-table">
                 <thead>
                     <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th class="text-right">Order Price</th>
-                        <th class="text-right">Order Qty</th>
-                        <th class="text-right">Rec'd Qty</th>
-                        <th class="text-right">Invoice Price</th>
+                        <th class="text-left">SKU</th>
+                        <th class="text-left">Name</th>
+                        <th class="text-center">Order Price</th>
+                        <th class="text-center">Order Qty</th>
+                        <th class="text-center">Rec'd Qty</th>
+                        <th class="text-center">Invoice Price</th>
                         <th class="text-right">Line Total</th>
                         <th class="text-center" style="width: 50px;"></th>
                     </tr>
@@ -415,7 +381,7 @@
                             <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price }}" oninput="recalcRowLineTotal(this)">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price|floatformat:2 }}" oninput="recalcRowLineTotal(this)">
                         </td>
                         <td class="text-right">
                             <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="1" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this)">
@@ -424,7 +390,7 @@
                             <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="1" value="{{ product.received_quantity|floatformat:0 }}">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price }}">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price|floatformat:2 }}">
                         </td>
                         <td class="text-right">
                             <span class="po-line-total-display">£{{ product.line_total|floatformat:2 }}</span>
@@ -517,26 +483,26 @@
                 {# ── VAT-aware breakdown ── #}
                 <div class="po-totals-row">
                     <div class="po-totals-label">Net (ex-VAT)</div>
-                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ po_net_total|floatformat:2 }}</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ po_net_total|floatformat:2|intcomma }}</div>
                 </div>
                 <div class="po-totals-row">
                     <div class="po-totals-label">VAT ({{ po_vat_rate|floatformat:2 }}%)</div>
-                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ po_vat_amount|floatformat:2 }}</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ po_vat_amount|floatformat:2|intcomma }}</div>
                 </div>
                 <div class="po-totals-row total">
                     <div class="po-totals-label">Gross (inc-VAT)</div>
-                    <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ po_gross_total|floatformat:2 }}</div>
+                    <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ po_gross_total|floatformat:2|intcomma }}</div>
                 </div>
                 {% else %}
                 {# ── No VAT rate set — original display ── #}
                 <div class="po-totals-row">
                     <div class="po-totals-label">Sub Total</div>
-                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2 }}</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2|intcomma }}</div>
                 </div>
                 {% if purchase_order.tax_total %}
                 <div class="po-totals-row">
                     <div class="po-totals-label">Tax Total</div>
-                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.tax_total|floatformat:2 }}</div>
+                    <div class="po-totals-value">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.tax_total|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
                 <div class="po-totals-row">
@@ -551,25 +517,25 @@
                 </div>
                 <div class="po-totals-row total">
                     <div class="po-totals-label">Total</div>
-                    <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2 }}</div>
+                    <div class="po-totals-value" id="po-total-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.total|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
                 {% if purchase_order.currency and purchase_order.currency != 'GBP' and purchase_order.base_currency_total %}
                 <div class="po-totals-row">
                     <div class="po-totals-label">GBP Equivalent</div>
-                    <div class="po-totals-value">£{{ purchase_order.base_currency_total|floatformat:2 }}</div>
+                    <div class="po-totals-value">£{{ purchase_order.base_currency_total|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
                 {% if purchase_order.invoiced_amount %}
                 <div class="po-totals-row">
                     <div class="po-totals-label">Invoiced</div>
-                    <div class="po-totals-value">£{{ purchase_order.invoiced_amount|floatformat:2 }}</div>
+                    <div class="po-totals-value">£{{ purchase_order.invoiced_amount|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
                 {% if purchase_order.amount_outstanding %}
                 <div class="po-totals-row">
                     <div class="po-totals-label">Outstanding</div>
-                    <div class="po-totals-value">£{{ purchase_order.amount_outstanding|floatformat:2 }}</div>
+                    <div class="po-totals-value">£{{ purchase_order.amount_outstanding|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
             </div>
@@ -662,11 +628,11 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <h3><i class="bi bi-paperclip"></i> Attachments</h3>
             <div style="display: flex; gap: 8px;">
-                <button class="btn btn-sm btn-info" onclick="openMediaFilesModal()" title="Attach files from the app (PNX, CSV, etc.)">
-                    <i class="bi bi-folder2-open"></i> Attach from Media
+                <button class="btn btn-md btn-info" onclick="openMediaFilesModal()" title="Attach from Media">
+                    <i class="bi bi-paperclip"></i>
                 </button>
-                <button class="btn btn-sm btn-primary" onclick="document.getElementById('attachment-file-input').click()">
-                    <i class="bi bi-upload"></i> Upload File
+                <button class="btn btn-md btn-primary" onclick="document.getElementById('attachment-file-input').click()" title="Upload File">
+                    <i class="bi bi-upload"></i>
                 </button>
                 <form id="upload-attachment-form" style="display:none;">
                     {% csrf_token %}
@@ -719,10 +685,10 @@
         <div class="po-products-section-container">
             <h3><i class="bi bi-receipt"></i> Invoices</h3>
             <div style="display: flex; gap: 8px;">
-                <button class="btn btn-sm btn-primary" onclick="toggleLinkedInvoiceSearch()">
+                <button class="btn btn-md btn-primary" onclick="toggleLinkedInvoiceSearch()">
                     <i class="bi bi-search"></i> Link Invoice
                 </button>
-                <button class="btn btn-sm btn-success" onclick="toggleAddInvoiceForm()">
+                <button class="btn btn-md btn-success" onclick="toggleAddInvoiceForm()">
                     <i class="bi bi-plus-lg"></i> Add Invoice
                 </button>
             </div>
@@ -933,7 +899,7 @@
     <div class="po-products-section">
         <div class="po-products-section-container">
             <h3><i class="bi bi-file-earmark-text"></i> Supplier Purchase Invoices</h3>
-            <button class="btn btn-sm btn-primary" onclick="togglePurchaseInvoiceSearch()">
+            <button class="btn btn-md btn-primary" onclick="togglePurchaseInvoiceSearch()">
                 <i class="bi bi-link-45deg"></i> Link Purchase Invoice
             </button>
         </div>
@@ -1131,8 +1097,8 @@ Sliderobes</textarea>
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-sm btn-secondary" onclick="closeSendModal()">Cancel</button>
-            <button class="btn btn-sm btn-send" id="send-email-btn" onclick="sendPOEmail()">
+            <button class="btn btn-md btn-secondary" onclick="closeSendModal()">Cancel</button>
+            <button class="btn btn-md btn-send" id="send-email-btn" onclick="sendPOEmail()">
                 <i class="bi bi-send"></i> Send Email
             </button>
         </div>
@@ -1307,12 +1273,12 @@ function removeProject(poId, projectId, btn) {
 function toggleEditMode() {
     editMode = true;
     document.querySelectorAll('.po-view-val').forEach(el => el.style.display = 'none');
-    document.querySelectorAll('.po-edit-val:not(.po-edit-number)').forEach(el => el.style.display = '');
+    document.querySelectorAll('.po-edit-val:not(.po-edit-number)').forEach(el => {
+        el.style.display = el.classList.contains('po-supplier-select-wrapper') ? 'flex' : '';
+    });
     document.getElementById('edit-toggle-btn').style.display = 'none';
     document.getElementById('save-btn').style.display = '';
     document.getElementById('cancel-btn').style.display = '';
-    document.getElementById('po-overview').classList.add('editing');
-    document.getElementById('products-table')?.classList.add('editing');
 }
 
 function cancelEdit() {
@@ -1322,8 +1288,6 @@ function cancelEdit() {
     document.getElementById('edit-toggle-btn').style.display = '';
     document.getElementById('save-btn').style.display = 'none';
     document.getElementById('cancel-btn').style.display = 'none';
-    document.getElementById('po-overview').classList.remove('editing');
-    document.getElementById('products-table')?.classList.remove('editing');
 }
 
 function savePO() {

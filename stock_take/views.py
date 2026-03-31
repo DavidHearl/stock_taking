@@ -1676,7 +1676,6 @@ def shortages(request):
                 })
         
         # Get incoming quantities from approved purchase orders
-        from django.db.models import Sum
         incoming_skus = list(upcoming_requirements.keys())
         incoming_data = PurchaseOrderProduct.objects.filter(
             sku__in=incoming_skus,
@@ -10824,6 +10823,13 @@ def timesheets(request):
     
     factory_workers = FactoryWorker.objects.all().order_by('display_order', 'name')
     fitters = Fitter.objects.all().order_by('name')
+
+    # Exclude fitters who are also factory workers (employed staff)
+    factory_worker_names = set(
+        fw.name.strip().lower() for fw in factory_workers if fw.active
+    )
+    schedule_fitters = [f for f in fitters if f.name.strip().lower() not in factory_worker_names]
+
     timesheets = Timesheet.objects.all().select_related('order', 'fitter', 'factory_worker').order_by('-date', '-created_at')[:100]
 
     # Build mapping: FitAppointment char code → Fitter model id
@@ -10838,6 +10844,7 @@ def timesheets(request):
     return render(request, 'stock_take/timesheets.html', {
         'factory_workers': factory_workers,
         'fitters': fitters,
+        'schedule_fitters': schedule_fitters,
         'timesheets': timesheets,
         'fitter_char_map': fitter_char_map,
         'fitter_id_to_char': fitter_id_to_char,
@@ -10859,7 +10866,7 @@ def save_manufacturing_day(request):
     """
     import json
     from datetime import date as date_type, timedelta
-    from .models import FactoryWorker, Timesheet, Order
+    from .models import FactoryWorker, Timesheet, Order, PurchaseOrder
 
     try:
         data = json.loads(request.body)
@@ -10880,7 +10887,7 @@ def save_manufacturing_day(request):
         return JsonResponse({'success': False, 'error': 'Invalid week_start format'}, status=400)
 
     # Delete existing manufacturing timesheets for this week before re-saving
-    week_end = week_start + timedelta(days=4)
+    week_end = week_start + timedelta(days=6)
     worker_ids = [e.get('worker_id') for e in entries if e.get('worker_id')]
     Timesheet.objects.filter(
         timesheet_type='manufacturing',
@@ -10899,6 +10906,7 @@ def save_manufacturing_day(request):
         day_index   = entry.get('day_index', 0)
         slots       = entry.get('slots', [])
         description = entry.get('description', '')
+        po_id_raw   = entry.get('po_id', '')
 
         if not worker_id or not slots:
             continue
@@ -10914,12 +10922,20 @@ def save_manufacturing_day(request):
         # Resolve order — None for non-order task types
         order = None
         order_id_str = str(order_id) if order_id else ''
-        if order_id_str not in ('DELIVERY', 'GENERAL', ''):
+        if order_id_str not in ('DELIVERY', 'GENERAL', 'INSTALLATION', ''):
             try:
                 order = Order.objects.get(id=int(order_id_str))
             except (Order.DoesNotExist, ValueError):
                 errors.append(f'Order {order_id} not found')
                 continue
+
+        # Resolve purchase order (optional, by workguru_id)
+        purchase_order = None
+        if po_id_raw:
+            try:
+                purchase_order = PurchaseOrder.objects.get(workguru_id=int(po_id_raw))
+            except (PurchaseOrder.DoesNotExist, ValueError):
+                errors.append(f'PO {po_id_raw} not found')
 
         # Sort slots chronologically then create ONE timesheet covering the whole block
         slots_sorted = sorted(slots)   # 'HH:MM' strings sort correctly as-is
@@ -10934,6 +10950,7 @@ def save_manufacturing_day(request):
         Timesheet.objects.create(
             order=order,
             factory_worker=worker,
+            purchase_order=purchase_order,
             timesheet_type='manufacturing',
             date=work_date,
             hours=total_hours,
@@ -10967,13 +10984,13 @@ def get_week_timesheets(request):
     except ValueError:
         return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
 
-    week_end = week_start + timedelta(days=4)
+    week_end = week_start + timedelta(days=6)
 
     timesheets = (
         Timesheet.objects
         .filter(timesheet_type='manufacturing', date__gte=week_start, date__lte=week_end,
                 factory_worker__isnull=False)
-        .select_related('factory_worker', 'order')
+        .select_related('factory_worker', 'order', 'purchase_order')
         .order_by('date', 'factory_worker__display_order', 'description')
     )
 
@@ -11036,6 +11053,8 @@ def get_week_timesheets(request):
             'task_type':   task_type,
             'start_slot':  start_slot,
             'span_len':    span_len,
+            'po_id':       str(ts.purchase_order.workguru_id) if ts.purchase_order else '',
+            'po_label':    (ts.purchase_order.display_number + ' \u2014 ' + (ts.purchase_order.supplier_name or '')) if ts.purchase_order else '',
         })
 
     return JsonResponse({'success': True, 'entries': result})
@@ -11056,7 +11075,7 @@ def get_week_fit_appointments(request):
     except ValueError:
         return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
 
-    week_end = week_start + timedelta(days=5)  # Mon-Sat
+    week_end = week_start + timedelta(days=6)  # Mon-Sun
 
     # Build mapping from FitAppointment char code → Fitter model id
     fitter_map = {}
@@ -11076,7 +11095,7 @@ def get_week_fit_appointments(request):
         if not fitter_id:
             continue
         day_index = (appt.fit_date - week_start).days
-        if day_index < 0 or day_index > 5:
+        if day_index < 0 or day_index > 6:
             continue
 
         customer_name = appt.customer_name
@@ -11123,19 +11142,19 @@ def get_week_fitter_timesheets(request):
     except ValueError:
         return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
 
-    week_end = week_start + timedelta(days=4)
+    week_end = week_start + timedelta(days=6)
     timesheets = Timesheet.objects.filter(
         timesheet_type='installation',
         fitter__isnull=False,
         date__gte=week_start,
         date__lte=week_end,
-    ).select_related('order', 'fitter')
+    ).select_related('order', 'fitter', 'purchase_order')
 
     result = []
     for ts in timesheets:
         fitter_id = ts.fitter_id
         day_index = (ts.date - week_start).days
-        if day_index < 0 or day_index > 4:
+        if day_index < 0 or day_index > 6:
             continue
 
         desc_raw = ts.description or ''
@@ -11186,6 +11205,8 @@ def get_week_fitter_timesheets(request):
             'task_type':   task_type,
             'start_slot':  start_slot,
             'span_len':    span_len,
+            'po_id':       str(ts.purchase_order.workguru_id) if ts.purchase_order else '',
+            'po_label':    (ts.purchase_order.display_number + ' \u2014 ' + (ts.purchase_order.supplier_name or '')) if ts.purchase_order else '',
         })
 
     return JsonResponse({'success': True, 'entries': result})
@@ -11200,7 +11221,7 @@ def save_fitter_week(request):
     """
     import json
     from datetime import date as date_type, timedelta
-    from .models import Fitter, Timesheet, Order
+    from .models import Fitter, Timesheet, Order, PurchaseOrder
 
     try:
         data = json.loads(request.body)
@@ -11220,7 +11241,7 @@ def save_fitter_week(request):
     except ValueError:
         return JsonResponse({'success': False, 'error': 'Invalid week_start format'}, status=400)
 
-    week_end = week_start + timedelta(days=4)
+    week_end = week_start + timedelta(days=6)
     fitter_ids = [e.get('worker_id') for e in entries if e.get('worker_id')]
     Timesheet.objects.filter(
         timesheet_type='installation',
@@ -11239,6 +11260,7 @@ def save_fitter_week(request):
         day_index   = entry.get('day_index', 0)
         slots       = entry.get('slots', [])
         description = entry.get('description', '')
+        po_id_raw   = entry.get('po_id', '')
 
         if not fitter_id or not slots:
             continue
@@ -11260,6 +11282,14 @@ def save_fitter_week(request):
                 errors.append(f'Order {order_id} not found')
                 continue
 
+        # Resolve purchase order (optional, by workguru_id)
+        purchase_order = None
+        if po_id_raw:
+            try:
+                purchase_order = PurchaseOrder.objects.get(workguru_id=int(po_id_raw))
+            except (PurchaseOrder.DoesNotExist, ValueError):
+                errors.append(f'PO {po_id_raw} not found')
+
         slots_sorted = sorted(slots)
         if not slots_sorted:
             continue
@@ -11271,6 +11301,7 @@ def save_fitter_week(request):
         Timesheet.objects.create(
             order=order,
             fitter=fitter,
+            purchase_order=purchase_order,
             timesheet_type='installation',
             date=work_date,
             hours=total_hours,

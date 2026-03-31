@@ -32,7 +32,7 @@
             </div>
             <div class="card-body" style="padding:0;">
                 {% if timesheets %}
-                <div class="table-container" style="max-height:500px;overflow-y:auto;">
+                <div class="table-container" style="max-height:75vh;overflow-y:auto;">
                     <table class="table ts-table">
                         <thead style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
                             <tr>
@@ -66,7 +66,7 @@
                                 {% endif %}
                             </td>
                             <td><strong>£{{ ts.total_cost|floatformat:2 }}</strong></td>
-                            <td>{{ ts.description|default:"-"|truncatewords:10 }}</td>
+                            <td>{{ ts.display_description|default:"-"|truncatewords:10 }}</td>
                         </tr>
                         {% endfor %}
                         </tbody>
@@ -83,60 +83,9 @@
         </div>
 
         {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
-        <div class="row" style="display:flex;gap:16px;flex-wrap:wrap;">
-            <div class="card" style="flex:1;min-width:420px;">
-                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-                    <h3><i class="bi bi-person-gear"></i> Factory Workers</h3>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()"><i class="bi bi-plus-lg"></i> Add Worker</button>
-                </div>
-                <div class="card-body" style="padding:0;">
-                    {% if factory_workers %}
-                    <div class="table-container">
-                        <table class="table ts-table">
-                            <thead><tr><th>#</th><th>Name</th><th>Hourly Rate</th><th>Status</th><th>Actions</th></tr></thead>
-                            <tbody id="factory-workers-table">
-                            {% for worker in factory_workers %}
-                            <tr id="worker-row-{{ worker.id }}" class="{% if not worker.active %}text-muted{% endif %}">
-                                <td><input type="number" min="1" max="99" class="form-input form-input-sm worker-order" data-id="{{ worker.id }}" value="{{ worker.display_order }}" style="max-width:50px;"></td>
-                                <td><input type="text" class="form-input form-input-sm worker-name" data-id="{{ worker.id }}" value="{{ worker.name }}" style="max-width:150px;"></td>
-                                <td>
-                                    <div style="display:flex;align-items:center;gap:2px;">
-                                        <span>£</span><input type="number" step="0.01" min="0" class="form-input form-input-sm worker-rate" data-id="{{ worker.id }}" value="{{ worker.hourly_rate }}" style="max-width:70px;"><span>/hr</span>
-                                    </div>
-                                </td>
-                                <td><label class="toggle-switch"><input type="checkbox" class="worker-active" data-id="{{ worker.id }}" {% if worker.active %}checked{% endif %}><span class="toggle-slider"></span></label></td>
-                                <td>
-                                    <button type="button" class="btn btn-success btn-sm" onclick="saveWorker({{ worker.id }})"><i class="bi bi-check-lg"></i></button>
-                                    <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteWorker({{ worker.id }}, '{{ worker.name }}')"><i class="bi bi-trash"></i></button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="empty-state"><i class="bi bi-person-x" style="font-size:2.5rem;color:#6c757d;"></i><p>No factory workers added yet.</p><button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">Add First Worker</button></div>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="card" style="flex:1;min-width:380px;">
-                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-                    <h3><i class="bi bi-people"></i> Fitters</h3>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddFitterModal()"><i class="bi bi-plus-lg"></i> Add Fitter</button>
-                </div>
-                <div class="card-body" style="padding:0;">
-                    {% if fitters %}
-                    <div class="table-container">
-                        <table class="table ts-table">
-                            <thead><tr><th>Name</th><th>Status</th></tr></thead>
-                            <tbody>{% for fitter in fitters %}<tr class="{% if not fitter.active %}text-muted{% endif %}"><td>{{ fitter.name }}</td><td>{% if fitter.active %}<span class="badge badge-success">Active</span>{% else %}<span class="badge badge-secondary">Inactive</span>{% endif %}</td></tr>{% endfor %}</tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="empty-state"><i class="bi bi-people" style="font-size:2.5rem;color:#6c757d;"></i><p>No fitters added yet.</p></div>
-                    {% endif %}
-                </div>
-            </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openModal('manageWorkersModal')"><i class="bi bi-person-gear"></i> Manage Factory Workers</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openModal('manageFittersModal')"><i class="bi bi-people"></i> Manage Fitters</button>
         </div>
         {% endif %}
     </div><!-- /#tab-overview -->
@@ -152,10 +101,7 @@
                 <button type="button" class="btn btn-secondary btn-sm" onclick="nextWeek()"><i class="bi bi-chevron-right"></i></button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="goToCurrentWeek()">Today</button>
                 <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-                    <span style="font-size:0.75rem;color:var(--text-secondary);">
-                        <span class="legend-swatch" style="background:var(--worker-0-bg);border-color:var(--worker-0-border);"></span> Paddy &nbsp;
-                        <span class="legend-swatch" style="background:var(--worker-1-bg);border-color:var(--worker-1-border);"></span> Ryan &nbsp;
-                        <span class="legend-swatch" style="background:var(--worker-2-bg);border-color:var(--worker-2-border);"></span> Mo &nbsp;
+                    <span style="font-size:0.75rem;color:var(--text-secondary);" id="manufacturing-legend">
                         <span class="legend-break"></span> Break
                     </span>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllAssignments()"><i class="bi bi-x-circle"></i> Clear</button>
@@ -259,6 +205,79 @@
         </div>
     </div>
 </div>
+
+<!-- Manage Factory Workers Modal -->
+<div class="modal" id="manageWorkersModal">
+    <div class="modal-overlay" onclick="closeModal('manageWorkersModal')"></div>
+    <div class="modal-dialog" style="max-width:620px;">
+        <div class="modal-content">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3><i class="bi bi-person-gear"></i> Factory Workers</h3>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()"><i class="bi bi-plus-lg"></i> Add Worker</button>
+                    <button type="button" class="modal-close" onclick="closeModal('manageWorkersModal')">&#x2715;</button>
+                </div>
+            </div>
+            <div class="modal-body" style="padding:0;">
+                {% if factory_workers %}
+                <div class="table-container" style="max-height:400px;overflow-y:auto;">
+                    <table class="table ts-table">
+                        <thead style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;"><tr><th>#</th><th>Name</th><th>Hourly Rate</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody id="factory-workers-table">
+                        {% for worker in factory_workers %}
+                        <tr id="worker-row-{{ worker.id }}" class="{% if not worker.active %}text-muted{% endif %}">
+                            <td><input type="number" min="1" max="99" class="form-input form-input-sm worker-order" data-id="{{ worker.id }}" value="{{ worker.display_order }}" style="max-width:50px;"></td>
+                            <td><input type="text" class="form-input form-input-sm worker-name" data-id="{{ worker.id }}" value="{{ worker.name }}" style="max-width:150px;"></td>
+                            <td>
+                                <div style="display:flex;align-items:center;gap:2px;">
+                                    <span>£</span><input type="number" step="0.01" min="0" class="form-input form-input-sm worker-rate" data-id="{{ worker.id }}" value="{{ worker.hourly_rate }}" style="max-width:70px;"><span>/hr</span>
+                                </div>
+                            </td>
+                            <td><label class="toggle-switch"><input type="checkbox" class="worker-active" data-id="{{ worker.id }}" {% if worker.active %}checked{% endif %}><span class="toggle-slider"></span></label></td>
+                            <td>
+                                <button type="button" class="btn btn-success btn-sm" onclick="saveWorker({{ worker.id }})"><i class="bi bi-check-lg"></i></button>
+                                <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteWorker({{ worker.id }}, '{{ worker.name }}')"><i class="bi bi-trash"></i></button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state"><i class="bi bi-person-x" style="font-size:2.5rem;color:#6c757d;"></i><p>No factory workers added yet.</p><button type="button" class="btn btn-primary btn-sm" onclick="openAddWorkerModal()">Add First Worker</button></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Fitters Modal -->
+<div class="modal" id="manageFittersModal">
+    <div class="modal-overlay" onclick="closeModal('manageFittersModal')"></div>
+    <div class="modal-dialog" style="max-width:480px;">
+        <div class="modal-content">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3><i class="bi bi-people"></i> Fitters</h3>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openAddFitterModal()"><i class="bi bi-plus-lg"></i> Add Fitter</button>
+                    <button type="button" class="modal-close" onclick="closeModal('manageFittersModal')">&#x2715;</button>
+                </div>
+            </div>
+            <div class="modal-body" style="padding:0;">
+                {% if fitters %}
+                <div class="table-container" style="max-height:400px;overflow-y:auto;">
+                    <table class="table ts-table">
+                        <thead style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;"><tr><th>Name</th><th>Status</th></tr></thead>
+                        <tbody>{% for fitter in fitters %}<tr class="{% if not fitter.active %}text-muted{% endif %}"><td>{{ fitter.name }}</td><td>{% if fitter.active %}<span class="badge badge-success">Active</span>{% else %}<span class="badge badge-secondary">Inactive</span>{% endif %}</td></tr>{% endfor %}</tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state"><i class="bi bi-people" style="font-size:2.5rem;color:#6c757d;"></i><p>No fitters added yet.</p></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
 {% endif %}
 
 <!-- Slot assignment popover -->
@@ -282,6 +301,13 @@
             <input type="hidden" id="popover-order-id">
             <div id="popover-order-results" class="autocomplete-dropdown" style="display:none;"></div>
         </div>
+        <!-- PO search (shown for installation task type) -->
+        <div class="form-group" id="popover-po-row" style="margin-bottom:8px;position:relative;display:none;">
+            <label style="font-size:0.78rem;color:var(--text-secondary);">Purchase Order <span style="color:var(--text-secondary);">(optional)</span></label>
+            <input type="text" class="form-input" id="popover-po-search" placeholder="PO number or supplier&hellip;" autocomplete="off" style="font-size:0.82rem;">
+            <input type="hidden" id="popover-po-id">
+            <div id="popover-po-results" class="autocomplete-dropdown" style="display:none;"></div>
+        </div>
         <div class="form-group" style="margin-bottom:8px;">
             <label style="font-size:0.78rem;color:var(--text-secondary);">Duration</label>
             <select class="form-input" id="popover-duration" style="font-size:0.82rem;">
@@ -294,7 +320,7 @@
                 <option value="10">5 hours</option>
             </select>
         </div>
-        <div class="form-group" style="margin-bottom:10px;">
+        <div class="form-group" style="margin-bottom:8px;">
             <label style="font-size:0.78rem;color:var(--text-secondary);">Description <span id="popover-desc-hint" style="color:var(--text-secondary);">(optional)</span></label>
             <input type="text" class="form-input" id="popover-description" placeholder="e.g. cabinet build" style="font-size:0.82rem;">
         </div>
@@ -401,8 +427,8 @@ const GRID_SLOTS = (function(){
 })();
 
 const BREAK_SLOTS = new Set(['10:00','13:00','13:30']);
-const DAY_NAMES   = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-const DAY_SHORT   = ['Mon','Tue','Wed','Thu','Fri'];
+const DAY_NAMES   = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const DAY_SHORT   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 // Workers injected from Django at bottom of script
 const WORKERS = [];
@@ -422,13 +448,13 @@ function nextWeek(){ currentWeekStart=new Date(currentWeekStart); currentWeekSta
 function goToCurrentWeek(){ currentWeekStart=getMondayOf(new Date()); updateWeekDisplay(); loadWeekTimesheets(); if(_fitterGridBuilt)loadFitterTimesheets(); }
 
 function updateWeekDisplay(){
-    const fri=new Date(currentWeekStart); fri.setDate(fri.getDate()+4);
+    const sun=new Date(currentWeekStart); sun.setDate(sun.getDate()+6);
     const fmt={day:'2-digit',month:'short'};
     document.getElementById('week-label').textContent=
-        currentWeekStart.toLocaleDateString('en-GB',fmt)+' \u2013 '+fri.toLocaleDateString('en-GB',{...fmt,year:'numeric'});
+        currentWeekStart.toLocaleDateString('en-GB',fmt)+' \u2013 '+sun.toLocaleDateString('en-GB',{...fmt,year:'numeric'});
 
     // Update day header cells (both grids)
-    for(let i=0;i<5;i++){
+    for(let i=0;i<7;i++){
         const d=new Date(currentWeekStart); d.setDate(d.getDate()+i);
         const dateStr=d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
         const inner=`<span class="day-name">${DAY_SHORT[i]}</span><span class="day-date">${dateStr}</span>`;
@@ -454,7 +480,7 @@ function buildGrid(){
     const tbody=document.getElementById('grid-body');
     const nW=WORKERS.length;
 
-    for(let dayIdx=0;dayIdx<5;dayIdx++){
+    for(let dayIdx=0;dayIdx<7;dayIdx++){
         WORKERS.forEach((worker,wi)=>{
             const tr=document.createElement('tr');
             if(wi===nW-1) tr.classList.add('day-last-row');
@@ -498,6 +524,14 @@ function buildGrid(){
 
 //  Slot helpers 
 function slotKey(wid,di,slot){ return `${wid}__${di}__${slot}`; }
+
+function buildManufacturingLegend(){
+    const el=document.getElementById('manufacturing-legend');
+    if(!el) return;
+    el.innerHTML=WORKERS.map((w,i)=>
+        `<span class="legend-swatch" style="background:var(--worker-${i}-bg);border-color:var(--worker-${i}-border);"></span> ${w.name.split(' ')[0]}`
+    ).join(' &nbsp; ')+' &nbsp; <span class="legend-break"></span> Break';
+}
 
 // Get consecutive non-break slots starting from startSlot (inclusive), up to maxN
 function getSpanSlots(startSlot, maxN){
@@ -789,11 +823,17 @@ function onDrop(e){
 function setTaskType(type){
     document.querySelectorAll('.task-type-btn').forEach(b=>b.classList.toggle('active', b.dataset.type===type));
     const showOrder = type==='order' || type==='installation';
+    const showPO    = type==='installation';
     document.getElementById('popover-order-row').style.display = showOrder ? '' : 'none';
+    document.getElementById('popover-po-row').style.display    = showPO    ? '' : 'none';
     document.getElementById('popover-desc-hint').textContent   = showOrder ? '(optional)' : '';
     if(!showOrder){
         document.getElementById('popover-order-search').value='';
         document.getElementById('popover-order-id').value=type.toUpperCase(); // synthetic ID
+    }
+    if(!showPO){
+        document.getElementById('popover-po-search').value='';
+        document.getElementById('popover-po-id').value='';
     }
 }
 
@@ -827,9 +867,14 @@ function onSlotClick(e){
         document.getElementById('popover-order-search').value = existing ? existing.order_label : '';
         document.getElementById('popover-order-id').value     = existing ? existing.order_id    : '';
     }
+    if(existType==='installation'){
+        document.getElementById('popover-po-search').value = existing?.po_label || '';
+        document.getElementById('popover-po-id').value     = existing?.po_id   || '';
+    }
     document.getElementById('popover-description').value = existing ? existing.description : '';
     document.getElementById('popover-duration').value    = existing ? String(existing.span_len||1) : '1';
     document.getElementById('popover-order-results').style.display='none';
+    document.getElementById('popover-po-results').style.display='none';
     document.getElementById('popover-clear-btn').style.display = existing ? 'inline-block':'none';
 
     // Copy row: populate worker + day selectors when editing an existing entry
@@ -843,7 +888,7 @@ function onSlotClick(e){
             return `<option value="${w.id}"${isSame?' selected':''}>${w.name.split(' ')[0]}${isSame?' (same)':''}</option>`;
         }).join('');
         // Mon–Fri of the currently displayed week
-        const DAY_SHORT = ['Mon','Tue','Wed','Thu','Fri'];
+        const DAY_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         dupDaySel.innerHTML = DAY_SHORT.map((name,idx)=>{
             const d=new Date(currentWeekStart); d.setDate(d.getDate()+idx);
             const dd=String(d.getDate()).padStart(2,'0'), mm=String(d.getMonth()+1).padStart(2,'0');
@@ -871,6 +916,9 @@ function closePopover(){
     document.getElementById('slot-popover').style.display='none';
     document.getElementById('popover-backdrop').style.display='none';
     document.getElementById('popover-order-results').style.display='none';
+    document.getElementById('popover-po-results').style.display='none';
+    document.getElementById('popover-po-search').value='';
+    document.getElementById('popover-po-id').value='';
     _popCtx=null;
 }
 
@@ -879,6 +927,7 @@ function assignSlot(){
     const spanLen    = parseInt(document.getElementById('popover-duration').value)||1;
     const desc       = document.getElementById('popover-description').value.trim();
     let orderId, orderLabel;
+    let poId='', poLabel='';
 
     if(activeType==='order'){
         orderId    = document.getElementById('popover-order-id').value;
@@ -887,6 +936,8 @@ function assignSlot(){
     } else if(activeType==='installation'){
         orderId    = document.getElementById('popover-order-id').value;
         orderLabel = document.getElementById('popover-order-search').value.trim();
+        poId       = document.getElementById('popover-po-id').value;
+        poLabel    = document.getElementById('popover-po-search').value.trim();
         if(orderId && orderLabel){
             // Installation linked to a specific order
             orderLabel = 'Installation: ' + orderLabel;
@@ -903,7 +954,7 @@ function assignSlot(){
 
     const {wid,wi,di,slot,isFitter}=_popCtx;
     const writeFn = isFitter ? writeFitterAssignment : writeAssignment;
-    writeFn(wid, di, slot, { order_id:orderId, order_label:orderLabel, description:desc, task_type:activeType, workerIdx:wi, span_len:spanLen });
+    writeFn(wid, di, slot, { order_id:orderId, order_label:orderLabel, description:desc, task_type:activeType, workerIdx:wi, span_len:spanLen, po_id:poId, po_label:poLabel });
     closePopover();
 }
 
@@ -944,6 +995,7 @@ function clearSlot(){
 document.addEventListener('DOMContentLoaded',function(){
     currentWeekStart=getMondayOf(new Date());
     buildGrid();
+    buildManufacturingLegend();
     updateWeekDisplay();
     loadWeekTimesheets();
 
@@ -979,6 +1031,40 @@ document.addEventListener('DOMContentLoaded',function(){
                 }).catch(()=>{results.style.display='none';});
         },280);
     });
+
+    // PO search handler (for installation task type)
+    const poInput=document.getElementById('popover-po-search');
+    const poResults=document.getElementById('popover-po-results');
+    let _poSearchTimer=null;
+    poInput.addEventListener('input',function(){
+        clearTimeout(_poSearchTimer);
+        const q=this.value.trim();
+        document.getElementById('popover-po-id').value='';
+        if(q.length<2){poResults.style.display='none';return;}
+        _poSearchTimer=setTimeout(()=>{
+            fetch('/api/purchase-order-search/?q='+encodeURIComponent(q))
+                .then(r=>r.json()).then(data=>{
+                    poResults.innerHTML='';
+                    if(data.results?.length){
+                        data.results.forEach(po=>{
+                            const div=document.createElement('div');
+                            div.className='autocomplete-item';
+                            div.innerHTML=`<span class="sale-num">${po.display_number}</span> &mdash; ${po.supplier_name||'Unknown'}`;
+                            div.addEventListener('click',()=>{
+                                poInput.value=po.display_number+' \u2014 '+(po.supplier_name||'Unknown');
+                                document.getElementById('popover-po-id').value=po.id;
+                                poResults.style.display='none';
+                            });
+                            poResults.appendChild(div);
+                        });
+                        poResults.style.display='block';
+                    } else {
+                        poResults.innerHTML='<div class="autocomplete-item" style="color:#999;">No POs found</div>';
+                        poResults.style.display='block';
+                    }
+                }).catch(()=>{poResults.style.display='none';});
+        },280);
+    });
 });
 
 // ── Load saved timesheets for the current week ─────────────────────
@@ -997,6 +1083,7 @@ function loadWeekTimesheets(){
                     String(e.worker_id), e.day_index, e.start_slot,
                     { order_id: e.order_id, order_label: e.order_label,
                       description: e.description, task_type: e.task_type,
+                      po_id: e.po_id||'', po_label: e.po_label||'',
                       workerIdx: wi, span_len: e.span_len, is_start: true }
                 );
             });
@@ -1021,6 +1108,7 @@ function saveWeek(){
             order_label: data.order_label||'',
             task_type: data.task_type||'order',
             description:data.description||'',
+            po_id: data.po_id||'',
             slots:[]
         };
         const spanSlots=getSpanSlots(slot,data.span_len);
@@ -1077,7 +1165,7 @@ function buildFitterGrid(){
     const tbody = document.getElementById('grid-body-fitter');
     const nW = FITTERS.length;
 
-    for(let dayIdx=0;dayIdx<5;dayIdx++){
+    for(let dayIdx=0;dayIdx<7;dayIdx++){
         FITTERS.forEach((worker,wi)=>{
             const tr=document.createElement('tr');
             if(wi===nW-1) tr.classList.add('day-last-row');
@@ -1263,6 +1351,7 @@ function loadFitterTimesheets(){
                     String(e.worker_id), e.day_index, e.start_slot,
                     { order_id:e.order_id, order_label:e.order_label,
                       description:e.description, task_type:e.task_type,
+                      po_id:e.po_id||'', po_label:e.po_label||'',
                       workerIdx:wi, span_len:e.span_len, is_start:true }
                 );
             });
@@ -1300,7 +1389,8 @@ function saveFitterWeek(){
         if(!grouped[gKey]) grouped[gKey]={
             worker_id:parseInt(wid), day_index:parseInt(dayIdx),
             order_id:data.order_id, order_label:data.order_label||'',
-            task_type:data.task_type||'order', description:data.description||'', slots:[]
+            task_type:data.task_type||'order', description:data.description||'',
+            po_id:data.po_id||'', slots:[]
         };
         const spanSlots=getSpanSlots(slot,data.span_len);
         grouped[gKey].slots.push(...spanSlots);
@@ -1334,8 +1424,8 @@ function saveFitterWeek(){
 WORKERS.push({ id: {{ worker.id }}, name: "{{ worker.name|escapejs }}" });
 {% endif %}{% endfor %}
 
-// ── Inject active fitters from Django ─────────────────────────────────────
-{% for fitter in fitters %}{% if fitter.active %}
+// ── Inject active fitters from Django (excluding employed staff) ───────────
+{% for fitter in schedule_fitters %}{% if fitter.active %}
 FITTERS.push({ id: {{ fitter.id }}, name: "{{ fitter.name|escapejs }}" });
 {% endif %}{% endfor %}
 

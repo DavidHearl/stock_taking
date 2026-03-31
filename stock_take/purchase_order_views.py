@@ -3347,20 +3347,19 @@ def purchase_order_push_to_xero(request, po_id):
             except (ValueError, TypeError):
                 pass
 
-        # Build delivery address if available
+        # Build delivery address as a plain string (Xero expects a string, not an object)
         delivery_address = None
         if any([po.delivery_address_1, po.delivery_address_2, po.suburb, po.state, po.postcode]):
-            delivery_address = {}
-            if po.delivery_address_1:
-                delivery_address['AddressLine1'] = po.delivery_address_1
-            if po.delivery_address_2:
-                delivery_address['AddressLine2'] = po.delivery_address_2
-            if po.suburb:
-                delivery_address['City'] = po.suburb
-            if po.state:
-                delivery_address['Region'] = po.state
-            if po.postcode:
-                delivery_address['PostalCode'] = po.postcode
+            parts = [
+                p for p in [
+                    po.delivery_address_1,
+                    po.delivery_address_2,
+                    po.suburb,
+                    po.state,
+                    po.postcode,
+                ] if p
+            ]
+            delivery_address = '\n'.join(parts)
 
         # Build reference from project info
         reference = po.description or ''
