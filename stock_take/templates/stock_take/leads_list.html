@@ -5,49 +5,39 @@
 
 {% block nav_leads_active %}active{% endblock %}
 
-{% block page_title %}
-Contacts
-<button class="btn btn-add-lead" onclick="document.getElementById('add-lead-modal').style.display='flex'" style="margin-left: 12px; padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--primary-color); background: transparent; color: var(--primary-color); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; transition: all 0.2s;">
-    <i class="bi bi-plus-lg"></i> Add Contact
-</button>
-{% endblock %}
+{% block page_title %}Contacts{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/leads.css' %}">
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<link rel="stylesheet" href="{% static 'css/ordering.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <!-- Search & Filters -->
-    <div class="leads-controls">
-        <div class="leads-search">
-            <div class="search-input-wrapper">
-                <i class="bi bi-search"></i>
-                <input type="text" id="lead-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
-            </div>
-        </div>
-        <div class="leads-filter-tabs">
-            <a href="?status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">All ({{ total_count }})</a>
-            <a href="?status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">Active ({{ active_count }})</a>
-            <a href="?status=converted" class="filter-tab {% if status_filter == 'converted' %}active{% endif %}">Converted ({{ converted_count }})</a>
-            <a href="?status=lost" class="filter-tab {% if status_filter == 'lost' %}active{% endif %}">Lost ({{ lost_count }})</a>
-        </div>
+<!-- Toolbar: search + actions in one row -->
+<div class="tabs">
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="lead-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
     </div>
-
-    {% if leads %}
-    <div class="leads-result-bar">
-        <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
-            <span id="selected-count">0 selected</span>
-            <button class="merge-btn" id="merge-btn" onclick="mergeLeads()" style="display:none;" title="Merge selected contacts">
+    <div class="tab-actions">
+        <button type="button" class="btn btn-add-order" onclick="document.getElementById('add-lead-modal').style.display='flex'" title="Add Contact">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+        <div class="bulk-actions-inline" id="bulk-actions-inline">
+            <button class="merge-btn" id="merge-btn" onclick="mergeLeads()" title="Merge selected contacts">
                 <i class="bi bi-arrow-left-right"></i> Merge
             </button>
-            <button class="bulk-delete-btn" onclick="bulkDelete()">
-                <i class="bi bi-trash"></i> Delete Selected
+            <button class="bulk-delete-icon" onclick="bulkDelete()" title="Delete selected">
+                <span class="bulk-count" id="bulk-count">0</span>
+                <i class="bi bi-trash"></i>
             </button>
         </div>
     </div>
-    <div class="leads-table-container">
-        <table class="leads-table">
+</div>
+
+    {% if leads %}
+    <div class="customers-table-container">
+        <table class="customers-table">
             <thead>
                 <tr>
                     <th class="checkbox-col"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
@@ -65,27 +55,27 @@ Contacts
                 <tr data-id="{{ lead.pk }}" data-search="{{ lead.name|lower }} {{ lead.email|lower }} {{ lead.phone|lower }} {{ lead.city|lower }} {{ lead.postcode|lower }} {{ lead.source|lower }}">
                     <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ lead.pk }}" onclick="updateSelection()"></td>
                     <td>
-                        <a href="{% url 'lead_detail' lead.pk %}" class="lead-name-link">
+                        <a href="{% url 'lead_detail' lead.pk %}" class="customer-name-link">
                             {{ lead.name|default:"-" }}
                         </a>
                     </td>
                     <td>
                         {% if lead.email %}
-                        <a href="mailto:{{ lead.email }}" class="lead-email">{{ lead.email }}</a>
+                        <a href="mailto:{{ lead.email }}" class="customer-email">{{ lead.email }}</a>
                         {% else %}-{% endif %}
                     </td>
                     <td>{{ lead.phone|default:"-" }}</td>
                     <td>{{ lead.city|default:"-" }}</td>
                     <td>
                         {% if lead.source %}
-                        <span class="lead-source-badge {{ lead.source }}">{{ lead.get_source_display }}</span>
+                        <span class="source-badge {{ lead.source }}">{{ lead.get_source_display }}</span>
                         {% else %}-{% endif %}
                     </td>
                     <td>
-                        <span class="lead-status-badge {{ lead.status }}">{{ lead.get_status_display }}</span>
+                        <span class="customer-active-badge {{ lead.status }}">{{ lead.get_status_display }}</span>
                     </td>
                     <td class="text-right">
-                        <button class="lead-delete-btn" onclick="deleteLead({{ lead.pk }}, '{{ lead.name|escapejs }}')" title="Delete">
+                        <button class="customer-delete-btn" onclick="deleteLead({{ lead.pk }}, '{{ lead.name|escapejs }}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>
                     </td>
@@ -96,43 +86,42 @@ Contacts
     </div>
     <!-- Pagination -->
     {% if page_obj.has_other_pages %}
-    <div class="leads-pagination">
+    <div class="customers-pagination">
         <div class="pagination-info">
             Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ filtered_count|default:page_obj.paginator.count }} results
         </div>
         <div class="pagination-controls">
             {% if page_obj.has_previous %}
-            <a href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">&lsaquo; Prev</a>
+            <a href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
             {% endif %}
 
             {% for num in page_obj.paginator.page_range %}
                 {% if num == page_obj.number %}
                     <span class="page-btn active">{{ num }}</span>
                 {% elif num > page_obj.number|add:"-3" and num < page_obj.number|add:"4" %}
-                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">{{ num }}</a>
+                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
                 {% elif num == 1 or num == page_obj.paginator.num_pages %}
-                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">{{ num }}</a>
+                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
                 {% elif num == page_obj.number|add:"-4" or num == page_obj.number|add:"4" %}
                     <span class="page-ellipsis">&hellip;</span>
                 {% endif %}
             {% endfor %}
 
             {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">Next &rsaquo;</a>
-            <a href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
             {% endif %}
         </div>
     </div>
     {% endif %}
 
     {% else %}
-    <div class="leads-empty-state">
+    <div class="customers-empty-state">
         <i class="bi bi-funnel"></i>
         <p>No contacts found.</p>
     </div>
     {% endif %}
-</div>
 
 <!-- Add Lead Modal -->
 <div class="modal-overlay" id="add-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
@@ -263,7 +252,11 @@ function checkMergeEligibility() {
     const mergeBtn = document.getElementById('merge-btn');
     if (!mergeBtn) return;
     const checked = document.querySelectorAll('.row-select:checked');
-    mergeBtn.style.display = checked.length === 2 ? 'inline-flex' : 'none';
+    if (checked.length === 2) {
+        mergeBtn.classList.add('visible');
+    } else {
+        mergeBtn.classList.remove('visible');
+    }
 }
 
 function mergeLeads() {
@@ -343,16 +336,16 @@ function toggleSelectAll(el) {
 
 function updateSelection() {
     const checked = document.querySelectorAll('.row-select:checked');
-    const bar = document.getElementById('bulk-actions-bar');
-    const countEl = document.getElementById('selected-count');
+    const inline = document.getElementById('bulk-actions-inline');
+    const countEl = document.getElementById('bulk-count');
     const selectAll = document.getElementById('select-all');
     const allBoxes = document.querySelectorAll('.row-select');
 
     if (checked.length > 0) {
-        bar.style.display = 'flex';
-        countEl.textContent = checked.length + ' selected';
+        inline.classList.add('visible');
+        countEl.textContent = checked.length;
     } else {
-        bar.style.display = 'none';
+        inline.classList.remove('visible');
     }
     selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
     selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;

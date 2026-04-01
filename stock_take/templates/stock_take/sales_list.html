@@ -55,38 +55,37 @@
 </style>
 {% endblock %}
 
-{% block page_title %}Sales ({{ filtered_count }}){% endblock %}
+{% block page_title %}Sales{% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <!-- Search & Filters -->
-    <div class="customers-controls">
-        <div class="customers-search">
-            <div class="search-input-wrapper">
-                <i class="bi bi-search"></i>
-                <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, contract, assigned to..." autocomplete="off">
-            </div>
-        </div>
-        <div class="customers-filter-tabs">
-            <a href="?age=1y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1y' %}active{% endif %}">
-                &lt; 1 Year ({{ count_1y }})
-            </a>
-            <a href="?age=1_2y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1_2y' %}active{% endif %}">
-                1-2 Years ({{ count_1_2y }})
-            </a>
-            <a href="?age=2_10y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '2_10y' %}active{% endif %}">
-                2+ Years ({{ count_2_10y }})
-            </a>
-            <a href="?age=historic{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == 'historic' %}active{% endif %}">
-                Historic ({{ count_historic }})
-            </a>
-        </div>
-        {% if location_filter %}
-        <div class="customers-location-badge">
-            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
-        </div>
-        {% endif %}
+<!-- Toolbar: tabs + search in one row -->
+<div class="tabs">
+    <div class="tab-nav tab-nav-pills">
+        <a href="?age=1y{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == '1y' %}active{% endif %}">
+            &lt; 1 Year ({{ count_1y }})
+        </a>
+        <a href="?age=1_2y{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == '1_2y' %}active{% endif %}">
+            1-2 Years ({{ count_1_2y }})
+        </a>
+        <a href="?age=2_10y{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == '2_10y' %}active{% endif %}">
+            2+ Years ({{ count_2_10y }})
+        </a>
+        <a href="?age=historic{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == 'historic' %}active{% endif %}">
+            Historic ({{ count_historic }})
+        </a>
     </div>
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, contract, assigned to..." autocomplete="off">
+    </div>
+    {% if location_filter %}
+    <div class="tab-actions">
+        <span class="customers-location-badge">
+            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
+        </span>
+    </div>
+    {% endif %}
+</div>
 
     {% if search_expanded_from %}
     <div class="search-expanded-notice">
@@ -219,7 +218,6 @@
         </div>
     </div>
     {% endif %}
-</div>
 
 <script>
 const searchInput = document.getElementById('sale-search');
@@ -243,9 +241,12 @@ function applyCompletedVisibility(hasSearch) {
     }
 }
 
-// On page load
+// Only hide completed sales on the "< 1 Year" tab — older brackets are mostly completed
+const ageFilter = '{{ age_filter|escapejs }}';
 const initialSearch = '{{ search_query|escapejs }}';
-applyCompletedVisibility(initialSearch.length > 0);
+if (ageFilter === '1y') {
+    applyCompletedVisibility(initialSearch.length > 0);
+}
 
 // Click notice to reveal
 if (noticeWrapper) {
@@ -256,8 +257,10 @@ if (noticeWrapper) {
 
 if (searchInput) {
     searchInput.addEventListener('input', function() {
-        // Reveal completed rows as user types (no page reload)
-        applyCompletedVisibility(this.value.trim().length > 0);
+        // Only toggle completed visibility on the < 1 Year tab
+        if (ageFilter === '1y') {
+            applyCompletedVisibility(this.value.trim().length > 0);
+        }
     });
     searchInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {

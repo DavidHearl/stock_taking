@@ -261,6 +261,14 @@ if CSRF_TRUSTED_ORIGINS_STRING:
 else:
     CSRF_TRUSTED_ORIGINS = ['https://atlas-gxbq5.ondigitalocean.app']
 
+# Always include the DigitalOcean app URL
+if 'https://atlas-gxbq5.ondigitalocean.app' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://atlas-gxbq5.ondigitalocean.app')
+
+# Allow any *.ondigitalocean.app subdomain (covers preview/staging deploys)
+if 'https://*.ondigitalocean.app' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://*.ondigitalocean.app')
+
 # Claim Service API Key (for automated PDF uploads from remote PC)
 CLAIM_UPLOAD_API_KEY = os.getenv('CLAIM_UPLOAD_API_KEY', 'change-me-in-production')
 CAD_DB_API_KEY = os.getenv('CAD_DB_API_KEY', 'change-me-in-production')

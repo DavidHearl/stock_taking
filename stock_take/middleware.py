@@ -279,7 +279,7 @@ class ActivityLoggingMiddleware:
                 except Exception:
                     func_name = path
 
-                description = f"{response.status_code} error on {func_name.replace('_', ' ').title()}"
+                description = f"{response.status_code} error on {func_name.replace('_', ' ').title()} ({request.method} {path})"
                 if error_message:
                     description += f": {error_message}"
 

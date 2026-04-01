@@ -5559,10 +5559,10 @@ def stock_list(request):
     # auto_create_stock_take_schedules()
     
     # Use only() to limit fields loaded from database
-    items = StockItem.objects.select_related('category', 'stock_take_group').only(
+    items = StockItem.objects.select_related('category', 'stock_take_group', 'supplier').only(
         'id', 'sku', 'name', 'cost', 'quantity', 'tracking_type', 
         'location', 'serial_or_batch', 'category__name', 'category__color',
-        'stock_take_group__name'
+        'stock_take_group__name', 'supplier__name'
     ).all()
     
     # Apply filters (already defined above for cache key)
@@ -5591,21 +5591,21 @@ def stock_list(request):
     # Separate items by stock status (exclude non-stock items from low/zero)
     in_stock_items = list(items.filter(
         quantity__gte=10
-    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group'))
+    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group', 'supplier'))
     
     low_stock_items = list(items.filter(
         quantity__gte=1, 
         quantity__lt=10
-    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group'))
+    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group', 'supplier'))
     
     zero_quantity_items = list(items.filter(
         quantity=0
-    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group'))
+    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group', 'supplier'))
     
     # Non-stock items (separate tab)
     non_stock_items = list(items.filter(
         tracking_type='non-stock'
-    ).select_related('category', 'stock_take_group'))
+    ).select_related('category', 'stock_take_group', 'supplier'))
     
     # Calculate total value from the items we already have
     total_value = sum(item.cost * item.quantity for item in in_stock_items + low_stock_items + zero_quantity_items + non_stock_items)
@@ -8487,60 +8487,6 @@ def remedials(request):
     matched_orders = Order.objects.filter(sale_number__in=remedial_ids)
     order_map = {o.sale_number: o for o in matched_orders}
 
-    # --- Local remedial orders (legacy) ---
-    remedial_orders = Remedial.objects.select_related('original_order', 'boards_po').prefetch_related('accessories').order_by('-created_date')
-
-    # Get all orders for selection (to create remedials from)
-    available_orders = Order.objects.exclude(
-        job_finished=True
-    ).select_related('boards_po').order_by('-order_date')[:100]
-
-    if request.method == 'POST':
-        # Handle creating a new remedial order
-        try:
-            original_order_id = request.POST.get('original_order_id')
-            remedial_reason = request.POST.get('remedial_notes', '')
-
-            if not original_order_id:
-                messages.error(request, 'Please select an order to create a remedial for.')
-                return redirect('remedials')
-
-            original_order = Order.objects.get(id=original_order_id)
-
-            # Generate unique remedial number
-            latest_remedial = Remedial.objects.order_by('-id').first()
-            if latest_remedial and latest_remedial.remedial_number:
-                try:
-                    last_num = int(latest_remedial.remedial_number.split('-')[1])
-                    new_num = last_num + 1
-                except (IndexError, ValueError):
-                    new_num = 1
-            else:
-                new_num = 1
-
-            remedial_number = f"REM-{new_num:03d}"
-
-            remedial = Remedial.objects.create(
-                original_order=original_order,
-                remedial_number=remedial_number,
-                reason=remedial_reason,
-                first_name=original_order.first_name,
-                last_name=original_order.last_name,
-                customer_number=original_order.customer_number,
-                address=original_order.address,
-                postcode=original_order.postcode,
-            )
-
-            messages.success(request, f'Remedial {remedial_number} created for {original_order.first_name} {original_order.last_name} (Order: {original_order.sale_number})')
-            return redirect('remedials')
-
-        except Order.DoesNotExist:
-            messages.error(request, 'Original order not found.')
-            return redirect('remedials')
-        except Exception as e:
-            messages.error(request, f'Error creating remedial: {str(e)}')
-            return redirect('remedials')
-
     return render(request, 'stock_take/remedials.html', {
         'anthill_remedials': page_obj,
         'page_obj': page_obj,
@@ -8553,8 +8499,6 @@ def remedials(request):
         'count_dead': count_dead,
         'count_all': count_all,
         'order_map': order_map,
-        'remedial_orders': remedial_orders,
-        'available_orders': available_orders,
     })
 
 @login_required

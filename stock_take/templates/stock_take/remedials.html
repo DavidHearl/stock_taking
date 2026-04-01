@@ -7,6 +7,7 @@
 {% block nav_remedials_active %}active{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/customers.css' %}">
 <link rel="stylesheet" href="{% static 'css/ordering.css' %}">
 <style>
     .sale-status-open     { background: rgba(16, 185, 129, 0.18); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 600; }
@@ -19,36 +20,34 @@
 </style>
 {% endblock %}
 
-{% block page_title %}Remedials ({{ filtered_count }}){% endblock %}
+{% block page_title %}Remedials{% endblock %}
 
 {% block content %}
-<!-- Tabs -->
+<!-- Toolbar: tabs + search in one row -->
 <div class="tabs">
-    <div class="tab-nav">
+    <div class="tab-nav tab-nav-pills">
         <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'open' %}active{% endif %}">
-            OPEN ({{ count_open }})
+            Open ({{ count_open }})
         </a>
         <a href="?status=won{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'won' %}active{% endif %}">
-            WON ({{ count_won }})
+            Won ({{ count_won }})
         </a>
         <a href="?status=dead{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'dead' %}active{% endif %}">
-            DEAD ({{ count_dead }})
+            Dead ({{ count_dead }})
         </a>
         <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'all' %}active{% endif %}">
-            ALL ({{ count_all }})
+            All ({{ count_all }})
         </a>
     </div>
-    {% if location_filter %}
-    <span style="font-size:0.8rem; color:var(--text-secondary);"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
-    {% endif %}
-</div>
-
-<!-- Search Box -->
-<div class="search-box">
     <div class="search-input-wrapper">
         <i class="bi bi-search"></i>
         <input type="text" id="remedial-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type or assigned to..." autocomplete="off">
     </div>
+    {% if location_filter %}
+    <div class="tab-actions">
+        <span style="font-size:0.8rem; color:var(--text-secondary);"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
+    </div>
+    {% endif %}
 </div>
 
 {% if anthill_remedials %}
@@ -145,60 +144,6 @@
         <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
         <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
         {% endif %}
-    </div>
-</div>
-{% endif %}
-
-<!-- Local Remedial Orders -->
-{% if remedial_orders %}
-<div style="margin-top: 20px;">
-    <div class="tabs" style="margin-bottom: 10px;">
-        <div style="display: flex; align-items: center; gap: 10px; cursor: pointer;" onclick="document.getElementById('local-remedials-section').style.display = document.getElementById('local-remedials-section').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-icon').classList.toggle('bi-chevron-down'); this.querySelector('.toggle-icon').classList.toggle('bi-chevron-right');">
-            <i class="bi bi-chevron-right toggle-icon" style="font-size:0.85rem; color:var(--text-secondary);"></i>
-            <span style="font-size:0.8rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-secondary);">Local Remedial Orders ({{ remedial_orders|length }})</span>
-        </div>
-    </div>
-    <div id="local-remedials-section" style="display: none;">
-        <div class="card">
-            <table class="table orders-table">
-                <thead>
-                    <tr>
-                        <th>Remedial #</th>
-                        <th>Original Order</th>
-                        <th>Customer</th>
-                        <th>Created</th>
-                        <th>Scheduled</th>
-                        <th>Status</th>
-                        <th>Days Open</th>
-                        <th>Details</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for remedial in remedial_orders %}
-                    <tr>
-                        <td><span class="sale-status-default" style="padding:2px 8px; border-radius:4px; font-size:0.78rem;">{{ remedial.remedial_number }}</span></td>
-                        <td>
-                            <a href="{% url 'order_details' remedial.original_order.id %}" class="customer-name-link">
-                                {{ remedial.original_order.sale_number }}
-                            </a>
-                        </td>
-                        <td>{{ remedial.first_name }} {{ remedial.last_name }}</td>
-                        <td>{{ remedial.created_date|date:"d/m/Y" }}</td>
-                        <td>{{ remedial.scheduled_date|date:"d/m/Y"|default:"-" }}</td>
-                        <td>
-                            <span class="customer-active-badge {% if remedial.is_completed %}sale-status-complete{% else %}sale-status-open{% endif %}">
-                                {% if remedial.is_completed %}Completed{% else %}In Progress{% endif %}
-                            </span>
-                        </td>
-                        <td>{{ remedial.days_since_created }}</td>
-                        <td>
-                            <a href="{% url 'remedial_detail' remedial.pk %}" class="btn btn-sm btn-outline-primary">Details</a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
     </div>
 </div>
 {% endif %}

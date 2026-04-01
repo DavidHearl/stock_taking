@@ -9,417 +9,142 @@
 
 {% block extra_css %}
     <link rel="stylesheet" href="{% static 'css/stock_manager.css' %}">
+    <link rel="stylesheet" href="{% static 'css/ordering.css' %}">
+    <link rel="stylesheet" href="{% static 'css/customers.css' %}">
 {% endblock %}
 
 {% block content %}
 {% if user.is_authenticated %}
 
-<!-- Header Bar -->
-<div class="stock-header-bar">
-    <!-- Stock Status Tabs -->
-    <div class="stock-tab-group">
-        <button class="stock-tab-btn tab-all active" onclick="switchStockTab('all', this)">
-            <i class="bi bi-grid-3x3-gap"></i> All
-            <span class="tab-count" id="all-tab-count">{{ total_items_count }}</span>
-        </button>
-        <button class="stock-tab-btn tab-in-stock" onclick="switchStockTab('in-stock', this)">
-            <i class="bi bi-check-circle"></i> In Stock
-            <span class="tab-count" id="in-stock-tab-count">{{ in_stock_count }}</span>
-        </button>
-        <button class="stock-tab-btn tab-low-stock" onclick="switchStockTab('low-stock', this)">
-            <i class="bi bi-exclamation-triangle"></i> Low Stock
-            <span class="tab-count" id="low-stock-tab-count">{{ low_stock_count }}</span>
-        </button>
-        <button class="stock-tab-btn tab-out-of-stock" onclick="switchStockTab('out-of-stock', this)">
-            <i class="bi bi-x-circle"></i> Out of Stock
-            <span class="tab-count" id="out-of-stock-tab-count">{{ zero_quantity_count }}</span>
-        </button>
-        <button class="stock-tab-btn tab-non-stock" onclick="switchStockTab('non-stock', this)">
-            <i class="bi bi-archive"></i> Non-Stock
-            <span class="tab-count" id="non-stock-tab-count">{{ non_stock_count }}</span>
-        </button>
-    </div>
-
-    <!-- Total Value -->
-    <div class="stock-value-display">
-        <span class="stock-value-label">Total Value</span>
-        <span class="stock-value-amount" id="total-value">£{{ total_value|floatformat:2 }}</span>
-    </div>
-
-    <div class="header-sep"></div>
-
-    <!-- Action Buttons -->
-    <div class="stock-header-actions">
-        <button type="button" id="updateItemsBtn" class="btn btn-success btn-sm stock-update-btn" onclick="saveAllChanges()">
-            <i class="bi bi-save"></i> Update <span id="changesCount" class="badge badge-light">0</span>
-        </button>
-        <a href="{% url 'add_product' %}" class="btn btn-primary btn-sm stock-add-btn">
-            <i class="bi bi-plus-lg"></i> Add Product
-        </a>
-    </div>
-</div>
-
-
-
-<!-- Search & Filters -->
-<div class="stock-search-bar">
-    <div class="stock-search-box">
+<!-- Toolbar -->
+<div class="tabs">
+    <div class="search-input-wrapper">
         <i class="bi bi-search"></i>
         <input type="text" id="stock-search" placeholder="Search by SKU, name, serial/batch..." autocomplete="off">
-        <button class="stock-search-clear" id="search-clear" onclick="clearSearch()">&times;</button>
     </div>
-    <div class="stock-filter-group">
-        <select id="category-filter" onchange="applyFilters()">
+    <div class="tab-actions">
+        <select id="stock-type-filter" class="stock-dropdown-filter" onchange="applyFilters()">
+            <option value="">All Stock ({{ total_items_count }})</option>
+            <option value="in-stock">In Stock ({{ in_stock_count }})</option>
+            <option value="low-stock">Low Stock ({{ low_stock_count }})</option>
+            <option value="out-of-stock">Out of Stock ({{ zero_quantity_count }})</option>
+            <option value="non-stock">Non-Stock ({{ non_stock_count }})</option>
+        </select>
+        <select id="category-filter" class="stock-dropdown-filter" onchange="applyFilters()">
             <option value="">All Categories</option>
             {% for category in categories %}
                 <option value="{{ category.name }}">{{ category.name }}</option>
             {% endfor %}
         </select>
-        <select id="tracking-filter" onchange="applyFilters()">
-            <option value="">All Tracking</option>
-            <option value="stock">Stock</option>
-            <option value="non-stock">Non-Stock</option>
-            <option value="not-classified">Not Classified</option>
-        </select>
+        <span id="filter-count" class="stock-filter-count"></span>
+        <span class="stock-value-display">
+            <span class="stock-value-label">Value</span>
+            <span class="stock-value-amount" id="total-value">£{{ total_value|floatformat:2 }}</span>
+        </span>
+        <button type="button" id="updateItemsBtn" class="btn btn-success btn-sm stock-update-btn" onclick="saveAllChanges()">
+            <i class="bi bi-save"></i> <span id="changesCount">0</span>
+        </button>
+        <a href="{% url 'add_product' %}" class="btn btn-add-order" title="Add Product">
+            <i class="bi bi-plus-lg"></i>
+        </a>
     </div>
-    <span class="stock-filter-count" id="filter-count"></span>
 </div>
 
-<!-- Table Card with Tab Panels -->
+<!-- Table -->
 <div class="stock-table-card">
-    <!-- All Items Panel -->
-    <div class="stock-tab-panel active" id="panel-all">
-        {% if in_stock_items or low_stock_items or zero_quantity_items or non_stock_items %}
-        <div class="stock-table-wrap">
-            <table class="stock-table" id="table-all">
-                <thead>
-                    <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th class="text-right">Cost</th>
-                        <th>Category</th>
-                        <th>Tracking</th>
-                        <th class="text-center">Qty</th>
-                        <th class="text-right">Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in in_stock_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="in-stock">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% for item in low_stock_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="low-stock">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% for item in zero_quantity_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="out-of-stock">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% for item in non_stock_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="non-stock">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="stock-empty-state">
-            <div class="empty-icon">📦</div>
-            <p>No items found. Import a CSV to get started.</p>
-        </div>
-        {% endif %}
+    {% if in_stock_items or low_stock_items or zero_quantity_items or non_stock_items %}
+    <div class="stock-table-wrap">
+        <table class="stock-table">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Name</th>
+                    <th>Supplier</th>
+                    <th class="text-right">Cost</th>
+                    <th>Tracking</th>
+                    <th class="text-center">Qty</th>
+                    <th class="text-right">Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in in_stock_items %}
+                <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="in-stock">
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td>
+                        <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
+                            <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                            <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                            <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                        </select>
+                    </td>
+                    <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)"><i class="bi bi-check-circle stock-icon-in" title="In Stock"></i> {{ item.quantity }}</td>
+                    <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+                {% for item in low_stock_items %}
+                <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="low-stock">
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td>
+                        <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
+                            <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                            <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                            <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                        </select>
+                    </td>
+                    <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)"><i class="bi bi-exclamation-triangle stock-icon-low" title="Low Stock"></i> {{ item.quantity }}</td>
+                    <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+                {% for item in zero_quantity_items %}
+                <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="out-of-stock">
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td>
+                        <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
+                            <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                            <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                            <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                        </select>
+                    </td>
+                    <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)"><i class="bi bi-x-circle stock-icon-out" title="Out of Stock"></i> {{ item.quantity }}</td>
+                    <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+                {% for item in non_stock_items %}
+                <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="non-stock">
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td>
+                        <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
+                            <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
+                            <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
+                            <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
+                        </select>
+                    </td>
+                    <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)"><i class="bi bi-dash-circle stock-icon-non" title="Non-Stock"></i> {{ item.quantity }}</td>
+                    <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
-
-    <!-- In Stock Panel -->
-    <div class="stock-tab-panel" id="panel-in-stock">
-        {% if in_stock_items %}
-        <div class="stock-table-wrap">
-            <table class="stock-table" id="table-in-stock">
-                <thead>
-                    <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th class="text-right">Cost</th>
-                        <th>Category</th>
-                        <th>Tracking</th>
-                        <th class="text-center">Qty</th>
-                        <th class="text-right">Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in in_stock_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="stock-empty-state">
-            <div class="empty-icon">✓</div>
-            <p>No items with 10+ quantity found.</p>
-        </div>
-        {% endif %}
+    {% else %}
+    <div class="stock-empty-state">
+        <div class="empty-icon">📦</div>
+        <p>No items found. Import a CSV to get started.</p>
     </div>
-
-    <!-- Low Stock Panel -->
-    <div class="stock-tab-panel" id="panel-low-stock">
-        {% if low_stock_items %}
-        <div class="stock-table-wrap">
-            <table class="stock-table" id="table-low-stock">
-                <thead>
-                    <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th class="text-right">Cost</th>
-                        <th>Category</th>
-                        <th>Tracking</th>
-                        <th class="text-center">Qty</th>
-                        <th class="text-right">Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in low_stock_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="stock-empty-state">
-            <div class="empty-icon">⚠</div>
-            <p>No low stock items found.</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Out of Stock Panel -->
-    <div class="stock-tab-panel" id="panel-out-of-stock">
-        {% if zero_quantity_items %}
-        <div class="stock-table-wrap">
-            <table class="stock-table" id="table-out-of-stock">
-                <thead>
-                    <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th class="text-right">Cost</th>
-                        <th>Category</th>
-                        <th>Tracking</th>
-                        <th class="text-center">Qty</th>
-                        <th class="text-right">Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in zero_quantity_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="stock-empty-state">
-            <div class="empty-icon">✗</div>
-            <p>No out of stock items found.</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Non-Stock Panel -->
-    <div class="stock-tab-panel" id="panel-non-stock">
-        {% if non_stock_items %}
-        <div class="stock-table-wrap">
-            <table class="stock-table" id="table-non-stock">
-                <thead>
-                    <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th class="text-right">Cost</th>
-                        <th>Category</th>
-                        <th>Tracking</th>
-                        <th class="text-center">Qty</th>
-                        <th class="text-right">Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in non_stock_items %}
-                    <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}">
-                        <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
-                        <td>{{ item.name }}</td>
-                        <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                        <td>
-                            {% if item.category %}
-                                <span class="category-badge" style="background-color: {{ item.category.color }};">{{ item.category.name }}</span>
-                            {% else %}
-                                <span class="uncategorized">Uncategorized</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
-                                <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
-                                <option value="non-stock" {% if item.tracking_type == 'non-stock' %}selected{% endif %}>Non-Stock</option>
-                                <option value="not-classified" {% if item.tracking_type == 'not-classified' %}selected{% endif %}>Not Classified</option>
-                            </select>
-                        </td>
-                        <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }}</td>
-                        <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="stock-empty-state">
-            <div class="empty-icon"><i class="bi bi-inbox"></i></div>
-            <p>No non-stock items found.</p>
-        </div>
-        {% endif %}
-    </div>
+    {% endif %}
 </div>
-
-<!-- Empty State (all tabs empty) -->
-{% if not in_stock_items and not low_stock_items and not zero_quantity_items and not non_stock_items %}
-<div class="stock-empty-state" style="padding: 80px 20px;">
-    <div class="empty-icon" style="font-size: 3rem;">📦</div>
-    <h3 style="color: var(--text-primary); margin: 12px 0 8px;">No Items Found</h3>
-    <p>Import a CSV to get started.</p>
-</div>
-{% endif %}
 
 
 
@@ -428,49 +153,25 @@
 
 {% block extra_js %}
 <script>
-/* ── Tab Switching ──────────────────────────────── */
-let activeTab = 'all';
-
-function switchStockTab(tabId, btn) {
-    activeTab = tabId;
-    
-    // Update buttons
-    document.querySelectorAll('.stock-tab-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    
-    // Update panels
-    document.querySelectorAll('.stock-tab-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById('panel-' + tabId).classList.add('active');
-    
-    // Re-apply filters to the new tab
-    applyFilters();
-}
-
 /* ── Client-side Search & Filter ────────────────── */
 let searchTimeout = null;
 
 document.getElementById('stock-search').addEventListener('input', function() {
     clearTimeout(searchTimeout);
-    const clearBtn = document.getElementById('search-clear');
-    clearBtn.style.display = this.value.length > 0 ? 'block' : 'none';
-    
     searchTimeout = setTimeout(() => applyFilters(), 150);
 });
 
 function clearSearch() {
     document.getElementById('stock-search').value = '';
-    document.getElementById('search-clear').style.display = 'none';
     applyFilters();
 }
 
 function applyFilters() {
     const query = document.getElementById('stock-search').value.toLowerCase().trim();
     const categoryFilter = document.getElementById('category-filter').value.toLowerCase();
-    const trackingFilter = document.getElementById('tracking-filter').value.toLowerCase();
+    const stockTypeFilter = document.getElementById('stock-type-filter').value;
     
-    // Get the active panel's table
-    const panel = document.getElementById('panel-' + activeTab);
-    const table = panel.querySelector('.stock-table tbody');
+    const table = document.querySelector('.stock-table tbody');
     if (!table) return;
     
     const rows = table.querySelectorAll('tr');
@@ -481,7 +182,7 @@ function applyFilters() {
         const name = row.dataset.name || '';
         const serial = row.dataset.serial || '';
         const category = row.dataset.category || '';
-        const tracking = row.dataset.tracking || '';
+        const status = row.dataset.status || '';
         
         let show = true;
         
@@ -495,8 +196,8 @@ function applyFilters() {
             show = false;
         }
         
-        // Tracking filter
-        if (trackingFilter && tracking !== trackingFilter) {
+        // Stock type filter
+        if (stockTypeFilter && status !== stockTypeFilter) {
             show = false;
         }
         
@@ -506,7 +207,7 @@ function applyFilters() {
     
     // Update filter count
     const countEl = document.getElementById('filter-count');
-    if (query || categoryFilter || trackingFilter) {
+    if (query || categoryFilter || stockTypeFilter) {
         countEl.textContent = visibleCount + ' of ' + rows.length + ' shown';
     } else {
         countEl.textContent = '';

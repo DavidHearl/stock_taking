@@ -7,90 +7,57 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<link rel="stylesheet" href="{% static 'css/ordering.css' %}">
 {% endblock %}
 
 {% block page_title %}Events{% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <!-- Search & Filters -->
-    <div class="customers-controls">
-        <div class="customers-search">
-            <div class="search-input-wrapper">
-                <i class="bi bi-search"></i>
-                <input type="text" id="event-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type, status..." autocomplete="off">
-            </div>
-        </div>
-        <div class="customers-filter-tabs">
-            <a href="?age=1y{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1y' %}active{% endif %}">
-                &lt; 1 Year ({{ count_1y }})
-            </a>
-            <a href="?age=1_2y{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1_2y' %}active{% endif %}">
-                1-2 Years ({{ count_1_2y }})
-            </a>
-            <a href="?age=2_10y{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '2_10y' %}active{% endif %}">
-                2+ Years ({{ count_2_10y }})
-            </a>
-            <a href="?age=historic{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == 'historic' %}active{% endif %}">
-                Historic ({{ count_historic }})
-            </a>
-        </div>
+<!-- Toolbar: tabs + search + actions in one row -->
+<div class="tabs">
+    <div class="tab-nav tab-nav-pills">
+        <a href="?{% if search_query %}q={{ search_query }}{% endif %}" class="tab-button {% if not category_filter %}active{% endif %}">
+            All
+        </a>
+        <a href="?cat=3{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if category_filter == '3' %}active{% endif %}">
+            Sales
+        </a>
+        <a href="?cat=1{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if category_filter == '1' %}active{% endif %}">
+            Enquiries
+        </a>
+        <a href="?cat=2{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if category_filter == '2' %}active{% endif %}">
+            Leads
+        </a>
+        <a href="?cat=8{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if category_filter == '8' %}active{% endif %}">
+            Remedials
+        </a>
+    </div>
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="event-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, type, status..." autocomplete="off">
+    </div>
+    <div class="tab-actions">
         {% if location_filter %}
-        <div class="customers-location-badge">
-            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
-        </div>
+        <span style="font-size:0.8rem; color:var(--text-secondary);"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
         {% endif %}
     </div>
-
-    {% if search_expanded_from %}
-    <div class="search-expanded-notice">
-        <i class="bi bi-info-circle"></i>
-        No results in current bracket — showing results found in 
-        <strong>
-            {% if search_expanded_from == '1y' %}&lt; 1 Year
-            {% elif search_expanded_from == '1_2y' %}1-2 Years
-            {% elif search_expanded_from == '2_10y' %}2+ Years
-            {% elif search_expanded_from == 'historic' %}Historic
-            {% endif %}
-        </strong>
-    </div>
-    {% endif %}
+</div>
 
     {% if events %}
-    <div class="customers-result-bar">
-        <span class="result-count">{{ filtered_count }} event{{ filtered_count|pluralize }}</span>
-        <div class="customers-filter-tabs" style="margin-left: auto;">
-            <a href="?age={{ age_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if not category_filter %}active{% endif %}">
-                All
-            </a>
-            <a href="?age={{ age_filter }}&cat=3{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '3' %}active{% endif %}">
-                Sales
-            </a>
-            <a href="?age={{ age_filter }}&cat=1{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '1' %}active{% endif %}">
-                Enquiries
-            </a>
-            <a href="?age={{ age_filter }}&cat=2{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '2' %}active{% endif %}">
-                Leads
-            </a>
-            <a href="?age={{ age_filter }}&cat=8{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if category_filter == '8' %}active{% endif %}">
-                Remedials
-            </a>
-        </div>
-    </div>
     <div class="customers-table-container">
-        <table class="customers-table">
+        <table class="customers-table" style="table-layout: fixed;">
             <thead>
                 <tr>
-                    <th>Activity ID</th>
-                    <th>Customer</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                    <th>Assigned To</th>
-                    <th>Value</th>
-                    <th>Contract</th>
-                    <th>Date</th>
-                    <th>Location</th>
-                    <th>Order</th>
+                    <th style="width: 10%;">Activity ID</th>
+                    <th style="width: 16%;">Customer</th>
+                    <th style="width: 9%;">Type</th>
+                    <th style="width: 8%;">Status</th>
+                    <th style="width: 13%;">Assigned To</th>
+                    <th style="width: 8%;">Value</th>
+                    <th style="width: 10%;">Contract</th>
+                    <th style="width: 9%;">Date</th>
+                    <th style="width: 9%;">Location</th>
+                    <th style="width: 8%;">Order</th>
                 </tr>
             </thead>
             <tbody>
@@ -154,30 +121,29 @@
         </div>
         <div class="pagination-controls">
             {% if page_obj.has_previous %}
-            <a href="?page=1&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-            <a href="?page={{ page_obj.previous_page_number }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            <a href="?page=1{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
             {% endif %}
 
             {% for num in page_obj.paginator.page_range %}
                 {% if page_obj.number == num %}
                     <span class="page-btn active">{{ num }}</span>
                 {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
-                    <a href="?page={{ num }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                    <a href="?page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
                 {% elif num == 1 or num == page_obj.paginator.num_pages %}
-                    <a href="?page={{ num }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                    <a href="?page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
                 {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
                     <span class="page-ellipsis">&hellip;</span>
                 {% endif %}
             {% endfor %}
 
             {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
-            <a href="?page={{ page_obj.paginator.num_pages }}&age={{ age_filter }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            <a href="?page={{ page_obj.next_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
             {% endif %}
         </div>
     </div>
     {% endif %}
-</div>
 
 <script>
 const searchInput = document.getElementById('event-search');
@@ -191,7 +157,6 @@ if (searchInput) {
             if (query) params.set('q', query);
             else params.delete('q');
             params.delete('page');
-            if (!params.has('age')) params.set('age', '{{ age_filter }}');
             window.location.href = '?' + params.toString();
         }, 500);
     });
@@ -203,7 +168,6 @@ if (searchInput) {
             if (query) params.set('q', query);
             else params.delete('q');
             params.delete('page');
-            if (!params.has('age')) params.set('age', '{{ age_filter }}');
             window.location.href = '?' + params.toString();
         }
     });

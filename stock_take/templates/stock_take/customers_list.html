@@ -5,54 +5,59 @@
 
 {% block nav_customers_active %}active{% endblock %}
 
-{% block page_title %}
-Customers
-<button class="btn btn-add-customer" onclick="document.getElementById('add-customer-modal').style.display='flex'" style="margin-left: 12px; padding: 4px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--primary-color); background: transparent; color: var(--primary-color); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; transition: all 0.2s;">
-    <i class="bi bi-plus-lg"></i> Add Customer
-</button>
-{% endblock %}
+{% block page_title %}Customers{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
+<link rel="stylesheet" href="{% static 'css/ordering.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <!-- Search & Filters -->
-    <div class="customers-controls">
-        <div class="customers-search">
-            <div class="search-input-wrapper">
-                <i class="bi bi-search"></i>
-                <input type="text" id="customer-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
-            </div>
-        </div>
-        <div class="customers-filter-tabs">
-            <a href="?age=1y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1y' %}active{% endif %}">
-                &lt; 1 Year ({{ count_1y }})
-            </a>
-            <a href="?age=1_2y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '1_2y' %}active{% endif %}">
-                1-2 Years ({{ count_1_2y }})
-            </a>
-            <a href="?age=2_10y{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == '2_10y' %}active{% endif %}">
-                2+ Years ({{ count_2_10y }})
-            </a>
-            <a href="?age=historic{% if search_query %}&q={{ search_query }}{% endif %}" class="filter-tab {% if age_filter == 'historic' %}active{% endif %}">
-                Historic ({{ count_historic }})
-            </a>
-        </div>
+<!-- Toolbar: tabs + search + actions in one row -->
+<div class="tabs">
+    <div class="tab-nav tab-nav-pills">
+        <a href="?age=1y{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == '1y' %}active{% endif %}">
+            &lt; 1 Year ({{ count_1y }})
+        </a>
+        <a href="?age=1_2y{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == '1_2y' %}active{% endif %}">
+            1-2 Years ({{ count_1_2y }})
+        </a>
+        <a href="?age=2_10y{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == '2_10y' %}active{% endif %}">
+            2+ Years ({{ count_2_10y }})
+        </a>
+        <a href="?age=historic{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if age_filter == 'historic' %}active{% endif %}">
+            Historic ({{ count_historic }})
+        </a>
+    </div>
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="customer-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
+    </div>
+    <div class="tab-actions">
         {% if location_filter %}
-        <div class="customers-location-badge">
-            <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
-        </div>
+        <span style="font-size:0.8rem; color:var(--text-secondary);"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
         {% endif %}
         {% if last_anthill_sync %}
-        <div class="customers-sync-note" title="Last Anthill import: {{ last_anthill_sync.ran_at|date:'d/m/Y H:i' }} — {{ last_anthill_sync.records_created }} created, {{ last_anthill_sync.records_updated }} updated">
+        <span class="customers-sync-note" title="Last Anthill import: {{ last_anthill_sync.ran_at|date:'d/m/Y H:i' }} — {{ last_anthill_sync.records_created }} created, {{ last_anthill_sync.records_updated }} updated" style="font-size:0.75rem; color:var(--text-secondary);">
             <i class="bi bi-arrow-repeat"></i>
             Anthill: {{ last_anthill_sync.ran_at|timesince }} ago
             <span class="sync-status-dot sync-{{ last_anthill_sync.status }}"></span>
-        </div>
+        </span>
         {% endif %}
+        <button type="button" class="btn btn-add-order" onclick="document.getElementById('add-customer-modal').style.display='flex'" title="Add Customer">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+        <div class="bulk-actions-inline" id="bulk-actions-inline">
+            <button class="merge-btn" id="merge-btn" onclick="mergeCustomers()" title="Merge selected customers">
+                <i class="bi bi-arrow-left-right"></i> Merge
+            </button>
+            <button class="bulk-delete-icon" onclick="bulkDelete()" title="Delete selected">
+                <span class="bulk-count" id="bulk-count">0</span>
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
     </div>
+</div>
 
     {% if search_expanded_from %}
     <div class="search-expanded-notice">
@@ -70,17 +75,6 @@ Customers
 
     {% if search_by_bracket %}
     <!-- Grouped search results across all brackets -->
-    <div class="customers-result-bar">
-        <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
-            <span id="selected-count">0 selected</span>
-            <button class="merge-btn" id="merge-btn" onclick="mergeCustomers()" style="display:none;" title="Merge selected customers">
-                <i class="bi bi-arrow-left-right"></i> Merge
-            </button>
-            <button class="bulk-delete-btn" onclick="bulkDelete()">
-                <i class="bi bi-trash"></i> Delete Selected
-            </button>
-        </div>
-    </div>
     {% for bracket in search_by_bracket %}
     <div class="bracket-separator">
         <span class="bracket-label">{{ bracket.label }}</span>
@@ -152,17 +146,6 @@ Customers
     {% endfor %}
 
     {% elif customers %}
-    <div class="customers-result-bar">
-        <div class="bulk-actions-bar" id="bulk-actions-bar" style="display:none;">
-            <span id="selected-count">0 selected</span>
-            <button class="merge-btn" id="merge-btn" onclick="mergeCustomers()" style="display:none;" title="Merge selected customers">
-                <i class="bi bi-arrow-left-right"></i> Merge
-            </button>
-            <button class="bulk-delete-btn" onclick="bulkDelete()">
-                <i class="bi bi-trash"></i> Delete Selected
-            </button>
-        </div>
-    </div>
     <div class="customers-table-container">
         <table class="customers-table">
             <thead>
@@ -317,7 +300,6 @@ Customers
         </div>
     </div>
     {% endif %}
-</div>
 
 <!-- Add Customer Modal -->
 <div class="modal-overlay" id="add-customer-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
@@ -478,8 +460,11 @@ function checkMergeEligibility() {
     const mergeBtn = document.getElementById('merge-btn');
     if (!mergeBtn) return;
     const checked = document.querySelectorAll('.row-select:checked');
-    // Show merge button whenever exactly 2 customers are selected
-    mergeBtn.style.display = checked.length === 2 ? 'inline-flex' : 'none';
+    if (checked.length === 2) {
+        mergeBtn.classList.add('visible');
+    } else {
+        mergeBtn.classList.remove('visible');
+    }
 }
 
 function mergeCustomers() {
@@ -566,16 +551,16 @@ function toggleSelectAllBracket(el, bracketKey) {
 
 function updateSelection() {
     const checked = document.querySelectorAll('.row-select:checked');
-    const bar = document.getElementById('bulk-actions-bar');
-    const countEl = document.getElementById('selected-count');
+    const inline = document.getElementById('bulk-actions-inline');
+    const countEl = document.getElementById('bulk-count');
     const selectAll = document.getElementById('select-all');
     const allBoxes = document.querySelectorAll('.row-select');
 
     if (checked.length > 0) {
-        bar.style.display = 'flex';
-        countEl.textContent = checked.length + ' selected';
+        inline.classList.add('visible');
+        countEl.textContent = checked.length;
     } else {
-        bar.style.display = 'none';
+        inline.classList.remove('visible');
     }
     if (selectAll) {
         selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
