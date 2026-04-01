@@ -1370,12 +1370,16 @@ function loadFitterTimesheets(){
         fetch('/api/get-week-fitter-timesheets/?week_start='+weekStart).then(r=>r.json()),
         fetch('/api/get-week-fit-appointments/?week_start='+weekStart).then(r=>r.json()),
     ]).then(([tsData, apptData])=>{
+        // Track which fitter+day combos have saved timesheets
+        const tsFitterDays = new Set();
+
         // Render saved timesheets
         if(tsData.success){
             tsData.entries.forEach(e=>{
                 const fitter=FITTERS.find(f=>String(f.id)===String(e.worker_id));
                 if(!fitter)return;
                 const wi=FITTERS.indexOf(fitter);
+                tsFitterDays.add(`${e.worker_id}__${e.day_index}`);
                 writeFitterAssignment(
                     String(e.worker_id), e.day_index, e.start_slot,
                     { order_id:e.order_id, order_label:e.order_label,
@@ -1386,9 +1390,11 @@ function loadFitterTimesheets(){
             });
         }
         // Render calendar appointments as full-day entries
+        // Skip fitter+day combos that already have saved timesheets
         if(apptData.success){
             apptData.entries.forEach(e=>{
                 if(e.day_index > 4) return; // skip Saturday
+                if(tsFitterDays.has(`${e.worker_id}__${e.day_index}`)) return;
                 const fitter=FITTERS.find(f=>String(f.id)===String(e.worker_id));
                 if(!fitter)return;
                 const wi=FITTERS.indexOf(fitter);

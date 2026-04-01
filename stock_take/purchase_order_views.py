@@ -520,6 +520,20 @@ def purchase_order_detail(request, po_id):
             for ts in unlinked_timesheets:
                 ts.line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
 
+    # ── Compute next split suffix for the Split PO modal ──────
+    import re as _re
+    _root_match = _re.match(r'^(PO\d+)(?:_\d+)?$', purchase_order.display_number or '')
+    _split_root = _root_match.group(1) if _root_match else (purchase_order.display_number or '')
+    _existing_splits = PurchaseOrder.objects.filter(
+        display_number__startswith=_split_root + '_'
+    ).values_list('display_number', flat=True)
+    _max_suffix = 0
+    for _dn in _existing_splits:
+        _sm = _re.match(r'^' + _re.escape(_split_root) + r'_(\d+)$', _dn)
+        if _sm:
+            _max_suffix = max(_max_suffix, int(_sm.group(1)))
+    next_split_label = f'{_split_root}_{_max_suffix + 1}'
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -557,6 +571,7 @@ def purchase_order_detail(request, po_id):
         'po_timesheets_total': po_timesheets_total,
         'po_expenses_total': po_expenses_total,
         'unlinked_timesheets': unlinked_timesheets,
+        'next_split_label': next_split_label,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -1957,15 +1972,16 @@ def purchase_order_delete(request, po_id):
 @login_required
 def purchase_order_split(request, po_id):
     """
-    Split a purchase order into two new child POs.
+    Split a purchase order: keep the original PO with updated quantities
+    and create one new child PO with the split-off quantities.
     Expects JSON body:
     {
         "splits": {
             "<product_id>": { "po1_qty": <int>, "po2_qty": <int> }
         }
     }
-    Products with po1_qty > 0 go to PO_1, po2_qty > 0 go to PO_2.
-    The original PO is marked Cancelled after the split.
+    po1_qty = quantities staying on the original PO.
+    po2_qty = quantities going to the new split PO.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
@@ -1988,13 +2004,25 @@ def purchase_order_split(request, po_id):
     if not products:
         return JsonResponse({'error': 'PO has no products to split'}, status=400)
 
+    # Collect product lines for the new split PO
+    new_po_lines = []
+
+    for product in products:
+        pid = str(product.id)
+        info = splits.get(pid, {})
+        qty2 = Decimal(str(info.get('po2_qty', 0)))
+
+        if qty2 > 0:
+            new_po_lines.append((product, qty2))
+
+    if not new_po_lines:
+        return JsonResponse({'error': 'No quantities assigned to the new PO'}, status=400)
+
     # Determine the next split suffix
     base_display = po.display_number or ''
-    # Strip existing _N suffix to find the root PO number
     root_match = re.match(r'^(PO\d+)(?:_\d+)?$', base_display)
     root_number = root_match.group(1) if root_match else base_display
 
-    # Find the highest existing suffix for this root
     existing = PurchaseOrder.objects.filter(
         display_number__startswith=root_number + '_'
     ).values_list('display_number', flat=True)
@@ -2005,134 +2033,115 @@ def purchase_order_split(request, po_id):
         if suffix_match:
             max_suffix = max(max_suffix, int(suffix_match.group(1)))
 
-    suffix_1 = max_suffix + 1
-    suffix_2 = max_suffix + 2
-    display_1 = f'{root_number}_{suffix_1}'
-    display_2 = f'{root_number}_{suffix_2}'
+    new_suffix = max_suffix + 1
+    new_display = f'{root_number}_{new_suffix}'
 
-    # Generate unique workguru_ids for the new POs
     max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
-    wg_id_1 = max(max_wg_id + 1, 800000)
-    wg_id_2 = wg_id_1 + 1
+    new_wg_id = max(max_wg_id + 1, 800000)
 
-    # Collect product lines for each new PO
-    po1_lines = []
-    po2_lines = []
+    # Create the new split PO
+    child = PurchaseOrder.objects.create(
+        workguru_id=new_wg_id,
+        number=new_display,
+        display_number=new_display,
+        description=f'Split from {po.display_number}',
+        po_type=po.po_type,
+        supplier_id=po.supplier_id,
+        supplier_name=po.supplier_name,
+        fitter=po.fitter,
+        project_id=po.project_id,
+        project_number=po.project_number,
+        project_name=po.project_name,
+        status='Draft',
+        currency=po.currency,
+        exchange_rate=po.exchange_rate,
+        warehouse_id=po.warehouse_id,
+        warehouse_name=po.warehouse_name,
+        delivery_address_1=po.delivery_address_1,
+        delivery_address_2=po.delivery_address_2,
+        delivery_instructions=po.delivery_instructions,
+        suburb=po.suburb,
+        state=po.state,
+        postcode=po.postcode,
+        client_id_wg=po.client_id_wg,
+        client_name=po.client_name,
+        contact_name=po.contact_name,
+        creator_name=request.user.get_full_name() or request.user.username,
+    )
 
+    child_total = Decimal('0')
+    for idx, (product, qty) in enumerate(new_po_lines):
+        line_total = product.order_price * qty
+        PurchaseOrderProduct.objects.create(
+            purchase_order=child,
+            product_id=product.product_id,
+            sku=product.sku,
+            supplier_code=product.supplier_code,
+            name=product.name,
+            description=product.description,
+            notes=product.notes,
+            order_price=product.order_price,
+            order_quantity=qty,
+            quantity=qty,
+            received_quantity=0,
+            invoice_price=product.invoice_price,
+            line_total=line_total,
+            unit_cost=product.unit_cost,
+            tax_type=product.tax_type,
+            tax_name=product.tax_name,
+            tax_rate=product.tax_rate,
+            account_code=product.account_code,
+            expense_account_code=product.expense_account_code,
+            sort_order=idx,
+            stock_item=product.stock_item,
+        )
+        child_total += line_total
+
+    child.total = child_total
+    child.save(update_fields=['total'])
+
+    # Copy project links to the new PO
+    for proj in po.projects.all():
+        PurchaseOrderProject.objects.create(
+            purchase_order=child,
+            project_type=proj.project_type,
+            order=proj.order,
+            label=proj.label,
+            sort_order=proj.sort_order,
+        )
+
+    # Update the original PO: adjust quantities for remaining products
+    original_total = Decimal('0')
     for product in products:
         pid = str(product.id)
         info = splits.get(pid, {})
         qty1 = Decimal(str(info.get('po1_qty', 0)))
-        qty2 = Decimal(str(info.get('po2_qty', 0)))
 
         if qty1 > 0:
-            po1_lines.append((product, qty1))
-        if qty2 > 0:
-            po2_lines.append((product, qty2))
+            line_total = product.order_price * qty1
+            product.order_quantity = qty1
+            product.quantity = qty1
+            product.line_total = line_total
+            product.save(update_fields=['order_quantity', 'quantity', 'line_total'])
+            original_total += line_total
+        else:
+            # No quantity remaining on original — remove the line
+            product.delete()
 
-    if not po1_lines and not po2_lines:
-        return JsonResponse({'error': 'Split would result in empty POs'}, status=400)
-
-    def _create_child_po(display_number, wg_id, lines):
-        """Create a child PO with the given product lines."""
-        child = PurchaseOrder.objects.create(
-            workguru_id=wg_id,
-            number=display_number,
-            display_number=display_number,
-            description=f'Split from {po.display_number}',
-            po_type=po.po_type,
-            supplier_id=po.supplier_id,
-            supplier_name=po.supplier_name,
-            fitter=po.fitter,
-            project_id=po.project_id,
-            project_number=po.project_number,
-            project_name=po.project_name,
-            status='Draft',
-            currency=po.currency,
-            exchange_rate=po.exchange_rate,
-            warehouse_id=po.warehouse_id,
-            warehouse_name=po.warehouse_name,
-            delivery_address_1=po.delivery_address_1,
-            delivery_address_2=po.delivery_address_2,
-            delivery_instructions=po.delivery_instructions,
-            suburb=po.suburb,
-            state=po.state,
-            postcode=po.postcode,
-            client_id_wg=po.client_id_wg,
-            client_name=po.client_name,
-            contact_name=po.contact_name,
-            creator_name=request.user.get_full_name() or request.user.username,
-        )
-
-        total = Decimal('0')
-        for idx, (product, qty) in enumerate(lines):
-            line_total = product.order_price * qty
-            PurchaseOrderProduct.objects.create(
-                purchase_order=child,
-                product_id=product.product_id,
-                sku=product.sku,
-                supplier_code=product.supplier_code,
-                name=product.name,
-                description=product.description,
-                notes=product.notes,
-                order_price=product.order_price,
-                order_quantity=qty,
-                quantity=qty,
-                received_quantity=0,
-                invoice_price=product.invoice_price,
-                line_total=line_total,
-                unit_cost=product.unit_cost,
-                tax_type=product.tax_type,
-                tax_name=product.tax_name,
-                tax_rate=product.tax_rate,
-                account_code=product.account_code,
-                expense_account_code=product.expense_account_code,
-                sort_order=idx,
-                stock_item=product.stock_item,
-            )
-            total += line_total
-
-        child.total = total
-        child.save(update_fields=['total'])
-
-        # Copy project links
-        for proj in po.projects.all():
-            PurchaseOrderProject.objects.create(
-                purchase_order=child,
-                project_type=proj.project_type,
-                order=proj.order,
-                label=proj.label,
-                sort_order=proj.sort_order,
-            )
-
-        return child
-
-    created = []
-
-    if po1_lines:
-        child1 = _create_child_po(display_1, wg_id_1, po1_lines)
-        created.append({'display_number': child1.display_number, 'workguru_id': child1.workguru_id})
-
-    if po2_lines:
-        child2 = _create_child_po(display_2, wg_id_2, po2_lines)
-        created.append({'display_number': child2.display_number, 'workguru_id': child2.workguru_id})
-
-    # Mark the original PO as cancelled
-    po.status = 'Cancelled'
-    po.save(update_fields=['status'])
+    po.total = original_total
+    po.save(update_fields=['total'])
 
     user_display = request.user.get_full_name() or request.user.username
-    child_labels = ', '.join(c['display_number'] for c in created)
     log_activity(
         user=request.user,
         event_type='po_split',
-        description=f'{user_display} split {po.display_number} into {child_labels}.',
+        description=f'{user_display} split {po.display_number} → {new_display}.',
     )
 
     return JsonResponse({
         'success': True,
-        'created': created,
-        'message': f'Split into {child_labels}',
+        'created': [{'display_number': new_display, 'workguru_id': child.workguru_id}],
+        'message': f'Split off {new_display} from {po.display_number}',
     })
 
 
