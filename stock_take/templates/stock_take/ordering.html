@@ -38,17 +38,22 @@
 }
 .badge-pfp {
     display: inline-block;
-    padding: 1px 7px;
-    background: rgba(240,173,78,0.18);
-    border: 1px solid #f0ad4e;
+    padding: 1px 8px;
+    background: rgba(240,173,78,0.10);
+    border: 1px solid rgba(240,173,78,0.35);
     border-radius: 4px;
-    color: #f0ad4e;
+    color: rgba(240,173,78,0.7);
     font-size: 11px;
     line-height: 16px;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     vertical-align: middle;
+}
+body.light-mode .badge-pfp {
+    background: rgba(180,120,30,0.12);
+    border-color: rgba(180,120,30,0.4);
+    color: #9a6a1e;
 }
 .badge-acc {
     display: inline-block;
@@ -71,9 +76,14 @@
     color: rgba(150,150,150,0.6);
 }
 .badge-acc-added {
-    background: rgba(240,173,78,0.15);
-    border: 1px solid rgba(240,173,78,0.5);
-    color: #f0ad4e;
+    background: rgba(240,173,78,0.10);
+    border: 1px solid rgba(240,173,78,0.35);
+    color: rgba(240,173,78,0.7);
+}
+body.light-mode .badge-acc-added {
+    background: rgba(180,120,30,0.12);
+    border-color: rgba(180,120,30,0.4);
+    color: #9a6a1e;
 }
 .badge-acc-ordered {
     background: rgba(16,185,129,0.12);
@@ -109,6 +119,16 @@
 #togglePfpBtn { white-space: nowrap; }
 /* Override global left-align on th so text-center class works */
 .table thead th.text-center { text-align: center !important; }
+.anthill-icon-link {
+    color: var(--success-color);
+    font-size: 1.1rem;
+    transition: color 0.15s;
+    text-decoration: none;
+    margin-right: 6px;
+}
+.anthill-icon-link:hover {
+    color: var(--success-hover);
+}
 .btn-remedial {
     background: transparent;
     border: 1px solid #f59e0b;
@@ -132,9 +152,9 @@
 {% endblock %}
 
 {% block content %}
-<!-- Tabs with actions on the right -->
+<!-- Toolbar: tabs + search + actions in one row -->
 <div class="tabs">
-    <div class="tab-nav">
+    <div class="tab-nav tab-nav-pills">
         <a href="?tab=wip{% if current_sort %}&sort={{ current_sort }}&order={{ current_order }}{% endif %}" 
            class="tab-button {% if current_tab == 'wip' %}active{% endif %}">
             WIP ({{ wip_orders }})
@@ -148,10 +168,17 @@
             ALL ORDERS ({{ total_orders }})
         </a>
     </div>
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="orderSearch" placeholder="Search orders..." autocomplete="off">
+    </div>
     <div class="tab-actions">
+        <button type="button" id="togglePfpBtn" class="btn btn-sm btn-outline-warning" onclick="togglePfp()" title="Toggle PFP orders" style="padding:8px 14px;">
+            <i class="bi bi-clock"></i> Hide PFP
+        </button>
         <button type="button" id="anthillOrdersBtn" class="btn btn-orders-to-place" onclick="openAnthillOrdersModal()" title="Orders awaiting placement in Anthill">
             <i class="bi bi-arrow-repeat"></i>
-            {% if anthill_orders_to_place_count %}<strong>{{ anthill_orders_to_place_count }}</strong>&nbsp;&middot;&nbsp;{% endif %}Orders to Place
+            {% if anthill_orders_to_place_count %}<strong>{{ anthill_orders_to_place_count }}</strong>{% endif %}
         </button>
         <button type="button" class="btn btn-add-order" onclick="openModal('addOrderModal')" title="Add Order">
             <i class="bi bi-plus-lg"></i>
@@ -176,16 +203,7 @@
 </div>
 {% endif %}
 
-<!-- Search Box -->
-<div class="search-box">
-    <div class="search-input-wrapper">
-        <i class="bi bi-search"></i>
-        <input type="text" id="orderSearch" placeholder="Search orders..." autocomplete="off">
-    </div>
-    <button type="button" id="togglePfpBtn" class="btn btn-sm btn-outline-warning" onclick="togglePfp()" title="Toggle PFP orders" style="padding:8px 14px;">
-        <i class="bi bi-clock"></i> Hide PFP
-    </button>
-</div>
+
 
 <div class="card">
     <table class="table orders-table" id="order-table">
@@ -194,14 +212,13 @@
             <col style="width:9%">   <!-- Last Name -->
             <col style="width:6%">   <!-- Sale # -->
             <col style="width:8%">   <!-- Fit Date -->
-            <col style="width:8%">   <!-- Boards PO -->
-            <col style="width:8%">   <!-- OS Doors -->
-            <col style="width:12%">  <!-- Accessories -->
-            <col style="width:6%">   <!-- Ordered -->
-            <col style="width:7%">   <!-- Payment -->
-            <col style="width:10%">  <!-- Anthill Customer -->
-            <col style="width:9%">   <!-- Anthill Sale -->
-            <col style="width:10%">  <!-- Actions -->
+            <col style="width:9%">   <!-- Boards PO -->
+            <col style="width:9%">   <!-- OS Doors -->
+            <col style="width:13%">  <!-- Accessories -->
+            <col style="width:7%">   <!-- Ordered -->
+            <col style="width:8%">   <!-- Payment -->
+            <col style="width:12%">  <!-- Anthill Links -->
+            <col style="width:12%">  <!-- Actions -->
         </colgroup>
         <thead>
             <tr>
@@ -239,7 +256,7 @@
                 <th>Accessories</th>
                 <th>Ordered</th>
                 <th class="text-center">Payment</th>
-                <th colspan="2">Anthill</th>
+                <th>Anthill</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -326,23 +343,20 @@
                     {% endif %}
                 </td>
                 {% endwith %}
-                <td onclick="event.stopPropagation();">
+                <td onclick="event.stopPropagation();" style="text-align:center;">
                     {% if order.anthill_id %}
                         <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"
-                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Customer">
-                            <i class="bi bi-person-fill"></i> Customer
+                           target="_blank" class="anthill-icon-link" title="Open Anthill Customer">
+                            <i class="bi bi-person-fill"></i>
                         </a>
-                    {% else %}
-                        <span class="text-muted">—</span>
                     {% endif %}
-                </td>
-                <td onclick="event.stopPropagation();">
                     {% if order.sale_number %}
                         <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}"
-                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Sale">
-                            <i class="bi bi-receipt"></i> Sale
+                           target="_blank" class="anthill-icon-link" title="Open Anthill Sale">
+                            <i class="bi bi-cash-stack"></i>
                         </a>
-                    {% else %}
+                    {% endif %}
+                    {% if not order.anthill_id and not order.sale_number %}
                         <span class="text-muted">—</span>
                     {% endif %}
                 </td>
@@ -361,7 +375,7 @@
             </tr>
 
             <tr class="detail-row hidden pfp-row" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="12" class="detail-cell">
+                <td colspan="11" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
@@ -369,7 +383,7 @@
 
             {% if pfp_orders %}
             <tr id="pfp-divider" class="pfp-divider-row">
-                <td colspan="12" class="pfp-divider-cell">
+                <td colspan="11" class="pfp-divider-cell">
                     <i class="bi bi-clock"></i>
                     PFP &mdash; Pending Fit Planning &nbsp;&middot;&nbsp; {{ pfp_orders|length }} order{{ pfp_orders|length|pluralize }} with no dates &nbsp;|&nbsp; dated orders below &darr;
                 </td>
@@ -459,23 +473,20 @@
                     {% endif %}
                 </td>
                 {% endwith %}
-                <td onclick="event.stopPropagation();">
+                <td onclick="event.stopPropagation();" style="text-align:center;">
                     {% if order.anthill_id %}
                         <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}"
-                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Customer">
-                            <i class="bi bi-person-fill"></i> Customer
+                           target="_blank" class="anthill-icon-link" title="Open Anthill Customer">
+                            <i class="bi bi-person-fill"></i>
                         </a>
-                    {% else %}
-                        <span class="text-muted">—</span>
                     {% endif %}
-                </td>
-                <td onclick="event.stopPropagation();">
                     {% if order.sale_number %}
                         <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}"
-                           target="_blank" class="btn btn-sm btn-outline-success" title="Open Anthill Sale">
-                            <i class="bi bi-receipt"></i> Sale
+                           target="_blank" class="anthill-icon-link" title="Open Anthill Sale">
+                            <i class="bi bi-cash-stack"></i>
                         </a>
-                    {% else %}
+                    {% endif %}
+                    {% if not order.anthill_id and not order.sale_number %}
                         <span class="text-muted">—</span>
                     {% endif %}
                 </td>
@@ -494,7 +505,7 @@
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="12" class="detail-cell">
+                <td colspan="11" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
@@ -1023,7 +1034,10 @@
                     // Update accessories cell
                     const accessoriesCell = row.querySelector('[data-indicator="accessories"]');
                     if (accessoriesCell && accessoriesCell.dataset.accessoriesNotRequired !== '1') {
-                        if (indicators.has_accessories) {
+                        if (indicators.has_short) {
+                            // Short badge only — skip ADDED, show SHORT
+                            accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-short" title="One or more accessories cannot be covered by current stock + incoming — this order has the furthest fit date">⚠ Short</span>';
+                        } else if (indicators.has_accessories) {
                             if (indicators.all_items_ordered || !indicators.has_unordered_accessories) {
                                 accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-ordered" title="All accessories ordered">Ordered</span>';
                             } else {
@@ -1031,10 +1045,6 @@
                             }
                         }
                         // No accessories and not N/R — leave cell empty (no data)
-                    }
-                    if (indicators.has_short) {
-                        const cell = row.querySelector('[data-indicator="accessories"]');
-                        if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories cannot be covered by current stock + incoming — this order has the furthest fit date">⚠ Short</span>');
                     }
                     
                     loadedIndicators.add(saleNumber);
@@ -1086,17 +1096,15 @@
                                 // Update accessories cell
                                 const accessoriesCell = row.querySelector('[data-indicator="accessories"]');
                                 if (accessoriesCell && accessoriesCell.dataset.accessoriesNotRequired !== '1') {
-                                    if (indicators.has_accessories) {
+                                    if (indicators.has_short) {
+                                        accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-short" title="One or more accessories cannot be covered by current stock + incoming — this order has the furthest fit date">⚠ Short</span>';
+                                    } else if (indicators.has_accessories) {
                                         if (indicators.all_items_ordered || !indicators.has_unordered_accessories) {
                                             accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-ordered" title="All accessories ordered">Ordered</span>';
                                         } else {
                                             accessoriesCell.innerHTML = '<span class="badge-acc badge-acc-added" title="Accessories added, not all ordered">Added</span>';
                                         }
                                     }
-                                }
-                                if (indicators.has_short) {
-                                    const cell = row.querySelector('[data-indicator="accessories"]');
-                                    if (cell) cell.insertAdjacentHTML('beforeend', ' <span class="badge-acc badge-acc-short" title="One or more accessories cannot be covered by current stock + incoming — this order has the furthest fit date">⚠ Short</span>');
                                 }
                                 
                                 loadedIndicators.add(saleNumber);
@@ -1179,7 +1187,7 @@
                 const divider = document.createElement('tr');
                 divider.id = 'today-divider';
                 divider.className = 'today-divider-row';
-                divider.innerHTML = `<td colspan="12" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
+                divider.innerHTML = `<td colspan="11" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
                 row.parentNode.insertBefore(divider, row);
                 break;
             }

@@ -534,6 +534,25 @@ def purchase_order_detail(request, po_id):
             _max_suffix = max(_max_suffix, int(_sm.group(1)))
     next_split_label = f'{_split_root}_{_max_suffix + 1}'
 
+    # ── Split family: parent / children ─────────────────────────
+    parent_po = purchase_order.parent_po
+    split_children = list(
+        purchase_order.split_children.all().order_by('display_number')
+    )
+
+    # ── PO Activity history ─────────────────────────────────────
+    # Collect activity for this PO and all its split family members
+    from .models import ActivityLog
+    _family_ids = [purchase_order.id]
+    if parent_po:
+        _family_ids.append(parent_po.id)
+        _family_ids.extend(parent_po.split_children.values_list('id', flat=True))
+    else:
+        _family_ids.extend(c.id for c in split_children)
+    po_activity_logs = ActivityLog.objects.filter(
+        purchase_order_id__in=_family_ids,
+    ).select_related('user', 'purchase_order').order_by('-timestamp')[:50]
+
     context = {
         'purchase_order': purchase_order,
         'products': products,
@@ -572,6 +591,9 @@ def purchase_order_detail(request, po_id):
         'po_expenses_total': po_expenses_total,
         'unlinked_timesheets': unlinked_timesheets,
         'next_split_label': next_split_label,
+        'parent_po': parent_po,
+        'split_children': split_children,
+        'po_activity_logs': po_activity_logs,
     }
     
     return render(request, 'stock_take/purchase_order_detail.html', context)
@@ -2045,6 +2067,7 @@ def purchase_order_split(request, po_id):
         number=new_display,
         display_number=new_display,
         description=f'Split from {po.display_number}',
+        parent_po=po,
         po_type=po.po_type,
         supplier_id=po.supplier_id,
         supplier_name=po.supplier_name,
@@ -2136,6 +2159,12 @@ def purchase_order_split(request, po_id):
         user=request.user,
         event_type='po_split',
         description=f'{user_display} split {po.display_number} → {new_display}.',
+        purchase_order=po,
+        extra_data={
+            'original_po': po.display_number,
+            'new_po': new_display,
+            'new_po_wg_id': child.workguru_id,
+        },
     )
 
     return JsonResponse({

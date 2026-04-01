@@ -52,6 +52,18 @@
                 {% endif %}
                 <span class="po-meta-sep">|</span>
                 <span>Last synced: {{ purchase_order.last_synced|date:"d/m/Y H:i" }}</span>
+                {% if parent_po %}
+                <span class="po-meta-sep">|</span>
+                <span><i class="bi bi-arrow-return-left"></i> Split from <a href="{% url 'purchase_order_detail' parent_po.workguru_id %}" style="color:var(--primary-color); text-decoration:none; font-weight:500;">{{ parent_po.display_number }}</a></span>
+                {% endif %}
+                {% if split_children %}
+                <span class="po-meta-sep">|</span>
+                <span><i class="bi bi-diagram-2"></i> Splits:
+                {% for child in split_children %}
+                    <a href="{% url 'purchase_order_detail' child.workguru_id %}" style="color:var(--accent-color); text-decoration:none; font-weight:500;">{{ child.display_number }}</a>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+                </span>
+                {% endif %}
             </div>
         </div>
         <div class="po-detail-actions">
@@ -115,6 +127,9 @@
                         <i class="bi bi-cloud-slash"></i> Remove Xero Sync
                     </button>
                     {% endif %}
+                    <button class="po-more-item" onclick="openHistoryModal()">
+                        <i class="bi bi-clock-history"></i> History
+                    </button>
                     <div class="po-more-separator"></div>
                     <button class="po-more-item danger" onclick="deletePO()">
                         <i class="bi bi-trash"></i> Delete PO
@@ -1362,6 +1377,38 @@ Sliderobes</textarea>
             <button type="button" class="btn-save" id="confirm-split-btn" onclick="confirmSplitPO()">
                 <i class="bi bi-scissors"></i> Confirm Split
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- History Modal -->
+<div class="modal-overlay" id="history-modal" style="display:none;" onclick="closeHistoryModal(event)">
+    <div class="modal-dialog" style="max-width: 600px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-clock-history"></i> PO History</h3>
+            <button class="modal-close" onclick="closeHistoryModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            {% if po_activity_logs %}
+            <div style="max-height:400px; overflow-y:auto;">
+                {% for log in po_activity_logs %}
+                <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-color); font-size:0.85rem;">
+                    <div style="min-width:0; flex:1;">
+                        <div style="color:var(--text-primary);">{{ log.description }}</div>
+                        <div style="color:var(--text-secondary); font-size:0.75rem; margin-top:2px;">
+                            {{ log.timestamp|date:"d M Y H:i" }}
+                            {% if log.user %} &middot; {{ log.user.get_full_name|default:log.user.username }}{% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color:var(--text-secondary); text-align:center; padding:20px;">No history recorded for this PO.</p>
+            {% endif %}
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeHistoryModal()">Close</button>
         </div>
     </div>
 </div>
@@ -2779,6 +2826,16 @@ function openSplitModal() {
 function closeSplitModal(e) {
     if (e && e.target !== e.currentTarget) return;
     document.getElementById('split-modal').style.display = 'none';
+}
+
+function openHistoryModal() {
+    document.getElementById('po-more-dropdown').classList.remove('show');
+    document.getElementById('history-modal').style.display = 'flex';
+}
+
+function closeHistoryModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('history-modal').style.display = 'none';
 }
 
 function onSplitQtyChange(input, poNum) {

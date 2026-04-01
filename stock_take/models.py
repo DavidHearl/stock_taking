@@ -1019,6 +1019,13 @@ class PurchaseOrder(models.Model):
     last_synced = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
+    # Split tracking
+    parent_po = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='split_children',
+        help_text='The PO this was split from',
+    )
+
     # Raw JSON data for reference
     raw_data = models.JSONField(null=True, blank=True, help_text='Full JSON from WorkGuru API')
     
@@ -2228,6 +2235,9 @@ class ActivityLog(models.Model):
         ('product_created',    'Product Created'),
         ('product_updated',    'Product Updated'),
         ('stock_adjusted',     'Stock Adjusted'),
+        ('po_split',           'Purchase Order Split'),
+        ('po_status_change',   'PO Status Change'),
+        ('po_updated',         'Purchase Order Updated'),
         ('error',              'Error'),
         ('other',              'Other'),
     ]
@@ -2241,6 +2251,10 @@ class ActivityLog(models.Model):
     timestamp   = models.DateTimeField(default=timezone.now, db_index=True)
     order       = models.ForeignKey(
         'Order', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='activity_logs',
+    )
+    purchase_order = models.ForeignKey(
+        'PurchaseOrder', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='activity_logs',
     )
     extra_data  = models.JSONField(default=dict, blank=True)
@@ -2259,7 +2273,7 @@ class ActivityLog(models.Model):
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M')}] {actor}: {self.get_event_type_display()}"
 
 
-def log_activity(user, event_type, description, order=None, extra_data=None, request=None):
+def log_activity(user, event_type, description, order=None, purchase_order=None, extra_data=None, request=None):
     """Helper – create an ActivityLog entry. Safe to call from any view."""
     try:
         ActivityLog.objects.create(
@@ -2267,6 +2281,7 @@ def log_activity(user, event_type, description, order=None, extra_data=None, req
             event_type=event_type,
             description=description,
             order=order,
+            purchase_order=purchase_order,
             extra_data=extra_data or {},
         )
         if request is not None:
