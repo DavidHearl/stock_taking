@@ -62,6 +62,11 @@ class Customer(models.Model):
     last_modification_time = models.DateTimeField(null=True, blank=True)
     raw_data = models.JSONField(null=True, blank=True, help_text='Full raw API response')
     
+    # Cached payment search data
+    xero_invoices_data = models.JSONField(null=True, blank=True, help_text='Cached Xero invoice search results')
+    anthill_payments_data = models.JSONField(null=True, blank=True, help_text='Cached Anthill payment scrape results')
+    last_payment_search = models.DateTimeField(null=True, blank=True, help_text='When payment data was last searched')
+    
     def __str__(self):
         if self.name:
             return self.name

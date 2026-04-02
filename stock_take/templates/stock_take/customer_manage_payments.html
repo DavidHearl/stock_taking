@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Manage Payments - {{ customer.name }}{% endblock %}
 
@@ -15,355 +15,12 @@
 {% block extra_css %}
 <link href="{% static 'css/order_details.css' %}" rel="stylesheet">
 <link href="{% static 'css/customers.css' %}" rel="stylesheet">
-<style>
-/* ── Payment Management Page ── */
-.pm-customer-banner {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-    margin-bottom: 24px;
-    border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-sm);
-}
-.pm-customer-name {
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: var(--text-primary);
-}
-.pm-customer-sub {
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-    margin-top: 2px;
-}
-
-/* Summary cards */
-.pm-summary-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-}
-.pm-summary-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 16px 20px;
-    text-align: center;
-    box-shadow: var(--shadow-sm);
-}
-.pm-summary-label {
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-secondary);
-    margin-bottom: 6px;
-}
-.pm-summary-value {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-}
-.pm-summary-value.success { color: var(--success-color); }
-.pm-summary-value.danger { color: var(--danger-color); }
-
-/* Sales grid */
-.pm-sales-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
-}
-.pm-sales-grid .pm-sale.expanded {
-    grid-column: 1 / -1;
-}
-@media (max-width: 1100px) {
-    .pm-sales-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-/* Sale accordion */
-.pm-sale {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    transition: box-shadow 0.15s;
-    box-shadow: var(--shadow-sm);
-}
-.pm-sale.drag-over {
-    box-shadow: 0 0 0 2px var(--primary-color);
-}
-.pm-sale-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 20px;
-    cursor: pointer;
-    user-select: none;
-    transition: background 0.1s;
-}
-.pm-sale-header:hover {
-    background: var(--bg-tertiary);
-}
-.pm-sale-chevron {
-    color: var(--text-muted);
-    transition: transform 0.2s;
-    flex-shrink: 0;
-}
-.pm-sale.expanded .pm-sale-chevron {
-    transform: rotate(90deg);
-}
-.pm-sale-contract {
-    font-weight: 700;
-    font-size: 0.92rem;
-    color: var(--text-primary);
-    min-width: 0;
-}
-.pm-sale-contract a {
-    color: inherit;
-    text-decoration: none;
-}
-.pm-sale-contract a:hover {
-    color: var(--primary-color);
-}
-.pm-sale-type {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-.pm-anthill-link {
-    color: var(--text-muted);
-    font-size: 0.72rem;
-    transition: color 0.15s;
-}
-.pm-anthill-link:hover {
-    color: var(--success-color);
-}
-.pm-xero-link {
-    font-size: 0.75rem;
-    color: var(--info-color);
-    text-decoration: none;
-    margin-left: 4px;
-}
-.pm-xero-link:hover {
-    text-decoration: underline;
-}
-.pm-sale-financials {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-}
-.pm-sale-fin-item {
-    text-align: right;
-}
-.pm-sale-fin-label {
-    font-size: 0.68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-muted);
-}
-.pm-sale-fin-value {
-    font-size: 0.92rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-}
-.pm-sale-fin-value.success { color: var(--success-color); }
-.pm-sale-fin-value.danger { color: var(--danger-color); }
-.pm-sale-fin-value.warning { color: var(--warning-color); }
-
-/* Progress mini-bar in header */
-.pm-progress-mini {
-    width: 60px;
-    height: 5px;
-    background: var(--bg-tertiary);
-    border-radius: 3px;
-    overflow: hidden;
-    flex-shrink: 0;
-}
-.pm-progress-mini-bar {
-    height: 100%;
-    background: var(--success-color);
-    border-radius: 3px;
-    transition: width 0.3s;
-}
-.pm-progress-mini-bar.overpaid {
-    background: var(--warning-color);
-}
-
-/* Sale body (payments table) */
-.pm-sale-body {
-    display: none;
-    border-top: 1px solid var(--border-color);
-}
-.pm-sale.expanded .pm-sale-body {
-    display: block;
-}
-.pm-payments-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82rem;
-}
-.pm-payments-table thead th {
-    padding: 8px 14px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-color);
-    text-align: left;
-}
-.pm-payments-table tbody td {
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--border-color);
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-}
-.pm-payments-table tbody tr:last-child td {
-    border-bottom: none;
-}
-.pm-payments-table tbody tr.payment-ignored td {
-    opacity: 0.4;
-    text-decoration: line-through;
-}
-.pm-payments-table tbody tr {
-    cursor: grab;
-    transition: background 0.1s;
-}
-.pm-payments-table tbody tr:hover {
-    background: var(--bg-hover);
-}
-.pm-payments-table tbody tr.dragging {
-    opacity: 0.4;
-}
-.pm-payment-source {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.7rem;
-    padding: 2px 8px;
-    border-radius: var(--radius-pill);
-    font-weight: 600;
-}
-.pm-payment-source.xero {
-    background: var(--info-subtle);
-    color: var(--info-color);
-}
-.pm-payment-source.manual {
-    background: var(--purple-subtle);
-    color: var(--purple-color);
-}
-
-/* No-payments placeholder */
-.pm-no-payments {
-    padding: 20px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.82rem;
-}
-
-/* Action buttons */
-.pm-action-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-    font-size: 0.82rem;
-}
-.pm-action-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-.pm-action-btn.move { border-color: var(--primary-color); color: var(--primary-color); }
-.pm-action-btn.move:hover { background: var(--primary-subtle); }
-.pm-action-btn.split { border-color: var(--warning-color); color: var(--warning-color); }
-.pm-action-btn.split:hover { background: var(--warning-subtle); }
-.pm-action-btn.delete { border-color: var(--danger-color); color: var(--danger-color); }
-.pm-action-btn.delete:hover { background: var(--danger-subtle); }
-
-/* Drop zone highlight */
-.pm-sale.drop-target .pm-sale-header {
-    background: var(--primary-subtle);
-}
-
-/* Modal styles (reuse dialog pattern from sale_detail) */
-.pm-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border-color);
-}
-.pm-modal-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 700;
-    font-size: 1rem;
-    color: var(--text-primary);
-}
-.pm-modal-close {
-    background: none;
-    border: none;
-    font-size: 1.1rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 4px;
-}
-.pm-modal-close:hover { color: var(--text-primary); }
-.pm-modal-body {
-    padding: 20px;
-}
-
-dialog {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    box-shadow: var(--shadow-lg);
-    padding: 0;
-    max-width: 480px;
-    width: 90vw;
-}
-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.5);
-}
-
-/* Info/help text */
-.pm-help-text {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-</style>
+<link href="{% static 'css/manage_payments.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<div class="page-content">
-    <!-- Customer Banner -->
+<div class="page-content pm-page">
+    <!-- Customer Banner with totals -->
     <div class="pm-customer-banner">
         <div>
             <div class="pm-customer-name">{{ customer.name }}</div>
@@ -372,26 +29,29 @@ dialog::backdrop {
                 {% if customer.anthill_customer_id %} &middot; Anthill #{{ customer.anthill_customer_id }}{% endif %}
             </div>
         </div>
-        {% if customer.anthill_customer_id %}
-        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ customer.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success" onclick="event.stopPropagation()" style="margin-left:auto;">
-            <i class="bi bi-box-arrow-up-right"></i> View in Anthill
-        </a>
-        {% endif %}
-    </div>
-
-    <!-- Summary Row -->
-    <div class="pm-summary-row">
-        <div class="pm-summary-card">
-            <div class="pm-summary-label">Total Sale Value</div>
-            <div class="pm-summary-value">£{{ grand_total_value|floatformat:2 }}</div>
+        <div class="pm-customer-totals">
+            <div class="pm-customer-total-item">
+                <div class="pm-customer-total-label">Sale Value</div>
+                <div class="pm-customer-total-value">£{{ grand_total_value|floatformat:2|intcomma }}</div>
+            </div>
+            <div class="pm-customer-total-item">
+                <div class="pm-customer-total-label">Paid</div>
+                <div class="pm-customer-total-value success">£{{ grand_total_paid|floatformat:2|intcomma }}</div>
+            </div>
+            <div class="pm-customer-total-item">
+                <div class="pm-customer-total-label">Outstanding</div>
+                <div class="pm-customer-total-value {% if grand_total_outstanding > 0 %}danger{% else %}success{% endif %}">£{{ grand_total_outstanding|floatformat:2|intcomma }}</div>
+            </div>
         </div>
-        <div class="pm-summary-card">
-            <div class="pm-summary-label">Total Paid</div>
-            <div class="pm-summary-value success">£{{ grand_total_paid|floatformat:2 }}</div>
-        </div>
-        <div class="pm-summary-card">
-            <div class="pm-summary-label">Total Outstanding</div>
-            <div class="pm-summary-value {% if grand_total_outstanding > 0 %}danger{% else %}success{% endif %}">£{{ grand_total_outstanding|floatformat:2 }}</div>
+        <div class="pm-banner-actions">
+            {% if customer.anthill_customer_id %}
+            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ customer.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success" onclick="event.stopPropagation()">
+                <i class="bi bi-box-arrow-up-right"></i> Anthill
+            </a>
+            {% endif %}
+            <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal()">
+                <i class="bi bi-search"></i> Search Payments
+            </button>
         </div>
     </div>
 
@@ -429,19 +89,19 @@ dialog::backdrop {
             <div class="pm-sale-financials">
                 <div class="pm-sale-fin-item">
                     <div class="pm-sale-fin-label">Value</div>
-                    <div class="pm-sale-fin-value">{% if entry.effective_value %}£{{ entry.effective_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                    <div class="pm-sale-fin-value">{% if entry.effective_value %}£{{ entry.effective_value|floatformat:2|intcomma }}{% else %}-{% endif %}</div>
                 </div>
                 <div class="pm-sale-fin-item">
                     <div class="pm-sale-fin-label">Paid</div>
-                    <div class="pm-sale-fin-value success">£{{ entry.total_paid|floatformat:2 }}</div>
+                    <div class="pm-sale-fin-value success">£{{ entry.total_paid|floatformat:2|intcomma }}</div>
                 </div>
                 <div class="pm-sale-fin-item">
                     <div class="pm-sale-fin-label">Outstanding</div>
                     <div class="pm-sale-fin-value {% if entry.outstanding > 0 %}danger{% elif entry.overpayment > 0 %}warning{% else %}success{% endif %}">
                         {% if entry.overpayment > 0 %}
-                            +£{{ entry.overpayment|floatformat:2 }}
+                            +£{{ entry.overpayment|floatformat:2|intcomma }}
                         {% else %}
-                            £{{ entry.outstanding|floatformat:2 }}
+                            £{{ entry.outstanding|floatformat:2|intcomma }}
                         {% endif %}
                     </div>
                 </div>
@@ -456,16 +116,23 @@ dialog::backdrop {
 
         <div class="pm-sale-body">
             {% if entry.payments %}
+            <div class="pm-bulk-bar" id="bulkBar-{{ sale.pk }}" style="display:none;">
+                <span class="pm-bulk-summary" id="bulkSummary-{{ sale.pk }}"></span>
+                <button class="btn btn-sm btn-outline-danger" onclick="bulkDeletePayments({{ sale.pk }})">
+                    <i class="bi bi-trash"></i> Delete Selected
+                </button>
+            </div>
             <table class="pm-payments-table">
                 <thead>
                     <tr>
-                        <th style="width:5%;"></th>
+                        <th class="pm-col-check"><input type="checkbox" class="pm-check-all" data-sale-pk="{{ sale.pk }}"></th>
+                        <th class="pm-col-grip"></th>
                         <th>Source</th>
                         <th>Type / Reference</th>
                         <th>Date</th>
                         <th>Amount</th>
                         <th>Status</th>
-                        <th style="width:10%;"></th>
+                        <th class="pm-col-actions"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -477,7 +144,8 @@ dialog::backdrop {
                         data-amount="{{ p.amount|default:0 }}"
                         ondragstart="handleDragStart(event, this)"
                         ondragend="handleDragEnd(this)">
-                        <td style="color:var(--text-muted); cursor:grab;"><i class="bi bi-grip-vertical"></i></td>
+                        <td class="pm-col-check"><input type="checkbox" class="pm-payment-check" data-payment-pk="{{ p.pk }}" data-sale-pk="{{ sale.pk }}"></td>
+                        <td class="pm-grip-cell"><i class="bi bi-grip-vertical"></i></td>
                         <td>
                             <span class="pm-payment-source {% if p.source == 'manual' %}manual{% else %}xero{% endif %}">
                                 <i class="bi {% if p.source == 'manual' %}bi-pencil{% else %}bi-cloud{% endif %}"></i>
@@ -497,8 +165,8 @@ dialog::backdrop {
                             {% endif %}
                         </td>
                         <td>{{ p.date|date:"d/m/Y"|default:"-" }}</td>
-                        <td style="font-weight:600; {% if p.amount < 0 %}color:var(--danger-color);{% endif %}">
-                            {% if p.amount %}£{{ p.amount|floatformat:2 }}{% else %}-{% endif %}
+                        <td class="pm-amount-cell {% if p.amount < 0 %}pm-amount-negative{% endif %}">
+                            {% if p.amount %}£{{ p.amount|floatformat:2|intcomma }}{% else %}-{% endif %}
                         </td>
                         <td>
                             {% if p.ignored %}
@@ -509,7 +177,7 @@ dialog::backdrop {
                                 <span style="color:var(--text-muted);">-</span>
                             {% endif %}
                         </td>
-                        <td style="white-space:nowrap;">
+                        <td class="pm-col-actions">
                             <button class="pm-action-btn move" onclick="event.stopPropagation(); openMoveModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Move to another sale">
                                 <i class="bi bi-arrow-right-circle"></i>
                             </button>
@@ -526,7 +194,7 @@ dialog::backdrop {
             </table>
             {% else %}
             <div class="pm-no-payments">
-                <i class="bi bi-inbox" style="font-size:1.2rem; display:block; margin-bottom:6px;"></i>
+                <i class="bi bi-inbox"></i>
                 No payments — drop a payment here to assign it to this sale
             </div>
             {% endif %}
@@ -538,13 +206,36 @@ dialog::backdrop {
     </div>
 
     {% if not sales_data %}
-    <div class="card">
-        <div class="card-body padded" style="text-align:center; padding:40px;">
-            <i class="bi bi-receipt" style="font-size:2rem; display:block; margin-bottom:8px; opacity:0.35;"></i>
-            <p style="color:var(--text-secondary); margin:0;">No sales found for this customer.</p>
-        </div>
+    <div class="pm-no-sales">
+        <i class="bi bi-receipt"></i>
+        <p>No sales found for this customer.</p>
     </div>
     {% endif %}
+
+    <!-- ── Inline Search Results (populated by JS after search) ── -->
+    <div id="inlineSearchResults" class="pm-inline-results" style="display:none;">
+        <!-- Xero Invoices -->
+        <div class="pm-inline-section">
+            <div class="pm-inline-section-header" onclick="toggleInlineSection('inlineXero')">
+                <div class="pm-inline-section-chevron"><i class="bi bi-chevron-right"></i></div>
+                <i class="bi bi-cloud" style="color:var(--info-color);"></i>
+                <span>Xero Invoices</span>
+                <span id="inlineXeroStatus" class="pm-inline-section-status"></span>
+            </div>
+            <div id="inlineXero" class="pm-inline-section-body"></div>
+        </div>
+
+        <!-- Anthill Payments -->
+        <div class="pm-inline-section">
+            <div class="pm-inline-section-header" onclick="toggleInlineSection('inlineAnthill')">
+                <div class="pm-inline-section-chevron"><i class="bi bi-chevron-right"></i></div>
+                <i class="bi bi-building" style="color:var(--success-color);"></i>
+                <span>Anthill Payments</span>
+                <span id="inlineAnthillStatus" class="pm-inline-section-status"></span>
+            </div>
+            <div id="inlineAnthill" class="pm-inline-section-body"></div>
+        </div>
+    </div>
 </div>
 
 <!-- Move Payment Modal -->
@@ -557,14 +248,12 @@ dialog::backdrop {
         <button class="pm-modal-close" onclick="document.getElementById('movePaymentModal').close()"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="pm-modal-body">
-        <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-secondary);">
+        <div class="pm-modal-info">
             Moving <strong id="movePaymentLabel"></strong> — <strong id="movePaymentAmount"></strong>
         </div>
-        <div style="margin-bottom:14px;">
-            <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
-                Move to Sale
-            </label>
-            <select id="moveTargetSale" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+        <div>
+            <label>Move to Sale</label>
+            <select id="moveTargetSale">
                 <option value="">-- Select a sale --</option>
                 {% for entry in sales_data %}
                 <option value="{{ entry.sale.pk }}" data-sale-pk="{{ entry.sale.pk }}">
@@ -573,14 +262,14 @@ dialog::backdrop {
                 {% endfor %}
             </select>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <button type="button" class="btn btn-sm btn-primary" onclick="confirmMovePayment()">
-                <i class="bi bi-arrow-right-circle"></i> Move
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('movePaymentModal').close()">
+        <div class="pm-modal-footer">
+            <button type="button" class="btn btn-md btn-outline-secondary" onclick="document.getElementById('movePaymentModal').close()">
                 Cancel
             </button>
-            <span id="moveMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+            <button type="button" class="btn btn-md btn-primary" onclick="confirmMovePayment()">
+                <i class="bi bi-arrow-right-circle"></i> Move
+            </button>
+            <span id="moveMsg" class="pm-modal-msg"></span>
         </div>
     </div>
 </dialog>
@@ -595,14 +284,12 @@ dialog::backdrop {
         <button class="pm-modal-close" onclick="document.getElementById('splitPaymentModal').close()"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="pm-modal-body">
-        <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-secondary);">
+        <div class="pm-modal-info">
             Splitting <strong id="splitPaymentLabel"></strong> — <strong id="splitOriginalAmount"></strong>
         </div>
-        <div style="margin-bottom:14px;">
-            <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
-                Move to Sale
-            </label>
-            <select id="splitTargetSale" style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+        <div>
+            <label>Move to Sale</label>
+            <select id="splitTargetSale">
                 <option value="">-- Select a sale --</option>
                 {% for entry in sales_data %}
                 <option value="{{ entry.sale.pk }}" data-sale-pk="{{ entry.sale.pk }}">
@@ -611,27 +298,87 @@ dialog::backdrop {
                 {% endfor %}
             </select>
         </div>
-        <div style="margin-bottom:14px;">
-            <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
-                Amount to Split (£)
-            </label>
-            <input type="number" id="splitAmount" step="0.01" min="0.01"
-                   style="width:100%; padding:8px 10px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
-            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+        <div>
+            <label>Amount to Split (£)</label>
+            <input type="number" id="splitAmount" step="0.01" min="0.01">
+            <div class="pm-modal-info" style="margin-top:4px;">
                 Keeping <strong id="splitKeepAmount">—</strong> on the current sale
             </div>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div class="pm-modal-footer">
             <button type="button" class="btn btn-sm btn-warning" onclick="confirmSplitPayment()">
                 <i class="bi bi-scissors"></i> Split
             </button>
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('splitPaymentModal').close()">
                 Cancel
             </button>
-            <span id="splitMsg" style="font-size:0.82rem; color:var(--text-secondary);"></span>
+            <span id="splitMsg" class="pm-modal-msg"></span>
         </div>
     </div>
 </dialog>
+
+<!-- Search Payments Modal -->
+<dialog id="searchPaymentsModal">
+    <div class="pm-modal-header">
+        <div class="pm-modal-title">
+            <i class="bi bi-search" style="color:var(--info-color);"></i>
+            <span>Search Payments</span>
+        </div>
+        <button class="pm-modal-close" onclick="document.getElementById('searchPaymentsModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pm-modal-body sp-modal-body">
+        <!-- Xero Section -->
+        <div class="sp-section">
+            <div class="sp-section-header">
+                <i class="bi bi-cloud"></i> Xero Invoices
+                <span id="spXeroStatus" class="sp-section-status"><i class="bi bi-arrow-repeat spin"></i> Searching&hellip;</span>
+            </div>
+            <div id="spXeroBody" class="sp-section-body"></div>
+        </div>
+
+        <!-- Anthill Section -->
+        <div class="sp-section">
+            <div class="sp-section-header">
+                <i class="bi bi-building"></i> Anthill CRM
+                <span id="spAnthillStatus" class="sp-section-status"><i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;</span>
+            </div>
+            <div id="spAnthillBody" class="sp-section-body"></div>
+        </div>
+
+        <div class="sp-footer">
+            <span id="spMsg" class="sp-msg"></span>
+            <button type="button" class="btn btn-sm btn-outline-info" onclick="spRefreshSearch()"><i class="bi bi-arrow-repeat"></i> Refresh</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('searchPaymentsModal').close()">Close</button>
+        </div>
+    </div>
+</dialog>
+
+<!-- Distribute Between Sales Modal -->
+<dialog id="distributeModal">
+    <div class="pm-modal-header">
+        <div class="pm-modal-title">
+            <i class="bi bi-diagram-3" style="color:var(--primary-color);"></i>
+            <span>Distribute Between Sales</span>
+        </div>
+        <button class="pm-modal-close" onclick="document.getElementById('distributeModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pm-modal-body">
+        <div class="pm-modal-info" id="distTotalInfo"></div>
+        <div id="distSalesBody"></div>
+        <div class="pm-modal-footer">
+            <button type="button" class="btn btn-sm btn-primary" onclick="confirmDistribute()">
+                <i class="bi bi-check-lg"></i> Confirm Distribution
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('distributeModal').close()">
+                Cancel
+            </button>
+            <span id="distMsg" class="pm-modal-msg"></span>
+        </div>
+    </div>
+</dialog>
+
+{{ saved_xero_data|json_script:"saved-xero-json" }}
+{{ saved_anthill_data|json_script:"saved-anthill-json" }}
 
 <script>
 const CUSTOMER_PK = {{ customer.pk }};
@@ -639,6 +386,26 @@ const CSRF_TOKEN = '{{ csrf_token }}';
 const MOVE_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/move/';
 const SPLIT_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/split/';
 const DELETE_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/delete/';
+const XERO_SEARCH_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/xero-search/';
+const XERO_LINK_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/xero-link/';
+const ANTHILL_SCRAPE_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/anthill-scrape/';
+const ADD_MANUAL_URL_TPL = '/sale/{salePk}/payments/add-manual/';
+
+// Sale value map {pk: effective_value} from Django context
+const SALE_VALUES = {
+    {% for entry in sales_data %}
+    {{ entry.sale.pk }}: {{ entry.effective_value|default:"0" }},
+    {% endfor %}
+};
+
+// Saved data from database (populated on page load)
+const SAVED_XERO_DATA = JSON.parse(document.getElementById('saved-xero-json').textContent);
+const SAVED_ANTHILL_DATA = JSON.parse(document.getElementById('saved-anthill-json').textContent);
+{% if last_payment_search %}
+const LAST_SEARCH_TIME = '{{ last_payment_search|date:"j M Y H:i" }}';
+{% else %}
+const LAST_SEARCH_TIME = null;
+{% endif %}
 
 // ── Accordion ────────────────────────────────────────────────────────────────
 function togglePmSale(salePk) {
@@ -708,7 +475,7 @@ function openMoveModal(paymentPk, salePk, label, amount) {
     movePaymentPk = paymentPk;
     moveSourceSalePk = salePk;
     document.getElementById('movePaymentLabel').textContent = label;
-    document.getElementById('movePaymentAmount').textContent = '£' + parseFloat(amount).toFixed(2);
+    document.getElementById('movePaymentAmount').textContent = '£' + fmtMoney(amount);
     document.getElementById('moveMsg').textContent = '';
 
     // Hide the source sale from the dropdown
@@ -764,10 +531,10 @@ function openSplitModal(paymentPk, salePk, label, amount) {
     splitSourceSalePk = salePk;
     splitOrigAmount = Math.abs(parseFloat(amount));
     document.getElementById('splitPaymentLabel').textContent = label;
-    document.getElementById('splitOriginalAmount').textContent = '£' + splitOrigAmount.toFixed(2);
+    document.getElementById('splitOriginalAmount').textContent = '£' + fmtMoney(splitOrigAmount);
     document.getElementById('splitAmount').value = '';
     document.getElementById('splitAmount').max = (splitOrigAmount - 0.01).toFixed(2);
-    document.getElementById('splitKeepAmount').textContent = '£' + splitOrigAmount.toFixed(2);
+    document.getElementById('splitKeepAmount').textContent = '£' + fmtMoney(splitOrigAmount);
     document.getElementById('splitMsg').textContent = '';
 
     // Hide the source sale from the dropdown
@@ -784,7 +551,7 @@ function openSplitModal(paymentPk, salePk, label, amount) {
 document.getElementById('splitAmount').addEventListener('input', function() {
     const val = parseFloat(this.value) || 0;
     const keep = splitOrigAmount - val;
-    document.getElementById('splitKeepAmount').textContent = '£' + Math.max(keep, 0).toFixed(2);
+    document.getElementById('splitKeepAmount').textContent = '£' + fmtMoney(Math.max(keep, 0));
 });
 
 function confirmSplitPayment() {
@@ -828,7 +595,7 @@ function confirmSplitPayment() {
 
 // ── Delete Payment ───────────────────────────────────────────────────────────
 function deletePayment(paymentPk, label, amount) {
-    const amountStr = '£' + Math.abs(parseFloat(amount)).toFixed(2);
+    const amountStr = '£' + fmtMoney(Math.abs(parseFloat(amount)));
     if (!confirm('Delete ' + label + ' (' + amountStr + ')? This cannot be undone.')) return;
 
     const url = DELETE_URL_TPL.replace('{paymentPk}', paymentPk);
@@ -846,5 +613,757 @@ function deletePayment(paymentPk, label, amount) {
     })
     .catch(() => alert('Network error'));
 }
+
+// ── Bulk Delete ──────────────────────────────────────────────────────────────
+const BULK_DELETE_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/bulk-delete/';
+
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('pm-check-all')) {
+        const salePk = e.target.dataset.salePk;
+        document.querySelectorAll('.pm-payment-check[data-sale-pk="' + salePk + '"]').forEach(cb => {
+            cb.checked = e.target.checked;
+        });
+        _updateBulkBar(salePk);
+    }
+    if (e.target.classList.contains('pm-payment-check')) {
+        _updateBulkBar(e.target.dataset.salePk);
+    }
+});
+
+function _updateBulkBar(salePk) {
+    const checks = document.querySelectorAll('.pm-payment-check[data-sale-pk="' + salePk + '"]:checked');
+    const bar = document.getElementById('bulkBar-' + salePk);
+    const summary = document.getElementById('bulkSummary-' + salePk);
+    if (!bar || !summary) return;
+    if (checks.length === 0) {
+        bar.style.display = 'none';
+        return;
+    }
+    summary.textContent = checks.length + ' payment' + (checks.length > 1 ? 's' : '') + ' selected';
+    bar.style.display = '';
+}
+
+function bulkDeletePayments(salePk) {
+    const checks = document.querySelectorAll('.pm-payment-check[data-sale-pk="' + salePk + '"]:checked');
+    if (!checks.length) return;
+    const pks = Array.from(checks).map(cb => parseInt(cb.dataset.paymentPk));
+    if (!confirm('Delete ' + pks.length + ' payment' + (pks.length > 1 ? 's' : '') + '? This cannot be undone.')) return;
+
+    fetch(BULK_DELETE_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({payment_pks: pks}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to delete payments');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+
+// ── Search Payments Modal ────────────────────────────────────────────────────
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function fmtMoney(n) {
+    return parseFloat(n).toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+let spSalesList = [];  // populated by Xero search response
+let _spXeroCache = null;   // cached Xero search response
+let _spAnthillCache = null; // cached Anthill scrape response
+
+// Hydrate from saved DB data on page load
+if (SAVED_XERO_DATA) {
+    _spXeroCache = {success: true, invoices: SAVED_XERO_DATA.invoices || [], customer_name: SAVED_XERO_DATA.customer_name || '', sales: SAVED_XERO_DATA.sales || []};
+    spSalesList = SAVED_XERO_DATA.sales || [];
+}
+if (SAVED_ANTHILL_DATA) {
+    _spAnthillCache = {success: true, sales: SAVED_ANTHILL_DATA.sales || []};
+}
+
+function _buildXeroTableHtml(invoices, idPrefix) {
+    const pfx = idPrefix || '';
+    let html = '<div class="sp-table-wrap"><table class="sp-table"><thead><tr>';
+    html += '<th class="sp-col-check"><input type="checkbox" class="sp-check-all" data-prefix="' + pfx + '"></th>';
+    html += '<th>Invoice #</th><th>Reference</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th><th>Status</th><th></th>';
+    html += '</tr></thead><tbody>';
+    invoices.forEach(inv => {
+        const statusClass = inv.status.toUpperCase() === 'PAID' ? 'sale-badge-paid' : inv.status.toUpperCase() === 'AUTHORISED' ? 'active' : 'inactive';
+        const linkedSales = inv.linked_sales || [];
+        const isLinked = linkedSales.length > 0;
+        html += '<tr class="' + (isLinked ? 'sp-row-linked' : '') + '">';
+        if (isLinked) {
+            html += '<td class="sp-col-check"></td>';
+        } else {
+            html += '<td class="sp-col-check"><input type="checkbox" class="sp-invoice-check" data-invoice-id="' + inv.invoice_id + '" data-total="' + inv.total + '" data-prefix="' + pfx + '"></td>';
+        }
+        html += '<td>' + escHtml(inv.invoice_number) + '</td>';
+        html += '<td>' + escHtml(inv.reference || '-') + '</td>';
+        html += '<td>' + escHtml(inv.date || '-') + '</td>';
+        html += '<td>£' + fmtMoney(inv.total) + '</td>';
+        html += '<td>£' + fmtMoney(inv.amount_paid) + '</td>';
+        html += '<td>£' + fmtMoney(inv.amount_due) + '</td>';
+        html += '<td><span class="customer-active-badge ' + statusClass + '">' + escHtml(inv.status) + '</span></td>';
+        html += '<td>';
+        if (isLinked) {
+            html += '<span class="sp-linked-badge"><i class="bi bi-link-45deg"></i> ' + escHtml(linkedSales.join(', ')) + '</span>';
+        } else {
+            const suggested = inv.suggested_sale_pk;
+            html += '<div class="sp-link-cell">';
+            html += '<select class="sp-sale-select" data-invoice-id="' + inv.invoice_id + '">';
+            html += '<option value="">Sale…</option>';
+            spSalesList.forEach(s => {
+                const sel = suggested && s.pk === suggested ? ' selected' : '';
+                html += '<option value="' + s.pk + '"' + sel + '>' + escHtml(s.label) + '</option>';
+            });
+            html += '</select>';
+            html += '<button class="btn btn-sm btn-outline-success sp-link-btn" onclick="spLinkInvoice(this)"><i class="bi bi-link-45deg"></i></button>';
+            html += '</div>';
+        }
+        html += '</td></tr>';
+    });
+    // Totals row
+    let totTotal = 0, totPaid = 0, totDue = 0;
+    invoices.forEach(inv => { totTotal += parseFloat(inv.total); totPaid += parseFloat(inv.amount_paid); totDue += parseFloat(inv.amount_due); });
+    html += '</tbody><tfoot><tr class="sp-totals-row">';
+    html += '<td class="sp-col-check"></td>';
+    html += '<td colspan="3" style="font-weight:700;">Total (' + invoices.length + ' invoices)</td>';
+    html += '<td style="font-weight:700;">£' + fmtMoney(totTotal) + '</td>';
+    html += '<td style="font-weight:700; color:var(--success-color);">£' + fmtMoney(totPaid) + '</td>';
+    html += '<td style="font-weight:700; color:var(--danger-color);">£' + fmtMoney(totDue) + '</td>';
+    html += '<td colspan="2"></td></tr></tfoot></table></div>';
+    // Distribute bar (hidden until invoices selected)
+    html += '<div class="sp-distribute-bar" id="spDistBar-' + pfx + '" style="display:none;">';
+    html += '<span class="sp-dist-summary" id="spDistSummary-' + pfx + '"></span>';
+    html += '<button class="btn btn-sm btn-outline-primary" onclick="openDistributeModal(\'' + pfx + '\')">';
+    html += '<i class="bi bi-diagram-3"></i> Distribute between sales</button>';
+    html += '</div>';
+    return html;
+}
+
+function _renderXeroToTarget(bodyEl, statusEl, data, elapsed, idPrefix) {
+    const timeStr = elapsed != null ? ' (' + elapsed + 's)' : '';
+    if (!data.success) {
+        bodyEl.innerHTML = '<p class="sp-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+        statusEl.innerHTML = '<i class="bi bi-x-circle"></i> Error' + timeStr;
+        statusEl.className = statusEl.className.replace(/sp-status-\w+/g, '') + ' sp-status-err';
+        return;
+    }
+    spSalesList = data.sales || [];
+    const invoices = data.invoices || [];
+    if (invoices.length === 0) {
+        bodyEl.innerHTML = '<p class="sp-empty"><i class="bi bi-inbox"></i> ' + escHtml(data.message || 'No invoices found') + '</p>';
+        statusEl.innerHTML = '<i class="bi bi-check-circle"></i> 0 invoices' + timeStr;
+        statusEl.className = statusEl.className.replace(/sp-status-\w+/g, '') + ' sp-status-ok';
+        return;
+    }
+    statusEl.innerHTML = '<i class="bi bi-check-circle"></i> ' + invoices.length + ' invoice(s)' + timeStr;
+    statusEl.className = statusEl.className.replace(/sp-status-\w+/g, '') + ' sp-status-ok';
+    bodyEl.innerHTML = _buildXeroTableHtml(invoices, idPrefix);
+}
+
+function _renderXeroResults(data, elapsed) {
+    // Modal
+    _renderXeroToTarget(
+        document.getElementById('spXeroBody'),
+        document.getElementById('spXeroStatus'),
+        data, elapsed, 'modal'
+    );
+    // Inline page section
+    _renderXeroToTarget(
+        document.getElementById('inlineXero'),
+        document.getElementById('inlineXeroStatus'),
+        data, null, 'inline'
+    );
+    _showInlineResults();
+}
+
+function _buildAnthillHtml(salesArr, idPrefix) {
+    let html = '';
+    salesArr.forEach(saleData => {
+        if (!saleData.payments.length) return;
+        html += '<div class="sp-anthill-sale" data-sale-pk="' + saleData.sale_pk + '">';
+        html += '<div class="sp-anthill-sale-header">';
+        html += '<strong>' + escHtml(saleData.sale_label) + '</strong>';
+        html += '<span class="sp-anthill-count">' + saleData.payments.length + ' payment(s)</span>';
+        html += '<button class="btn btn-sm btn-outline-success sp-import-btn" onclick="spImportAnthill(this, ' + saleData.sale_pk + ')">';
+        html += '<i class="bi bi-download"></i> Import</button>';
+        html += '</div>';
+        html += '<div class="sp-anthill-payments">';
+        saleData.payments.forEach((p, idx) => {
+            html += '<label class="sp-anthill-row">';
+            html += '<input type="checkbox" class="sp-anthill-check" checked data-sale-pk="' + saleData.sale_pk + '" data-idx="' + idx + '" data-target="' + idPrefix + '">';
+            html += '<div class="sp-anthill-detail">';
+            html += '<div class="sp-anthill-type">' + escHtml(p.type) + '</div>';
+            html += '<div class="sp-anthill-meta">' + escHtml(p.date) + ' &bull; ' + escHtml(p.location) + ' &bull; ' + escHtml(p.user) + '</div>';
+            html += '</div>';
+            html += '<div class="sp-anthill-amount">&pound;' + escHtml(p.amount) + '</div>';
+            html += '</label>';
+        });
+        html += '</div></div>';
+    });
+    // Totals bar
+    let grandTotal = 0, totalCount = 0;
+    salesArr.forEach(s => { s.payments.forEach(p => { grandTotal += parseFloat(p.amount) || 0; totalCount++; }); });
+    if (totalCount > 0) {
+        html += '<div class="sp-anthill-totals"><span>Total: ' + totalCount + ' payment(s)</span><span style="font-weight:700;">£' + fmtMoney(grandTotal) + '</span></div>';
+    }
+    return html;
+}
+
+function _attachAnthillPaymentData(salesArr, idPrefix) {
+    salesArr.forEach(saleData => {
+        saleData.payments.forEach((p, idx) => {
+            const cb = document.querySelector('.sp-anthill-check[data-sale-pk="' + saleData.sale_pk + '"][data-idx="' + idx + '"][data-target="' + idPrefix + '"]');
+            if (cb) cb._payment = p;
+        });
+    });
+}
+
+function _renderAnthillToTarget(bodyEl, statusEl, data, elapsed, idPrefix) {
+    const timeStr = elapsed != null ? ' (' + elapsed + 's)' : '';
+    if (!data.success) {
+        bodyEl.innerHTML = '<p class="sp-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+        statusEl.innerHTML = '<i class="bi bi-x-circle"></i> Error' + timeStr;
+        statusEl.className = statusEl.className.replace(/sp-status-\w+/g, '') + ' sp-status-err';
+        return;
+    }
+    const salesArr = data.sales || [];
+    let totalPayments = 0;
+    salesArr.forEach(s => { totalPayments += s.payments.length; });
+    if (totalPayments === 0) {
+        bodyEl.innerHTML = '<p class="sp-empty"><i class="bi bi-inbox"></i> No payments found on Anthill</p>';
+        statusEl.innerHTML = '<i class="bi bi-check-circle"></i> 0 payments' + timeStr;
+        statusEl.className = statusEl.className.replace(/sp-status-\w+/g, '') + ' sp-status-ok';
+        return;
+    }
+    statusEl.innerHTML = '<i class="bi bi-check-circle"></i> ' + totalPayments + ' payment(s) across ' + salesArr.length + ' sale(s)' + timeStr;
+    statusEl.className = statusEl.className.replace(/sp-status-\w+/g, '') + ' sp-status-ok';
+    bodyEl.innerHTML = _buildAnthillHtml(salesArr, idPrefix);
+    _attachAnthillPaymentData(salesArr, idPrefix);
+}
+
+function _renderAnthillResults(data, elapsed) {
+    // Modal
+    _renderAnthillToTarget(
+        document.getElementById('spAnthillBody'),
+        document.getElementById('spAnthillStatus'),
+        data, elapsed, 'modal'
+    );
+    // Inline page section
+    _renderAnthillToTarget(
+        document.getElementById('inlineAnthill'),
+        document.getElementById('inlineAnthillStatus'),
+        data, null, 'inline'
+    );
+    _showInlineResults();
+}
+
+function _showInlineResults() {
+    const container = document.getElementById('inlineSearchResults');
+    if (_spXeroCache || _spAnthillCache) {
+        container.style.display = '';
+        // Auto-expand sections that have data
+        if (_spXeroCache && _spXeroCache.success && (_spXeroCache.invoices || []).length > 0) {
+            document.getElementById('inlineXero').closest('.pm-inline-section').classList.add('expanded');
+        }
+        if (_spAnthillCache && _spAnthillCache.success) {
+            const salesArr = _spAnthillCache.sales || [];
+            const total = salesArr.reduce((n, s) => n + s.payments.length, 0);
+            if (total > 0) {
+                document.getElementById('inlineAnthill').closest('.pm-inline-section').classList.add('expanded');
+            }
+        }
+    }
+}
+
+function _updateInlineTimestamp() {
+    const container = document.getElementById('inlineSearchResults');
+    let ts = container.querySelector('.pm-inline-timestamp');
+    if (!ts) {
+        ts = document.createElement('div');
+        ts.className = 'pm-inline-timestamp';
+        container.insertBefore(ts, container.firstChild);
+    }
+    const now = new Date();
+    const dateStr = now.getDate() + ' ' + now.toLocaleString('en-GB', {month: 'short'}) + ' ' + now.getFullYear() + ' ' + now.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+    ts.innerHTML = '<i class="bi bi-clock-history"></i> Last searched: ' + dateStr + ' (just now)';
+}
+
+function toggleInlineSection(bodyId) {
+    const section = document.getElementById(bodyId).closest('.pm-inline-section');
+    section.classList.toggle('expanded');
+}
+
+function _runSearches() {
+    const xeroBody = document.getElementById('spXeroBody');
+    const xeroStatus = document.getElementById('spXeroStatus');
+    const anthillBody = document.getElementById('spAnthillBody');
+    const anthillStatus = document.getElementById('spAnthillStatus');
+    const msg = document.getElementById('spMsg');
+
+    xeroBody.innerHTML = '';
+    anthillBody.innerHTML = '';
+    xeroStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Searching Xero&hellip; <span class="sp-elapsed">0s</span>';
+    xeroStatus.className = 'sp-section-status';
+    anthillStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Scraping Anthill&hellip; <span class="sp-elapsed">0s</span>';
+    anthillStatus.className = 'sp-section-status';
+    msg.textContent = '';
+    msg.className = 'sp-msg';
+
+    // Elapsed-time counters so user knows the search is alive
+    const xeroStart = Date.now();
+    const anthillStart = Date.now();
+    const xeroTimer = setInterval(() => {
+        const el = xeroStatus.querySelector('.sp-elapsed');
+        if (el) el.textContent = Math.round((Date.now() - xeroStart) / 1000) + 's';
+    }, 1000);
+    const anthillTimer = setInterval(() => {
+        const el = anthillStatus.querySelector('.sp-elapsed');
+        if (el) el.textContent = Math.round((Date.now() - anthillStart) / 1000) + 's';
+    }, 1000);
+
+    // ── Xero search ──
+    fetch(XERO_SEARCH_URL)
+    .then(r => r.json())
+    .then(data => {
+        clearInterval(xeroTimer);
+        const elapsed = ((Date.now() - xeroStart) / 1000).toFixed(1);
+        _spXeroCache = data;
+        _renderXeroResults(data, elapsed);
+        _updateInlineTimestamp();
+    })
+    .catch(() => {
+        clearInterval(xeroTimer);
+        const elapsed = ((Date.now() - xeroStart) / 1000).toFixed(1);
+        const errData = {success: false, error: 'Network error — could not reach Xero'};
+        _renderXeroResults(errData, elapsed);
+    });
+
+    // ── Anthill scrape ──
+    fetch(ANTHILL_SCRAPE_URL, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF_TOKEN},
+    })
+    .then(r => r.json())
+    .then(data => {
+        clearInterval(anthillTimer);
+        const elapsed = ((Date.now() - anthillStart) / 1000).toFixed(1);
+        _spAnthillCache = data;
+        _renderAnthillResults(data, elapsed);
+        _updateInlineTimestamp();
+    })
+    .catch(() => {
+        clearInterval(anthillTimer);
+        const elapsed = ((Date.now() - anthillStart) / 1000).toFixed(1);
+        const errData = {success: false, error: 'Network error — could not reach Anthill'};
+        _renderAnthillResults(errData, elapsed);
+    });
+}
+
+function openSearchPaymentsModal() {
+    const modal = document.getElementById('searchPaymentsModal');
+    modal.showModal();
+
+    // If we have cached results, re-render them instantly
+    if (_spXeroCache || _spAnthillCache) {
+        if (_spXeroCache) _renderXeroResults(_spXeroCache, null);
+        if (_spAnthillCache) _renderAnthillResults(_spAnthillCache, null);
+        const msg = document.getElementById('spMsg');
+        msg.textContent = 'Showing cached results — click Refresh to re-search';
+        msg.className = 'sp-msg';
+        return;
+    }
+
+    _runSearches();
+}
+
+function spRefreshSearch() {
+    _spXeroCache = null;
+    _spAnthillCache = null;
+    _runSearches();
+}
+
+function spLinkInvoice(btn) {
+    const cell = btn.closest('.sp-link-cell');
+    const sel = cell.querySelector('.sp-sale-select');
+    const invoiceId = sel.dataset.invoiceId;
+    const salePk = sel.value;
+    if (!salePk) {
+        sel.style.borderColor = 'var(--danger-color)';
+        return;
+    }
+    sel.style.borderColor = '';
+    const tr = btn.closest('tr');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
+
+    fetch(XERO_LINK_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({invoice_id: invoiceId, sale_pk: parseInt(salePk)}),
+    })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(data => {
+        if (data.success) {
+            const saleLabel = sel.options[sel.selectedIndex].text;
+            // Mark linked in ALL matching rows (modal + inline)
+            document.querySelectorAll('.sp-sale-select[data-invoice-id="' + invoiceId + '"]').forEach(s => {
+                const row = s.closest('tr');
+                const linkCell = s.closest('.sp-link-cell');
+                if (row) row.classList.add('sp-row-linked');
+                if (linkCell) linkCell.innerHTML = '<span class="sp-linked-badge"><i class="bi bi-link-45deg"></i> ' + escHtml(saleLabel) + '</span>';
+            });
+            // Update cache so re-rendering shows linked state
+            if (_spXeroCache && _spXeroCache.invoices) {
+                const inv = _spXeroCache.invoices.find(i => i.invoice_id === invoiceId);
+                if (inv) { inv.linked_sales = [saleLabel]; }
+            }
+            const msg = document.getElementById('spMsg');
+            if (msg) { msg.textContent = data.message || 'Linked!'; msg.className = 'sp-msg sp-msg-ok'; }
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-link-45deg"></i>';
+            const msg = document.getElementById('spMsg');
+            if (msg) { msg.textContent = data.error || 'Failed'; msg.className = 'sp-msg sp-msg-err'; }
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-link-45deg"></i>';
+        const msg = document.getElementById('spMsg');
+        if (msg) { msg.textContent = 'Network error'; msg.className = 'sp-msg sp-msg-err'; }
+    });
+}
+
+function spImportAnthill(btn, salePk) {
+    const container = btn.closest('.sp-anthill-sale');
+    const checks = container.querySelectorAll('.sp-anthill-check:checked');
+    if (!checks.length) return;
+
+    const payments = Array.from(checks).map(cb => ({
+        type: cb._payment.type,
+        date: cb._payment.date,
+        location: cb._payment.location,
+        user: cb._payment.user,
+        amount: cb._payment.amount,
+        status: cb._payment.status,
+    }));
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Importing…';
+
+    const url = ADD_MANUAL_URL_TPL.replace('{salePk}', salePk);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({ payments }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Imported';
+            btn.classList.remove('btn-outline-success');
+            btn.classList.add('btn-success');
+            container.querySelectorAll('.sp-anthill-check').forEach(cb => { cb.disabled = true; });
+            // Also mark same sale's import buttons in the other view
+            document.querySelectorAll('.sp-anthill-sale[data-sale-pk="' + salePk + '"] .sp-import-btn').forEach(b => {
+                b.innerHTML = '<i class="bi bi-check-lg"></i> Imported';
+                b.classList.remove('btn-outline-success');
+                b.classList.add('btn-success');
+                b.disabled = true;
+            });
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-download"></i> Import';
+            alert('Error: ' + (data.errors || [data.error]).join(', '));
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download"></i> Import';
+        alert('Network error importing payments');
+    });
+}
+
+document.getElementById('searchPaymentsModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+document.getElementById('distributeModal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
+
+// ── Distribute Between Sales ─────────────────────────────────────────────────
+const DISTRIBUTE_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/distribute/';
+
+// Checkbox event delegation
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('sp-check-all')) {
+        const pfx = e.target.dataset.prefix;
+        document.querySelectorAll('.sp-invoice-check[data-prefix="' + pfx + '"]').forEach(cb => {
+            cb.checked = e.target.checked;
+        });
+        _updateDistributeBar(pfx);
+    }
+    if (e.target.classList.contains('sp-invoice-check')) {
+        _updateDistributeBar(e.target.dataset.prefix);
+    }
+});
+
+function _updateDistributeBar(pfx) {
+    const checks = document.querySelectorAll('.sp-invoice-check[data-prefix="' + pfx + '"]:checked');
+    const bar = document.getElementById('spDistBar-' + pfx);
+    const summary = document.getElementById('spDistSummary-' + pfx);
+    if (!bar || !summary) return;
+    if (checks.length === 0) {
+        bar.style.display = 'none';
+        return;
+    }
+    let total = 0;
+    checks.forEach(cb => total += parseFloat(cb.dataset.total) || 0);
+    summary.textContent = checks.length + ' selected \u00b7 \u00a3' + fmtMoney(total);
+    bar.style.display = '';
+}
+
+function _getAnthillSaleTotals() {
+    // Build {sale_pk: {label, total, payments: [{type, amount}]}} from cached Anthill data
+    const result = {};
+    if (!_spAnthillCache || !_spAnthillCache.success) return result;
+    (_spAnthillCache.sales || []).forEach(s => {
+        let saleTotal = 0;
+        const payments = [];
+        s.payments.forEach(p => {
+            const amt = parseFloat(p.amount) || 0;
+            saleTotal += amt;
+            payments.push({type: p.type, amount: amt});
+        });
+        if (saleTotal > 0) {
+            result[s.sale_pk] = {label: s.sale_label, total: saleTotal, payments: payments};
+        }
+    });
+    return result;
+}
+
+function openDistributeModal(pfx) {
+    const checks = document.querySelectorAll('.sp-invoice-check[data-prefix="' + pfx + '"]:checked');
+    if (!checks.length) return;
+
+    // Gather selected invoice info
+    let selectedTotal = 0;
+    const selectedInvoiceIds = [];
+    checks.forEach(cb => {
+        selectedTotal += parseFloat(cb.dataset.total) || 0;
+        selectedInvoiceIds.push(cb.dataset.invoiceId);
+    });
+
+    // Get Anthill proportions
+    const anthillTotals = _getAnthillSaleTotals();
+    let anthillGrand = 0;
+    Object.values(anthillTotals).forEach(s => anthillGrand += s.total);
+
+    // Build distribution table
+    const distInfo = document.getElementById('distTotalInfo');
+    distInfo.innerHTML = 'Distributing <strong>£' + fmtMoney(selectedTotal) + '</strong> from <strong>' + checks.length + ' invoice(s)</strong>';
+
+    const body = document.getElementById('distSalesBody');
+    let html = '';
+
+    // If we have Anthill data, use proportions; otherwise, equal split across all sales
+    if (anthillGrand > 0) {
+        Object.keys(anthillTotals).forEach(salePk => {
+            const s = anthillTotals[salePk];
+            const proportion = s.total / anthillGrand;
+            const allocated = Math.round(selectedTotal * proportion * 100) / 100;
+            const saleValue = SALE_VALUES[salePk] || 0;
+            const pctOfSale = saleValue > 0 ? (allocated / saleValue * 100).toFixed(1) : '-';
+
+            html += '<div class="dist-sale-card">';
+            html += '<div class="dist-sale-header">';
+            html += '<span class="dist-sale-name">' + escHtml(s.label) + '</span>';
+            if (saleValue > 0) {
+                html += '<span class="dist-sale-value">Sale value: £' + fmtMoney(saleValue) + '</span>';
+            }
+            html += '</div>';
+            // Payment type breakdown
+            html += '<div class="dist-payments-list">';
+            s.payments.forEach(p => {
+                const payProportion = p.amount / anthillGrand;
+                const payAllocated = Math.round(selectedTotal * payProportion * 100) / 100;
+                html += '<div class="dist-payment-row">';
+                html += '<span class="dist-payment-type">' + escHtml(p.type) + '</span>';
+                html += '<span class="dist-payment-anthill">£' + fmtMoney(p.amount) + '</span>';
+                html += '<span class="dist-payment-pct">' + (payProportion * 100).toFixed(1) + '%</span>';
+                html += '<span class="dist-payment-alloc">£' + fmtMoney(payAllocated) + '</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+            // Sale total allocation
+            html += '<div class="dist-sale-footer">';
+            html += '<span class="dist-sale-total-label">Allocation</span>';
+            html += '<div class="dist-amount-wrap"><span class="dist-pound">£</span><input type="number" step="0.01" min="0" class="dist-amount-input" data-sale-pk="' + salePk + '" value="' + allocated.toFixed(2) + '"></div>';
+            html += '<span class="dist-pct-of-sale">' + pctOfSale + '% of sale</span>';
+            html += '</div>';
+            html += '</div>';
+        });
+    } else {
+        // No Anthill data — equal split across all sales from spSalesList
+        const perSale = Math.round(selectedTotal / Math.max(spSalesList.length, 1) * 100) / 100;
+        spSalesList.forEach(s => {
+            const saleValue = SALE_VALUES[s.pk] || 0;
+            const pctOfSale = saleValue > 0 ? (perSale / saleValue * 100).toFixed(1) : '-';
+
+            html += '<div class="dist-sale-card">';
+            html += '<div class="dist-sale-header">';
+            html += '<span class="dist-sale-name">' + escHtml(s.label) + '</span>';
+            if (saleValue > 0) {
+                html += '<span class="dist-sale-value">Sale value: £' + fmtMoney(saleValue) + '</span>';
+            }
+            html += '</div>';
+            html += '<div class="dist-payments-list"><div class="dist-payment-row"><span class="dist-payment-type" style="color:var(--text-muted);">No Anthill data — equal split</span></div></div>';
+            html += '<div class="dist-sale-footer">';
+            html += '<span class="dist-sale-total-label">Allocation</span>';
+            html += '<div class="dist-amount-wrap"><span class="dist-pound">£</span><input type="number" step="0.01" min="0" class="dist-amount-input" data-sale-pk="' + s.pk + '" value="' + perSale.toFixed(2) + '"></div>';
+            html += '<span class="dist-pct-of-sale">' + pctOfSale + '% of sale</span>';
+            html += '</div>';
+            html += '</div>';
+        });
+    }
+
+    // Grand total bar
+    html += '<div class="dist-grand-total">';
+    html += '<span>Total allocated</span>';
+    html += '<strong id="distAllocTotal">£' + fmtMoney(selectedTotal) + '</strong>';
+    html += '</div>';
+    html += '<div class="dist-remainder" id="distRemainder"></div>';
+
+    body.innerHTML = html;
+    body.dataset.selectedTotal = selectedTotal;
+    body.dataset.invoiceIds = selectedInvoiceIds.join(',');
+
+    // Listen for amount changes
+    body.querySelectorAll('.dist-amount-input').forEach(inp => {
+        inp.addEventListener('input', _updateDistTotals);
+    });
+
+    document.getElementById('distMsg').textContent = '';
+    document.getElementById('distributeModal').showModal();
+}
+
+function _updateDistTotals() {
+    const body = document.getElementById('distSalesBody');
+    const selectedTotal = parseFloat(body.dataset.selectedTotal) || 0;
+    let allocTotal = 0;
+    body.querySelectorAll('.dist-amount-input').forEach(inp => {
+        const val = parseFloat(inp.value) || 0;
+        allocTotal += val;
+        // Update % of sale label
+        const footer = inp.closest('.dist-sale-footer');
+        if (footer) {
+            const pctEl = footer.querySelector('.dist-pct-of-sale');
+            if (pctEl) {
+                const salePk = inp.dataset.salePk;
+                const saleValue = SALE_VALUES[salePk] || 0;
+                pctEl.textContent = saleValue > 0 ? (val / saleValue * 100).toFixed(1) + '% of sale' : '-';
+            }
+        }
+    });
+    allocTotal = Math.round(allocTotal * 100) / 100;
+    document.getElementById('distAllocTotal').textContent = '£' + fmtMoney(allocTotal);
+
+    const remainder = Math.round((selectedTotal - allocTotal) * 100) / 100;
+    const el = document.getElementById('distRemainder');
+    if (Math.abs(remainder) > 0.005) {
+        el.textContent = (remainder > 0 ? '£' + fmtMoney(remainder) + ' unallocated' : '£' + fmtMoney(Math.abs(remainder)) + ' over-allocated');
+        el.className = 'dist-remainder ' + (remainder > 0 ? 'warning' : 'danger');
+    } else {
+        el.textContent = '';
+        el.className = 'dist-remainder';
+    }
+}
+
+function confirmDistribute() {
+    const body = document.getElementById('distSalesBody');
+    const invoiceIds = (body.dataset.invoiceIds || '').split(',').filter(Boolean);
+    const distributions = [];
+
+    body.querySelectorAll('.dist-amount-input').forEach(inp => {
+        const amount = parseFloat(inp.value);
+        if (amount > 0) {
+            distributions.push({
+                sale_pk: parseInt(inp.dataset.salePk),
+                amount: amount.toFixed(2),
+            });
+        }
+    });
+
+    if (distributions.length === 0) {
+        document.getElementById('distMsg').textContent = 'No amounts to distribute';
+        document.getElementById('distMsg').style.color = 'var(--danger-color)';
+        return;
+    }
+
+    document.getElementById('distMsg').textContent = 'Distributing...';
+    document.getElementById('distMsg').style.color = 'var(--text-secondary)';
+
+    fetch(DISTRIBUTE_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({invoice_ids: invoiceIds, distributions: distributions}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('distributeModal').close();
+            location.reload();
+        } else {
+            document.getElementById('distMsg').textContent = data.error || 'Failed';
+            document.getElementById('distMsg').style.color = 'var(--danger-color)';
+        }
+    })
+    .catch(() => {
+        document.getElementById('distMsg').textContent = 'Network error';
+        document.getElementById('distMsg').style.color = 'var(--danger-color)';
+    });
+}
+
+// Render saved data into inline sections on page load
+document.addEventListener('DOMContentLoaded', function() {
+    if (_spXeroCache || _spAnthillCache) {
+        if (_spXeroCache) {
+            _renderXeroToTarget(
+                document.getElementById('inlineXero'),
+                document.getElementById('inlineXeroStatus'),
+                _spXeroCache, null, 'inline'
+            );
+        }
+        if (_spAnthillCache) {
+            _renderAnthillToTarget(
+                document.getElementById('inlineAnthill'),
+                document.getElementById('inlineAnthillStatus'),
+                _spAnthillCache, null, 'inline'
+            );
+        }
+        _showInlineResults();
+        // Show when last searched
+        if (LAST_SEARCH_TIME) {
+            const container = document.getElementById('inlineSearchResults');
+            let ts = container.querySelector('.pm-inline-timestamp');
+            if (!ts) {
+                ts = document.createElement('div');
+                ts.className = 'pm-inline-timestamp';
+                container.insertBefore(ts, container.firstChild);
+            }
+            ts.innerHTML = '<i class="bi bi-clock-history"></i> Last searched: ' + LAST_SEARCH_TIME;
+        }
+    }
+});
 </script>
 {% endblock %}

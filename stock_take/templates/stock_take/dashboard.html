@@ -1130,127 +1130,118 @@ function loadOutstandingReport() {
             }
             const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
             const fmtDec = n => '\u00a3' + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            const totalOutstanding = data.rows.reduce((s, r) => s + r.outstanding, 0);
+            const totalOutstanding = data.rows.reduce((s, r) => s + r.total_outstanding, 0);
             const locLabel = '{{ current_location|escapejs }}' || 'All Locations';
             meta.innerHTML = `${data.count} customer${data.count !== 1 ? 's' : ''} &nbsp;|&nbsp; ${fmt(totalOutstanding)} &nbsp;|&nbsp; ${locLabel}`;
 
-            // Group rows by fit_date year (null = "No Fit Date")
-            const byGroup = {};
-            data.rows.forEach(r => {
-                const key = r.year !== null ? r.year : 'no_fit_date';
-                if (!byGroup[key]) byGroup[key] = [];
-                byGroup[key].push(r);
-            });
-            const groups = Object.keys(byGroup).sort((a, b) => {
-                if (a === 'no_fit_date') return -1;
-                if (b === 'no_fit_date') return 1;
-                return Number(b) - Number(a);
-            });
-
-            const COL_COUNT = 10;
-            const todayISO = new Date().toISOString().split('T')[0];
-            const todayLabel = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-
+            const COL_COUNT = 6;
             let html = '<table class="dash-report-table"><thead><tr>';
-            html += '<th style="width:24px"></th><th>Customer</th><th>Sale #</th><th>Anthill</th><th>Contract</th><th>Fit Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-center" title="Actions" style="width:36px"></th>';
+            html += '<th style="width:24px"></th><th>Customer</th><th>Sales</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th>';
             html += '</tr></thead><tbody>';
 
-            let rowIdx = 0;
-            groups.forEach(grp => {
-                const groupRows = byGroup[grp];
-                const groupTotal = groupRows.reduce((s, r) => s + r.outstanding, 0);
-                const label = grp === 'no_fit_date' ? 'No Fit Date' : grp;
-                const badgeClass = grp === 'no_fit_date' ? ' style="color:#dc3545;"' : '';
-                html += `<tr class="dash-report-year-sep" data-year-sep="${grp}"><td colspan="${COL_COUNT}"><strong${badgeClass}>${label}</strong><span class="dash-report-year-total">${fmt(groupTotal)} outstanding &mdash; ${groupRows.length} customer${groupRows.length !== 1 ? 's' : ''}</span></td></tr>`;
+            let custIdx = 0;
+            data.rows.forEach(cust => {
+                const rid = 'os-cust-' + custIdx++;
+                const hasSales = cust.sales && cust.sales.length > 0;
+                const hasPayments = cust.sales.some(s => s.payments && s.payments.length > 0);
+                const chevron = hasSales
+                    ? `<i class="bi bi-chevron-down os-row-chevron" id="icon-${rid}"></i>`
+                    : '<span style="display:inline-block;width:14px;"></span>';
+                const custLink = cust.customer_id
+                    ? `<a href="/customer/${cust.customer_id}/" target="_blank" class="dash-report-link">${cust.customer}</a>`
+                    : cust.customer;
+                const manageLink = cust.customer_id
+                    ? ` <a href="/customer/${cust.customer_id}/manage-payments/" target="_blank" class="os-manage-link" title="Manage payments"><i class="bi bi-sliders2"></i></a>`
+                    : '';
 
-                groupRows.sort((a, b) => {
-                    if (!a.fit_date_iso && !b.fit_date_iso) return 0;
-                    if (!a.fit_date_iso) return 1;
-                    if (!b.fit_date_iso) return -1;
-                    return b.fit_date_iso.localeCompare(a.fit_date_iso);
-                });
+                html += `<tr class="os-main-row${hasSales ? ' os-expandable' : ''}" data-has-payments="${hasPayments ? 1 : 0}" data-outstanding="${cust.total_outstanding}" data-rid="${rid}" onclick="toggleOutstandingDetail('${rid}', event)">`;
+                html += `<td class="text-center" style="padding-left:8px;padding-right:0;">${chevron}</td>`;
+                html += `<td>${custLink}${manageLink}</td>`;
+                html += `<td>${cust.sales.length} sale${cust.sales.length !== 1 ? 's' : ''}</td>`;
+                html += `<td class="text-right">${fmt(cust.total_sale_value)}</td>`;
+                html += `<td class="text-right">${fmt(cust.total_paid)}</td>`;
+                html += `<td class="text-right" style="color:#dc3545;font-weight:600">${fmt(cust.total_outstanding)}</td>`;
+                html += `</tr>`;
 
-                const currentYear = new Date().getFullYear();
-                let todayInserted = false;
-                groupRows.forEach(r => {
-                    if (!todayInserted && String(grp) === String(currentYear) && r.fit_date_iso && r.fit_date_iso < todayISO) {
-                        html += `<tr class="today-divider-row"><td colspan="${COL_COUNT}" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td></tr>`;
-                        todayInserted = true;
-                    }
-                    const rid = 'os-row-' + rowIdx++;
-                    const anthillCell = r.sale_number
-                        ? '<a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID=' + r.sale_number + '" target="_blank" class="dash-report-anthill-btn" title="Open in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>'
-                        : '-';
-                    const fitDateCell = r.fit_date
-                        ? r.fit_date
-                        : '<span style="color:#dc3545;font-style:italic;">No fit date</span>';
-                    const hasPayments = r.payments && r.payments.length > 0;
-                    const chevron = hasPayments
-                        ? `<i class="bi bi-chevron-down os-row-chevron" id="icon-${rid}"></i>`
-                        : '<span style="display:inline-block;width:14px;"></span>';
-
-                    html += `<tr class="os-main-row${hasPayments ? ' os-expandable' : ''}" data-has-payments="${hasPayments ? 1 : 0}" data-year="${grp}" data-outstanding="${r.outstanding}" data-rid="${rid}" onclick="toggleOutstandingDetail('${rid}', event)">`;
-                    html += `<td class="text-center" style="padding-left:8px;padding-right:0;">${chevron}</td>`;
-                    html += `<td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>`;
-                    html += `<td>${r.sale_number ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>' : '-'}</td>`;
-                    html += `<td>${anthillCell}</td>`;
-                    html += `<td>${r.contract || '-'}</td>`;
-                    html += `<td>${fitDateCell}</td>`;
-                    html += `<td class="text-right">${fmt(r.sale_value)}</td>`;
-                    html += `<td class="text-right">${fmt(r.paid)}</td>`;
-                    html += `<td class="text-right" style="color:#dc3545;font-weight:600">${fmt(r.outstanding)}</td>`;
-                    html += `<td class="text-center"><button class="os-xero-btn" onclick="checkXeroSingle(${r.pk}, this, event)" title="Check Xero for payments"><i class="bi bi-arrow-repeat"></i></button></td>`;
-                    html += `</tr>`;
-
-                    // Expandable detail row (hidden by default)
-                    html += `<tr class="os-detail-row" id="${rid}" style="display:none;"><td colspan="${COL_COUNT}">`;
-                    html += `<div class="os-detail-content">`;
-                    if (hasPayments) {
-                        html += `<table class="os-payments-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Invoice</th><th>Status</th><th class="text-right">Amount</th></tr></thead><tbody>`;
-                        r.payments.forEach(p => {
-                            html += `<tr><td>${p.date || '-'}</td><td>${p.type}</td><td>${p.source}</td><td>${p.invoice || '-'}</td><td>${p.invoice_status || '-'}</td><td class="text-right">${fmtDec(p.amount)}</td></tr>`;
-                        });
-                        html += `</tbody></table>`;
-                    } else {
-                        html += `<p style="margin:0;color:var(--text-secondary);font-size:0.8rem;">No payment records found.</p>`;
-                    }
-                    html += `</div></td></tr>`;
-                });
+                // Expandable detail row with sales breakdown
+                html += `<tr class="os-detail-row" id="${rid}" style="display:none;"><td colspan="${COL_COUNT}">`;
+                html += `<div class="os-detail-content">`;
+                if (hasSales) {
+                    html += `<table class="os-sales-table"><thead><tr>`;
+                    html += `<th>Sale #</th><th>Contract</th><th>Fit Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-center" style="width:36px"></th>`;
+                    html += `</tr></thead><tbody>`;
+                    cust.sales.forEach(s => {
+                        html += `<tr>`;
+                        html += `<td>${s.sale_number ? '<a href="/sale/' + s.pk + '/" target="_blank" class="dash-report-link">' + s.sale_number + '</a>' : '-'}</td>`;
+                        html += `<td>${s.contract || '-'}</td>`;
+                        html += `<td>${s.fit_date || '<span style="color:#dc3545;font-style:italic;">No fit date</span>'}</td>`;
+                        html += `<td class="text-right">${fmt(s.sale_value)}</td>`;
+                        html += `<td class="text-right">${fmt(s.paid)}</td>`;
+                        html += `<td class="text-right" style="color:#dc3545;font-weight:600">${fmt(s.outstanding)}</td>`;
+                        html += `<td class="text-center"><button class="os-xero-btn" onclick="checkXeroSingle(${s.pk}, this, event)" title="Check Xero for payments"><i class="bi bi-arrow-repeat"></i></button></td>`;
+                        html += `</tr>`;
+                        // Payment detail sub-rows
+                        if (s.payments && s.payments.length > 0) {
+                            html += `<tr class="os-payment-sub"><td colspan="7"><table class="os-payments-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Invoice</th><th>Status</th><th class="text-right">Amount</th></tr></thead><tbody>`;
+                            s.payments.forEach(p => {
+                                html += `<tr><td>${p.date || '-'}</td><td>${p.type}</td><td>${p.source}</td><td>${p.invoice || '-'}</td><td>${p.invoice_status || '-'}</td><td class="text-right">${fmtDec(p.amount)}</td></tr>`;
+                            });
+                            html += `</tbody></table></td></tr>`;
+                        }
+                    });
+                    html += `</tbody></table>`;
+                }
+                html += `</div></td></tr>`;
             });
 
             html += '</tbody></table>';
 
             // ── Overpaid customers section ──
             if (data.overpaid_rows && data.overpaid_rows.length > 0) {
-                const totalOverpaid = data.overpaid_rows.reduce((s, r) => s + r.overpaid, 0);
+                const totalOverpaid = data.overpaid_rows.reduce((s, r) => s + r.total_overpaid, 0);
                 html += `<div style="margin-top:18px;padding:12px 16px;background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.3);border-radius:8px;">`;
                 html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="bi bi-exclamation-triangle-fill" style="color:#f59e0b;font-size:1rem;"></i><strong style="color:#f59e0b;">Overpaid Customers</strong><span style="font-size:0.78rem;color:var(--text-secondary);">${data.overpaid_rows.length} customer${data.overpaid_rows.length !== 1 ? 's' : ''} &mdash; ${fmt(totalOverpaid)} overpaid</span></div>`;
                 html += `<table class="dash-report-table" style="margin:0;"><thead><tr>`;
-                html += `<th style="width:24px"></th><th>Customer</th><th>Sale #</th><th>Contract</th><th>Fit Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Overpaid</th>`;
+                html += `<th style="width:24px"></th><th>Customer</th><th>Sales</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Overpaid</th>`;
                 html += `</tr></thead><tbody>`;
                 let opIdx = 0;
-                data.overpaid_rows.forEach(r => {
-                    const oprid = 'op-row-' + opIdx++;
-                    const hasPayments = r.payments && r.payments.length > 0;
-                    const chevron = hasPayments
+                data.overpaid_rows.forEach(cust => {
+                    const oprid = 'op-cust-' + opIdx++;
+                    const hasSales = cust.sales && cust.sales.length > 0;
+                    const chevron = hasSales
                         ? `<i class="bi bi-chevron-down os-row-chevron" id="icon-${oprid}"></i>`
                         : '<span style="display:inline-block;width:14px;"></span>';
-                    html += `<tr class="os-main-row${hasPayments ? ' os-expandable' : ''}" data-rid="${oprid}" onclick="toggleOutstandingDetail('${oprid}', event)">`;
+                    const custLink = cust.customer_id
+                        ? `<a href="/customer/${cust.customer_id}/" target="_blank" class="dash-report-link">${cust.customer}</a>`
+                        : cust.customer;
+                    html += `<tr class="os-main-row${hasSales ? ' os-expandable' : ''}" data-rid="${oprid}" onclick="toggleOutstandingDetail('${oprid}', event)">`;
                     html += `<td class="text-center" style="padding-left:8px;padding-right:0;">${chevron}</td>`;
-                    html += `<td><a href="/sale/${r.pk}/" target="_blank" class="dash-report-link">${r.customer}</a></td>`;
-                    html += `<td>${r.sale_number ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>' : '-'}</td>`;
-                    html += `<td>${r.contract || '-'}</td>`;
-                    html += `<td>${r.fit_date || '-'}</td>`;
-                    html += `<td class="text-right">${fmt(r.sale_value)}</td>`;
-                    html += `<td class="text-right">${fmt(r.paid)}</td>`;
-                    html += `<td class="text-right" style="color:#f59e0b;font-weight:600">+${fmt(r.overpaid)}</td>`;
+                    html += `<td>${custLink}</td>`;
+                    html += `<td>${cust.sales.length} sale${cust.sales.length !== 1 ? 's' : ''}</td>`;
+                    html += `<td class="text-right">${fmt(cust.total_sale_value)}</td>`;
+                    html += `<td class="text-right">${fmt(cust.total_paid)}</td>`;
+                    html += `<td class="text-right" style="color:#f59e0b;font-weight:600">+${fmt(cust.total_overpaid)}</td>`;
                     html += `</tr>`;
-                    html += `<tr class="os-detail-row" id="${oprid}" style="display:none;"><td colspan="8">`;
+                    html += `<tr class="os-detail-row" id="${oprid}" style="display:none;"><td colspan="6">`;
                     html += `<div class="os-detail-content">`;
-                    if (hasPayments) {
-                        html += `<table class="os-payments-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Invoice</th><th>Status</th><th class="text-right">Amount</th></tr></thead><tbody>`;
-                        r.payments.forEach(p => {
-                            html += `<tr><td>${p.date || '-'}</td><td>${p.type}</td><td>${p.source}</td><td>${p.invoice || '-'}</td><td>${p.invoice_status || '-'}</td><td class="text-right">${fmtDec(p.amount)}</td></tr>`;
+                    if (hasSales) {
+                        html += `<table class="os-sales-table"><thead><tr><th>Sale #</th><th>Contract</th><th>Fit Date</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Overpaid</th></tr></thead><tbody>`;
+                        cust.sales.forEach(s => {
+                            html += `<tr>`;
+                            html += `<td>${s.sale_number ? '<a href="/sale/' + s.pk + '/" target="_blank" class="dash-report-link">' + s.sale_number + '</a>' : '-'}</td>`;
+                            html += `<td>${s.contract || '-'}</td>`;
+                            html += `<td>${s.fit_date || '-'}</td>`;
+                            html += `<td class="text-right">${fmt(s.sale_value)}</td>`;
+                            html += `<td class="text-right">${fmt(s.paid)}</td>`;
+                            html += `<td class="text-right" style="color:#f59e0b;font-weight:600">+${fmt(s.overpaid)}</td>`;
+                            html += `</tr>`;
+                            if (s.payments && s.payments.length > 0) {
+                                html += `<tr class="os-payment-sub"><td colspan="6"><table class="os-payments-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Invoice</th><th>Status</th><th class="text-right">Amount</th></tr></thead><tbody>`;
+                                s.payments.forEach(p => {
+                                    html += `<tr><td>${p.date || '-'}</td><td>${p.type}</td><td>${p.source}</td><td>${p.invoice || '-'}</td><td>${p.invoice_status || '-'}</td><td class="text-right">${fmtDec(p.amount)}</td></tr>`;
+                                });
+                                html += `</tbody></table></td></tr>`;
+                            }
                         });
                         html += `</tbody></table>`;
                     }
@@ -1314,19 +1305,6 @@ function checkXeroSingle(salePk, btnEl, event) {
 
 function _recalcOutstandingMeta() {
     const fmt = n => '\u00a3' + Math.round(n).toLocaleString();
-    document.querySelectorAll('#outstandingReportBody tr[data-year-sep]').forEach(sepRow => {
-        const yr = sepRow.dataset.yearSep;
-        let visibleCount = 0, visibleTotal = 0;
-        document.querySelectorAll(`#outstandingReportBody tr.os-main-row[data-year="${yr}"]`).forEach(tr => {
-            if (tr.style.display !== 'none') {
-                visibleCount++;
-                visibleTotal += parseFloat(tr.dataset.outstanding || 0);
-            }
-        });
-        sepRow.style.display = visibleCount === 0 ? 'none' : '';
-        const span = sepRow.querySelector('.dash-report-year-total');
-        if (span) span.textContent = `${fmt(visibleTotal)} outstanding \u2014 ${visibleCount} customer${visibleCount !== 1 ? 's' : ''}`;
-    });
     let totalVisible = 0, totalOutstandingVisible = 0;
     document.querySelectorAll('#outstandingReportBody tr.os-main-row[data-outstanding]').forEach(tr => {
         if (tr.style.display !== 'none') {

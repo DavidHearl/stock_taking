@@ -440,6 +440,197 @@ class Command(BaseCommand):
 
                 time.sleep(0.3)  # brief pause between sales; rate limiter in xero_api handles throttling
 
+        # ── Pass 3: Fallback — match unmatched invoices by customer + amount ──
+        # When a Xero invoice has the wrong reference but can be identified by
+        # the customer contact and outstanding amount, assign it automatically.
+        stats['fallback_matched'] = 0
+        if not sale_id and not daily_limit_hit and reference_index and not dry_run:
+            from decimal import Decimal
+            import re as _re
+
+            # Build contact-name index from bulk-fetched invoices:
+            # { "CONTACT NAME" : [ invoice_dict, ... ] }
+            contact_index = {}
+            for inv in all_bfs_invoices:
+                cn = ((inv.get("Contact") or {}).get("Name") or "").strip().upper()
+                if cn:
+                    contact_index.setdefault(cn, []).append(inv)
+
+            # Invoice IDs already linked to any sale
+            matched_invoice_ids = set(
+                AnthillPayment.objects
+                .filter(source='xero')
+                .exclude(xero_invoice_id='')
+                .values_list('xero_invoice_id', flat=True)
+            )
+
+            # Find outstanding sales grouped by customer name
+            outstanding_sales = list(
+                AnthillSale.objects
+                .filter(category='3', contract_number__startswith='BFS')
+                .exclude(contract_number='')
+                .filter(paid_in_full=False, balance_payable__gt=0)
+            )
+
+            if outstanding_sales:
+                self.stdout.write(self.style.NOTICE(
+                    f'\n-- Pass 3 – Fallback amount matching '
+                    f'({len(outstanding_sales)} outstanding sales) --'
+                ))
+
+                # Group by customer name (upper)
+                from collections import defaultdict
+                by_customer = defaultdict(list)
+                for s in outstanding_sales:
+                    key = (s.customer_name or '').strip().upper()
+                    if key:
+                        by_customer[key].append(s)
+
+                for cust_upper, cust_sales in by_customer.items():
+                    # Only attempt fallback when there's exactly one outstanding
+                    # sale for this customer — otherwise we can't determine which
+                    # sale the payment belongs to.
+                    if len(cust_sales) != 1:
+                        continue
+
+                    sale = cust_sales[0]
+                    outstanding = sale.balance_payable or Decimal('0')
+                    if outstanding <= 0:
+                        continue
+
+                    # Find Xero invoices for this contact that are not yet matched
+                    contact_invs = contact_index.get(cust_upper, [])
+                    unmatched = [
+                        inv for inv in contact_invs
+                        if inv.get("InvoiceID") and inv["InvoiceID"] not in matched_invoice_ids
+                        and (inv.get("Status") or "").upper() not in ("VOIDED", "DELETED")
+                    ]
+                    if not unmatched:
+                        continue
+
+                    # Check if any unmatched invoice total matches the outstanding balance
+                    for inv_summary in unmatched:
+                        inv_total = Decimal(str(inv_summary.get("Total", 0) or 0))
+                        amount_paid = Decimal(str(inv_summary.get("AmountPaid", 0) or 0))
+
+                        # Match if the invoice total matches the outstanding amount
+                        # (the Xero invoice is for the right amount) OR if the
+                        # amount already paid on this invoice matches the outstanding.
+                        if inv_total != outstanding and amount_paid != outstanding:
+                            continue
+
+                        invoice_id = inv_summary["InvoiceID"]
+                        inv_ref = inv_summary.get("Reference", "")
+
+                        self.stdout.write(self.style.WARNING(
+                            f'  FALLBACK: {sale.anthill_activity_id} ({sale.contract_number}) '
+                            f'← Xero invoice ref "{inv_ref}" '
+                            f'(£{inv_total}, customer match "{cust_upper}")'
+                        ))
+
+                        # Fetch full invoice with payments
+                        try:
+                            full_inv = xero_api.get_invoice_with_payments(invoice_id)
+                        except Exception as exc:
+                            self.stderr.write(f'    Error fetching invoice: {exc}')
+                            continue
+
+                        if not full_inv:
+                            continue
+
+                        # Process this invoice's payments using the normal xero_api function
+                        # by passing it as a prefetched invoice list
+                        try:
+                            invoice_data = xero_api.get_sale_payments_from_xero(
+                                contract_number=inv_ref or sale.contract_number,
+                                contact_name=None,
+                                prefetched_invoices=[inv_summary],
+                            )
+                        except Exception as exc:
+                            self.stderr.write(f'    Error processing: {exc}')
+                            continue
+
+                        if not invoice_data:
+                            continue
+
+                        # Write payments to DB for this sale
+                        close_old_connections()
+                        for inv in invoice_data:
+                            if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
+                                continue
+
+                            for p in inv['payments']:
+                                if p.get('status', '').upper() == 'CANCELLED':
+                                    continue
+                                pid = p.get('payment_id') or ''
+                                defaults = {
+                                    'source': 'xero',
+                                    'xero_invoice_id': inv['invoice_id'],
+                                    'xero_invoice_number': inv['invoice_number'],
+                                    'invoice_total': inv['total'],
+                                    'invoice_amount_due': inv['amount_due'],
+                                    'invoice_status': inv['status'],
+                                    'payment_type': p['reference'] or 'Payment',
+                                    'date': p['date'],
+                                    'amount': p['amount'],
+                                    'status': p['status'],
+                                    'location': 'fallback-match',
+                                    'user_name': '',
+                                }
+                                if pid:
+                                    obj, created = AnthillPayment.objects.update_or_create(
+                                        sale=sale,
+                                        anthill_payment_id=pid,
+                                        defaults=defaults,
+                                    )
+                                else:
+                                    obj, created = AnthillPayment.objects.update_or_create(
+                                        sale=sale,
+                                        xero_invoice_id=inv['invoice_id'],
+                                        date=p['date'],
+                                        defaults=defaults,
+                                    )
+                                if created:
+                                    stats['payments_created'] += 1
+                                    stats['fallback_matched'] += 1
+                                else:
+                                    stats['payments_updated'] += 1
+
+                            if not inv['payments']:
+                                defaults = {
+                                    'source': 'xero',
+                                    'xero_invoice_id': inv['invoice_id'],
+                                    'xero_invoice_number': inv['invoice_number'],
+                                    'invoice_total': inv['total'],
+                                    'invoice_amount_due': inv['amount_due'],
+                                    'invoice_status': inv['status'],
+                                    'payment_type': 'Invoice Payment',
+                                    'date': None,
+                                    'amount': inv['amount_paid'],
+                                    'status': inv['status'],
+                                    'location': 'fallback-match',
+                                    'user_name': '',
+                                }
+                                obj, created = AnthillPayment.objects.update_or_create(
+                                    sale=sale,
+                                    xero_invoice_id=inv['invoice_id'],
+                                    date=None,
+                                    defaults=defaults,
+                                )
+                                if created:
+                                    stats['payments_created'] += 1
+                                    stats['fallback_matched'] += 1
+                                else:
+                                    stats['payments_updated'] += 1
+
+                        # Mark as matched so it isn't used again
+                        matched_invoice_ids.add(invoice_id)
+
+                        # Recalculate financials
+                        from stock_take.customer_views import _recalculate_sale_financials
+                        _recalculate_sale_financials(sale)
+                        break  # Only match one invoice per sale
+
         # Final summary
         self.stdout.write('')
         api_calls = xero_api.get_api_call_count()
@@ -451,6 +642,7 @@ class Command(BaseCommand):
             f'  Invoices found        : {stats["invoices_found"]}\n'
             f'  Payments created      : {stats["payments_created"]}\n'
             f'  Payments updated      : {stats["payments_updated"]}\n'
+            f'  Fallback matched      : {stats["fallback_matched"]}\n'
             f'  Stale records cleaned : {stats.get("stale_cleaned", 0)}\n'
             f'  Errors                : {stats["errors"]}\n'
             f'  Xero API calls used   : {api_calls}'
@@ -465,7 +657,8 @@ class Command(BaseCommand):
                 f"Processed {total} sales. "
                 f"Found invoices for {stats['sales_with_invoices']}. "
                 f"Created {stats['payments_created']}, "
-                f"updated {stats['payments_updated']} payment records."
+                f"updated {stats['payments_updated']} payment records. "
+                f"Fallback matched: {stats.get('fallback_matched', 0)}."
             )
             if error_notes:
                 notes += ' Errors: ' + '; '.join(error_notes[:5])

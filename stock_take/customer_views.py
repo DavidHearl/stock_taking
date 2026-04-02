@@ -880,6 +880,36 @@ def _match_credits_to_payments(payments_list):
     return max(total_paid, Decimal('0')), discount
 
 
+def _refresh_xero_cache_linked_sales(customer):
+    """Update linked_sales in the saved xero_invoices_data cache to reflect current DB state."""
+    if not customer.xero_invoices_data:
+        return
+    invoices = customer.xero_invoices_data.get('invoices', [])
+    if not invoices:
+        return
+    sales = list(
+        customer.anthill_sales
+        .exclude(activity_type__icontains='lead')
+        .exclude(activity_type__icontains='enquir')
+    )
+    sale_map = {s.pk: s.contract_number or str(s.anthill_activity_id or s.pk) for s in sales}
+    linked_payments = (
+        AnthillPayment.objects
+        .filter(sale__customer=customer)
+        .exclude(xero_invoice_id='')
+        .values_list('xero_invoice_id', 'sale_id')
+        .distinct()
+    )
+    invoice_sale_map = {}
+    for xid, sale_id in linked_payments:
+        label = sale_map.get(sale_id, str(sale_id))
+        invoice_sale_map.setdefault(xid, []).append(label)
+    for inv in invoices:
+        inv['linked_sales'] = invoice_sale_map.get(inv.get('invoice_id', ''), [])
+    customer.xero_invoices_data['invoices'] = invoices
+    customer.save(update_fields=['xero_invoices_data'])
+
+
 def _recalculate_sale_financials(sale):
     """Recompute discount, balance_payable and paid_in_full using credit-payment matching."""
     from decimal import Decimal
@@ -892,6 +922,208 @@ def _recalculate_sale_financials(sale):
     sale.balance_payable = new_balance
     sale.paid_in_full = new_balance <= Decimal('0')
     sale.save(update_fields=['discount', 'balance_payable', 'paid_in_full'])
+
+
+@login_required
+def xero_search_invoices(request, pk):
+    """Search Xero for invoices matching this sale's customer name."""
+    import re as _re
+    from decimal import Decimal
+    from .services.xero_api import find_contact_by_name, get_invoices_for_contact, search_contacts_by_name
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer'), pk=pk)
+    customer_name = (sale.customer.name if sale.customer else sale.customer_name) or ''
+    if not customer_name:
+        return JsonResponse({'success': False, 'error': 'No customer name on this sale'}, status=400)
+
+    # Find Xero contact
+    contact_id = find_contact_by_name(customer_name)
+    if not contact_id:
+        # Try partial search and return candidates
+        candidates = search_contacts_by_name(customer_name)
+        if not candidates:
+            return JsonResponse({'success': True, 'invoices': [], 'message': f'No Xero contact found for "{customer_name}"'})
+        # Use first candidate as best match
+        contact_id = candidates[0].get('ContactID', '')
+        if not contact_id:
+            return JsonResponse({'success': True, 'invoices': [], 'message': f'No Xero contact found for "{customer_name}"'})
+
+    invoices = get_invoices_for_contact(contact_id)
+
+    # Already-linked invoice IDs for this sale
+    linked_ids = set(sale.payments.values_list('xero_invoice_id', flat=True))
+
+    # Invoices linked to OTHER sales — map invoice_id -> sale info
+    other_links = (
+        AnthillPayment.objects
+        .exclude(sale=sale)
+        .exclude(xero_invoice_id='')
+        .values_list('xero_invoice_id', 'sale__contract_number', 'sale__anthill_activity_id')
+        .distinct()
+    )
+    other_sale_map = {}
+    for xid, contract, activity_id in other_links:
+        label = contract or str(activity_id or '')
+        if xid not in other_sale_map:
+            other_sale_map[xid] = label
+
+    def _parse_date(raw):
+        if not raw:
+            return None
+        ms = _re.search(r'/Date\((\d+)', raw)
+        if ms:
+            import datetime
+            ts = int(ms.group(1)) / 1000
+            return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime('%Y-%m-%d')
+        return raw[:10] if len(raw) >= 10 else raw
+
+    results = []
+    for inv in invoices:
+        inv_id = inv.get('InvoiceID', '')
+        status = inv.get('Status', '')
+        if status.upper() in ('DELETED', 'DRAFT'):
+            continue
+        total = Decimal(str(inv.get('Total', 0)))
+        amount_due = Decimal(str(inv.get('AmountDue', 0)))
+        amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
+        results.append({
+            'invoice_id': inv_id,
+            'invoice_number': inv.get('InvoiceNumber', ''),
+            'reference': inv.get('Reference', ''),
+            'date': _parse_date(inv.get('DateString') or inv.get('Date')),
+            'due_date': _parse_date(inv.get('DueDateString') or inv.get('DueDate')),
+            'total': str(total),
+            'amount_paid': str(amount_paid),
+            'amount_due': str(amount_due),
+            'status': status,
+            'already_linked': inv_id in linked_ids,
+            'linked_to_other': other_sale_map.get(inv_id, ''),
+        })
+
+    # Sort: authorised first, then by date desc
+    results.sort(key=lambda x: (0 if x['status'].upper() == 'AUTHORISED' else 1, x['date'] or ''), reverse=False)
+
+    return JsonResponse({'success': True, 'invoices': results, 'customer_name': customer_name})
+
+
+@login_required
+def xero_link_invoice(request, pk):
+    """Fetch a Xero invoice's payments and link them to this sale."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    from decimal import Decimal
+    from .services.xero_api import get_sale_payments_from_xero, get_invoice_with_payments
+    import re as _re, datetime, logging
+    logger = logging.getLogger(__name__)
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer'), pk=pk)
+
+    try:
+        data = json.loads(request.body)
+        invoice_id = data.get('invoice_id', '').strip()
+    except (json.JSONDecodeError, KeyError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    if not invoice_id:
+        return JsonResponse({'success': False, 'error': 'No invoice_id provided'}, status=400)
+
+    # Check if already linked
+    if sale.payments.filter(xero_invoice_id=invoice_id).exists():
+        return JsonResponse({'success': False, 'error': 'Invoice already linked to this sale'}, status=400)
+
+    try:
+        # Fetch full invoice detail with payments
+        inv = get_invoice_with_payments(invoice_id)
+        if not inv:
+            return JsonResponse({'success': False, 'error': 'Could not fetch invoice from Xero'}, status=400)
+
+        def _parse_xero_date(raw):
+            if not raw:
+                return None
+            ms = _re.search(r'/Date\((\d+)', raw)
+            if ms:
+                ts = int(ms.group(1)) / 1000
+                return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+            for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+                try:
+                    return datetime.datetime.strptime(raw[:10], fmt)
+                except ValueError:
+                    pass
+            return None
+
+        inv_id = inv.get('InvoiceID', '')
+        inv_number = inv.get('InvoiceNumber', '')
+        inv_total = Decimal(str(inv.get('Total', 0)))
+        inv_amount_due = Decimal(str(inv.get('AmountDue', 0)))
+        inv_status = inv.get('Status', '')
+        payments_list = inv.get('Payments', [])
+        created_count = 0
+
+        if payments_list:
+            for p in payments_list:
+                if (p.get('Status', '') or '').upper() == 'CANCELLED':
+                    continue
+                pid = p.get('PaymentID', '')
+                amount = Decimal(str(p.get('Amount', 0)))
+                date = _parse_xero_date(p.get('Date'))
+                ref = p.get('Reference', '') or 'Payment'
+
+                defaults = {
+                    'source': 'xero',
+                    'xero_invoice_id': inv_id,
+                    'xero_invoice_number': inv_number,
+                    'invoice_total': inv_total,
+                    'invoice_amount_due': inv_amount_due,
+                    'invoice_status': inv_status,
+                    'payment_type': ref,
+                    'date': date,
+                    'amount': amount,
+                    'status': inv_status,
+                    'location': 'manual-link',
+                    'user_name': '',
+                }
+
+                if pid:
+                    AnthillPayment.objects.update_or_create(
+                        sale=sale, anthill_payment_id=pid, defaults=defaults)
+                else:
+                    AnthillPayment.objects.update_or_create(
+                        sale=sale, xero_invoice_id=inv_id, date=date, defaults=defaults)
+                created_count += 1
+        else:
+            # No individual payments — create invoice-level summary
+            amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
+            AnthillPayment.objects.update_or_create(
+                sale=sale,
+                xero_invoice_id=inv_id,
+                date=None,
+                defaults={
+                    'source': 'xero',
+                    'xero_invoice_id': inv_id,
+                    'xero_invoice_number': inv_number,
+                    'invoice_total': inv_total,
+                    'invoice_amount_due': inv_amount_due,
+                    'invoice_status': inv_status,
+                    'payment_type': 'Invoice Payment',
+                    'date': None,
+                    'amount': amount_paid,
+                    'status': inv_status,
+                    'location': 'manual-link',
+                    'user_name': '',
+                })
+            created_count = 1
+
+        _recalculate_sale_financials(sale)
+
+        return JsonResponse({
+            'success': True,
+            'message': f'Linked {inv_number} — {created_count} payment(s) imported',
+            'payments_created': created_count,
+        })
+    except Exception as e:
+        logger.exception('xero_link_invoice failed for sale %s, invoice %s', pk, invoice_id)
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
 @login_required
@@ -1365,15 +1597,581 @@ def customer_manage_payments(request, pk):
             'payment_pct': payment_pct,
         })
 
+    # Refresh linked_sales in cached Xero data to reflect current DB state
+    _refresh_xero_cache_linked_sales(customer)
+
     context = {
         'customer': customer,
         'sales_data': sales_data,
         'grand_total_value': grand_total_value,
         'grand_total_paid': grand_total_paid,
         'grand_total_outstanding': grand_total_outstanding,
+        'saved_xero_data': customer.xero_invoices_data,
+        'saved_anthill_data': customer.anthill_payments_data,
+        'last_payment_search': customer.last_payment_search,
     }
 
     return render(request, 'stock_take/customer_manage_payments.html', context)
+
+
+@login_required
+def customer_xero_search(request, pk):
+    """Search Xero for all invoices belonging to this customer's contact."""
+    import re as _re
+    from decimal import Decimal
+    from .services.xero_api import find_contact_by_name, get_invoices_for_contact, search_contacts_by_name
+
+    customer = get_object_or_404(Customer, pk=pk)
+    customer_name = customer.name or ''
+    if not customer_name:
+        return JsonResponse({'success': False, 'error': 'No customer name'}, status=400)
+
+    # Find Xero contact
+    contact_id = find_contact_by_name(customer_name)
+    if not contact_id:
+        candidates = search_contacts_by_name(customer_name)
+        if not candidates:
+            return JsonResponse({'success': True, 'invoices': [], 'message': f'No Xero contact found for "{customer_name}"'})
+        contact_id = candidates[0].get('ContactID', '')
+        if not contact_id:
+            return JsonResponse({'success': True, 'invoices': [], 'message': f'No Xero contact found for "{customer_name}"'})
+
+    invoices = get_invoices_for_contact(contact_id)
+
+    # Build map: invoice_id -> sale contract_number for ALL of this customer's sales
+    sales = list(customer.anthill_sales.all())
+    sale_map = {s.pk: s.contract_number or str(s.anthill_activity_id or s.pk) for s in sales}
+
+    linked_payments = (
+        AnthillPayment.objects
+        .filter(sale__customer=customer)
+        .exclude(xero_invoice_id='')
+        .values_list('xero_invoice_id', 'sale_id')
+        .distinct()
+    )
+    # invoice_id -> list of sale labels
+    invoice_sale_map = {}
+    for xid, sale_id in linked_payments:
+        label = sale_map.get(sale_id, str(sale_id))
+        invoice_sale_map.setdefault(xid, []).append(label)
+
+    def _parse_date(raw):
+        if not raw:
+            return None
+        ms = _re.search(r'/Date\((\d+)', raw)
+        if ms:
+            import datetime
+            ts = int(ms.group(1)) / 1000
+            return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime('%Y-%m-%d')
+        return raw[:10] if len(raw) >= 10 else raw
+
+    results = []
+    for inv in invoices:
+        inv_id = inv.get('InvoiceID', '')
+        status = inv.get('Status', '')
+        if status.upper() in ('DELETED', 'DRAFT'):
+            continue
+        total = Decimal(str(inv.get('Total', 0)))
+        amount_due = Decimal(str(inv.get('AmountDue', 0)))
+        amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
+        linked_sales = invoice_sale_map.get(inv_id, [])
+        results.append({
+            'invoice_id': inv_id,
+            'invoice_number': inv.get('InvoiceNumber', ''),
+            'reference': inv.get('Reference', ''),
+            'date': _parse_date(inv.get('DateString') or inv.get('Date')),
+            'due_date': _parse_date(inv.get('DueDateString') or inv.get('DueDate')),
+            'total': str(total),
+            'amount_paid': str(amount_paid),
+            'amount_due': str(amount_due),
+            'status': status,
+            'linked_sales': linked_sales,
+        })
+
+    results.sort(key=lambda x: (0 if x['status'].upper() == 'AUTHORISED' else 1, x['date'] or ''), reverse=False)
+
+    # Auto-match: try to suggest the best sale for each unlinked invoice
+    # by matching the invoice Reference against sale contract numbers
+    contract_to_pk = {}
+    for s in sales:
+        cn = (s.contract_number or '').strip().upper()
+        if cn:
+            contract_to_pk[cn] = s.pk
+    for r in results:
+        if r['linked_sales']:
+            r['suggested_sale_pk'] = None
+            continue
+        ref = (r.get('reference') or '').strip().upper()
+        inv_num = (r.get('invoice_number') or '').strip().upper()
+        matched_pk = None
+        # Exact match on reference
+        if ref and ref in contract_to_pk:
+            matched_pk = contract_to_pk[ref]
+        # Reference contains contract number or vice versa
+        if not matched_pk and ref:
+            for cn, spk in contract_to_pk.items():
+                if cn in ref or ref in cn:
+                    matched_pk = spk
+                    break
+        # Try invoice number against contract
+        if not matched_pk and inv_num:
+            for cn, spk in contract_to_pk.items():
+                if cn in inv_num or inv_num in cn:
+                    matched_pk = spk
+                    break
+        r['suggested_sale_pk'] = matched_pk
+
+    # Return sales list so the JS can build a dropdown
+    sales_list_json = [{'pk': s.pk, 'label': sale_map[s.pk]} for s in sales]
+
+    # Persist to Customer for page-load display
+    from django.utils import timezone as _tz
+    customer.xero_invoices_data = {'invoices': results, 'customer_name': customer_name, 'sales': sales_list_json}
+    customer.last_payment_search = _tz.now()
+    customer.save(update_fields=['xero_invoices_data', 'last_payment_search'])
+
+    return JsonResponse({'success': True, 'invoices': results, 'customer_name': customer_name, 'sales': sales_list_json})
+
+
+@login_required
+def customer_xero_link(request, pk):
+    """Link a Xero invoice to a specific sale under this customer."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    from decimal import Decimal
+    from .services.xero_api import get_invoice_with_payments
+    import re as _re, datetime, logging
+    logger = logging.getLogger(__name__)
+
+    customer = get_object_or_404(Customer, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+        invoice_id = data.get('invoice_id', '').strip()
+        sale_pk = data.get('sale_pk')
+    except (json.JSONDecodeError, KeyError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    if not invoice_id or not sale_pk:
+        return JsonResponse({'success': False, 'error': 'invoice_id and sale_pk required'}, status=400)
+
+    sale = get_object_or_404(AnthillSale, pk=sale_pk, customer=customer)
+
+    if sale.payments.filter(xero_invoice_id=invoice_id).exists():
+        return JsonResponse({'success': False, 'error': 'Invoice already linked to this sale'}, status=400)
+
+    try:
+        inv = get_invoice_with_payments(invoice_id)
+        if not inv:
+            return JsonResponse({'success': False, 'error': 'Could not fetch invoice from Xero'}, status=400)
+
+        def _parse_xero_date(raw):
+            if not raw:
+                return None
+            ms = _re.search(r'/Date\((\d+)', raw)
+            if ms:
+                ts = int(ms.group(1)) / 1000
+                return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+            for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+                try:
+                    return datetime.datetime.strptime(raw[:10], fmt)
+                except ValueError:
+                    pass
+            return None
+
+        inv_id = inv.get('InvoiceID', '')
+        inv_number = inv.get('InvoiceNumber', '')
+        inv_total = Decimal(str(inv.get('Total', 0)))
+        inv_amount_due = Decimal(str(inv.get('AmountDue', 0)))
+        inv_status = inv.get('Status', '')
+        payments_list = inv.get('Payments', [])
+        created_count = 0
+
+        if payments_list:
+            for p in payments_list:
+                if (p.get('Status', '') or '').upper() == 'CANCELLED':
+                    continue
+                pid = p.get('PaymentID', '')
+                amount = Decimal(str(p.get('Amount', 0)))
+                date = _parse_xero_date(p.get('Date'))
+                ref = p.get('Reference', '') or 'Payment'
+
+                defaults = {
+                    'source': 'xero',
+                    'xero_invoice_id': inv_id,
+                    'xero_invoice_number': inv_number,
+                    'invoice_total': inv_total,
+                    'invoice_amount_due': inv_amount_due,
+                    'invoice_status': inv_status,
+                    'payment_type': ref,
+                    'date': date,
+                    'amount': amount,
+                    'status': inv_status,
+                    'location': 'manual-link',
+                    'user_name': '',
+                }
+
+                if pid:
+                    AnthillPayment.objects.update_or_create(
+                        sale=sale, anthill_payment_id=pid, defaults=defaults)
+                else:
+                    AnthillPayment.objects.update_or_create(
+                        sale=sale, xero_invoice_id=inv_id, date=date, defaults=defaults)
+                created_count += 1
+        else:
+            amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
+            AnthillPayment.objects.update_or_create(
+                sale=sale,
+                xero_invoice_id=inv_id,
+                date=None,
+                defaults={
+                    'source': 'xero',
+                    'xero_invoice_id': inv_id,
+                    'xero_invoice_number': inv_number,
+                    'invoice_total': inv_total,
+                    'invoice_amount_due': inv_amount_due,
+                    'invoice_status': inv_status,
+                    'payment_type': 'Invoice Payment',
+                    'date': None,
+                    'amount': amount_paid,
+                    'status': inv_status,
+                    'location': 'manual-link',
+                    'user_name': '',
+                })
+            created_count = 1
+
+        _recalculate_sale_financials(sale)
+
+        sale_label = sale.contract_number or str(sale.anthill_activity_id or sale.pk)
+        return JsonResponse({
+            'success': True,
+            'message': f'Linked {inv_number} to {sale_label} — {created_count} payment(s) imported',
+            'payments_created': created_count,
+        })
+    except Exception as e:
+        logger.exception('customer_xero_link failed for customer %s, invoice %s', pk, invoice_id)
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+def customer_anthill_scrape(request, pk):
+    """Scrape Anthill CRM for payments across all of this customer's sales."""
+    import os
+    import re
+    import requests as req_lib
+    from html.parser import HTMLParser
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    customer = get_object_or_404(Customer, pk=pk)
+    sales = list(
+        customer.anthill_sales
+        .exclude(activity_type__icontains='lead')
+        .exclude(activity_type__icontains='enquir')
+        .filter(anthill_activity_id__isnull=False)
+        .order_by('-activity_date')
+    )
+
+    if not sales:
+        return JsonResponse({'success': True, 'sales': []})
+
+    username = os.getenv('ANTHILL_USER_USERNAME')
+    password = os.getenv('ANTHILL_USER_PASSWORD')
+    subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+
+    if not username or not password:
+        return JsonResponse({
+            'success': False,
+            'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD are not set in the environment.',
+        })
+
+    base_url = f'https://{subdomain}.anthillcrm.com'
+
+    # Reusable HTML parser class
+    class _TableParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self._in_target = False
+            self._depth = 0
+            self._in_row = False
+            self._in_cell = False
+            self._current_row = []
+            self._current_cell_parts = []
+            self.rows = []
+            self.found = False
+
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            if tag == 'table':
+                classes = attr_dict.get('class', '')
+                if 'paymentsTable' in classes.split():
+                    self._in_target = True
+                    self._depth = 1
+                    return
+            if self._in_target:
+                if tag == 'table':
+                    self._depth += 1
+                elif tag == 'tr':
+                    self._in_row = True
+                    self._current_row = []
+                elif tag in ('td', 'th'):
+                    self._in_cell = True
+                    self._current_cell_parts = []
+
+        def handle_endtag(self, tag):
+            if not self._in_target:
+                return
+            if tag == 'table':
+                self._depth -= 1
+                if self._depth == 0:
+                    self._in_target = False
+                    self.found = True
+            elif tag == 'tr' and self._in_row:
+                self._in_row = False
+                self.rows.append(self._current_row)
+                self._current_row = []
+            elif tag in ('td', 'th') and self._in_cell:
+                self._in_cell = False
+                text = ' '.join(self._current_cell_parts).strip()
+                text = re.sub(r'\s+', ' ', text).strip()
+                self._current_row.append(text)
+                self._current_cell_parts = []
+
+        def handle_data(self, data):
+            if self._in_cell:
+                stripped = data.strip()
+                if stripped:
+                    self._current_cell_parts.append(stripped)
+
+    class _FormParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self._in_form = False
+            self.action = ''
+            self.fields = {}
+
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            if tag == 'form':
+                self._in_form = True
+                self.action = attr_dict.get('action', '')
+            elif tag == 'input' and self._in_form:
+                name = attr_dict.get('name', '').strip()
+                value = attr_dict.get('value', '')
+                if name:
+                    self.fields[name] = value
+
+        def handle_endtag(self, tag):
+            if tag == 'form':
+                self._in_form = False
+
+    # Create a session and authenticate once
+    session = req_lib.Session()
+    session.headers['User-Agent'] = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    )
+
+    def _is_auth_page(url):
+        u = url.lower()
+        return 'login' in u or 'signin' in u or '/sign-in' in u
+
+    authenticated = False
+
+    def ensure_authenticated(resp):
+        nonlocal authenticated
+        if authenticated:
+            return resp
+        if not (_is_auth_page(resp.url) or resp.status_code in (401, 403)):
+            authenticated = True
+            return resp
+
+        fp = _FormParser()
+        fp.feed(resp.text)
+
+        payload = dict(fp.fields)
+        login_post_url = resp.url
+
+        if fp.action:
+            action = fp.action.strip()
+            if action.startswith('http'):
+                login_post_url = action
+            elif action.startswith('/'):
+                login_post_url = base_url + action
+            else:
+                login_post_url = resp.url.rsplit('/', 1)[0] + '/' + action
+
+        u_filled = p_filled = False
+        for name in list(payload.keys()):
+            nl = name.lower()
+            if not u_filled and any(k in nl for k in ('user', 'email', 'login')) \
+                    and 'view' not in nl and 'event' not in nl:
+                payload[name] = username
+                u_filled = True
+            elif not p_filled and 'pass' in nl:
+                payload[name] = password
+                p_filled = True
+
+        if not u_filled:
+            payload['username'] = username
+        if not p_filled:
+            payload['password'] = password
+
+        login_resp = session.post(login_post_url, data=payload, timeout=20, allow_redirects=True)
+
+        if _is_auth_page(login_resp.url):
+            return None  # Login failed
+        authenticated = True
+        return login_resp
+
+    results = []
+    action_words = {'edit', 'delete', 'receipt', 'unconfirm', 'confirm', 'view'}
+
+    try:
+        for sale in sales:
+            if not sale.anthill_activity_id:
+                continue
+            sale_url = f'{base_url}/system/Orders/ViewOrder.aspx?OrderID={sale.anthill_activity_id}'
+            resp = session.get(sale_url, timeout=20, allow_redirects=True)
+
+            if not authenticated:
+                auth_result = ensure_authenticated(resp)
+                if auth_result is None:
+                    return JsonResponse({'success': False, 'error': 'Anthill login failed'})
+                resp = session.get(sale_url, timeout=20)
+
+            parser = _TableParser()
+            parser.feed(resp.text)
+
+            if not parser.found:
+                continue
+
+            sale_label = sale.contract_number or str(sale.anthill_activity_id)
+            payments = []
+            for row in parser.rows[1:]:
+                if len(row) < 5:
+                    continue
+                non_empty = [c for c in row if c]
+                if non_empty and all(c.lower() in action_words for c in non_empty):
+                    continue
+
+                payment_type = row[0]
+                date_str = row[1]
+                location = row[2]
+                user = row[3]
+                amount_str = row[4]
+                status = row[5].strip() if len(row) > 5 else ''
+
+                amount_clean = amount_str.replace('£', '').replace(',', '').strip()
+                if not payment_type or not amount_clean:
+                    continue
+
+                payments.append({
+                    'type': payment_type,
+                    'date': date_str,
+                    'location': location,
+                    'user': user,
+                    'amount': amount_clean,
+                    'status': status,
+                })
+
+            results.append({
+                'sale_pk': sale.pk,
+                'sale_label': sale_label,
+                'payments': payments,
+            })
+
+    except req_lib.exceptions.RequestException as exc:
+        return JsonResponse({'success': False, 'error': f'Network error contacting Anthill: {exc}'})
+
+    # Persist to Customer for page-load display
+    from django.utils import timezone as _tz
+    customer.anthill_payments_data = {'sales': results}
+    customer.last_payment_search = _tz.now()
+    customer.save(update_fields=['anthill_payments_data', 'last_payment_search'])
+
+    return JsonResponse({'success': True, 'sales': results})
+
+
+@login_required
+def customer_distribute_payments(request, pk):
+    """Distribute a total amount across multiple sales, creating payment records.
+
+    Expects JSON body:
+        {
+            "invoice_ids": [str, ...],     # Xero invoice IDs (for reference)
+            "distributions": [
+                {"sale_pk": int, "amount": str},
+                ...
+            ]
+        }
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    customer = get_object_or_404(Customer, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    distributions = data.get('distributions', [])
+    invoice_ids = data.get('invoice_ids', [])
+    if not distributions:
+        return JsonResponse({'success': False, 'error': 'No distributions provided'}, status=400)
+
+    from decimal import Decimal, InvalidOperation
+    from django.utils import timezone as _tz
+
+    invoice_ref = ', '.join(invoice_ids[:5])
+    if len(invoice_ids) > 5:
+        invoice_ref += f' (+{len(invoice_ids) - 5} more)'
+
+    created = 0
+    errors = []
+
+    for dist in distributions:
+        sale_pk = dist.get('sale_pk')
+        amount_str = dist.get('amount', '0')
+
+        try:
+            amount = Decimal(str(amount_str))
+        except (InvalidOperation, ValueError):
+            errors.append(f'Invalid amount for sale {sale_pk}')
+            continue
+
+        if amount <= 0:
+            continue
+
+        try:
+            sale = AnthillSale.objects.get(pk=sale_pk, customer=customer)
+        except AnthillSale.DoesNotExist:
+            errors.append(f'Sale {sale_pk} not found')
+            continue
+
+        AnthillPayment.objects.create(
+            sale=sale,
+            source='xero',
+            payment_type='Xero Distribution',
+            amount=amount,
+            date=_tz.now().date(),
+            location='distribute',
+            status='Confirmed',
+        )
+        created += 1
+        _recalculate_sale_financials(sale)
+
+    if errors:
+        return JsonResponse({
+            'success': created > 0,
+            'created': created,
+            'error': '; '.join(errors),
+        })
+
+    return JsonResponse({'success': True, 'created': created})
 
 
 @login_required
@@ -1526,5 +2324,39 @@ def delete_payment_from_manage(request, pk, payment_pk):
     sale = payment.sale
     payment.delete()
     _recalculate_sale_financials(sale)
+    _refresh_xero_cache_linked_sales(customer)
     return JsonResponse({'success': True})
+
+
+@login_required
+def bulk_delete_payments(request, pk):
+    """Delete multiple payments at once from the manage-payments page (POST).
+
+    Expects JSON body:
+        {"payment_pks": [int, ...]}
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    customer = get_object_or_404(Customer, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    pks = data.get('payment_pks', [])
+    if not pks:
+        return JsonResponse({'success': False, 'error': 'No payments specified'}, status=400)
+
+    payments = AnthillPayment.objects.filter(pk__in=pks, sale__customer=customer)
+    affected_sales = set(payments.values_list('sale_id', flat=True))
+    deleted_count = payments.count()
+    payments.delete()
+
+    for sale in AnthillSale.objects.filter(pk__in=affected_sales):
+        _recalculate_sale_financials(sale)
+
+    _refresh_xero_cache_linked_sales(customer)
+    return JsonResponse({'success': True, 'deleted': deleted_count})
 

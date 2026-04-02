@@ -534,7 +534,7 @@ def dashboard(request):
         .filter(sale_value__gt=0)
         .exclude(status='cancelled')
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
-        .values('sale_value', 'discount', 'total_paid')
+        .values('sale_value', 'discount', 'total_paid', 'customer_id', 'customer_name')
     )
     if contract_prefix:
         outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
@@ -545,10 +545,11 @@ def dashboard(request):
         for row in outstanding_rows
         if (row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
     ) or Decimal('0')
-    outstanding_debtor_count = sum(
-        1 for row in outstanding_rows
-        if (row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) > (row['total_paid'] or Decimal('0'))
-    )
+    outstanding_debtor_customers = set()
+    for row in outstanding_rows:
+        if (row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) > (row['total_paid'] or Decimal('0')):
+            outstanding_debtor_customers.add(row['customer_id'] or row['customer_name'])
+    outstanding_debtor_count = len(outstanding_debtor_customers)
 
     # Remaining balance of fits scheduled this week
     this_week_qs = (
@@ -916,7 +917,8 @@ def dashboard_outstanding_report(request):
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .order_by('-activity_date')
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'discount', 'activity_date', 'location', 'total_paid', 'fit_date')
+                'sale_value', 'discount', 'activity_date', 'location', 'total_paid', 'fit_date',
+                'customer_id', 'customer__name')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
@@ -968,35 +970,57 @@ def dashboard_outstanding_report(request):
                 'invoice_status': p['invoice_status'] or '',
             })
 
-    results = []
-    for row in sale_rows:
+    # ── Group by customer ──
+    def _build_sale_dict(row):
         sv = row['sale_value'] or Decimal('0')
         disc = row['discount'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
         real_paid = total_paid + disc
         effective_sv = sv - disc
         real_outstanding = effective_sv - real_paid
-        dt = row['activity_date']
         fd = row['fit_date']
-        results.append({
+        return {
             'pk': row['pk'],
             'sale_number': row['anthill_activity_id'],
-            'customer': row['customer_name'] or '-',
             'contract': row['contract_number'] or '',
             'location': row['location'] or '',
             'sale_value': float(sv),
             'paid': float(real_paid),
             'outstanding': float(real_outstanding),
-            'year': fd.year if fd else None,
             'fit_date': fd.strftime('%d/%m/%Y') if fd else '',
             'fit_date_iso': fd.isoformat() if fd else '',
+            'year': fd.year if fd else None,
             'payments': payments_by_sale.get(row['pk'], []),
-        })
-    # Sort by fit_date year descending (no fit date last), then outstanding descending
-    results.sort(key=lambda x: (0 if x['year'] is None else 1, -(x['year'] or 0), -x['outstanding']))
+        }
 
-    overpaid_results = []
+    customers = {}  # customer_key -> customer data
+    for row in sale_rows:
+        cust_id = row['customer_id']
+        cust_name = row['customer__name'] or row['customer_name'] or '-'
+        key = cust_id or cust_name  # group by customer PK if available, else name
+        if key not in customers:
+            customers[key] = {
+                'customer_id': cust_id,
+                'customer': cust_name,
+                'total_sale_value': 0,
+                'total_paid': 0,
+                'total_outstanding': 0,
+                'sales': [],
+            }
+        sale_dict = _build_sale_dict(row)
+        customers[key]['sales'].append(sale_dict)
+        customers[key]['total_sale_value'] += sale_dict['sale_value']
+        customers[key]['total_paid'] += sale_dict['paid']
+        customers[key]['total_outstanding'] += sale_dict['outstanding']
+
+    results = list(customers.values())
+    results.sort(key=lambda x: -x['total_outstanding'])
+
+    overpaid_customers = {}
     for row in overpaid_rows:
+        cust_id = row['customer_id']
+        cust_name = row['customer__name'] or row['customer_name'] or '-'
+        key = cust_id or cust_name
         sv = row['sale_value'] or Decimal('0')
         disc = row['discount'] or Decimal('0')
         total_paid = row['total_paid'] or Decimal('0')
@@ -1004,18 +1028,32 @@ def dashboard_outstanding_report(request):
         effective_sv = sv - disc
         overpay_amount = real_paid - effective_sv
         fd = row['fit_date']
-        overpaid_results.append({
+        if key not in overpaid_customers:
+            overpaid_customers[key] = {
+                'customer_id': cust_id,
+                'customer': cust_name,
+                'total_sale_value': 0,
+                'total_paid': 0,
+                'total_overpaid': 0,
+                'sales': [],
+            }
+        sale_dict = {
             'pk': row['pk'],
             'sale_number': row['anthill_activity_id'],
-            'customer': row['customer_name'] or '-',
             'contract': row['contract_number'] or '',
             'sale_value': float(sv),
             'paid': float(real_paid),
             'overpaid': float(overpay_amount),
             'fit_date': fd.strftime('%d/%m/%Y') if fd else '',
             'payments': payments_by_sale.get(row['pk'], []),
-        })
-    overpaid_results.sort(key=lambda x: -x['overpaid'])
+        }
+        overpaid_customers[key]['sales'].append(sale_dict)
+        overpaid_customers[key]['total_sale_value'] += sale_dict['sale_value']
+        overpaid_customers[key]['total_paid'] += sale_dict['paid']
+        overpaid_customers[key]['total_overpaid'] += sale_dict['overpaid']
+
+    overpaid_results = list(overpaid_customers.values())
+    overpaid_results.sort(key=lambda x: -x['total_overpaid'])
 
     return JsonResponse({
         'success': True, 'rows': results, 'count': len(results),
@@ -1554,7 +1592,7 @@ def dashboard_outstanding_xero_check_single(request):
 
 @login_required
 def dashboard_outstanding_pdf(request):
-    """Download the outstanding balance report as a PDF."""
+    """Download the outstanding balance report as a PDF (customer-grouped)."""
     from .pdf_generator import generate_outstanding_report_pdf
 
     profile = getattr(request.user, 'profile', None)
@@ -1572,15 +1610,18 @@ def dashboard_outstanding_pdf(request):
     qs = (
         AnthillSale.objects
         .filter(sale_value__gt=0)
+        .exclude(status='cancelled')
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .order_by('-activity_date')
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
-                'sale_value', 'discount', 'activity_date', 'total_paid')
+                'sale_value', 'discount', 'activity_date', 'total_paid',
+                'customer_id', 'customer__name')
     )
     if contract_prefix:
         qs = qs.filter(contract_number__istartswith=contract_prefix)
 
-    rows = []
+    # Build customer-grouped structure
+    customers = {}
     for row in qs:
         sv = row['sale_value'] or Decimal('0')
         disc = row['discount'] or Decimal('0')
@@ -1591,21 +1632,35 @@ def dashboard_outstanding_pdf(request):
         if real_outstanding < Decimal('10'):
             continue
         dt = row['activity_date']
-        rows.append({
-            'pk': row['pk'],
+        cust_id = row['customer_id']
+        cust_name = row['customer__name'] or row['customer_name'] or '-'
+        key = cust_id or cust_name
+        if key not in customers:
+            customers[key] = {
+                'customer': cust_name,
+                'total_sale_value': 0.0,
+                'total_paid': 0.0,
+                'total_outstanding': 0.0,
+                'sales': [],
+            }
+        sale_dict = {
             'sale_number': row['anthill_activity_id'],
-            'customer': row['customer_name'] or '-',
             'contract': row['contract_number'] or '',
             'sale_value': float(sv),
             'paid': float(real_paid),
             'outstanding': float(real_outstanding),
-            'year': dt.year if dt else None,
             'date': dt.strftime('%d/%m/%Y') if dt else '',
-        })
-    rows.sort(key=lambda x: (-(x['year'] or 0), -x['outstanding']))
+        }
+        customers[key]['sales'].append(sale_dict)
+        customers[key]['total_sale_value'] += sale_dict['sale_value']
+        customers[key]['total_paid'] += sale_dict['paid']
+        customers[key]['total_outstanding'] += sale_dict['outstanding']
+
+    customer_rows = list(customers.values())
+    customer_rows.sort(key=lambda x: -x['total_outstanding'])
 
     from datetime import date
-    buffer = generate_outstanding_report_pdf(rows, location_label=location_label)
+    buffer = generate_outstanding_report_pdf(customer_rows, location_label=location_label)
     filename = f'Outstanding_Balance_{location_label}_{date.today().strftime("%Y%m%d")}.pdf'
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'

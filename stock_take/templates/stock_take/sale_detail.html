@@ -248,8 +248,8 @@
                     <h3>Payment History</h3>
                     <div class="sale-payment-header-actions">
                         {% if payments %}<span class="tab-count">{{ payments|length }}</span>{% endif %}
-                        <button type="button" class="btn btn-sm btn-outline-success" onclick="openScrapeAnthillModal()">
-                            <i class="bi bi-cloud-download"></i> Scrape from Anthill
+                        <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal()">
+                            <i class="bi bi-search"></i> Search Payments
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAddManualModal()">
                             <i class="bi bi-plus-lg"></i> Add Manual Payment
@@ -438,25 +438,40 @@
                 </div>
             </dialog>
 
-            <!-- Sync from Anthill Approval Modal -->
-            <dialog id="scrapeAnthillModal">
+            <!-- Combined Search Payments Modal -->
+            <dialog id="searchPaymentsModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
-                        <i class="bi bi-cloud-download sale-modal-icon-green"></i>
-                        <span>Sync Payments from Anthill</span>
+                        <i class="bi bi-search sale-modal-icon-blue"></i>
+                        <span>Search Payments</span>
                     </div>
-                    <button class="manual-modal-close" onclick="document.getElementById('scrapeAnthillModal').close()"><i class="bi bi-x-lg"></i></button>
+                    <button class="manual-modal-close" onclick="document.getElementById('searchPaymentsModal').close()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
-                    <div id="scrapeModalBody"></div>
+                    <!-- Xero Section -->
+                    <div class="search-payments-section">
+                        <div class="search-payments-section-header">
+                            <i class="bi bi-cloud"></i> Xero Invoices
+                            <span id="xeroSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Searching&hellip;</span>
+                        </div>
+                        <div id="xeroSectionBody" class="search-payments-section-body"></div>
+                    </div>
+
+                    <!-- Anthill Section -->
+                    <div class="search-payments-section">
+                        <div class="search-payments-section-header">
+                            <i class="bi bi-building"></i> Anthill CRM
+                            <span id="anthillSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;</span>
+                        </div>
+                        <div id="anthillSectionBody" class="search-payments-section-body"></div>
+                    </div>
+
                     <div class="sale-scrape-footer">
-                        <button type="button" class="btn btn-sm btn-success" id="scrapeImportBtn" onclick="importScrapeSelected()" style="display:none;">
+                        <span id="searchPaymentsMsg" class="sale-modal-msg"></span>
+                        <button type="button" class="btn btn-sm btn-success" id="anthillImportBtn" onclick="importScrapeSelected()" style="display:none;">
                             <i class="bi bi-check-lg"></i> Import
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('scrapeAnthillModal').close()">
-                            Cancel
-                        </button>
-                        <span id="scrapeMsg" class="sale-modal-msg"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('searchPaymentsModal').close()">Close</button>
                     </div>
                 </div>
             </dialog>
@@ -510,21 +525,88 @@
             const SALE_PK = {{ sale.pk }};
             const ADD_MANUAL_URL = "{% url 'add_manual_payment' sale.pk %}";
             const SCRAPE_ANTHILL_URL = "{% url 'scrape_anthill_payments' sale.pk %}";
+            const XERO_SEARCH_URL = "{% url 'xero_search_invoices' sale.pk %}";
+            const XERO_LINK_URL = "{% url 'xero_link_invoice' sale.pk %}";
             const DELETE_MANUAL_BASE = "/sale/{{ sale.pk }}/payments/";
             const CSRF_TOKEN = '{{ csrf_token }}';
+            const SALE_OUTSTANDING = {{ outstanding|default:"0" }};
 
-            // ── Scrape-from-Anthill modal ────────────────────────────────────
-            function openScrapeAnthillModal() {
-                const modal = document.getElementById('scrapeAnthillModal');
-                const body = document.getElementById('scrapeModalBody');
-                const importBtn = document.getElementById('scrapeImportBtn');
-                const msg = document.getElementById('scrapeMsg');
+            // ── Combined Search Payments modal ─────────────────────────────
+            function openSearchPaymentsModal() {
+                const modal = document.getElementById('searchPaymentsModal');
+                const xeroBody = document.getElementById('xeroSectionBody');
+                const xeroStatus = document.getElementById('xeroSectionStatus');
+                const anthillBody = document.getElementById('anthillSectionBody');
+                const anthillStatus = document.getElementById('anthillSectionStatus');
+                const importBtn = document.getElementById('anthillImportBtn');
+                const msg = document.getElementById('searchPaymentsMsg');
 
-                body.innerHTML = '<div class="sale-scrape-loading"><i class="bi bi-arrow-repeat"></i><p>Fetching payments from Anthill&hellip;</p></div>';
+                xeroBody.innerHTML = '';
+                anthillBody.innerHTML = '';
+                xeroStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Searching&hellip;';
+                xeroStatus.className = 'search-section-status';
+                anthillStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;';
+                anthillStatus.className = 'search-section-status';
                 importBtn.style.display = 'none';
                 msg.textContent = '';
+                msg.className = 'sale-modal-msg';
                 modal.showModal();
 
+                // Fire both requests in parallel
+                // ── Xero search ──
+                fetch(XERO_SEARCH_URL)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        xeroBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+                        xeroStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+                        xeroStatus.className = 'search-section-status search-section-err';
+                        return;
+                    }
+                    const invoices = data.invoices || [];
+                    if (invoices.length === 0) {
+                        xeroBody.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> ' + escHtml(data.message || 'No invoices found') + '</p>';
+                        xeroStatus.innerHTML = '<i class="bi bi-check-circle"></i> 0 invoices';
+                        xeroStatus.className = 'search-section-status search-section-ok';
+                        return;
+                    }
+                    xeroStatus.innerHTML = '<i class="bi bi-check-circle"></i> ' + invoices.length + ' invoice(s)';
+                    xeroStatus.className = 'search-section-status search-section-ok';
+                    let html = '<div class="sale-modal-table-wrap"><table class="manual-entry-table xero-search-table"><thead><tr>';
+                    html += '<th>Invoice #</th><th>Reference</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th><th>Status</th><th></th>';
+                    html += '</tr></thead><tbody>';
+                    invoices.forEach(inv => {
+                        const statusClass = inv.status.toUpperCase() === 'PAID' ? 'sale-badge-paid' : inv.status.toUpperCase() === 'AUTHORISED' ? 'active' : 'inactive';
+                        const linked = inv.already_linked;
+                        const otherSale = inv.linked_to_other || '';
+                        html += '<tr class="' + (linked ? 'xero-row-linked' : otherSale ? 'xero-row-other' : '') + '">';
+                        html += '<td>' + escHtml(inv.invoice_number) + '</td>';
+                        html += '<td>' + escHtml(inv.reference || '-') + '</td>';
+                        html += '<td>' + escHtml(inv.date || '-') + '</td>';
+                        html += '<td>£' + parseFloat(inv.total).toFixed(2) + '</td>';
+                        html += '<td>£' + parseFloat(inv.amount_paid).toFixed(2) + '</td>';
+                        html += '<td>£' + parseFloat(inv.amount_due).toFixed(2) + '</td>';
+                        html += '<td><span class="customer-active-badge ' + statusClass + '">' + escHtml(inv.status) + '</span></td>';
+                        html += '<td>';
+                        if (linked) {
+                            html += '<span class="xero-linked-badge"><i class="bi bi-link-45deg"></i> Linked</span>';
+                        } else if (otherSale) {
+                            html += '<span class="xero-other-badge" title="Linked to ' + escHtml(otherSale) + '"><i class="bi bi-link-45deg"></i> ' + escHtml(otherSale) + '</span>';
+                        } else {
+                            html += '<button class="btn btn-sm btn-outline-success" onclick="linkXeroInvoice(\'' + inv.invoice_id + '\', this)"><i class="bi bi-link-45deg"></i> Link</button>';
+                        }
+                        html += '</td></tr>';
+                    });
+                    html += '</tbody></table></div>';
+                    xeroBody.innerHTML = html;
+                })
+                .catch(() => {
+                    xeroBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach Xero</p>';
+                    xeroStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+                    xeroStatus.className = 'search-section-status search-section-err';
+                });
+
+                // ── Anthill scrape ──
                 fetch(SCRAPE_ANTHILL_URL, {
                     method: 'POST',
                     headers: {'X-CSRFToken': CSRF_TOKEN},
@@ -532,38 +614,33 @@
                 .then(r => r.json())
                 .then(data => {
                     if (!data.success) {
-                        const d = data.diag || {};
-                        let diagHtml = '';
-                        if (d.final_url || d.page_title || d.raw_has_payments_table !== undefined) {
-                            diagHtml += '<details class="sale-scrape-diag">' +
-                                '<summary>Diagnostic info</summary>' +
-                                '<div class="sale-scrape-diag-body">';
-                            if (d.http_status)           diagHtml += 'HTTP status: <b>' + escHtml(String(d.http_status)) + '</b><br>';
-                            if (d.final_url)             diagHtml += 'Fetched URL: <b>' + escHtml(d.final_url) + '</b><br>';
-                            if (d.page_title)            diagHtml += 'Page title: <b>' + escHtml(d.page_title) + '</b><br>';
-                            diagHtml += '"paymentsTable" in HTML: <b>' + (d.raw_has_payments_table ? 'YES ✓' : 'NO ✗') + '</b><br>';
-                            if (d.html_sample) diagHtml += '<br><b>First 5000 chars of response:</b><br><span class="sale-scrape-diag-sample">' + escHtml(d.html_sample) + '</span>';
-                            diagHtml += '</div></details>';
-                        }
-                        body.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>' + diagHtml;
+                        anthillBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+                        anthillStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+                        anthillStatus.className = 'search-section-status search-section-err';
                         return;
                     }
                     if (!data.payments.length) {
-                        body.innerHTML = '<p class="sale-scrape-empty">No payments found on the Anthill page.</p>';
+                        anthillBody.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> No payments found on Anthill</p>';
+                        anthillStatus.innerHTML = '<i class="bi bi-check-circle"></i> 0 payments';
+                        anthillStatus.className = 'search-section-status search-section-ok';
                         return;
                     }
+                    anthillStatus.innerHTML = '<i class="bi bi-check-circle"></i> ' + data.payments.length + ' payment(s)';
+                    anthillStatus.className = 'search-section-status search-section-ok';
                     renderScrapeResults(data.payments);
-                    importBtn.style.display = '';
+                    if (SALE_OUTSTANDING > 0) {
+                        importBtn.style.display = '';
+                    }
                 })
                 .catch(() => {
-                    body.innerHTML = '<p class="sale-scrape-network-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach the server.</p>';
+                    anthillBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach Anthill</p>';
+                    anthillStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+                    anthillStatus.className = 'search-section-status search-section-err';
                 });
             }
 
             function renderScrapeResults(payments) {
-                const body = document.getElementById('scrapeModalBody');
-                let html = '<p class="sale-scrape-results-intro">Review the payments below and check the ones you want to import.</p>';
-                html += '<div class="sale-scrape-results-list">';
+                let html = '<div class="sale-scrape-results-list">';
                 payments.forEach((p, idx) => {
                     html += `<label class="sale-scrape-row scrape-row">`;
                     html += `<input type="checkbox" class="scrape-check sale-scrape-check" checked data-idx="${idx}">`;
@@ -577,14 +654,14 @@
                     html += `</div></label>`;
                 });
                 html += '</div>';
-                document.getElementById('scrapeModalBody').innerHTML = html;
+                document.getElementById('anthillSectionBody').innerHTML = html;
 
-                // Store payment data on the checkboxes for retrieval on import
                 document.querySelectorAll('.scrape-check').forEach(cb => {
                     cb._payment = payments[parseInt(cb.dataset.idx)];
                 });
 
-                document.getElementById('scrapeImportBtn').textContent = `Import ${payments.length} Payment${payments.length !== 1 ? 's' : ''}`;
+                const importBtn = document.getElementById('anthillImportBtn');
+                importBtn.textContent = `Import ${payments.length} Payment${payments.length !== 1 ? 's' : ''}`;
 
                 document.querySelectorAll('.scrape-check').forEach(cb => {
                     cb.addEventListener('change', updateScrapeImportBtn);
@@ -593,7 +670,7 @@
 
             function updateScrapeImportBtn() {
                 const checked = document.querySelectorAll('.scrape-check:checked');
-                const btn = document.getElementById('scrapeImportBtn');
+                const btn = document.getElementById('anthillImportBtn');
                 btn.disabled = checked.length === 0;
                 btn.textContent = `Import ${checked.length} Payment${checked.length !== 1 ? 's' : ''}`;
             }
@@ -611,8 +688,8 @@
                     status: cb._payment.status,
                 }));
 
-                const btn = document.getElementById('scrapeImportBtn');
-                const msg = document.getElementById('scrapeMsg');
+                const btn = document.getElementById('anthillImportBtn');
+                const msg = document.getElementById('searchPaymentsMsg');
                 btn.disabled = true;
                 msg.textContent = 'Saving…';
 
@@ -626,22 +703,22 @@
                     if (data.success) {
                         location.reload();
                     } else {
-                        msg.style.color = '#dc3545';
+                        msg.className = 'sale-modal-msg sale-modal-msg-err';
                         msg.textContent = 'Error: ' + (data.errors || [data.error]).join(', ');
                         btn.disabled = false;
                     }
                 })
                 .catch(() => {
-                    msg.style.color = '#dc3545';
+                    msg.className = 'sale-modal-msg sale-modal-msg-err';
                     msg.textContent = 'Network error. Please try again.';
                     btn.disabled = false;
                 });
             }
 
-            document.getElementById('scrapeAnthillModal').addEventListener('click', function(e) {
+            document.getElementById('searchPaymentsModal').addEventListener('click', function(e) {
                 if (e.target === this) this.close();
             });
-            // ── End scrape modal ─────────────────────────────────────────────
+            // ── End combined search modal ────────────────────────────────────
 
             function openAddManualModal() {
                 const modal = document.getElementById('addManualPaymentModal');
@@ -970,6 +1047,43 @@
                     notif.style.display = 'flex';
                     btn.disabled = false;
                     btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+                });
+            }
+
+            // ── Xero Link (used inside combined modal) ─────────────────────
+            function linkXeroInvoice(invoiceId, btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
+                const msg = document.getElementById('searchPaymentsMsg');
+                const row = btn.closest('tr');
+
+                fetch(XERO_LINK_URL, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({invoice_id: invoiceId}),
+                })
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(result => {
+                    if (result.success) {
+                        row.classList.add('xero-row-linked');
+                        btn.outerHTML = '<span class="xero-linked-badge"><i class="bi bi-check-circle"></i> Linked</span>';
+                        msg.textContent = result.message || 'Linked successfully';
+                        msg.className = 'sale-modal-msg sale-modal-msg-ok';
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Link';
+                        msg.textContent = result.error || 'Link failed';
+                        msg.className = 'sale-modal-msg sale-modal-msg-err';
+                    }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-link-45deg"></i> Link';
+                    msg.textContent = 'Error: ' + err.message;
+                    msg.className = 'sale-modal-msg sale-modal-msg-err';
                 });
             }
             </script>
