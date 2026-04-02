@@ -314,9 +314,14 @@
                 <span class="po-board-count-badge">{{ products.count }} items</span>
                 {% endif %}
             </h3>
-            <button class="btn btn-sm btn-add-product" onclick="toggleAddProductRow()">
-                <i class="bi bi-plus-lg"></i> Add Product
-            </button>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn btn-sm btn-add-freight" onclick="toggleFreightEdit()">
+                    <i class="bi bi-truck"></i> Freight{% if purchase_order.freight_cost %} · £{{ purchase_order.freight_cost|floatformat:2 }}{% endif %}
+                </button>
+                <button class="btn btn-sm btn-add-product" onclick="toggleAddProductRow()">
+                    <i class="bi bi-plus-lg"></i> Add Product
+                </button>
+            </div>
         </div>
 
         {% if boards_po %}
@@ -496,9 +501,26 @@
             </table>
         </div>
         
+        <!-- Freight inline edit -->
+        <div class="po-freight-edit-row" id="freight-edit-row" style="display:none;">
+            <div class="po-freight-inner">
+                <label>Freight Cost (£)</label>
+                <input type="number" id="freight-cost-input" step="0.01" min="0" value="{{ purchase_order.freight_cost|floatformat:2 }}" class="po-inline-input">
+                <button class="btn-inline-save" onclick="saveFreightCost()" title="Save"><i class="bi bi-check-lg"></i></button>
+                {% if purchase_order.freight_cost %}<button class="btn-inline-delete" onclick="removeFreightCost()" title="Remove freight"><i class="bi bi-trash"></i></button>{% endif %}
+                <button class="btn-inline-cancel" onclick="toggleFreightEdit()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+            </div>
+        </div>
+
         <!-- Totals -->
         <div class="po-totals">
             <div class="po-totals-table">
+                {% if purchase_order.freight_cost %}
+                <div class="po-totals-row">
+                    <div class="po-totals-label"><i class="bi bi-truck" style="margin-right:4px;"></i> Freight</div>
+                    <div class="po-totals-value" id="freight-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.freight_cost|floatformat:2|intcomma }}</div>
+                </div>
+                {% endif %}
                 {% if po_vat_rate is not None %}
                 {# ── VAT-aware breakdown ── #}
                 <div class="po-totals-row">
@@ -1395,6 +1417,24 @@ Sliderobes</textarea>
                 <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-color); font-size:0.85rem;">
                     <div style="min-width:0; flex:1;">
                         <div style="color:var(--text-primary);">{{ log.description }}</div>
+                        {% if log.event_type == 'po_split' and log.extra_data.moved_items %}
+                        <div style="margin-top:6px; padding:6px 8px; background:var(--bg-tertiary); border-radius:6px; font-size:0.78rem;">
+                            <div style="color:var(--text-secondary); margin-bottom:4px; font-weight:600;">
+                                <i class="bi bi-arrow-right-circle"></i> Moved to {{ log.extra_data.new_po }}:
+                            </div>
+                            {% for item in log.extra_data.moved_items %}
+                            <div style="color:var(--text-primary); padding:1px 0;">{{ item.sku }} — {{ item.name }} × {{ item.qty }}</div>
+                            {% endfor %}
+                            {% if log.extra_data.remaining_items %}
+                            <div style="color:var(--text-secondary); margin-top:6px; margin-bottom:4px; font-weight:600;">
+                                <i class="bi bi-box-seam"></i> Remaining on {{ log.extra_data.original_po }}:
+                            </div>
+                            {% for item in log.extra_data.remaining_items %}
+                            <div style="color:var(--text-primary); padding:1px 0;">{{ item.sku }} — {{ item.name }} × {{ item.qty }}</div>
+                            {% endfor %}
+                            {% endif %}
+                        </div>
+                        {% endif %}
                         <div style="color:var(--text-secondary); font-size:0.75rem; margin-top:2px;">
                             {{ log.timestamp|date:"d M Y H:i" }}
                             {% if log.user %} &middot; {{ log.user.get_full_name|default:log.user.username }}{% endif %}
@@ -1795,6 +1835,49 @@ function confirmReceivePO() {
         showNotification('Network error: ' + err.message, 'error');
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-box-arrow-in-down"></i> Receive';
+    });
+}
+
+/* ── Freight Cost ────────────────────────────────── */
+let freightEditVisible = false;
+
+function toggleFreightEdit() {
+    const row = document.getElementById('freight-edit-row');
+    freightEditVisible = !freightEditVisible;
+    row.style.display = freightEditVisible ? '' : 'none';
+    if (freightEditVisible) {
+        document.getElementById('freight-cost-input').focus();
+    }
+}
+
+function saveFreightCost() {
+    const val = parseFloat(document.getElementById('freight-cost-input').value) || 0;
+    fetch('{% url "po_save_freight" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({freight_cost: val})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to save freight cost');
+        }
+    });
+}
+
+function removeFreightCost() {
+    if (!confirm('Remove freight cost?')) return;
+    fetch('{% url "po_save_freight" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({freight_cost: 0})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) location.reload();
+        else alert(data.error || 'Failed to remove freight cost');
     });
 }
 

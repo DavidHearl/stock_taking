@@ -1090,6 +1090,25 @@ def purchase_order_create(request):
 
 
 @login_required
+def po_save_freight(request, po_id):
+    """Save freight cost on a purchase order (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    data = json.loads(request.body)
+    freight = data.get('freight_cost', 0)
+    try:
+        freight = round(float(freight), 2)
+    except (ValueError, TypeError):
+        freight = 0
+    if freight < 0:
+        freight = 0
+    po.freight_cost = freight
+    po.save(update_fields=['freight_cost'])
+    return JsonResponse({'ok': True, 'freight_cost': str(po.freight_cost)})
+
+
+@login_required
 def purchase_order_add_product(request, po_id):
     """Add a product line item to a purchase order (AJAX)"""
     if request.method != 'POST':
@@ -2028,14 +2047,29 @@ def purchase_order_split(request, po_id):
 
     # Collect product lines for the new split PO
     new_po_lines = []
+    # Track items for activity log
+    moved_items = []
+    remaining_items = []
 
     for product in products:
         pid = str(product.id)
         info = splits.get(pid, {})
         qty2 = Decimal(str(info.get('po2_qty', 0)))
+        qty1 = Decimal(str(info.get('po1_qty', 0)))
 
         if qty2 > 0:
             new_po_lines.append((product, qty2))
+            moved_items.append({
+                'sku': product.sku or '',
+                'name': product.name or '',
+                'qty': str(qty2),
+            })
+        if qty1 > 0:
+            remaining_items.append({
+                'sku': product.sku or '',
+                'name': product.name or '',
+                'qty': str(qty1),
+            })
 
     if not new_po_lines:
         return JsonResponse({'error': 'No quantities assigned to the new PO'}, status=400)
@@ -2155,15 +2189,27 @@ def purchase_order_split(request, po_id):
     po.save(update_fields=['total'])
 
     user_display = request.user.get_full_name() or request.user.username
+
+    # Build descriptive summary
+    moved_summary = ', '.join(f'{m["sku"]} ×{m["qty"]}' for m in moved_items)
+    remaining_summary = ', '.join(f'{r["sku"]} ×{r["qty"]}' for r in remaining_items)
+    desc_parts = [f'{user_display} split {po.display_number} → {new_display}.']
+    if moved_summary:
+        desc_parts.append(f'Moved: {moved_summary}.')
+    if remaining_summary:
+        desc_parts.append(f'Remaining: {remaining_summary}.')
+
     log_activity(
         user=request.user,
         event_type='po_split',
-        description=f'{user_display} split {po.display_number} → {new_display}.',
+        description=' '.join(desc_parts),
         purchase_order=po,
         extra_data={
             'original_po': po.display_number,
             'new_po': new_display,
             'new_po_wg_id': child.workguru_id,
+            'moved_items': moved_items,
+            'remaining_items': remaining_items,
         },
     )
 

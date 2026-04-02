@@ -969,6 +969,7 @@ class PurchaseOrder(models.Model):
     volume = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     weight = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     cis_deduction = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    freight_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Freight / shipping cost')
     
     # Delivery
     warehouse_id = models.IntegerField(null=True, blank=True)
