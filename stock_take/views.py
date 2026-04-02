@@ -5530,6 +5530,7 @@ def stock_list(request):
     import time
     from django.core.cache import cache
     from django.db.models import Max
+    from .models import Supplier
     
     start_time = time.time()
     
@@ -5561,7 +5562,7 @@ def stock_list(request):
     # Use only() to limit fields loaded from database
     items = StockItem.objects.select_related('category', 'stock_take_group', 'supplier').only(
         'id', 'sku', 'name', 'cost', 'quantity', 'tracking_type', 
-        'location', 'serial_or_batch', 'category__name', 'category__color',
+        'location', 'serial_or_batch', 'image', 'category__name', 'category__color',
         'stock_take_group__name', 'supplier__name'
     ).all()
     
@@ -5588,34 +5589,33 @@ def stock_list(request):
     # Calculate statistics - use count() to avoid loading all items
     all_items_query = StockItem.objects.all()
     
-    # Separate items by stock status (exclude non-stock items from low/zero)
-    in_stock_items = list(items.filter(
-        quantity__gte=10
-    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group', 'supplier'))
+    # Single sorted list with annotated stock status
+    all_stock_items = list(items.select_related('category', 'stock_take_group', 'supplier').order_by('sku'))
     
-    low_stock_items = list(items.filter(
-        quantity__gte=1, 
-        quantity__lt=10
-    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group', 'supplier'))
-    
-    zero_quantity_items = list(items.filter(
-        quantity=0
-    ).exclude(tracking_type='non-stock').select_related('category', 'stock_take_group', 'supplier'))
-    
-    # Non-stock items (separate tab)
-    non_stock_items = list(items.filter(
-        tracking_type='non-stock'
-    ).select_related('category', 'stock_take_group', 'supplier'))
+    # Annotate each item with stock_status for template icon rendering
+    in_stock_count = 0
+    low_stock_count = 0
+    zero_quantity_count = 0
+    non_stock_count = 0
+    for item in all_stock_items:
+        if item.tracking_type == 'non-stock':
+            item.stock_status = 'non-stock'
+            non_stock_count += 1
+        elif item.quantity >= 10:
+            item.stock_status = 'in-stock'
+            in_stock_count += 1
+        elif item.quantity >= 1:
+            item.stock_status = 'low-stock'
+            low_stock_count += 1
+        else:
+            item.stock_status = 'out-of-stock'
+            zero_quantity_count += 1
     
     # Calculate total value from the items we already have
-    total_value = sum(item.cost * item.quantity for item in in_stock_items + low_stock_items + zero_quantity_items + non_stock_items)
+    total_value = sum(item.cost * item.quantity for item in all_stock_items)
     
-    # Use counts from the lists we already have
-    total_items_count = len(in_stock_items) + len(low_stock_items) + len(zero_quantity_items) + len(non_stock_items)
-    zero_quantity_count = len(zero_quantity_items)
-    low_stock_count = len(low_stock_items)
-    in_stock_count = len(in_stock_items)
-    non_stock_count = len(non_stock_items)
+    # Use counts from the list we already have
+    total_items_count = len(all_stock_items)
     
     # Items needing stock takes (convert to list for caching)
     items_needing_stock_take = list(items.filter(
@@ -5628,16 +5628,14 @@ def stock_list(request):
     # Get filter options and convert to list for caching
     categories = list(Category.objects.all())
     stock_take_groups = list(StockTakeGroup.objects.select_related('category').all())
+    suppliers = list(Supplier.objects.filter(is_active=True).order_by('name'))
     
     # Add performance timing
     end_time = time.time()
     query_time = end_time - start_time
     
     context = {
-        'in_stock_items': in_stock_items,
-        'low_stock_items': low_stock_items,
-        'zero_quantity_items': zero_quantity_items,
-        'non_stock_items': non_stock_items,
+        'all_stock_items': all_stock_items,
         'items_needing_stock_take': items_needing_stock_take,
         'latest_import': latest_import,
         'import_history': import_history,
@@ -5649,6 +5647,7 @@ def stock_list(request):
         'non_stock_count': non_stock_count,
         'categories': categories,
         'stock_take_groups': stock_take_groups,
+        'suppliers': suppliers,
         'query_time': f'{query_time:.3f}',
         'current_filters': {
             'search': search,
@@ -5861,6 +5860,49 @@ def update_product_quantity(request):
         })
     except StockItem.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Product not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+
+@login_required
+def bulk_update_products(request):
+    """Bulk update selected products' supplier, category, or tracking type"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+    try:
+        import json
+        from .models import Supplier
+        data = json.loads(request.body)
+        item_ids = data.get('item_ids', [])
+        if not item_ids:
+            return JsonResponse({'success': False, 'error': 'No items selected'}, status=400)
+        
+        # Validate IDs are integers
+        item_ids = [int(i) for i in item_ids]
+        items = StockItem.objects.filter(id__in=item_ids)
+        
+        update_fields = {}
+        if data.get('supplier_id'):
+            supplier = Supplier.objects.get(id=int(data['supplier_id']))
+            update_fields['supplier'] = supplier
+        if data.get('category_id'):
+            category = Category.objects.get(id=int(data['category_id']))
+            update_fields['category'] = category
+        if data.get('tracking_type'):
+            if data['tracking_type'] in ('stock', 'non-stock', 'not-classified'):
+                update_fields['tracking_type'] = data['tracking_type']
+        
+        if not update_fields:
+            return JsonResponse({'success': False, 'error': 'No fields to update'}, status=400)
+        
+        count = items.update(**update_fields)
+        
+        # Clear cache
+        from django.core.cache import cache
+        cache.clear()
+        
+        return JsonResponse({'success': True, 'updated': count})
+    except (Supplier.DoesNotExist, Category.DoesNotExist):
+        return JsonResponse({'success': False, 'error': 'Invalid supplier or category'}, status=400)
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=400)
 

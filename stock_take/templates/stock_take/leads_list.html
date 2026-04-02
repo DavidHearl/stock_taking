@@ -10,6 +10,59 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
 <link rel="stylesheet" href="{% static 'css/ordering.css' %}">
+<style>
+    /* Undo ordering.css viewport-lock — this page scrolls normally */
+    .main-content {
+        height: auto;
+        overflow: visible;
+        display: block;
+    }
+    .content-wrapper {
+        display: block;
+        overflow: visible;
+    }
+
+    /* Force table to fill container width */
+    .customers-table {
+        table-layout: fixed;
+    }
+    .customers-table-container {
+        overflow-x: hidden;
+    }
+
+    .phone-cell {
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+    }
+
+    /* Checkbox column width */
+    .customers-table th:first-child,
+    .customers-table td:first-child { width: 40px; }
+    /* Actions column width */
+    .customers-table th:last-child,
+    .customers-table td:last-child { width: 100px; }
+
+    /* Checkbox vertical alignment */
+    .checkbox-col {
+        vertical-align: middle;
+    }
+    .checkbox-col input[type="checkbox"] {
+        display: block;
+        margin: 0 auto;
+    }
+
+    /* Delete modal warning icon */
+    .delete-modal-icon {
+        font-size: 2.5rem;
+        color: var(--danger-color);
+        margin-bottom: 12px;
+    }
+    .delete-modal-name {
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -64,7 +117,7 @@
                         <a href="mailto:{{ lead.email }}" class="customer-email">{{ lead.email }}</a>
                         {% else %}-{% endif %}
                     </td>
-                    <td>{{ lead.phone|default:"-" }}</td>
+                    <td class="phone-cell">{{ lead.phone|default:"-" }}</td>
                     <td>{{ lead.city|default:"-" }}</td>
                     <td>
                         {% if lead.source %}
@@ -222,6 +275,25 @@
     </div>
 </div>
 
+<!-- Delete Confirmation Modal -->
+<div class="modal-overlay" id="delete-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-exclamation-triangle"></i> Delete Contact</h2>
+            <button class="modal-close" onclick="document.getElementById('delete-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" style="text-align: center; padding: 30px 20px;">
+            <div class="delete-modal-icon"><i class="bi bi-trash"></i></div>
+            <p>Are you sure you want to delete <span class="delete-modal-name" id="delete-contact-name"></span>?</p>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px;">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('delete-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-cancel" style="background: var(--danger-color); color: white; border-color: var(--danger-color);" id="confirm-delete-btn">Delete</button>
+        </div>
+    </div>
+</div>
+
 <script>
 // --- Client-side search ---
 const searchInput = document.getElementById('lead-search');
@@ -309,24 +381,32 @@ function executeMerge() {
 }
 
 function deleteLead(id, name) {
-    if (!confirm('Delete contact "' + name + '"?')) return;
+    const modal = document.getElementById('delete-modal');
+    document.getElementById('delete-contact-name').textContent = name;
+    modal.style.display = 'flex';
 
-    fetch('/lead/' + id + '/delete/', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            clearSelectionAndReload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(err => alert('Network error: ' + err.message));
+    const confirmBtn = document.getElementById('confirm-delete-btn');
+    const newBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+    newBtn.addEventListener('click', function() {
+        modal.style.display = 'none';
+        fetch('/contact/' + id + '/delete/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                clearSelectionAndReload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(err => alert('Network error: ' + err.message));
+    });
 }
 
 function toggleSelectAll(el) {

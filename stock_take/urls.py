@@ -54,6 +54,7 @@ urlpatterns = [
     path('export/', views.export_csv, name='export_csv'),
     path('update/<int:item_id>/', views.update_item, name='update_item'),
     path('update-product-quantity/', views.update_product_quantity, name='update_product_quantity'),
+    path('bulk-update-products/', views.bulk_update_products, name='bulk_update_products'),
     
     # Purchase Invoices (inbound / supplier invoices)
     path('purchase-invoices/', purchase_invoices_list, name='purchase_invoices_list'),
@@ -166,15 +167,15 @@ urlpatterns = [
     path('customer/<int:pk>/manage-payments/<int:payment_pk>/split/', cross_sale_split_payment, name='cross_sale_split_payment'),
     path('customer/<int:pk>/manage-payments/<int:payment_pk>/delete/', delete_payment_from_manage, name='delete_payment_from_manage'),
     
-    # Leads
-    path('leads/', leads_list, name='leads_list'),
-    path('leads/create/', lead_create, name='lead_create'),
-    path('lead/<int:pk>/', lead_detail, name='lead_detail'),
-    path('lead/<int:pk>/save/', lead_save, name='lead_save'),
-    path('lead/<int:pk>/delete/', lead_delete, name='lead_delete'),
-    path('lead/<int:pk>/convert/', lead_convert, name='lead_convert'),
-    path('leads/bulk-delete/', leads_bulk_delete, name='leads_bulk_delete'),
-    path('leads/merge/', lead_merge, name='lead_merge'),
+    # Contacts
+    path('contacts/', leads_list, name='leads_list'),
+    path('contacts/create/', lead_create, name='lead_create'),
+    path('contact/<int:pk>/', lead_detail, name='lead_detail'),
+    path('contact/<int:pk>/save/', lead_save, name='lead_save'),
+    path('contact/<int:pk>/delete/', lead_delete, name='lead_delete'),
+    path('contact/<int:pk>/convert/', lead_convert, name='lead_convert'),
+    path('contacts/bulk-delete/', leads_bulk_delete, name='leads_bulk_delete'),
+    path('contacts/merge/', lead_merge, name='lead_merge'),
     
     # Import management
     path('import-history/', views.import_history, name='import_history'),
