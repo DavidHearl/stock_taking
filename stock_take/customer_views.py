@@ -240,6 +240,21 @@ def customer_detail(request, pk):
     # Sort descending by date for display
     sales_data.sort(key=lambda x: x['sale'].activity_date or _min_dt, reverse=True)
 
+    # Compute per-row outstanding and overall payment totals
+    from decimal import Decimal
+    total_sale_value = Decimal('0')
+    total_paid = Decimal('0')
+    for entry in sales_data:
+        sale = entry['sale']
+        sv = Decimal(str(sale.sale_value or 0))
+        pt = Decimal(str(sale.payments_total or 0))
+        entry['outstanding'] = sv - pt
+        entry['paid_percent'] = round(float(pt) / float(sv) * 100) if sv else 0
+        total_sale_value += sv
+        total_paid += pt
+    total_outstanding = total_sale_value - total_paid
+    payment_percent = round(float(total_paid) / float(total_sale_value) * 100) if total_sale_value else 0
+
     # Get invoices linked to this customer
     invoices = Invoice.objects.filter(customer=customer).order_by('-date')
 
@@ -266,6 +281,10 @@ def customer_detail(request, pk):
         'invoices': invoices,
         'invoice_count': invoices.count(),
         'lead': lead,
+        'total_sale_value': total_sale_value,
+        'total_paid': total_paid,
+        'total_outstanding': total_outstanding,
+        'payment_percent': payment_percent,
     }
 
     return render(request, 'stock_take/customer_detail.html', context)

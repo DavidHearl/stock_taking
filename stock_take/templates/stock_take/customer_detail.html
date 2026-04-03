@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}{{ customer.name }} - Customer{% endblock %}
 
@@ -59,7 +59,7 @@
                                 <div>
                                     <div class="field-label">Email</div>
                                     <div class="field-value view-val">
-                                        {% if customer.email %}<a href="mailto:{{ customer.email }}">{{ customer.email }}</a>{% else %}-{% endif %}
+                                        {% if customer.email %}<a href="mailto:{{ customer.email }}" class="cd-email-link">{{ customer.email }}</a>{% else %}-{% endif %}
                                     </div>
                                     <input class="customer-edit-input edit-val" data-field="email" type="email" value="{{ customer.email|default:'' }}" style="display:none;">
                                 </div>
@@ -123,7 +123,7 @@
                                 </div>
                                 <div>
                                     <div class="field-label">Credit Limit</div>
-                                    <div class="field-value view-val">£{{ customer.credit_limit|floatformat:2 }}</div>
+                                    <div class="field-value view-val">£{{ customer.credit_limit|floatformat:2|intcomma }}</div>
                                     <input class="customer-edit-input edit-val" data-field="credit_limit" type="number" step="0.01" value="{{ customer.credit_limit }}" style="display:none;">
                                 </div>
                                 <div>
@@ -143,7 +143,7 @@
                 </div>
             </div>
 
-            <!-- Sales & Orders Card (tree hierarchy: Lead → Sale → Order) -->
+            <!-- Sales & Orders Card -->
             <div class="card">
                 <div class="card-header">
                     <h3>Sales &amp; Orders
@@ -157,84 +157,50 @@
                 </div>
                 <div class="card-body">
                     {% if sales_data %}
-                    <div class="cd-tree">
-
-                        <div class="cd-sales-group">
+                    <table class="cd-sales-table">
+                        <thead>
+                            <tr>
+                                <th>Contract</th>
+                                <th>Type</th>
+                                <th>Date</th>
+                                <th class="text-right">Value</th>
+                                <th class="text-right">Paid</th>
+                                <th class="text-right">Outstanding</th>
+                                <th class="text-right">%</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             {% for entry in sales_data %}
-                            {% with sale=entry.sale lead_activity=entry.lead_activity %}
-                            <div class="cd-sale-item" id="cd-sale-{{ sale.pk }}">
-
-                                <!-- Sale node (clickable header) -->
-                                <div class="cd-sale-header" onclick="toggleSale({{ sale.pk }})">
-                                    <div class="cd-sale-icon"><i class="bi bi-tag"></i></div>
-                                    <div class="cd-sale-main">
-                                        <div class="cd-sale-contract">
-                                            <a href="{% url 'sale_detail' sale.pk %}" onclick="event.stopPropagation()">
-                                                {{ sale.contract_number|default:sale.anthill_activity_id }}
-                                            </a>
-                                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="cd-anthill-link" onclick="event.stopPropagation()" title="Open in Anthill">
-                                                <i class="bi bi-box-arrow-up-right"></i>
-                                            </a>
-                                        </div>
-                                        <div class="cd-sale-sub">{{ sale.activity_type|default:"" }}{% if sale.location %} &middot; {{ sale.location }}{% endif %}</div>
-                                    </div>
-                                    <div class="cd-sale-date">{{ sale.activity_date|date:"d M Y"|default:"-" }}</div>
-                                    <div class="cd-sale-value-col">
-                                        <div class="cd-sale-value">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
-                                        {% if sale.payments_total %}<div class="cd-sale-paid">£{{ sale.payments_total|floatformat:2 }} paid</div>{% endif %}
-                                    </div>
+                            {% with sale=entry.sale %}
+                            <tr class="cd-sale-row">
+                                <td>
+                                    <a href="{% url 'sale_detail' sale.pk %}" class="cd-contract-link">
+                                        {{ sale.contract_number|default:sale.anthill_activity_id }}
+                                    </a>
+                                </td>
+                                <td class="cd-type-cell">{{ sale.activity_type|default:"-" }}</td>
+                                <td class="cd-date-cell">{{ sale.activity_date|date:"d M Y"|default:"-" }}</td>
+                                <td class="text-right cd-money">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                                <td class="text-right cd-money cd-paid">{% if sale.payments_total %}£{{ sale.payments_total|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                                <td class="text-right cd-money {% if entry.outstanding > 0 %}cd-outstanding{% endif %}">{% if sale.sale_value %}£{{ entry.outstanding|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                                <td class="text-right cd-pct {% if entry.paid_percent >= 100 %}cd-paid{% elif entry.paid_percent > 0 %}cd-pct-partial{% endif %}">{% if sale.sale_value %}{{ entry.paid_percent }}%{% else %}-{% endif %}</td>
+                                <td>
                                     <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
                                         {{ sale.status|default:"unknown" }}
                                     </span>
-                                    <div class="cd-chevron"><i class="bi bi-chevron-right"></i></div>
-                                </div>
-
-                                <!-- Children (expanded): Source Lead Activity + Order node -->
-                                <div class="cd-children">
-                                    {% if lead_activity %}
-                                    <div class="cd-lead-activity-node">
-                                        <div class="cd-la-icon"><i class="bi bi-person-raised-hand"></i></div>
-                                        <div class="cd-la-main">
-                                            <div class="cd-la-number">
-                                                <a href="{% url 'sale_detail' lead_activity.pk %}" onclick="event.stopPropagation()">
-                                                    {{ lead_activity.anthill_activity_id }}
-                                                </a>
-                                            </div>
-                                            <div class="cd-la-sub">{{ lead_activity.activity_type }}{% if lead_activity.location %} &middot; {{ lead_activity.location }}{% endif %}</div>
-                                        </div>
-                                        <div class="cd-la-date">{{ lead_activity.activity_date|date:"d M Y"|default:"-" }}</div>
-                                        <div class="cd-la-value">{% if lead_activity.sale_value %}£{{ lead_activity.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
-                                        <span class="customer-active-badge {% if lead_activity.status == 'converted' %}active{% elif lead_activity.status == 'dead' or lead_activity.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
-                                            {{ lead_activity.status|default:"unknown" }}
-                                        </span>
-                                    </div>
-                                    {% endif %}
-                                    {% if sale.order %}
-                                    <div class="cd-order-node">
-                                        <div class="cd-order-icon"><i class="bi bi-folder2-open"></i></div>
-                                        <div class="cd-order-main">
-                                            <div class="cd-order-number">
-                                                <a href="{% url 'order_details' sale.order.id %}">{{ sale.order.sale_number }}</a>
-                                            </div>
-                                            <div class="cd-order-sub">{% if sale.order.designer %}{{ sale.order.designer.name }}{% endif %}</div>
-                                        </div>
-                                        <div class="cd-order-date">{% if sale.order.fit_date %}Fit {{ sale.order.fit_date|date:"d M Y" }}{% else %}-{% endif %}</div>
-                                        <div class="cd-order-value">{% if sale.order.total_value_exc_vat %}£{{ sale.order.total_value_exc_vat|floatformat:2 }}{% else %}-{% endif %}</div>
-                                        <span class="customer-active-badge {% if sale.order.job_finished %}active{% else %}inactive{% endif %}">
-                                            {% if sale.order.job_finished %}Finished{% else %}Active{% endif %}
-                                        </span>
-                                    </div>
-                                    {% elif not lead_activity %}
-                                    <div class="cd-no-child">No linked order</div>
-                                    {% endif %}
-                                </div>
-
-                            </div>
+                                </td>
+                                <td class="cd-ext-link-cell">
+                                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="cd-anthill-link" title="Open in Anthill">
+                                        <i class="bi bi-box-arrow-up-right"></i>
+                                    </a>
+                                </td>
+                            </tr>
                             {% endwith %}
                             {% endfor %}
-                        </div>
-
-                    </div>
+                        </tbody>
+                    </table>
                     {% else %}
                     <div style="text-align:center; padding:32px 0; color:var(--text-secondary);">
                         <i class="bi bi-bag" style="font-size:2rem; display:block; margin-bottom:8px; opacity:0.35;"></i>
@@ -266,8 +232,8 @@
                             <tr style="border-bottom:1px solid var(--border-color);">
                                 <td style="padding:8px 16px;">{{ inv.invoice_number }}</td>
                                 <td style="padding:8px 16px;">{{ inv.date|date:"d/m/Y"|default:"-" }}</td>
-                                <td style="padding:8px 16px; text-align:right;">£{{ inv.total|floatformat:2 }}</td>
-                                <td style="padding:8px 16px; text-align:right;">£{{ inv.amount_outstanding|floatformat:2 }}</td>
+                                <td style="padding:8px 16px; text-align:right;">£{{ inv.total|floatformat:2|intcomma }}</td>
+                                <td style="padding:8px 16px; text-align:right;">£{{ inv.amount_outstanding|floatformat:2|intcomma }}</td>
                                 <td style="padding:8px 16px;">
                                     <span class="customer-active-badge {% if inv.payment_status == 'paid' %}active{% elif inv.is_overdue %}danger{% else %}inactive{% endif %}">
                                         {% if inv.is_overdue %}Overdue{% else %}{{ inv.get_payment_status_display }}{% endif %}
@@ -285,6 +251,38 @@
 
         <!-- ===== SIDEBAR COLUMN ===== -->
         <div class="sidebar-column">
+
+            <!-- Payment Overview Card -->
+            <div class="card cd-payment-overview" style="margin-bottom:24px;">
+                <div class="card-header">
+                    <h3>Payment Overview</h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="cd-po-rows">
+                        <div class="cd-po-row">
+                            <span class="cd-po-label">Total Sale Value</span>
+                            <span class="cd-po-value">£{{ total_sale_value|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="cd-po-row">
+                            <span class="cd-po-label">Total Paid</span>
+                            <span class="cd-po-value cd-po-success">£{{ total_paid|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="cd-po-divider"></div>
+                        <div class="cd-po-row cd-po-row-total">
+                            <span class="cd-po-label">Outstanding</span>
+                            <span class="cd-po-value {% if total_outstanding > 0 %}cd-po-danger{% else %}cd-po-success{% endif %}">£{{ total_outstanding|floatformat:2|intcomma }}</span>
+                        </div>
+                    </div>
+                    {% if total_sale_value %}
+                    <div class="cd-po-bar-wrap">
+                        <div class="cd-po-bar">
+                            <div class="cd-po-bar-fill" style="width:{{ payment_percent }}%;"></div>
+                        </div>
+                        <div class="cd-po-bar-label">{{ payment_percent }}% collected</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
 
             <!-- Contacts Card -->
             {% if contacts %}
