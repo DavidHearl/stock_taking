@@ -12,6 +12,7 @@ from .about_views import about_page
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
+from .gallery_views import gallery, gallery_upload, gallery_delete, gallery_update, gallery_customer_orders, gallery_rotate
 from .cad_views import cad_db_upload, cad_db_download, cad_db_status
 from .profile_views import user_profile, user_profile_save, user_change_password
 from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact
@@ -426,6 +427,14 @@ urlpatterns = [
     path('claims/<int:doc_id>/delete/', claim_delete, name='claim_delete'),
     path('claims/<int:doc_id>/download/', claim_file_download, name='claim_file_download'),
     path('claims/download/<path:group_key>/', claim_download_zip, name='claim_download_zip'),
+
+    # Gallery
+    path('gallery/', gallery, name='gallery'),
+    path('gallery/upload/', gallery_upload, name='gallery_upload'),
+    path('gallery/<int:image_id>/delete/', gallery_delete, name='gallery_delete'),
+    path('gallery/<int:image_id>/update/', gallery_update, name='gallery_update'),
+    path('gallery/<int:image_id>/rotate/', gallery_rotate, name='gallery_rotate'),
+    path('gallery/customer/<int:customer_id>/orders/', gallery_customer_orders, name='gallery_customer_orders'),
 
     # Xero Integration
     path('xero/connect/', xero_connect, name='xero_connect'),

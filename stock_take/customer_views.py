@@ -810,7 +810,11 @@ def sale_detail(request, pk):
     """Display detailed view of a single Anthill event."""
     sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
 
-    # Get other sales for the same customer
+    # Get gallery images for this sale's order
+    gallery_images = []
+    if sale.order:
+        from .models import GalleryImage
+        gallery_images = GalleryImage.objects.filter(order=sale.order).order_by('-uploaded_at')
     related_sales = []
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
@@ -852,6 +856,7 @@ def sale_detail(request, pk):
         'payment_pct': payment_pct,
         'overpayment_pct': overpayment_pct,
         'adjusted_profit': adjusted_profit,
+        'gallery_images': gallery_images,
     }
 
     return render(request, 'stock_take/sale_detail.html', context)

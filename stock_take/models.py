@@ -1971,6 +1971,7 @@ PAGE_SECTIONS = [
     ('Other', [
         ('tickets', 'Tickets'),
         ('claim_service', 'Claim Service'),
+        ('gallery', 'Gallery'),
         ('about', 'About'),
         ('admin_panel', 'Admin Panel'),
     ]),
@@ -2048,6 +2049,30 @@ class PagePermission(models.Model):
     class Meta:
         unique_together = ('role', 'page_codename')
         ordering = ['role', 'page_codename']
+
+
+class GalleryImage(models.Model):
+    """Photo gallery for completed jobs"""
+    image = models.ImageField(upload_to='gallery/')
+    thumbnail = models.ImageField(upload_to='gallery/thumbs/', blank=True)
+    caption = models.CharField(max_length=255, blank=True)
+    order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='gallery_images')
+    customer = models.ForeignKey('Customer', on_delete=models.SET_NULL, null=True, blank=True, related_name='gallery_images')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        parts = []
+        if self.order:
+            parts.append(f"Sale {self.order.sale_number}")
+        if self.customer:
+            parts.append(self.customer.name)
+        if parts:
+            return f"Gallery image – {', '.join(parts)}"
+        return f"Gallery image #{self.pk}"
 
 
 class UserProfile(models.Model):

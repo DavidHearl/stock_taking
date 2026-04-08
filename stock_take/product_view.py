@@ -1,11 +1,12 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, log_activity
+from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, log_activity
 import json
 from decimal import Decimal
 from datetime import datetime, timedelta
 from django.utils import timezone
+from django.db import models
 from django.db.models import Sum
 
 
@@ -158,6 +159,11 @@ def product_detail(request, item_id):
         stock_item=product
     ).select_related('created_by').order_by('-created_at')[:50]
     
+    # Substitutions where this product's SKU is either the missing or replacement
+    substitutions = Substitution.objects.filter(
+        models.Q(missing_sku=product.sku) | models.Q(replacement_sku=product.sku)
+    )
+    
     return render(request, 'stock_take/product_detail.html', {
         'product': product,
         'categories': json.dumps(categories),
@@ -171,6 +177,7 @@ def product_detail(request, item_id):
         'po_lines': po_lines,
         'order_accessories': order_accessories,
         'stock_changes': stock_changes,
+        'substitutions': substitutions,
     })
 
 

@@ -63,6 +63,16 @@
         <a href="{% url 'add_product' %}" class="btn btn-add-order" title="Add Product">
             <i class="bi bi-plus-lg"></i>
         </a>
+        <div class="dots-menu">
+            <button class="btn btn-secondary btn-sm dots-menu-btn" onclick="toggleDotsMenu(event)" title="More options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="dots-menu-dropdown">
+                <button class="dots-menu-item" onclick="openModal('substitutionsModal'); closeDotsMenu()">
+                    <i class="bi bi-arrow-left-right"></i> Substitutions
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -88,7 +98,7 @@
                 {% for item in all_stock_items %}
                 <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="{{ item.stock_status }}">
                     <td class="text-center cb-col"><input type="checkbox" class="row-cb" value="{{ item.id }}" onclick="updateSelection()"></td>
-                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a></td>
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in substitution_skus %}<i class="bi bi-arrow-left-right sub-marker" title="Has substitution"></i>{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                     <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
@@ -158,6 +168,122 @@
                 <button type="button" class="btn btn-secondary" onclick="closeModal('bulkEditModal')">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="applyBulkEdit()">
                     <i class="bi bi-check-lg"></i> Apply Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Substitutions Modal -->
+<div class="modal" id="substitutionsModal">
+    <div class="modal-overlay" onclick="closeModal('substitutionsModal')"></div>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-arrow-left-right"></i> Substitutions & Skip Items</h3>
+                <button type="button" class="modal-close" onclick="closeModal('substitutionsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Substitutions Section -->
+                <h4 class="sub-section-title">Substitutions</h4>
+                <div class="sub-add-row">
+                    <input type="text" id="addMissingSku" class="form-control" placeholder="Missing SKU">
+                    <input type="text" id="addMissingName" class="form-control" placeholder="Missing Name">
+                    <input type="text" id="addReplacementSku" class="form-control" placeholder="Replacement SKU">
+                    <button class="btn btn-primary btn-sm" onclick="addSubstitution()"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="sub-table-wrap">
+                    <table class="sub-table">
+                        <thead>
+                            <tr>
+                                <th>Missing SKU</th>
+                                <th>Missing Name</th>
+                                <th>Replacement SKU</th>
+                                <th class="text-center actions-col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="substitutionsBody">
+                            {% for sub in substitutions %}
+                            <tr data-id="{{ sub.id }}">
+                                <td>{{ sub.missing_sku }}</td>
+                                <td>{{ sub.missing_name }}</td>
+                                <td>{{ sub.replacement_sku }}</td>
+                                <td class="text-center actions-col">
+                                    <button class="action-icon" title="Edit" onclick="editSubstitution({{ sub.id }})"><i class="bi bi-pencil"></i></button>
+                                    <button class="action-icon danger" title="Delete" onclick="deleteSubstitution({{ sub.id }}, '{{ sub.missing_name|escapejs }}')"><i class="bi bi-trash"></i></button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr class="empty-row"><td colspan="4">No substitutions defined</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Skip Items Section -->
+                <h4 class="sub-section-title">Skip Items</h4>
+                <div class="sub-add-row">
+                    <input type="text" id="addSkipSku" class="form-control" placeholder="SKU to skip">
+                    <input type="text" id="addSkipName" class="form-control" placeholder="Item name">
+                    <button class="btn btn-primary btn-sm" onclick="addSkipItem()"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="sub-table-wrap">
+                    <table class="sub-table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th class="text-center actions-col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="skipItemsBody">
+                            {% for skip in skip_items %}
+                            <tr data-id="{{ skip.id }}">
+                                <td>{{ skip.sku }}</td>
+                                <td>{{ skip.name }}</td>
+                                <td class="text-center actions-col">
+                                    <button class="action-icon danger" title="Delete" onclick="deleteSkipItem({{ skip.id }}, '{{ skip.sku|escapejs }}')"><i class="bi bi-trash"></i></button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr class="empty-row"><td colspan="3">No skip items defined</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Substitution Modal -->
+<div class="modal" id="editSubModal">
+    <div class="modal-overlay" onclick="closeModal('editSubModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-pencil-square"></i> Edit Substitution</h3>
+                <button type="button" class="modal-close" onclick="closeModal('editSubModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editSubId">
+                <div class="form-group">
+                    <label for="editMissingSku">Missing SKU</label>
+                    <input type="text" id="editMissingSku" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="editMissingName">Missing Name</label>
+                    <input type="text" id="editMissingName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="editReplacementSku">Replacement SKU</label>
+                    <input type="text" id="editReplacementSku" class="form-control" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('editSubModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveSubstitution()">
+                    <i class="bi bi-check-lg"></i> Save
                 </button>
             </div>
         </div>
@@ -505,6 +631,95 @@ function applyBulkEdit() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
     });
+}
+
+/* ── Dots Menu ──────────────────────────────────── */
+function toggleDotsMenu(e) {
+    e.stopPropagation();
+    const menu = e.target.closest('.dots-menu');
+    menu.classList.toggle('open');
+}
+
+function closeDotsMenu() {
+    document.querySelectorAll('.dots-menu.open').forEach(m => m.classList.remove('open'));
+}
+
+document.addEventListener('click', function() { closeDotsMenu(); });
+
+/* ── Substitution CRUD ──────────────────────────── */
+const csrfToken = '{{ csrf_token }}';
+
+function addSubstitution() {
+    const sku = document.getElementById('addMissingSku');
+    const name = document.getElementById('addMissingName');
+    const repl = document.getElementById('addReplacementSku');
+    if (!sku.value.trim() || !name.value.trim() || !repl.value.trim()) return;
+
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('missing_sku', sku.value.trim());
+    form.append('missing_name', name.value.trim());
+    form.append('replacement_sku', repl.value.trim());
+
+    fetch('{% url "substitutions" %}', { method: 'POST', body: form })
+        .then(r => { if (r.ok) location.reload(); else alert('Error adding substitution.'); });
+}
+
+function deleteSubstitution(id, label) {
+    if (!confirm('Delete substitution for ' + label + '?')) return;
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    fetch('/substitution/delete/' + id + '/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert(d.error); });
+}
+
+function editSubstitution(id) {
+    fetch('/substitution/edit/' + id + '/')
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('editSubId').value = d.id;
+            document.getElementById('editMissingSku').value = d.missing_sku;
+            document.getElementById('editMissingName').value = d.missing_name;
+            document.getElementById('editReplacementSku').value = d.replacement_sku;
+            openModal('editSubModal');
+        });
+}
+
+function saveSubstitution() {
+    const id = document.getElementById('editSubId').value;
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('missing_sku', document.getElementById('editMissingSku').value);
+    form.append('missing_name', document.getElementById('editMissingName').value);
+    form.append('replacement_sku', document.getElementById('editReplacementSku').value);
+
+    fetch('/substitution/edit/' + id + '/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert('Error saving.'); });
+}
+
+function addSkipItem() {
+    const sku = document.getElementById('addSkipSku');
+    const name = document.getElementById('addSkipName');
+    if (!sku.value.trim() || !name.value.trim()) return;
+
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('sku', sku.value.trim());
+    form.append('name', name.value.trim());
+
+    fetch('{% url "substitutions" %}', { method: 'POST', body: form })
+        .then(r => { if (r.ok) location.reload(); else alert('Error adding skip item.'); });
+}
+
+function deleteSkipItem(id, label) {
+    if (!confirm('Delete skip item ' + label + '?')) return;
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    fetch('/skip-item/delete/' + id + '/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert(d.error); });
 }
 </script>
 {% endblock %}

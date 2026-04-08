@@ -1,0 +1,585 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Gallery - {{ block.super }}{% endblock %}
+
+{% block nav_gallery_active %}active{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/gallery.css' %}">
+{% endblock %}
+
+{% block content %}
+{% if user.is_authenticated %}
+
+<!-- Page Header -->
+<div class="gallery-header">
+    <div class="gallery-header-left">
+        <h1>Gallery</h1>
+        <span class="gallery-count">{{ images|length }} photo{{ images|length|pluralize }}</span>
+    </div>
+    <div class="gallery-header-right">
+        <button class="btn-cancel" id="gridSizeBtn" onclick="toggleGridSize()">
+            <i class="bi bi-grid-3x3-gap"></i> Larger
+        </button>
+        <button class="btn-cancel" id="editModeBtn" onclick="toggleEditMode()">
+            <i class="bi bi-pencil"></i> Edit Mode
+        </button>
+        <button class="btn-save" onclick="document.getElementById('uploadModal').classList.add('active')">
+            <i class="bi bi-cloud-upload"></i> Upload Photos
+        </button>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="gallery-filters">
+    <form method="get" class="gallery-filter-form">
+        <div class="filter-group">
+            <input type="text" name="search" value="{{ search }}" placeholder="Search by caption, sale number, or customer..." class="form-input gallery-search-input">
+        </div>
+        <div class="filter-group">
+            <select name="filter" class="form-input gallery-filter-select" onchange="this.form.submit()">
+                <option value="">All Photos</option>
+                <option value="assigned" {% if filter_type == 'assigned' %}selected{% endif %}>Assigned</option>
+                <option value="unassigned" {% if filter_type == 'unassigned' %}selected{% endif %}>Unassigned</option>
+            </select>
+        </div>
+        <button type="submit" class="btn-save btn-sm"><i class="bi bi-search"></i> Search</button>
+        {% if search or filter_type %}
+        <a href="{% url 'gallery' %}" class="btn-cancel btn-sm"><i class="bi bi-x-lg"></i> Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+<!-- Gallery Grid -->
+{% if images %}
+<div class="gallery-grid">
+    {% for img in images %}
+    <div class="gallery-card" data-id="{{ img.id }}">
+        <div class="gallery-card-image" onclick="openLightbox('{{ img.image.url }}', {{ img.id }})">
+            <img src="{% if img.thumbnail %}{{ img.thumbnail.url }}{% else %}{{ img.image.url }}{% endif %}" alt="{{ img.caption }}" loading="lazy">
+            {% if img.order %}
+            <span class="gallery-overlay-tag overlay-top-left">{{ img.order.sale_number }}</span>
+            {% endif %}
+            {% if img.customer %}
+            <span class="gallery-overlay-tag overlay-top-right">{{ img.customer.name|default:img.customer.last_name|title }}</span>
+            {% endif %}
+            <div class="gallery-card-actions">
+                <button class="btn-icon" title="Rotate" onclick="event.stopPropagation(); rotateImage({{ img.id }})"><i class="bi bi-arrow-clockwise"></i></button>
+                <button class="btn-icon" title="Edit" onclick="event.stopPropagation(); openEditModal({{ img.id }})"><i class="bi bi-pencil"></i></button>
+                <button class="btn-icon btn-icon-danger" title="Delete" onclick="event.stopPropagation(); deleteImage({{ img.id }})"><i class="bi bi-trash"></i></button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="gallery-empty">
+    <i class="bi bi-images"></i>
+    <h2>No photos yet</h2>
+    <p>Upload photos of completed jobs to build your gallery.</p>
+    <button class="btn-save" onclick="document.getElementById('uploadModal').classList.add('active')">
+        <i class="bi bi-cloud-upload"></i> Upload Photos
+    </button>
+</div>
+{% endif %}
+
+<!-- Upload Modal -->
+<div class="modal-overlay" id="uploadModal">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h2>Upload Photos</h2>
+            <button class="modal-close" onclick="closeUploadModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="upload-dropzone" id="dropzone">
+                <i class="bi bi-cloud-arrow-up"></i>
+                <p>Drag & drop images here or <label for="fileInput" class="upload-browse">browse</label></p>
+                <input type="file" id="fileInput" multiple accept="image/*" style="display:none" onchange="handleFiles(this.files)">
+            </div>
+            <div class="upload-preview" id="uploadPreview"></div>
+            <div class="upload-fields">
+                <div class="form-group">
+                    <label>Caption</label>
+                    <input type="text" id="uploadCaption" class="form-input" placeholder="Optional caption...">
+                </div>
+                <div class="form-group">
+                    <label>Customer</label>
+                    <div class="customer-search-wrap">
+                        <input type="hidden" id="uploadCustomerId">
+                        <input type="text" id="uploadCustomerSearch" class="form-input" placeholder="Search customer by name, email, phone..." autocomplete="off">
+                        <div class="search-results" id="uploadCustomerResults"></div>
+                        <div class="selected-customer" id="uploadSelectedCustomer" style="display:none">
+                            <span id="uploadCustomerName"></span>
+                            <button type="button" class="btn-clear" onclick="clearCustomer('upload')">&times;</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group" id="uploadOrderGroup" style="display:none">
+                    <label>Assign to Sale</label>
+                    <div class="order-list" id="uploadOrderList"></div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick="closeUploadModal()">Cancel</button>
+            <button class="btn-save" id="uploadBtn" onclick="uploadImages()" disabled>
+                <i class="bi bi-cloud-upload"></i> Upload
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h2>Edit Photo</h2>
+            <button class="modal-close" onclick="document.getElementById('editModal').classList.remove('active')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editImageId">
+            <div class="form-group">
+                <label>Caption</label>
+                <input type="text" id="editCaption" class="form-input" placeholder="Optional caption...">
+            </div>
+            <div class="form-group">
+                <label>Customer</label>
+                <div class="customer-search-wrap">
+                    <input type="hidden" id="editCustomerId">
+                    <input type="text" id="editCustomerSearch" class="form-input" placeholder="Search customer by name, email, phone..." autocomplete="off">
+                    <div class="search-results" id="editCustomerResults"></div>
+                    <div class="selected-customer" id="editSelectedCustomer" style="display:none">
+                        <span id="editCustomerName"></span>
+                        <button type="button" class="btn-clear" onclick="clearCustomer('edit')">&times;</button>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group" id="editOrderGroup" style="display:none">
+                <label>Assign to Sale</label>
+                <div class="order-list" id="editOrderList"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick="document.getElementById('editModal').classList.remove('active')">Cancel</button>
+            <button class="btn-save" onclick="saveEdit()"><i class="bi bi-check-lg"></i> Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Lightbox -->
+<div class="gallery-lightbox" id="lightbox" onclick="closeLightbox(event)">
+    <div class="lightbox-header" id="lightboxHeader"></div>
+    <button class="lightbox-close" onclick="closeLightbox(event)">&times;</button>
+    <button class="lightbox-arrow lightbox-prev" id="lightboxPrev" onclick="event.stopPropagation(); navigateLightbox(-1)"><i class="bi bi-chevron-left"></i></button>
+    <img id="lightboxImg" src="" alt="">
+    <button class="lightbox-arrow lightbox-next" id="lightboxNext" onclick="event.stopPropagation(); navigateLightbox(1)"><i class="bi bi-chevron-right"></i></button>
+    <div class="lightbox-footer" id="lightboxFooter"></div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const csrfToken = '{{ csrf_token }}';
+
+    /* ========== Grid Size Toggle ========== */
+    function toggleGridSize() {
+        const grid = document.querySelector('.gallery-grid');
+        if (!grid) return;
+        grid.classList.toggle('grid-large');
+        const btn = document.getElementById('gridSizeBtn');
+        const large = grid.classList.contains('grid-large');
+        btn.innerHTML = large
+            ? '<i class="bi bi-grid-3x3-gap"></i> Smaller'
+            : '<i class="bi bi-grid-3x3-gap"></i> Larger';
+    }
+
+    /* ========== Edit Mode ========== */
+    function toggleEditMode() {
+        const grid = document.querySelector('.gallery-grid');
+        if (!grid) return;
+        grid.classList.toggle('edit-mode');
+        const btn = document.getElementById('editModeBtn');
+        const active = grid.classList.contains('edit-mode');
+        btn.classList.toggle('btn-save', active);
+        btn.classList.toggle('btn-cancel', !active);
+        btn.innerHTML = active
+            ? '<i class="bi bi-check-lg"></i> Done'
+            : '<i class="bi bi-pencil"></i> Edit Mode';
+    }
+
+    /* ========== Upload: drag & drop ========== */
+    let selectedFiles = [];
+
+    const dropzone = document.getElementById('dropzone');
+    if (dropzone) {
+        dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+        dropzone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+        dropzone.addEventListener('click', () => document.getElementById('fileInput').click());
+    }
+
+    function handleFiles(files) {
+        const newFiles = Array.from(files);
+        selectedFiles = selectedFiles.concat(newFiles);
+        document.getElementById('fileInput').value = '';
+        renderPreviews();
+    }
+
+    function renderPreviews() {
+        const preview = document.getElementById('uploadPreview');
+        preview.innerHTML = '';
+        selectedFiles.forEach((f, i) => {
+            const reader = new FileReader();
+            reader.onload = e => {
+                const div = document.createElement('div');
+                div.className = 'upload-thumb';
+                div.innerHTML = `<img src="${e.target.result}" alt=""><button type="button" onclick="removeFile(${i})">&times;</button>`;
+                preview.appendChild(div);
+            };
+            reader.readAsDataURL(f);
+        });
+        document.getElementById('uploadBtn').disabled = selectedFiles.length === 0;
+    }
+
+    function removeFile(index) {
+        selectedFiles.splice(index, 1);
+        renderPreviews();
+    }
+
+    function closeUploadModal() {
+        document.getElementById('uploadModal').classList.remove('active');
+        selectedFiles = [];
+        document.getElementById('uploadPreview').innerHTML = '';
+        document.getElementById('uploadCaption').value = '';
+        clearCustomer('upload');
+        document.getElementById('uploadBtn').disabled = true;
+    }
+
+    function uploadImages() {
+        if (!selectedFiles.length) return;
+        const fd = new FormData();
+        selectedFiles.forEach(f => fd.append('images', f));
+        fd.append('caption', document.getElementById('uploadCaption').value);
+        fd.append('customer_id', document.getElementById('uploadCustomerId').value);
+
+        // Get selected order radio
+        const checkedOrder = document.querySelector('input[name="upload_order"]:checked');
+        if (checkedOrder) fd.append('order_id', checkedOrder.value);
+
+        const btn = document.getElementById('uploadBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Uploading...';
+
+        fetch("{% url 'gallery_upload' %}", { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.error || 'Upload failed');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Upload';
+                }
+            })
+            .catch(() => {
+                alert('Upload failed');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Upload';
+            });
+    }
+
+    /* ========== Customer Search (shared) ========== */
+    let searchTimeouts = {};
+
+    function initCustomerSearch(prefix) {
+        const input = document.getElementById(prefix + 'CustomerSearch');
+        const results = document.getElementById(prefix + 'CustomerResults');
+        if (!input) return;
+
+        input.addEventListener('input', function() {
+            clearTimeout(searchTimeouts[prefix]);
+            const q = this.value.trim();
+            if (q.length < 3) { results.classList.remove('show'); return; }
+
+            searchTimeouts[prefix] = setTimeout(() => {
+                fetch(`/search-customers/?q=${encodeURIComponent(q)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.customers && data.customers.length) {
+                            results.innerHTML = data.customers.map(c => {
+                                const name = c.name || `${c.first_name} ${c.last_name}`.trim();
+                                const details = [c.address, c.city, c.postcode].filter(Boolean).join(', ') || '';
+                                return `<div class="search-result-item" onclick="selectCustomer('${prefix}', ${c.customer_id}, '${name.replace(/'/g, "\\'")}')">
+                                    <div class="search-result-name">${name}</div>
+                                    ${details ? `<div class="search-result-details">${details}</div>` : ''}
+                                </div>`;
+                            }).join('');
+                            results.classList.add('show');
+                        } else {
+                            results.innerHTML = '<div class="search-result-item no-hover">No customers found</div>';
+                            results.classList.add('show');
+                        }
+                    });
+            }, 500);
+        });
+
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.customer-search-wrap')) results.classList.remove('show');
+        });
+    }
+
+    function selectCustomer(prefix, customerId, customerName) {
+        document.getElementById(prefix + 'CustomerId').value = customerId;
+        document.getElementById(prefix + 'CustomerSearch').style.display = 'none';
+        document.getElementById(prefix + 'CustomerResults').classList.remove('show');
+
+        const selected = document.getElementById(prefix + 'SelectedCustomer');
+        document.getElementById(prefix + 'CustomerName').textContent = customerName;
+        selected.style.display = 'flex';
+
+        // Load customer orders
+        loadCustomerOrders(prefix, customerId);
+    }
+
+    function clearCustomer(prefix) {
+        document.getElementById(prefix + 'CustomerId').value = '';
+        const searchInput = document.getElementById(prefix + 'CustomerSearch');
+        searchInput.value = '';
+        searchInput.style.display = '';
+        document.getElementById(prefix + 'SelectedCustomer').style.display = 'none';
+        document.getElementById(prefix + 'OrderGroup').style.display = 'none';
+        document.getElementById(prefix + 'OrderList').innerHTML = '';
+    }
+
+    function loadCustomerOrders(prefix, customerId) {
+        const orderGroup = document.getElementById(prefix + 'OrderGroup');
+        const orderList = document.getElementById(prefix + 'OrderList');
+        orderList.innerHTML = '<div class="order-loading">Loading sales...</div>';
+        orderGroup.style.display = '';
+
+        fetch(`/gallery/customer/${customerId}/orders/`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.orders || !data.orders.length) {
+                    orderList.innerHTML = '<div class="order-empty">No sales found for this customer</div>';
+                    return;
+                }
+                const radioName = prefix + '_order';
+                orderList.innerHTML =
+                    `<label class="order-radio-item">
+                        <input type="radio" name="${radioName}" value="" checked>
+                        <div class="order-radio-info">
+                            <span class="order-radio-label">No specific sale</span>
+                        </div>
+                    </label>` +
+                    data.orders.map(o => {
+                        const name = [o.first_name, o.last_name].filter(Boolean).join(' ');
+                        const date = o.order_date || '';
+                        const value = o.total_value_inc_vat ? `£${parseFloat(o.total_value_inc_vat).toLocaleString('en-GB', {minimumFractionDigits: 2})}` : '';
+                        return `<label class="order-radio-item">
+                            <input type="radio" name="${radioName}" value="${o.id}">
+                            <div class="order-radio-info">
+                                <span class="order-radio-label">Sale ${o.sale_number}${name ? ' — ' + name : ''}</span>
+                                <span class="order-radio-meta">${[date, value].filter(Boolean).join(' · ')}</span>
+                            </div>
+                        </label>`;
+                    }).join('');
+            })
+            .catch(() => {
+                orderList.innerHTML = '<div class="order-empty">Failed to load sales</div>';
+            });
+    }
+
+    // Initialise customer search for both modals
+    initCustomerSearch('upload');
+    initCustomerSearch('edit');
+
+    /* ========== Edit ========== */
+    const imageData = {};
+    {% for img in images %}
+    imageData[{{ img.id }}] = {
+        caption: "{{ img.caption|escapejs }}",
+        order_id: "{{ img.order_id|default:'' }}",
+        customer_id: "{{ img.customer_id|default:'' }}",
+        customer_name: "{{ img.customer.name|default:''|escapejs }}",
+        sale_number: "{{ img.order.sale_number|default:''|escapejs }}",
+        url: "{{ img.image.url }}"
+    };
+    {% endfor %}
+
+    function openEditModal(id) {
+        const d = imageData[id];
+        if (!d) return;
+        document.getElementById('editImageId').value = id;
+        document.getElementById('editCaption').value = d.caption;
+
+        // Reset customer state
+        clearCustomer('edit');
+
+        // If image has a customer, pre-populate
+        if (d.customer_id) {
+            selectCustomer('edit', d.customer_id, d.customer_name);
+            // After orders load, pre-select the right one
+            setTimeout(() => {
+                if (d.order_id) {
+                    const radio = document.querySelector(`input[name="edit_order"][value="${d.order_id}"]`);
+                    if (radio) radio.checked = true;
+                }
+            }, 800);
+        }
+
+        document.getElementById('editModal').classList.add('active');
+    }
+
+    function saveEdit() {
+        const id = document.getElementById('editImageId').value;
+        const fd = new FormData();
+        fd.append('caption', document.getElementById('editCaption').value);
+        fd.append('customer_id', document.getElementById('editCustomerId').value);
+
+        const checkedOrder = document.querySelector('input[name="edit_order"]:checked');
+        fd.append('order_id', checkedOrder ? checkedOrder.value : '');
+
+        fetch(`/gallery/${id}/update/`, { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) location.reload();
+                else alert(data.error || 'Save failed');
+            });
+    }
+
+    /* ========== Delete ========== */
+    function deleteImage(id) {
+        if (!confirm('Delete this photo?')) return;
+        fetch(`/gallery/${id}/delete/`, { method: 'POST', headers: { 'X-CSRFToken': csrfToken } })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const card = document.querySelector(`.gallery-card[data-id="${id}"]`);
+                    if (card) card.remove();
+                    const countEl = document.querySelector('.gallery-count');
+                    if (countEl) {
+                        const remaining = document.querySelectorAll('.gallery-card').length;
+                        countEl.textContent = remaining + ' photo' + (remaining !== 1 ? 's' : '');
+                    }
+                } else {
+                    alert(data.error || 'Delete failed');
+                }
+            });
+    }
+
+    /* ========== Rotate ========== */
+    function rotateImage(id) {
+        fetch(`/gallery/${id}/rotate/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'direction=cw'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const card = document.querySelector(`.gallery-card[data-id="${id}"]`);
+                if (card) {
+                    const img = card.querySelector('.gallery-card-image img');
+                    if (img) img.src = data.thumbnail_url + '?t=' + Date.now();
+                }
+                if (imageData[id]) imageData[id].url = data.image_url;
+            } else {
+                alert(data.error || 'Rotate failed');
+            }
+        });
+    }
+
+    /* ========== Lightbox ========== */
+    let lightboxGroup = [];   // array of image IDs in current group
+    let lightboxIndex = 0;    // current position in group
+
+    function buildLightboxGroup(id) {
+        const d = imageData[id];
+        if (!d) return [id];
+        const orderId = d.order_id;
+        if (!orderId) return [id];
+        // Collect all images with the same order, preserving DOM order
+        const cards = document.querySelectorAll('.gallery-card');
+        const group = [];
+        cards.forEach(card => {
+            const cardId = parseInt(card.dataset.id);
+            if (imageData[cardId] && imageData[cardId].order_id === orderId) {
+                group.push(cardId);
+            }
+        });
+        return group.length ? group : [id];
+    }
+
+    function showLightboxImage(id) {
+        const d = imageData[id];
+        if (!d) return;
+        document.getElementById('lightboxImg').src = d.url;
+
+        // Header tags
+        let headerHtml = '';
+        if (d.sale_number) {
+            headerHtml += `<span class="lightbox-tag lightbox-tag-sale">${d.sale_number}</span>`;
+        }
+        if (d.customer_name) {
+            const name = d.customer_name.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+            headerHtml += `<span class="lightbox-tag lightbox-tag-customer">${name}</span>`;
+        }
+        document.getElementById('lightboxHeader').innerHTML = headerHtml;
+
+        // Footer caption
+        let footerHtml = '';
+        if (d.caption) footerHtml += `<span>${d.caption}</span>`;
+        if (lightboxGroup.length > 1) {
+            footerHtml += `<span class="lightbox-counter">${lightboxIndex + 1} / ${lightboxGroup.length}</span>`;
+        }
+        document.getElementById('lightboxFooter').innerHTML = footerHtml;
+
+        // Show/hide arrows
+        const hasPrev = lightboxIndex > 0;
+        const hasNext = lightboxIndex < lightboxGroup.length - 1;
+        document.getElementById('lightboxPrev').style.display = hasPrev ? '' : 'none';
+        document.getElementById('lightboxNext').style.display = hasNext ? '' : 'none';
+    }
+
+    function openLightbox(url, id) {
+        lightboxGroup = buildLightboxGroup(id);
+        lightboxIndex = lightboxGroup.indexOf(id);
+        if (lightboxIndex === -1) lightboxIndex = 0;
+        showLightboxImage(id);
+        document.getElementById('lightbox').classList.add('active');
+    }
+
+    function navigateLightbox(dir) {
+        const newIndex = lightboxIndex + dir;
+        if (newIndex < 0 || newIndex >= lightboxGroup.length) return;
+        lightboxIndex = newIndex;
+        showLightboxImage(lightboxGroup[lightboxIndex]);
+    }
+
+    function closeLightbox(e) {
+        if (e && e.target && e.target.tagName === 'IMG') return;
+        document.getElementById('lightbox').classList.remove('active');
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            document.getElementById('lightbox').classList.remove('active');
+            document.getElementById('uploadModal').classList.remove('active');
+            document.getElementById('editModal').classList.remove('active');
+        }
+        const lb = document.getElementById('lightbox');
+        if (lb.classList.contains('active')) {
+            if (e.key === 'ArrowLeft') navigateLightbox(-1);
+            if (e.key === 'ArrowRight') navigateLightbox(1);
+        }
+    });
+</script>
+{% endblock %}

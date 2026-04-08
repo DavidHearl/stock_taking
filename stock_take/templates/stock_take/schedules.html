@@ -23,6 +23,25 @@ function getCookie(name) {
     return m ? m.pop() : '';
 }
 
+/* ── Dots Menu ── */
+function toggleDotsMenu(e) {
+    e.stopPropagation();
+    document.getElementById('dotsMenuDropdown').classList.toggle('open');
+}
+
+document.addEventListener('click', function() {
+    document.getElementById('dotsMenuDropdown')?.classList.remove('open');
+});
+
+/* ── Location Column Toggle ── */
+function toggleLocations() {
+    const content = document.querySelector('.page-content');
+    const active = content.classList.toggle('show-locations');
+    const label = document.getElementById('locToggleLabel');
+    label.textContent = active ? 'Hide Locations' : 'Show Locations';
+    document.getElementById('dotsMenuDropdown').classList.remove('open');
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // ── Inline stock count update ──
     document.querySelectorAll('.count-input').forEach(function(input) {
@@ -124,9 +143,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Tab switching
-    document.querySelectorAll('.stock-tab-btn').forEach(function(tab) {
+    document.querySelectorAll('.tab-nav-pills .tab-button').forEach(function(tab) {
         tab.addEventListener('click', function() {
-            document.querySelectorAll('.stock-tab-btn').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-nav-pills .tab-button').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             const target = tab.dataset.tab;
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -377,24 +396,24 @@ function submitHistoricalAdjustment() {
 {% block content %}
 {% if user.is_authenticated %}
 <div class="page-content">
-    <!-- Header Bar -->
-    <div class="stock-header-bar">
-        <div class="stock-tab-group">
-            <button type="button" class="stock-tab-btn tab-all active" data-tab="stock-panel">
-                <i class="bi bi-box-seam"></i> Stock Items
-                <span class="tab-count">{{ total_stock }}</span>
+    <!-- Toolbar -->
+    <div class="tabs">
+        <div class="tab-nav tab-nav-pills">
+            <button type="button" class="tab-button active" data-tab="stock-panel">
+                Stock Items
+                <span class="badge">{{ total_stock }}</span>
             </button>
-            <button type="button" class="stock-tab-btn" data-tab="non-stock-panel">
-                <i class="bi bi-archive"></i> Non-Stock
-                <span class="tab-count">{{ total_non_stock }}</span>
+            <button type="button" class="tab-button" data-tab="non-stock-panel">
+                Non-Stock
+                <span class="badge">{{ total_non_stock }}</span>
             </button>
-            <button type="button" class="stock-tab-btn" data-tab="raumplus-panel">
-                <i class="bi bi-gear"></i> Raumplus
-                <span class="tab-count">{{ total_raumplus }}</span>
+            <button type="button" class="tab-button" data-tab="raumplus-panel">
+                Raumplus
+                <span class="badge">{{ total_raumplus }}</span>
             </button>
-            <button type="button" class="stock-tab-btn" data-tab="categories-panel">
-                <i class="bi bi-grid"></i> Categories
-                <span class="tab-count">{{ categories|length }}</span>
+            <button type="button" class="tab-button" data-tab="categories-panel">
+                Categories
+                <span class="badge">{{ categories|length }}</span>
             </button>
         </div>
 
@@ -404,16 +423,24 @@ function submitHistoricalAdjustment() {
         </span>
         {% endif %}
 
-        <div class="header-sep"></div>
-
-        <!-- Actions (right-aligned) -->
-        <div class="stock-header-actions">
+        <div class="tab-actions">
             <button class="btn btn-secondary btn-sm" onclick="openHistoricalAdjustment()">
-                <i class="bi bi-clock-history"></i> Historical Adjustment
+                <i class="bi bi-clock-history"></i> History
             </button>
             <a href="{% url 'export_all_stock_pdf' %}" class="btn btn-primary btn-sm" target="_blank">
                 <i class="bi bi-printer"></i> Print Sheet
             </a>
+            <div class="dots-menu">
+                <button class="btn btn-secondary btn-sm dots-menu-btn" onclick="toggleDotsMenu(event)" title="More options">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <div class="dots-menu-dropdown" id="dotsMenuDropdown">
+                    <button class="dots-menu-item" onclick="toggleLocations()">
+                        <i class="bi bi-geo-alt"></i>
+                        <span id="locToggleLabel">Show Locations</span>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -428,11 +455,11 @@ function submitHistoricalAdjustment() {
                 <h2>Q{{ quarter_number }} Day {{ day_number }}/{{ total_days }}<span class="plan-sub">{{ total_plan_items }} items over {{ cycle_days }} days</span></h2>
                 <div class="plan-controls">
                     {% if day_number > 1 %}
-                    <a href="?day={{ day_number|add:"-1" }}" class="btn btn-sm btn-secondary"><i class="bi bi-chevron-left"></i></a>
+                    <a href="?day={{ day_number|add:"-1" }}" class="plan-arrow" title="Previous day"><i class="bi bi-chevron-left"></i></a>
                     {% endif %}
                     <span class="plan-info">{{ today_date }}</span>
                     {% if day_number < total_days %}
-                    <a href="?day={{ day_number|add:"1" }}" class="btn btn-sm btn-secondary"><i class="bi bi-chevron-right"></i></a>
+                    <a href="?day={{ day_number|add:"1" }}" class="plan-arrow" title="Next day"><i class="bi bi-chevron-right"></i></a>
                     {% endif %}
                 </div>
             </div>
@@ -444,7 +471,7 @@ function submitHistoricalAdjustment() {
                         <tr>
                             <th>SKU</th>
                             <th class="hide-mobile">Category</th>
-                            <th class="hide-mobile">Location</th>
+                            <th class="loc-col">Location</th>
                             <th class="text-center hide-mobile">System Qty</th>
                             <th class="text-center">Count</th>
                             <th class="text-center">Variance</th>
@@ -459,8 +486,8 @@ function submitHistoricalAdjustment() {
                                 <span class="sku-text">{{ item.sku }}</span>
                                 <span class="mobile-name">{{ item.name }}</span>
                             </td>
-                            <td class="hide-mobile"><span class="cat-badge" {% if item.category %}style="border-left: 3px solid {{ item.category.color }}"{% endif %}>{{ item.category.name|default:"—" }}</span></td>
-                            <td class="hide-mobile">{{ item.location }}</td>
+                            <td class="hide-mobile"><span class="cat-badge" {% if item.category and item.category.color %}style="--cat-color: {{ item.category.color }}"{% endif %}>{{ item.category.name|default:"—" }}</span></td>
+                            <td class="loc-col">{{ item.location }}</td>
                             <td class="text-center hide-mobile"><span class="system-qty">{{ item.quantity }}</span></td>
                             <td class="text-center">
                                 <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
@@ -573,6 +600,11 @@ function submitHistoricalAdjustment() {
             <div class="category-section">
                 <button class="category-toggle" data-target="stock-cat-{{ forloop.counter }}">
                     <i class="bi bi-chevron-right toggle-icon"></i>
+                    {% with first_item=items.0 %}
+                    {% if first_item.category and first_item.category.color %}
+                    <span class="cat-color-dot" style="background: {{ first_item.category.color }}"></span>
+                    {% endif %}
+                    {% endwith %}
                     <strong>{{ cat_name }}</strong>
                     <span class="cat-item-count">{{ items|length }} items</span>
                 </button>
@@ -583,7 +615,7 @@ function submitHistoricalAdjustment() {
                             <tr>
                                 <th>SKU</th>
                                 <th class="hide-mobile">Name</th>
-                                <th class="hide-mobile">Location</th>
+                                <th class="loc-col">Location</th>
                                 <th class="text-center hide-mobile">System Qty</th>
                                 <th class="text-center">Count</th>
                                 <th class="text-center">Variance</th>
@@ -598,7 +630,7 @@ function submitHistoricalAdjustment() {
                                     <span class="mobile-name">{{ item.name }}</span>
                                 </td>
                                 <td class="hide-mobile">{{ item.name }}</td>
-                                <td class="hide-mobile">{{ item.location }}</td>
+                                <td class="loc-col">{{ item.location }}</td>
                                 <td class="text-center hide-mobile"><span class="system-qty">{{ item.quantity }}</span></td>
                                 <td class="text-center">
                                     <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
@@ -635,7 +667,14 @@ function submitHistoricalAdjustment() {
         {% for cat_name, items in non_stock_by_category.items %}
         <div class="schedule-card">
             <div class="schedule-card-header">
-                <h2>{{ cat_name }}</h2>
+                <h2>
+                    {% with first_item=items.0 %}
+                    {% if first_item.category and first_item.category.color %}
+                    <span class="cat-color-dot" style="background: {{ first_item.category.color }}"></span>
+                    {% endif %}
+                    {% endwith %}
+                    {{ cat_name }}
+                </h2>
                 <span class="cat-item-count">{{ items|length }} items</span>
             </div>
             <div class="count-table-wrap">
@@ -644,7 +683,7 @@ function submitHistoricalAdjustment() {
                         <tr>
                             <th>SKU</th>
                             <th class="hide-mobile">Name</th>
-                            <th class="hide-mobile">Location</th>
+                            <th class="loc-col">Location</th>
                             <th class="text-center hide-mobile">System Qty</th>
                             <th class="text-center">Count</th>
                             <th class="text-center">Variance</th>
@@ -660,7 +699,7 @@ function submitHistoricalAdjustment() {
                                 <span class="mobile-name">{{ item.name }}</span>
                             </td>
                             <td class="hide-mobile">{{ item.name }}</td>
-                            <td class="hide-mobile">{{ item.location }}</td>
+                            <td class="loc-col">{{ item.location }}</td>
                             <td class="text-center hide-mobile"><span class="system-qty">{{ item.quantity }}</span></td>
                             <td class="text-center">
                                 <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">
@@ -703,7 +742,14 @@ function submitHistoricalAdjustment() {
         {% for cat_name, items in raumplus_by_category.items %}
         <div class="schedule-card">
             <div class="schedule-card-header">
-                <h2>{{ cat_name }}</h2>
+                <h2>
+                    {% with first_item=items.0 %}
+                    {% if first_item.category and first_item.category.color %}
+                    <span class="cat-color-dot" style="background: {{ first_item.category.color }}"></span>
+                    {% endif %}
+                    {% endwith %}
+                    {{ cat_name }}
+                </h2>
                 <span class="cat-item-count">{{ items|length }} items</span>
             </div>
             <div class="count-table-wrap">
@@ -712,7 +758,7 @@ function submitHistoricalAdjustment() {
                         <tr>
                             <th>SKU</th>
                             <th class="hide-mobile">Name</th>
-                            <th class="hide-mobile">Location</th>
+                            <th class="loc-col">Location</th>
                             <th class="text-center hide-mobile">System Qty</th>
                             <th class="text-center">Count</th>
                             <th class="text-center">Variance</th>
@@ -728,7 +774,7 @@ function submitHistoricalAdjustment() {
                                 <span class="mobile-name">{{ item.name }}</span>
                             </td>
                             <td class="hide-mobile">{{ item.name }}</td>
-                            <td class="hide-mobile">{{ item.location }}</td>
+                            <td class="loc-col">{{ item.location }}</td>
                             <td class="text-center hide-mobile"><span class="system-qty">{{ item.quantity }}</span></td>
                             <td class="text-center">
                                 <input type="number" class="count-input" data-item-id="{{ item.id }}" data-system-qty="{{ item.quantity }}" value="{{ item.quantity }}" min="0">

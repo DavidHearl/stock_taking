@@ -5554,6 +5554,10 @@ def stock_list(request):
     cached_data = cache.get(cache_key)
     if cached_data and not request.GET.get('nocache'):
         cached_data['query_time'] = f"{time.time() - start_time:.3f} (cached)"
+        # Always fetch fresh substitution data (not cached with stock items)
+        cached_data['substitutions'] = list(Substitution.objects.all())
+        cached_data['skip_items'] = list(CSVSkipItem.objects.filter(order__isnull=True))
+        cached_data['substitution_skus'] = set(s.replacement_sku for s in cached_data['substitutions'])
         return render(request, 'stock_take/stock_list.html', cached_data)
     
     # Don't auto-create schedules on every page load - too slow
@@ -5630,6 +5634,11 @@ def stock_list(request):
     stock_take_groups = list(StockTakeGroup.objects.select_related('category').all())
     suppliers = list(Supplier.objects.filter(is_active=True).order_by('name'))
     
+    # Substitutions & skip items for the modal
+    all_substitutions = list(Substitution.objects.all())
+    all_skip_items = list(CSVSkipItem.objects.filter(order__isnull=True))
+    substitution_skus = set(s.replacement_sku for s in all_substitutions)
+    
     # Add performance timing
     end_time = time.time()
     query_time = end_time - start_time
@@ -5648,6 +5657,9 @@ def stock_list(request):
         'categories': categories,
         'stock_take_groups': stock_take_groups,
         'suppliers': suppliers,
+        'substitutions': all_substitutions,
+        'skip_items': all_skip_items,
+        'substitution_skus': substitution_skus,
         'query_time': f'{query_time:.3f}',
         'current_filters': {
             'search': search,

@@ -1208,6 +1208,75 @@
                 </div>
             </div>
 
+            <!-- Photos Card -->
+            {% if gallery_images %}
+            <div class="card sale-sidebar-card">
+                <div class="card-header">
+                    <h3><i class="bi bi-images"></i> Photos ({{ gallery_images|length }})</h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="sale-photos-grid">
+                        {% for img in gallery_images %}
+                        <div class="sale-photo-thumb" onclick="openSalePhotoLightbox({{ forloop.counter0 }})">
+                            <img src="{% if img.thumbnail %}{{ img.thumbnail.url }}{% else %}{{ img.image.url }}{% endif %}" alt="{{ img.caption }}" loading="lazy">
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Photo Lightbox -->
+            <div class="sale-photo-lightbox" id="salePhotoLightbox" onclick="closeSalePhotoLightbox(event)">
+                <button class="lightbox-close" onclick="closeSalePhotoLightbox(event)">&times;</button>
+                <button class="lightbox-arrow lightbox-prev" id="salePhotoPrev" onclick="event.stopPropagation(); navigateSalePhoto(-1)"><i class="bi bi-chevron-left"></i></button>
+                <img id="salePhotoImg" src="" alt="">
+                <button class="lightbox-arrow lightbox-next" id="salePhotoNext" onclick="event.stopPropagation(); navigateSalePhoto(1)"><i class="bi bi-chevron-right"></i></button>
+                <div class="lightbox-footer" id="salePhotoFooter"></div>
+            </div>
+
+            <script>
+            (function() {
+                const photos = [
+                    {% for img in gallery_images %}
+                    { url: "{{ img.image.url }}", caption: "{{ img.caption|escapejs }}" },
+                    {% endfor %}
+                ];
+                let currentIdx = 0;
+
+                function show(idx) {
+                    currentIdx = idx;
+                    document.getElementById('salePhotoImg').src = photos[idx].url;
+                    document.getElementById('salePhotoPrev').style.display = idx > 0 ? '' : 'none';
+                    document.getElementById('salePhotoNext').style.display = idx < photos.length - 1 ? '' : 'none';
+                    const footer = photos[idx].caption ? `<span>${photos[idx].caption}</span>` : '';
+                    const counter = photos.length > 1 ? `<span style="opacity:0.6;font-size:0.8rem">${idx + 1} / ${photos.length}</span>` : '';
+                    document.getElementById('salePhotoFooter').innerHTML = footer + counter;
+                }
+
+                window.openSalePhotoLightbox = function(idx) {
+                    show(idx);
+                    document.getElementById('salePhotoLightbox').classList.add('active');
+                };
+                window.closeSalePhotoLightbox = function(e) {
+                    if (e && e.target && e.target.tagName === 'IMG') return;
+                    document.getElementById('salePhotoLightbox').classList.remove('active');
+                };
+                window.navigateSalePhoto = function(dir) {
+                    const newIdx = currentIdx + dir;
+                    if (newIdx >= 0 && newIdx < photos.length) show(newIdx);
+                };
+
+                document.addEventListener('keydown', function(e) {
+                    const lb = document.getElementById('salePhotoLightbox');
+                    if (!lb.classList.contains('active')) return;
+                    if (e.key === 'Escape') lb.classList.remove('active');
+                    if (e.key === 'ArrowLeft') navigateSalePhoto(-1);
+                    if (e.key === 'ArrowRight') navigateSalePhoto(1);
+                });
+            })();
+            </script>
+            {% endif %}
+
             <!-- System Info Card -->
             <div class="card">
                 <div class="card-header">
