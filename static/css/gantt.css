@@ -1,0 +1,468 @@
+/* ── Gantt Chart ─────────────────────────────────────────────── */
+
+:root {
+    --day-width: 34px;
+    --gantt-row-height: 36px;
+    --gantt-label-width: 250px;
+    --gantt-header-height: 28px;
+}
+
+/* Legend */
+.gantt-legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 6px 16px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.gantt-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.gantt-legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.gantt-legend-marker-goods {
+    background: #10b981;
+    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+    border-radius: 0;
+}
+
+.gantt-legend-marker-fit {
+    background: #3b82f6;
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    border-radius: 0;
+}
+
+.gantt-legend-label {
+    text-transform: capitalize;
+}
+
+/* Wrapper */
+.gantt-wrapper {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   WORKFLOW GANTT — traditional: stages as rows, time as bars
+   ══════════════════════════════════════════════════════════════ */
+.gantt-wf-scroll {
+    overflow: auto;
+    max-height: calc(100vh - 200px);
+}
+
+.gantt-wf-row {
+    display: flex;
+    align-items: center;
+    height: var(--gantt-row-height);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.gantt-wf-row:last-child {
+    border-bottom: none;
+}
+
+.gantt-wf-label {
+    width: var(--gantt-label-width);
+    min-width: var(--gantt-label-width);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-right: 2px solid var(--border-color);
+    height: 100%;
+    overflow: hidden;
+}
+
+.gantt-stage-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.gantt-wf-name {
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gantt-wf-count {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--primary-color);
+    border-radius: 10px;
+    min-width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    margin-left: auto;
+}
+
+.gantt-wf-track {
+    flex: 1;
+    position: relative;
+    height: 100%;
+    min-width: 0;
+}
+
+.gantt-wf-bar {
+    position: absolute;
+    height: var(--gantt-row-height);
+    left: calc(var(--bar-start) / var(--total-wf-days) * 100%);
+    width: calc(var(--bar-days) / var(--total-wf-days) * 100%);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    cursor: default;
+    transition: opacity 0.15s;
+    box-shadow: var(--shadow-sm);
+    opacity: 0.85;
+}
+
+.gantt-wf-bar:hover {
+    opacity: 1;
+    box-shadow: var(--shadow-md);
+}
+
+.gantt-wf-bar-text {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   TIMELINE GANTT (date-based) — single scroll container
+   ══════════════════════════════════════════════════════════════ */
+.gantt-tl-outer {
+    overflow: auto;
+    max-height: calc(100vh - 200px);
+}
+
+.gantt-tl-inner {
+    display: inline-flex;
+    flex-direction: column;
+    min-width: 100%;
+    position: relative;
+    width: calc(var(--gantt-label-width) + var(--total-days) * var(--day-width));
+}
+
+/* ── Header rows (month + day) ──────────────────────────────── */
+.gantt-tl-header-row {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 15;
+    background: var(--bg-secondary);
+}
+
+.gantt-tl-day-header {
+    top: var(--gantt-header-height);
+    z-index: 14;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.gantt-tl-corner {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+}
+
+.gantt-tl-header-track {
+    display: flex;
+}
+
+/* ── Shared label cell (sticky left) ────────────────────────── */
+.gantt-tl-label-cell {
+    width: var(--gantt-label-width);
+    min-width: var(--gantt-label-width);
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    background: var(--bg-secondary);
+    padding: 0 8px;
+    border-right: 2px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+}
+
+/* ── Order rows ─────────────────────────────────────────────── */
+.gantt-tl-row {
+    display: flex;
+    height: var(--gantt-row-height);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.gantt-tl-row:hover .gantt-tl-label-cell {
+    background: var(--bg-hover);
+}
+
+.gantt-tl-bar-track {
+    flex: 1;
+    display: flex;
+    position: relative;
+    min-width: calc(var(--total-days) * var(--day-width));
+}
+
+/* ── Shared label styles ────────────────────────────────────── */
+.gantt-label-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--text-primary);
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+}
+
+.gantt-label-link:hover {
+    color: var(--primary-color);
+}
+
+.gantt-label-sale {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.gantt-label-name {
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gantt-anthill-link {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+    transition: opacity 0.15s, color 0.15s;
+    margin-left: auto;
+    padding: 2px;
+}
+
+.gantt-anthill-link:hover {
+    opacity: 1;
+    color: var(--primary-color);
+}
+
+/* ── Month header row ───────────────────────────────────────── */
+.gantt-month-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-right: 1px solid var(--border-color);
+    box-sizing: border-box;
+    height: var(--gantt-header-height);
+}
+
+/* ── Day header row ─────────────────────────────────────────── */
+.gantt-day-cell {
+    width: var(--day-width);
+    min-width: var(--day-width);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    border-right: 1px solid var(--border-color);
+    box-sizing: border-box;
+    line-height: 1.1;
+    height: var(--gantt-header-height);
+}
+
+.gantt-day-name {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.55rem;
+}
+
+.gantt-day-num {
+    font-variant-numeric: tabular-nums;
+}
+
+.gantt-day-today {
+    background: var(--primary-subtle);
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+.gantt-day-weekend {
+    background: color-mix(in srgb, var(--bg-tertiary) 50%, transparent);
+}
+
+/* ── Today vertical line ────────────────────────────────────── */
+.gantt-today-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--primary-color);
+    opacity: 0.5;
+    z-index: 4;
+    pointer-events: none;
+}
+
+/* ── Grid cells ─────────────────────────────────────────────── */
+.gantt-grid-cell {
+    width: var(--day-width);
+    min-width: var(--day-width);
+    height: 100%;
+    border-right: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
+    box-sizing: border-box;
+}
+
+.gantt-grid-weekend {
+    background: color-mix(in srgb, var(--bg-tertiary) 30%, transparent);
+}
+
+/* ── Bars ────────────────────────────────────────────────────── */
+.gantt-bar {
+    position: absolute;
+    top: 6px;
+    height: calc(var(--gantt-row-height) - 12px);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    overflow: hidden;
+    z-index: 3;
+    cursor: default;
+    transition: opacity 0.15s;
+    box-shadow: var(--shadow-sm);
+}
+
+.gantt-bar:hover {
+    opacity: 0.85;
+    box-shadow: var(--shadow-md);
+}
+
+.gantt-bar-text {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* ── Markers (goods due, fit date) ──────────────────────────── */
+.gantt-marker {
+    position: absolute;
+    top: 2px;
+    z-index: 5;
+}
+
+.gantt-grid-cell {
+    width: var(--day-width);
+    min-width: var(--day-width);
+    height: 100%;
+    border-right: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
+    box-sizing: border-box;
+}
+
+.gantt-grid-weekend {
+    background: color-mix(in srgb, var(--bg-tertiary) 30%, transparent);
+}
+
+/* ── Bars ────────────────────────────────────────────────────── */
+.gantt-bar {
+    position: absolute;
+    top: 6px;
+    height: calc(var(--gantt-row-height) - 12px);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    overflow: hidden;
+    z-index: 3;
+    cursor: default;
+    transition: opacity 0.15s;
+    box-shadow: var(--shadow-sm);
+}
+
+.gantt-bar:hover {
+    opacity: 0.85;
+    box-shadow: var(--shadow-md);
+}
+
+.gantt-bar-text {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* ── Markers (goods due, fit date) ──────────────────────────── */
+.gantt-marker {
+    position: absolute;
+    top: 2px;
+    z-index: 5;
+    font-size: 0.7rem;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    cursor: help;
+}
+
+.gantt-marker-goods {
+    color: #10b981;
+}
+
+.gantt-marker-fit {
+    color: #3b82f6;
+    top: auto;
+    bottom: 2px;
+}
+
+/* ── Empty state ────────────────────────────────────────────── */
+.gantt-empty {
+    text-align: center;
+    padding: 48px 16px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}

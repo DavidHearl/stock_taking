@@ -322,6 +322,8 @@ urlpatterns = [
     # Calendar (renamed from Fit Board)
     path('calendar/', views.calendar_weekly, name='calendar_weekly'),
     path('calendar/monthly/', views.calendar_view, name='calendar_view'),
+    path('calendar/gantt/', views.gantt_chart, name='gantt_chart'),
+    path('calendar/gantt/sync-anthill/<int:order_id>/', views.sync_anthill_workflow, name='sync_anthill_workflow'),
     path('fit-board/', views.calendar_view, name='fit_board'),  # backwards compat
     path('fit-board/add-appointment/', views.add_fit_appointment, name='add_fit_appointment'),
     path('fit-board/update-status/<int:appointment_id>/', views.update_fit_status, name='update_fit_status'),

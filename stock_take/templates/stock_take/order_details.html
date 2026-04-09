@@ -1098,6 +1098,12 @@
                     <button type="button" class="btn btn-sm btn-danger hidden" id="delete-os-doors-selected">
                         <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
                     </button>
+                    {% if order.os_doors_required %}
+                    <button type="button" class="btn btn-sm btn-outline-danger" title="Remove OS Doors Required marker"
+                            onclick="if(confirm('Remove the OS Doors Required marker from this order?')){removeOSDoorsRequired({{ order.id }})}">
+                        <i class="bi bi-x-lg"></i> Remove
+                    </button>
+                    {% endif %}
                     <button class="btn btn-sm btn-paste-icon" type="button" onclick="openPasteOSDoorModal('{{ order.os_doors_po }}')" title="Paste OS Door">
                         <i class="bi bi-clipboard"></i>
                     </button>
@@ -1527,10 +1533,9 @@
 
         </div>
 
-    <!-- Timesheets and Expenses Section -->
+    <!-- Installation Section -->
+    {% if installation_timesheets %}
     <div class="timesheets-row">
-
-        <!-- Installation Card -->
         <div class="card">
             <div class="card-header timesheet-card-header">
                 <h3>Installation</h3>
@@ -1539,7 +1544,6 @@
                 </button>
             </div>
             <div class="card-body">
-                {% if installation_timesheets %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1588,13 +1592,24 @@
                         </tbody>
                     </table>
                 </div>
-                {% else %}
-                <p class="text-muted">No installation timesheets added yet.</p>
-                {% endif %}
             </div>
         </div>
+    </div>
+    {% else %}
+    <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
+        <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Installation</span>
+    </div>
+    <div class="section-divider-content collapsed">
+        <div class="card">
+            <div class="card-header timesheet-card-header"><h3>Installation</h3></div>
+            <div class="card-body"><p class="text-muted">No installation timesheets added yet.</p></div>
+        </div>
+    </div>
+    {% endif %}
 
-        <!-- Manufacturing Card -->
+    <!-- Manufacturing Section -->
+    {% if manufacturing_timesheets %}
+    <div class="timesheets-row">
         <div class="card">
             <div class="card-header timesheet-card-header">
                 <h3>Manufacturing</h3>
@@ -1603,7 +1618,6 @@
                 </button>
             </div>
             <div class="card-body">
-                {% if manufacturing_timesheets %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1644,19 +1658,29 @@
                         </tbody>
                     </table>
                 </div>
-                {% else %}
-                <p class="text-muted">No manufacturing timesheets added yet.</p>
-                {% endif %}
             </div>
         </div>
+    </div>
+    {% else %}
+    <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
+        <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Manufacturing</span>
+    </div>
+    <div class="section-divider-content collapsed">
+        <div class="card">
+            <div class="card-header timesheet-card-header"><h3>Manufacturing</h3></div>
+            <div class="card-body"><p class="text-muted">No manufacturing timesheets added yet.</p></div>
+        </div>
+    </div>
+    {% endif %}
 
-        <!-- Expenses Card -->
+    <!-- Expenses Section -->
+    {% if expenses %}
+    <div class="timesheets-row">
         <div class="card">
             <div class="card-header">
                 <h3>Expenses</h3>
             </div>
             <div class="card-body">
-                {% if expenses %}
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1692,12 +1716,20 @@
                         </tbody>
                     </table>
                 </div>
-                {% else %}
-                <p class="text-muted">No expenses added yet.</p>
-                {% endif %}
             </div>
         </div>
     </div>
+    {% else %}
+    <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
+        <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Expenses</span>
+    </div>
+    <div class="section-divider-content collapsed">
+        <div class="card">
+            <div class="card-header"><h3>Expenses</h3></div>
+            <div class="card-body"><p class="text-muted">No expenses added yet.</p></div>
+        </div>
+    </div>
+    {% endif %}
     <!-- Purchase Invoice Costs -->
     <div class="pi-costs-wrapper">
         <div class="pi-costs-card">
@@ -6311,6 +6343,27 @@ function createNextBoardsPO(orderId) {
         console.error('Error:', error);
         showAlert('Error creating PO: ' + error.message, 'danger');
     });
+}
+
+function removeOSDoorsRequired(orderId) {
+    fetch(`/order/${orderId}/update-job-checkbox/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ os_doors_required: false })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('OS Doors Required removed', 'success');
+            location.reload();
+        } else {
+            showAlert('Error removing OS Doors Required', 'danger');
+        }
+    })
+    .catch(() => showAlert('Error removing OS Doors Required', 'danger'));
 }
 
 function createOSDoorsPO(orderId) {

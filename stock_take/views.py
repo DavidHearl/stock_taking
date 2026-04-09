@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.db.models import Sum, F, Count, Q, Prefetch
 from django.db.models.functions import Greatest
 from django.db import models
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 from .models import StockItem, StockHistory, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
 from django.template.loader import render_to_string
 import datetime
@@ -4615,6 +4615,8 @@ def update_job_checkbox(request, order_id):
             order.boards_not_required = bool(data['boards_not_required'])
         if 'accessories_not_required' in data:
             order.accessories_not_required = bool(data['accessories_not_required'])
+        if 'os_doors_required' in data:
+            order.os_doors_required = bool(data['os_doors_required'])
         if 'job_finished' in data:
             was_finished = order.job_finished
             order.job_finished = bool(data['job_finished'])
@@ -11858,3 +11860,532 @@ def move_sales_appointment(request, appointment_id):
         return JsonResponse({'success': False, 'error': 'Not found'})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def gantt_chart(request):
+    """Display a Gantt chart of orders showing workflow stage progression and timeline."""
+    from datetime import datetime, timedelta
+    from .models import WorkflowStage, OrderWorkflowProgress
+
+    today = timezone.now().date()
+    tab = request.GET.get('tab', 'workflow')  # 'workflow' or 'timeline'
+
+    # ── Workflow stages (used by both tabs) ──
+    all_stages = list(WorkflowStage.objects.filter(phase='sale').order_by('order'))
+
+    # Role colours for workflow stages
+    role_colours = {
+        'customer-support': '#6366f1',
+        'design': '#3b82f6',
+        'fitter': '#10b981',
+        'operations': '#f59e0b',
+        'manufacturing': '#ef4444',
+        'enquiry': '#8b5cf6',
+        'waiting': '#94a3b8',
+    }
+
+    # ── Get orders with workflow progress in the Sale phase ──
+    sale_stage_ids = [s.id for s in all_stages]
+    progress_qs = (
+        OrderWorkflowProgress.objects
+        .filter(current_stage_id__in=sale_stage_ids)
+        .select_related('order', 'order__customer', 'current_stage')
+        .order_by('current_stage__order', 'order__fit_date')
+    )
+
+    # Build stage lookup: stage.order value -> index
+    stage_index_map = {}
+    for idx, stage in enumerate(all_stages):
+        stage_index_map[stage.id] = idx
+
+    order_rows = []
+    for wp in progress_qs:
+        order = wp.order
+        if not order or order.job_finished:
+            continue
+
+        # Customer display name — try customer relation first, then order fields
+        display_name = ''
+        if order.customer:
+            display_name = f"{order.customer.first_name} {order.customer.last_name}".strip()
+        if not display_name:
+            display_name = f"{order.first_name} {order.last_name}".strip()
+
+        current_idx = stage_index_map.get(wp.current_stage_id, 0)
+
+        # Build stage cells for this order
+        stage_cells = []
+        for idx, stage in enumerate(all_stages):
+            if idx < current_idx:
+                status = 'completed'
+            elif idx == current_idx:
+                status = 'current'
+            else:
+                status = 'pending'
+            stage_cells.append({
+                'stage': stage,
+                'status': status,
+                'role_colour': role_colours.get(stage.role, '#94a3b8'),
+            })
+
+        order_rows.append({
+            'order': order,
+            'display_name': display_name or order.sale_number,
+            'current_stage': wp.current_stage,
+            'current_idx': current_idx,
+            'stage_cells': stage_cells,
+            'stage_colour': role_colours.get(wp.current_stage.role, '#94a3b8'),
+        })
+
+    # ── Traditional Gantt: stages as rows with sequential bars ──
+    stage_order_counts = {}
+    for row in order_rows:
+        sid = row['current_stage'].id
+        stage_order_counts[sid] = stage_order_counts.get(sid, 0) + 1
+
+    cumulative_day = 0
+    stage_rows = []
+    for stage in all_stages:
+        days = stage.expected_days if stage.expected_days else 1
+        stage_rows.append({
+            'stage': stage,
+            'start_day': cumulative_day,
+            'days': days,
+            'role_colour': role_colours.get(stage.role, '#94a3b8'),
+            'order_count': stage_order_counts.get(stage.id, 0),
+        })
+        cumulative_day += days
+    total_workflow_days = cumulative_day
+
+    # ── Timeline tab data (date-based Gantt) ──
+    timeline_rows = []
+    day_columns = []
+    month_headers = []
+    total_days = 0
+    today_offset = 0
+    weeks_back = 4
+    weeks_ahead = 8
+    range_start = today
+    range_end = today
+
+    if tab == 'timeline':
+        weeks_back = int(request.GET.get('back', 4))
+        weeks_ahead = int(request.GET.get('ahead', 8))
+        range_start = today - timedelta(weeks=weeks_back)
+        range_end = today + timedelta(weeks=weeks_ahead)
+
+        orders = (
+            Order.objects
+            .filter(job_finished=False)
+            .filter(
+                models.Q(fit_date__gte=range_start, fit_date__lte=range_end)
+                | models.Q(order_date__gte=range_start, order_date__lte=range_end)
+                | models.Q(order_date__lte=range_start, fit_date__gte=range_start)
+            )
+            .select_related('customer', 'workflow_progress', 'workflow_progress__current_stage')
+            .order_by('fit_date', 'order_date')
+        )
+
+        # Fetch AnthillSale data for goods_due_in
+        sale_numbers = [o.sale_number for o in orders if o.sale_number]
+        anthill_map = {}
+        if sale_numbers:
+            for sale in AnthillSale.objects.filter(anthill_activity_id__in=sale_numbers):
+                anthill_map[sale.anthill_activity_id] = sale
+
+        total_days = (range_end - range_start).days + 1
+        for i in range(total_days):
+            d = range_start + timedelta(days=i)
+            day_columns.append(d)
+
+        current_month = None
+        for d in day_columns:
+            key = (d.year, d.month)
+            if key != current_month:
+                current_month = key
+                month_headers.append({'date': d, 'label': d.strftime('%B %Y'), 'span': 1})
+            else:
+                month_headers[-1]['span'] += 1
+
+        today_offset = (today - range_start).days
+
+        for order in orders:
+            start = order.order_date
+            end = order.fit_date
+            if not start and not end:
+                continue
+            if not start:
+                start = end
+            if not end:
+                end = start
+
+            bar_start = max(start, range_start)
+            bar_end = min(end, range_end)
+            offset = (bar_start - range_start).days
+            width = max((bar_end - bar_start).days, 1)
+
+            stage_name = ''
+            stage_colour = '#94a3b8'
+            try:
+                wp = order.workflow_progress
+                if wp and wp.current_stage:
+                    stage_name = wp.current_stage.name
+                    stage_colour = role_colours.get(wp.current_stage.role, '#94a3b8')
+            except OrderWorkflowProgress.DoesNotExist:
+                pass
+
+            goods_due_in = None
+            anthill = anthill_map.get(order.sale_number)
+            if anthill and anthill.goods_due_in:
+                try:
+                    goods_due_in = datetime.strptime(anthill.goods_due_in, '%d/%m/%Y').date()
+                except (ValueError, TypeError):
+                    pass
+
+            goods_due_offset = None
+            if goods_due_in and range_start <= goods_due_in <= range_end:
+                goods_due_offset = (goods_due_in - range_start).days
+
+            fit_offset = None
+            if order.fit_date and range_start <= order.fit_date <= range_end:
+                fit_offset = (order.fit_date - range_start).days
+
+            display_name = ''
+            if order.customer:
+                display_name = f"{order.customer.first_name} {order.customer.last_name}".strip()
+            if not display_name:
+                display_name = f"{order.first_name} {order.last_name}".strip()
+
+            timeline_rows.append({
+                'order': order,
+                'display_name': display_name or order.sale_number,
+                'offset': offset,
+                'width': width,
+                'stage_name': stage_name,
+                'stage_colour': stage_colour,
+                'goods_due_offset': goods_due_offset,
+                'goods_due_in': goods_due_in,
+                'fit_offset': fit_offset,
+                'time_allowance': order.time_allowance(),
+            })
+
+    context = {
+        'tab': tab,
+        'order_rows': order_rows,
+        'all_stages': all_stages,
+        'stage_rows': stage_rows,
+        'total_workflow_days': total_workflow_days,
+        'timeline_rows': timeline_rows,
+        'day_columns': day_columns,
+        'month_headers': month_headers,
+        'total_days': total_days,
+        'range_start': range_start,
+        'range_end': range_end,
+        'today': today,
+        'today_offset': today_offset,
+        'weeks_back': weeks_back,
+        'weeks_ahead': weeks_ahead,
+        'role_colours': role_colours,
+    }
+
+    return render(request, 'stock_take/gantt_chart.html', context)
+
+
+@login_required
+@require_POST
+def sync_anthill_workflow(request, order_id):
+    """
+    Scrape the Anthill CRM order page for workflow stage data and update
+    the local OrderWorkflowProgress to match.
+
+    Follows the same auth pattern as scrape_anthill_payments: stdlib html.parser,
+    requests.Session login, no third-party HTML libs.
+    """
+    import os
+    import re
+    import requests as req_lib
+    from html.parser import HTMLParser
+    from datetime import datetime as dt
+    from .models import WorkflowStage, OrderWorkflowProgress
+
+    order = get_object_or_404(Order, pk=order_id)
+    if not order.sale_number:
+        return JsonResponse({'success': False, 'error': 'Order has no sale number.'})
+
+    # ── Anthill action name  →  local WorkflowStage name mapping ──────────
+    # Anthill has more granular stages; several map to the same local stage.
+    ANTHILL_TO_LOCAL = {
+        'Record Design Requirements':               'Record Design Requirements',
+        'Generate Contract':                         'Generate Contract',
+        'Take Deposit':                              'Take Deposit',
+        'Confirm Contract Signed':                   'Confirm Contract Signed',
+        'Confirm Relevant Documentation':            'Upload Documents',
+        'Design Check':                              'Final Design Checked and Handover',
+        'Confirm Sales Information':                 'Final Design Checked and Handover',
+        'Confirm Design with Customer':              'Final Design Checked and Handover',
+        'PFP Passed for Production':                 'Passed for Production (PFP)',
+        'Provide Fit From Date':                     'Arrange Install Date & Take Stock Payment',
+        'Arrange Install Date & Take Second Payment': 'Arrange Install Date & Take Stock Payment',
+        'Place Order or Allocate from Stock':        'Place Order or Allocate from Stock',
+        'Pre-Fit Call to Customer':                  'Pre-Fit Call to Customer',
+        'Upload Fit Photos':                         'Upload Fit Photos',
+        'Complete Fitter Report':                    'Complete Fitter Report',
+        'Complete RFT Details':                      'Complete RFT Details',
+        'Take Final Balance':                        'Take Final Balance and Issue Guarantee',
+        'Issue Guarantee':                           'Take Final Balance and Issue Guarantee',
+        'Complete Sale':                             'Complete Sale',
+    }
+
+    # ── HTML parser for the workflow pane ──────────────────────────────────
+    class _WorkflowParser(HTMLParser):
+        """Extract action stages from div.pane-inner data attributes + status."""
+
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.actions = []     # [{name, status, due_date, completed_date, is_current}, ...]
+            self._in_pane_inner = False
+            self._current_action = None
+            self._capture_status_text = False
+            self._status_text_parts = []
+
+        def handle_starttag(self, tag, attrs):
+            attr_dict = dict(attrs)
+            classes = attr_dict.get('class', '')
+
+            if tag == 'div' and 'pane-inner' in classes.split():
+                name = attr_dict.get('data-actionname', '').strip()
+                due = attr_dict.get('data-duetime', '').strip()
+                self._current_action = {
+                    'name': name,
+                    'due_date': due[:10] if due else '',
+                    'status': 'pending',
+                    'completed_date': '',
+                    'is_current': False,
+                }
+                self._in_pane_inner = True
+
+            # Detect is_current from parent pane class
+            if tag == 'div' and 'pane' in classes.split():
+                if 'current' in classes.split():
+                    self._pending_current = True
+                else:
+                    self._pending_current = False
+
+            if self._in_pane_inner:
+                if tag == 'div' and 'action-detail' in classes:
+                    if 'status-complete' in classes:
+                        self._current_action['status'] = 'completed'
+                    elif 'status-overdue' in classes:
+                        self._current_action['status'] = 'overdue'
+                    elif 'status-cancelled' in classes:
+                        self._current_action['status'] = 'cancelled'
+                    elif 'status-pending' in classes:
+                        self._current_action['status'] = 'pending'
+
+                if tag == 'div' and 'action-stage-text' in classes:
+                    self._capture_status_text = True
+                    self._status_text_parts = []
+
+        def handle_data(self, data):
+            if self._capture_status_text:
+                self._status_text_parts.append(data.strip())
+
+        def handle_endtag(self, tag):
+            if self._capture_status_text and tag == 'div':
+                self._capture_status_text = False
+                text = ' '.join(self._status_text_parts)
+                # Extract date from "... - Completed 29/11/2025" or "... - Cancelled 24/03/2026"
+                m = re.search(r'(?:Completed|Cancelled)\s+(\d{2}/\d{2}/\d{4})', text)
+                if m and self._current_action:
+                    self._current_action['completed_date'] = m.group(1)
+
+            if tag == 'div' and self._in_pane_inner and self._current_action:
+                # pane-inner has closed
+                if hasattr(self, '_pending_current') and self._pending_current:
+                    self._current_action['is_current'] = True
+                    self._pending_current = False
+                self.actions.append(self._current_action)
+                self._current_action = None
+                self._in_pane_inner = False
+
+    # ── Authenticate and fetch the Anthill order page ─────────────────────
+    username = os.getenv('ANTHILL_USER_USERNAME')
+    password = os.getenv('ANTHILL_USER_PASSWORD')
+    subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+
+    if not username or not password:
+        return JsonResponse({
+            'success': False,
+            'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD are not set.',
+        })
+
+    base_url = f'https://{subdomain}.anthillcrm.com'
+    sale_url = f'{base_url}/system/Orders/ViewOrder.aspx?OrderID={order.sale_number}'
+
+    session = req_lib.Session()
+    session.headers['User-Agent'] = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    )
+
+    try:
+        resp = session.get(sale_url, timeout=20, allow_redirects=True)
+
+        def _is_auth_page(url):
+            u = url.lower()
+            return 'login' in u or 'signin' in u or '/sign-in' in u
+
+        if _is_auth_page(resp.url) or resp.status_code in (401, 403):
+            class _FormParser(HTMLParser):
+                def __init__(self):
+                    super().__init__(convert_charrefs=True)
+                    self._in_form = False
+                    self.action = ''
+                    self.fields = {}
+
+                def handle_starttag(self, tag, attrs):
+                    attr_dict = dict(attrs)
+                    if tag == 'form':
+                        self._in_form = True
+                        self.action = attr_dict.get('action', '')
+                    elif tag == 'input' and self._in_form:
+                        name = attr_dict.get('name', '').strip()
+                        value = attr_dict.get('value', '')
+                        if name:
+                            self.fields[name] = value
+
+                def handle_endtag(self, tag):
+                    if tag == 'form':
+                        self._in_form = False
+
+            fp = _FormParser()
+            fp.feed(resp.text)
+
+            payload = dict(fp.fields)
+            login_post_url = resp.url
+
+            if fp.action:
+                action = fp.action.strip()
+                if action.startswith('http'):
+                    login_post_url = action
+                elif action.startswith('/'):
+                    login_post_url = base_url + action
+                else:
+                    login_post_url = resp.url.rsplit('/', 1)[0] + '/' + action
+
+            u_filled = p_filled = False
+            for name in list(payload.keys()):
+                nl = name.lower()
+                if not u_filled and any(k in nl for k in ('user', 'email', 'login')) \
+                        and 'view' not in nl and 'event' not in nl:
+                    payload[name] = username
+                    u_filled = True
+                elif not p_filled and 'pass' in nl:
+                    payload[name] = password
+                    p_filled = True
+
+            if not u_filled:
+                payload['username'] = username
+            if not p_filled:
+                payload['password'] = password
+
+            login_resp = session.post(login_post_url, data=payload, timeout=20, allow_redirects=True)
+
+            if _is_auth_page(login_resp.url):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Anthill login failed — check credentials.',
+                })
+
+            resp = session.get(sale_url, timeout=20)
+
+    except req_lib.exceptions.RequestException as exc:
+        return JsonResponse({'success': False, 'error': f'Network error: {exc}'})
+
+    if 'pnlWorkflow' not in resp.text:
+        return JsonResponse({
+            'success': False,
+            'error': 'Workflow panel not found on the Anthill page.',
+        })
+
+    # ── Parse the workflow HTML ───────────────────────────────────────────
+    parser = _WorkflowParser()
+    parser.feed(resp.text)
+
+    if not parser.actions:
+        return JsonResponse({
+            'success': False,
+            'error': 'No workflow actions found in the Anthill page HTML.',
+        })
+
+    # ── Build stage lookup ────────────────────────────────────────────────
+    sale_stages = {s.name: s for s in WorkflowStage.objects.filter(phase='sale')}
+    stage_order = {s.name: s.order for s in sale_stages.values()}
+
+    # Find the furthest completed local stage
+    best_local_name = None
+    best_local_order = -1
+
+    anthill_stages = []
+    for action in parser.actions:
+        local_name = ANTHILL_TO_LOCAL.get(action['name'])
+        mapped = bool(local_name and local_name in sale_stages)
+        anthill_stages.append({
+            'anthill_name': action['name'],
+            'status': action['status'],
+            'completed_date': action['completed_date'],
+            'due_date': action['due_date'],
+            'is_current': action['is_current'],
+            'local_name': local_name or '',
+            'mapped': mapped,
+        })
+
+        if action['status'] in ('completed', 'cancelled') and mapped:
+            order_val = stage_order[local_name]
+            if order_val > best_local_order:
+                best_local_order = order_val
+                best_local_name = local_name
+
+    # The current stage = the one AFTER the last completed
+    current_stage = None
+    if best_local_name:
+        sorted_stages = sorted(sale_stages.values(), key=lambda s: s.order)
+        for i, s in enumerate(sorted_stages):
+            if s.name == best_local_name:
+                if i + 1 < len(sorted_stages):
+                    current_stage = sorted_stages[i + 1]
+                else:
+                    current_stage = s  # all stages complete, stay on last
+                break
+
+    # Also check if Anthill reports a 'current' (overdue/active) action
+    for action in parser.actions:
+        if action['is_current'] or action['status'] == 'overdue':
+            local_name = ANTHILL_TO_LOCAL.get(action['name'])
+            if local_name and local_name in sale_stages:
+                current_stage = sale_stages[local_name]
+                break
+
+    # ── Update OrderWorkflowProgress ──────────────────────────────────────
+    updated = False
+    if current_stage:
+        wp, created = OrderWorkflowProgress.objects.get_or_create(
+            order=order,
+            defaults={'current_stage': current_stage},
+        )
+        if not created and wp.current_stage_id != current_stage.id:
+            wp.current_stage = current_stage
+            wp.save()
+            updated = True
+        elif created:
+            updated = True
+
+    return JsonResponse({
+        'success': True,
+        'order_id': order.id,
+        'sale_number': order.sale_number,
+        'anthill_stages': anthill_stages,
+        'current_stage': current_stage.name if current_stage else None,
+        'updated': updated,
+    })

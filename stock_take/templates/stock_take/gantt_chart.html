@@ -1,0 +1,249 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Gantt Chart{% endblock %}
+
+{% block nav_gantt_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/fit_board.css' %}" rel="stylesheet">
+<link href="{% static 'css/gantt.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+
+<!-- Toolbar -->
+<div class="cal-toolbar">
+    <div class="calendar-nav">
+        {% if tab == 'timeline' %}
+        <a href="?tab=timeline&back={{ weeks_back|add:4 }}&ahead={{ weeks_ahead }}" class="btn btn-secondary">&larr;</a>
+        <h2 class="calendar-date">{{ range_start|date:"j M" }} &ndash; {{ range_end|date:"j M Y" }}</h2>
+        <a href="?tab=timeline&back={{ weeks_back }}&ahead={{ weeks_ahead|add:4 }}" class="btn btn-secondary">&rarr;</a>
+        <a href="?tab=timeline" class="btn btn-primary">Reset</a>
+        {% else %}
+        <h2 class="calendar-date">Workflow Gantt</h2>
+        <button type="button" class="btn btn-secondary" onclick="syncAllAnthill()" id="btnSyncAll" title="Sync workflow stages from Anthill for all visible orders">
+            <i class="bi bi-arrow-repeat"></i> Sync from Anthill
+        </button>
+        {% endif %}
+    </div>
+    <div class="view-toggle">
+        <a href="{% url 'gantt_chart' %}" class="view-toggle-btn {% if tab == 'workflow' %}active{% endif %}">Workflow</a>
+        <a href="{% url 'gantt_chart' %}?tab=timeline" class="view-toggle-btn {% if tab == 'timeline' %}active{% endif %}">Timeline</a>
+    </div>
+</div>
+
+<!-- Legend -->
+<div class="gantt-legend">
+    {% for role, colour in role_colours.items %}
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch" style="background: {{ colour }};"></span>
+        <span class="gantt-legend-label">{{ role }}</span>
+    </div>
+    {% endfor %}
+    {% if tab == 'timeline' %}
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch gantt-legend-marker-goods"></span>
+        <span class="gantt-legend-label">Goods Due</span>
+    </div>
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch gantt-legend-marker-fit"></span>
+        <span class="gantt-legend-label">Fit Date</span>
+    </div>
+    {% endif %}
+</div>
+
+{% if tab == 'workflow' %}
+<!-- ══════════════════════════════════════════════════════════
+     WORKFLOW GANTT — traditional: stages as rows, time as bars
+     ══════════════════════════════════════════════════════════ -->
+<div class="gantt-wrapper">
+    <div class="gantt-wf-scroll" style="--total-wf-days: {{ total_workflow_days }};">
+        {% for row in stage_rows %}
+        <div class="gantt-wf-row">
+            <div class="gantt-wf-label">
+                <span class="gantt-stage-dot" style="background: {{ row.role_colour }};"></span>
+                <span class="gantt-wf-name">{{ row.stage.name }}</span>
+                {% if row.order_count %}
+                <span class="gantt-wf-count">{{ row.order_count }}</span>
+                {% endif %}
+            </div>
+            <div class="gantt-wf-track">
+                <div class="gantt-wf-bar" style="--bar-start: {{ row.start_day }}; --bar-days: {{ row.days }}; background: {{ row.role_colour }};">
+                    <span class="gantt-wf-bar-text">{{ row.days }}d</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% if not stage_rows %}
+<div class="gantt-empty">
+    <p>No workflow stages defined.</p>
+</div>
+{% endif %}
+
+{% else %}
+<!-- ══════════════════════════════════════════════════════════
+     TIMELINE GANTT — date-based bars
+     ══════════════════════════════════════════════════════════ -->
+<div class="gantt-wrapper">
+    <div class="gantt-tl-outer" style="--total-days: {{ total_days }};">
+        <div class="gantt-tl-inner">
+
+            <!-- Header row: label + month headers -->
+            <div class="gantt-tl-header-row">
+                <div class="gantt-tl-label-cell gantt-tl-corner">Order</div>
+                <div class="gantt-tl-header-track">
+                    {% for mh in month_headers %}
+                    <div class="gantt-month-cell" style="width: calc({{ mh.span }} * var(--day-width));">
+                        {{ mh.label }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Day header row -->
+            <div class="gantt-tl-header-row gantt-tl-day-header">
+                <div class="gantt-tl-label-cell gantt-tl-corner"></div>
+                <div class="gantt-tl-header-track">
+                    {% for d in day_columns %}
+                    <div class="gantt-day-cell {% if d == today %}gantt-day-today{% endif %} {% if d.weekday == 5 or d.weekday == 6 %}gantt-day-weekend{% endif %}">
+                        <span class="gantt-day-name">{{ d|date:"D" }}</span>
+                        <span class="gantt-day-num">{{ d.day }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Today line -->
+            {% if today_offset >= 0 and today_offset < total_days %}
+            <div class="gantt-today-line" style="left: calc(var(--gantt-label-width) + {{ today_offset }} * var(--day-width) + var(--day-width) / 2);"></div>
+            {% endif %}
+
+            <!-- Order rows -->
+            {% for row in timeline_rows %}
+            <div class="gantt-tl-row">
+                <div class="gantt-tl-label-cell">
+                    <a href="{% url 'order_details' row.order.id %}" class="gantt-label-link" title="{{ row.display_name }}">
+                        <span class="gantt-label-sale">{{ row.order.sale_number }}</span>
+                        <span class="gantt-label-name">{{ row.display_name }}</span>
+                    </a>
+                    {% if row.order.sale_number %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ row.order.sale_number }}" target="_blank" class="gantt-anthill-link" title="Open in Anthill">
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="gantt-tl-bar-track">
+                    {% for d in day_columns %}
+                    <div class="gantt-grid-cell {% if d.weekday == 5 or d.weekday == 6 %}gantt-grid-weekend{% endif %}"></div>
+                    {% endfor %}
+
+                    <div class="gantt-bar"
+                         style="left: calc({{ row.offset }} * var(--day-width));
+                                width: calc({{ row.width }} * var(--day-width));
+                                background: {{ row.stage_colour }};"
+                         title="{{ row.display_name }}{% if row.stage_name %} — {{ row.stage_name }}{% endif %}{% if row.time_allowance %} ({{ row.time_allowance }} days){% endif %}">
+                        <span class="gantt-bar-text">
+                            {% if row.stage_name %}{{ row.stage_name }}{% else %}{{ row.order.sale_number }}{% endif %}
+                        </span>
+                    </div>
+
+                    {% if row.goods_due_offset is not None %}
+                    <div class="gantt-marker gantt-marker-goods"
+                         style="left: calc({{ row.goods_due_offset }} * var(--day-width) + var(--day-width) / 2);"
+                         title="Goods Due: {{ row.goods_due_in|date:'d/m/Y' }}">
+                        <i class="bi bi-truck"></i>
+                    </div>
+                    {% endif %}
+
+                    {% if row.fit_offset is not None %}
+                    <div class="gantt-marker gantt-marker-fit"
+                         style="left: calc({{ row.fit_offset }} * var(--day-width) + var(--day-width) / 2);"
+                         title="Fit Date: {{ row.order.fit_date|date:'d/m/Y' }}">
+                        <i class="bi bi-wrench"></i>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+
+        </div>
+    </div>
+</div>
+
+{% if not timeline_rows %}
+<div class="gantt-empty">
+    <p>No orders with dates found in this range.</p>
+</div>
+{% endif %}
+
+{% endif %}
+
+{% if tab == 'workflow' %}
+<script>
+const ORDER_IDS = [{% for row in order_rows %}{{ row.order.id }}{% if not forloop.last %},{% endif %}{% endfor %}];
+
+function syncAllAnthill() {
+    const btn = document.getElementById('btnSyncAll');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Syncing...';
+
+    let completed = 0;
+    let updated = 0;
+    let errors = [];
+
+    function syncNext(idx) {
+        if (idx >= ORDER_IDS.length) {
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Done (' + updated + ' updated)';
+            if (errors.length) {
+                console.warn('Sync errors:', errors);
+            }
+            if (updated > 0) {
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync from Anthill';
+                }, 2000);
+            }
+            return;
+        }
+        const oid = ORDER_IDS[idx];
+        fetch(`{% url 'gantt_chart' %}sync-anthill/${oid}/`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': '{{ csrf_token }}'},
+        })
+        .then(r => r.json())
+        .then(data => {
+            completed++;
+            if (data.success && data.updated) updated++;
+            if (!data.success) errors.push({id: oid, error: data.error});
+            btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> ' + completed + '/' + ORDER_IDS.length;
+            syncNext(idx + 1);
+        })
+        .catch(err => {
+            completed++;
+            errors.push({id: oid, error: err.message});
+            btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> ' + completed + '/' + ORDER_IDS.length;
+            syncNext(idx + 1);
+        });
+    }
+
+    if (ORDER_IDS.length === 0) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> No orders to sync';
+        return;
+    }
+    syncNext(0);
+}
+</script>
+<style>
+.spin { animation: spinAnim 1s linear infinite; }
+@keyframes spinAnim { to { transform: rotate(360deg); } }
+</style>
+{% endif %}
+
+{% endblock %}
