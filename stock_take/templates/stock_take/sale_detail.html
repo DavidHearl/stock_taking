@@ -1169,6 +1169,11 @@
             <div class="card sale-sidebar-card">
                 <div class="card-header">
                     <h3><i class="bi bi-folder"></i> Linked Order</h3>
+                    {% if sale.order %}
+                    <button class="btn btn-sm btn-outline-danger" onclick="unlinkSaleOrder()" title="Remove order link" style="padding:2px 8px; font-size:0.75rem;">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                    {% endif %}
                 </div>
                 <div class="card-body padded">
                     {% if sale.order %}
@@ -1203,6 +1208,15 @@
                     <div class="sale-no-order">
                         <i class="bi bi-folder"></i>
                         <p>No local order linked to this sale.</p>
+                        <div class="sale-link-order-combo" style="position:relative; width:100%; margin-top:8px;">
+                            <input type="text" class="form-input" id="sale-order-search"
+                                   placeholder="Search order by name or sale number..."
+                                   autocomplete="off"
+                                   style="width:100%; font-size:0.8rem;"
+                                   oninput="searchOrderForSale(this.value)"
+                                   onfocus="this.select(); searchOrderForSale(this.value);">
+                            <div class="boards-po-results" id="sale-order-results" style="display:none;"></div>
+                        </div>
                     </div>
                     {% endif %}
                 </div>
@@ -1307,4 +1321,99 @@
         </div>
     </div>
 </div>
+
+<script>
+// ─── Link / Unlink Order to Sale ────────────────────────────────────────
+let _saleOrderSearchTimer = null;
+
+function searchOrderForSale(query) {
+    clearTimeout(_saleOrderSearchTimer);
+    const resultsDiv = document.getElementById('sale-order-results');
+    if (!resultsDiv) return;
+
+    if (query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    _saleOrderSearchTimer = setTimeout(() => {
+        fetch(`{% url 'order_search' %}?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                resultsDiv.innerHTML = '';
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No orders found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                data.results.forEach(order => {
+                    const item = document.createElement('div');
+                    item.className = 'boards-po-result-item';
+                    item.innerHTML = `
+                        <span class="boards-po-result-number">${order.sale_number}</span>
+                        <span class="boards-po-result-meta">${order.customer_name}</span>
+                    `;
+                    item.addEventListener('click', () => linkSaleToOrder(order));
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = 'block';
+            })
+            .catch(() => { resultsDiv.style.display = 'none'; });
+    }, 250);
+}
+
+function linkSaleToOrder(order) {
+    const resultsDiv = document.getElementById('sale-order-results');
+    if (resultsDiv) resultsDiv.style.display = 'none';
+
+    fetch(`/api/sale/{{ sale.pk }}/link-order/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ order_id: order.id })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Unknown'));
+        }
+    })
+    .catch(err => alert('Error linking order: ' + err.message));
+}
+
+function unlinkSaleOrder() {
+    if (!confirm('Remove the order link from this sale?')) return;
+
+    fetch(`/api/sale/{{ sale.pk }}/link-order/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ order_id: null })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Unknown'));
+        }
+    })
+    .catch(err => alert('Error unlinking order: ' + err.message));
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const combo = document.querySelector('.sale-link-order-combo');
+    const results = document.getElementById('sale-order-results');
+    if (combo && results && !combo.contains(e.target)) {
+        results.style.display = 'none';
+    }
+});
+</script>
 {% endblock %}

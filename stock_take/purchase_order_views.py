@@ -32,27 +32,38 @@ def _get_board_product_rows_for_pdf(po):
     from collections import defaultdict
     from decimal import Decimal
 
+    is_angled = boards_po.is_angled
+
     groups = defaultdict(lambda: {
         'matname': '', 'cleng': 0, 'cwidth': 0,
+        'left_height': None, 'right_height': None, 'top_edge': 0,
         'total_qty': Decimal('0'), 'total_cost': Decimal('0'),
     })
     for item in pnx_items:
-        key = (item.matname, float(item.cleng), float(item.cwidth))
+        if is_angled and item.left_height is not None:
+            # For angled boards, group by all dimensions including left/right/top_edge
+            key = (item.matname, float(item.left_height or 0), float(item.right_height or 0),
+                   float(item.cwidth), float(item.top_edge or 0))
+        else:
+            key = (item.matname, float(item.cleng), float(item.cwidth))
         grp = groups[key]
         grp['matname'] = item.matname
         grp['cleng'] = float(item.cleng)
         grp['cwidth'] = float(item.cwidth)
+        grp['left_height'] = float(item.left_height) if item.left_height is not None else None
+        grp['right_height'] = float(item.right_height) if item.right_height is not None else None
+        grp['top_edge'] = float(item.top_edge or 0)
         grp['total_qty'] += item.cnt
         grp['total_cost'] += item.get_cost()
 
     class _BoardRow:
         """Lightweight duck-type wrapper matching PurchaseOrderProduct interface."""
-        def __init__(self, sku, name, qty, unit_price, line_total):
+        def __init__(self, sku, name, description, qty, unit_price, line_total):
             self.sku = sku
             self.supplier_code = ''
             self.stock_item = None
             self.name = name
-            self.description = name
+            self.description = description
             self.order_quantity = qty
             self.quantity = qty
             self.order_price = unit_price
@@ -64,9 +75,18 @@ def _get_board_product_rows_for_pdf(po):
         qty = grp['total_qty']
         cost = grp['total_cost']
         unit_price = (cost / qty) if qty else Decimal('0')
+        # Build dimension string
+        if grp['left_height'] is not None:
+            dims = f"L:{grp['left_height']:.0f} R:{grp['right_height']:.0f} W:{grp['cwidth']:.0f}"
+            if grp['top_edge'] > 0:
+                dims += f" TE:{grp['top_edge']:.0f}"
+            name = f"{grp['matname']} — {dims}mm"
+        else:
+            name = f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm"
         rows.append(_BoardRow(
             sku=sku,
-            name=f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm",
+            name=name,
+            description=name,
             qty=qty,
             unit_price=unit_price,
             line_total=cost,
@@ -313,17 +333,26 @@ def purchase_order_detail(request, po_id):
         # Group PNX items by matname + dimensions into product-like rows
         from collections import defaultdict
         from decimal import Decimal
+        is_angled_po = boards_po.is_angled
         groups = defaultdict(lambda: {
             'matname': '', 'cleng': 0, 'cwidth': 0,
+            'left_height': None, 'right_height': None, 'top_edge': 0,
             'total_qty': Decimal('0'), 'received_qty': Decimal('0'),
             'total_cost': Decimal('0'), 'items': [],
         })
         for item in pnx_items:
-            key = (item.matname, float(item.cleng), float(item.cwidth))
+            if is_angled_po and item.left_height is not None:
+                key = (item.matname, float(item.left_height or 0), float(item.right_height or 0),
+                       float(item.cwidth), float(item.top_edge or 0))
+            else:
+                key = (item.matname, float(item.cleng), float(item.cwidth))
             grp = groups[key]
             grp['matname'] = item.matname
             grp['cleng'] = float(item.cleng)
             grp['cwidth'] = float(item.cwidth)
+            grp['left_height'] = float(item.left_height) if item.left_height is not None else None
+            grp['right_height'] = float(item.right_height) if item.right_height is not None else None
+            grp['top_edge'] = float(item.top_edge or 0)
             grp['total_qty'] += item.cnt
             grp['received_qty'] += item.received_quantity
             grp['total_cost'] += item.calculated_cost
@@ -334,9 +363,17 @@ def purchase_order_detail(request, po_id):
             qty = grp['total_qty']
             cost = grp['total_cost']
             unit_price = (cost / qty) if qty else Decimal('0')
+            # Build dimension string
+            if grp['left_height'] is not None:
+                dims = f"L:{grp['left_height']:.0f} R:{grp['right_height']:.0f} W:{grp['cwidth']:.0f}"
+                if grp['top_edge'] > 0:
+                    dims += f" TE:{grp['top_edge']:.0f}"
+                name = f"{grp['matname']} — {dims}mm"
+            else:
+                name = f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm"
             board_product_rows.append({
                 'sku': sku,
-                'name': f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm",
+                'name': name,
                 'order_price': unit_price,
                 'order_quantity': qty,
                 'received_quantity': grp['received_qty'],
@@ -3721,11 +3758,23 @@ def carnehill_summary(request):
                 Paragraph('<b>E4</b>', styles['CellTextRight']),
                 Paragraph('<b>Qty</b>', styles['CellTextRight']),
             ]]
-            for item in sorted(board_items, key=lambda x: (x.matname, float(x.cleng), float(x.cwidth))):
+            is_angled_po = boards_po.is_angled if boards_po else False
+            if is_angled_po:
+                sort_key = lambda x: (x.matname, float(x.left_height or 0), float(x.right_height or 0), float(x.cwidth))
+            else:
+                sort_key = lambda x: (x.matname, float(x.cleng), float(x.cwidth))
+            for item in sorted(board_items, key=sort_key):
                 tick = '\u2713'
+                if is_angled_po and item.left_height is not None:
+                    dims = f'L:{float(item.left_height):.0f} R:{float(item.right_height):.0f} W:{float(item.cwidth):.0f}'
+                    if item.top_edge and float(item.top_edge) > 0:
+                        dims += f' TE:{float(item.top_edge):.0f}'
+                    dims += ' mm'
+                else:
+                    dims = f'{float(item.cleng):.0f} \u00d7 {float(item.cwidth):.0f} mm'
                 table_data.append([
                     Paragraph(str(item.matname or ''), styles['CellText']),
-                    Paragraph(f'{float(item.cleng):.0f} \u00d7 {float(item.cwidth):.0f} mm', styles['CellText']),
+                    Paragraph(dims, styles['CellText']),
                     Paragraph(tick if item.prfid1 else '', styles['CellTextRight']),
                     Paragraph(tick if item.prfid2 else '', styles['CellTextRight']),
                     Paragraph(tick if item.prfid3 else '', styles['CellTextRight']),

@@ -287,12 +287,22 @@ def dashboard(request):
         count=Count('id'),
     )
 
-    # Get count of approved POs waiting to arrive
-    pending_pos = PurchaseOrder.objects.filter(
+    # Get approved POs waiting to arrive
+    pending_pos_qs = PurchaseOrder.objects.filter(
         status__in=['Approved', 'Ordered', 'Sent']
     ).exclude(
         status__in=['Received', 'Invoiced', 'Cancelled', 'Closed']
-    ).count()
+    ).order_by('-issue_date')
+    pending_pos = pending_pos_qs.count()
+    pending_pos_list = [
+        {
+            'number': po.display_number or po.number or str(po.workguru_id),
+            'supplier': po.supplier_name or '—',
+            'total': float(po.total or 0),
+            'status': po.status or '',
+        }
+        for po in pending_pos_qs[:20]
+    ]
 
     # Item shortages — tracked items where quantity is below par level (par_level > 0)
     shortage_items = (
@@ -565,7 +575,106 @@ def dashboard(request):
         max((row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
         for row in this_week_qs
     ) or Decimal('0')
-    
+
+    # ── Preview data for stat-card "Detailed" variant tables ──
+
+    # Outstanding: top 10 debtors by outstanding balance
+    debtor_map = {}
+    for row in outstanding_rows:
+        sv = row['sale_value'] or Decimal('0')
+        disc = row['discount'] or Decimal('0')
+        paid = row['total_paid'] or Decimal('0')
+        owed = sv - 2 * disc - paid
+        if owed >= Decimal('10'):
+            name = row['customer_name'] or '-'
+            if name not in debtor_map:
+                debtor_map[name] = {'sale_value': Decimal('0'), 'outstanding': Decimal('0')}
+            debtor_map[name]['sale_value'] += sv
+            debtor_map[name]['outstanding'] += owed
+    outstanding_preview = sorted(
+        [{'customer': n, 'sale_value': float(v['sale_value']), 'outstanding': float(v['outstanding'])}
+         for n, v in debtor_map.items()],
+        key=lambda x: -x['outstanding'],
+    )[:10]
+
+    # Sales After: next 10 upcoming fits by date
+    sales_after_preview_qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=today, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        sales_after_preview_qs = sales_after_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    sales_after_preview = [
+        {'customer': s['customer_name'] or '-',
+         'fit_date': s['fit_date'].strftime('%d/%m') if s['fit_date'] else '',
+         'value': float(s['sale_value'] or 0)}
+        for s in sales_after_preview_qs.values('customer_name', 'fit_date', 'sale_value')[:10]
+    ]
+
+    # Stock Value: top 10 items by total value (qty * cost)
+    stock_preview = sorted(
+        [{'name': i.name, 'qty': i.quantity, 'value': float(i.cost * i.quantity)}
+         for i in stock_items if i.cost and i.quantity],
+        key=lambda x: -x['value'],
+    )[:10]
+
+    # Week Sales: this week's fits (up to 10)
+    week_preview_qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        week_preview_qs = week_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    week_preview = [
+        {'customer': s['customer_name'] or '-',
+         'fit_date': s['fit_date'].strftime('%a %d') if s['fit_date'] else '',
+         'value': float(s['sale_value'] or 0)}
+        for s in week_preview_qs.values('customer_name', 'fit_date', 'sale_value')[:10]
+    ]
+
+    # Monthly Sales: this month's fits (up to 10)
+    from calendar import monthrange
+    month_start = today.replace(day=1)
+    month_end = today.replace(day=monthrange(today.year, today.month)[1])
+    monthly_preview_qs = (
+        AnthillSale.objects
+        .filter(fit_date__gte=month_start, fit_date__lte=month_end, sale_value__gt=0)
+        .exclude(status__in=['cancelled', 'dead'])
+        .order_by('fit_date')
+    )
+    if contract_prefix:
+        monthly_preview_qs = monthly_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    monthly_preview = [
+        {'customer': s['customer_name'] or '-',
+         'fit_date': s['fit_date'].strftime('%d/%m') if s['fit_date'] else '',
+         'value': float(s['sale_value'] or 0)}
+        for s in monthly_preview_qs.values('customer_name', 'fit_date', 'sale_value')[:10]
+    ]
+
+    # Avg Sale: last 6 months breakdown
+    from django.db.models.functions import TruncMonth as _TruncMonth
+    avg_preview_qs = AnthillSale.objects.filter(
+        fit_date__gte=today - timedelta(days=180), fit_date__lte=today, sale_value__gt=0,
+    ).exclude(status__in=['cancelled', 'dead'])
+    if contract_prefix:
+        avg_preview_qs = avg_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    avg_monthly = (
+        avg_preview_qs.annotate(month=_TruncMonth('fit_date'))
+        .values('month')
+        .annotate(count=Count('id'), total=Sum('sale_value'))
+        .order_by('-month')
+    )
+    avg_preview = [
+        {'month': (m['month'].date() if hasattr(m['month'], 'date') else m['month']).strftime('%b %Y'),
+         'count': m['count'],
+         'avg': round(float(m['total'] or 0) / m['count'], 0) if m['count'] else 0}
+        for m in avg_monthly
+    ][:6]
+
     context = {
         'fits_chart_data': json.dumps({
             'labels': labels,
@@ -587,6 +696,7 @@ def dashboard(request):
         'current_month_board_index': current_month_board_index,
         'current_month_sales_index': current_month_sales_index,
         'pending_pos_count': pending_pos,
+        'pending_pos_json': json.dumps(pending_pos_list),
         'shortage_count': shortage_count,
         'shortage_items_json': json.dumps(shortage_items_list),
         'incoming_materials_count': incoming_materials_count,
@@ -611,8 +721,34 @@ def dashboard(request):
         'total_outstanding_balance': '{:,.0f}'.format(total_outstanding_balance),
         'outstanding_debtor_count': outstanding_debtor_count,
         'expected_this_week': '{:,.0f}'.format(expected_this_week),
+        'dashboard_layout_json': json.dumps(profile.dashboard_layout if profile and profile.dashboard_layout else None),
+        'outstanding_preview_json': json.dumps(outstanding_preview),
+        'sales_after_preview_json': json.dumps(sales_after_preview),
+        'stock_preview_json': json.dumps(stock_preview),
+        'week_preview_json': json.dumps(week_preview),
+        'monthly_preview_json': json.dumps(monthly_preview),
+        'avg_preview_json': json.dumps(avg_preview),
     }
     return render(request, 'stock_take/dashboard.html', context)
+
+
+@login_required
+def dashboard_save_layout(request):
+    """Save the user's dashboard widget layout."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+    import json as _json
+    try:
+        layout = _json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+    profile = getattr(request.user, 'profile', None)
+    if not profile:
+        from .models import UserProfile
+        profile = UserProfile.objects.create(user=request.user)
+    profile.dashboard_layout = layout
+    profile.save(update_fields=['dashboard_layout'])
+    return JsonResponse({'success': True})
 
 
 @login_required

@@ -524,7 +524,7 @@ class Command(BaseCommand):
 
                         self.stdout.write(self.style.WARNING(
                             f'  FALLBACK: {sale.anthill_activity_id} ({sale.contract_number}) '
-                            f'← Xero invoice ref "{inv_ref}" '
+                            f'<- Xero invoice ref "{inv_ref}" '
                             f'(£{inv_total}, customer match "{cust_upper}")'
                         ))
 

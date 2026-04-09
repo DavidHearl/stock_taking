@@ -3027,7 +3027,7 @@ def update_pnx_dimensions(request):
                 value = change.get('value')
                 
                 # Handle dimension fields (numeric)
-                if field in ['cleng', 'cwidth', 'cnt']:
+                if field in ['cleng', 'cwidth', 'cnt', 'left_height', 'right_height', 'top_edge']:
                     pnx_item = PNXItem.objects.filter(id=pnx_id).first()
                     if pnx_item:
                         setattr(pnx_item, field, Decimal(str(value)))
@@ -3106,6 +3106,9 @@ def add_board_item(request):
                 prfid4=data.get('prfid4', ''),
                 customer=_build_customer_value(linked_order),
                 ordername=linked_order.sale_number if linked_order else '',
+                left_height=Decimal(str(data['left_height'])) if data.get('left_height') else None,
+                right_height=Decimal(str(data['right_height'])) if data.get('right_height') else None,
+                top_edge=Decimal(str(data.get('top_edge', 0) or 0)),
             )
             
             # Regenerate PNX and CSV files
@@ -4489,10 +4492,12 @@ def add_additional_boards_po(request, order_id):
         if request.content_type and 'multipart' in request.content_type:
             po_number = request.POST.get('po_number', '').strip()
             dwg_file = request.FILES.get('dwg_file')
+            is_angled = request.POST.get('is_angled') in ('true', 'on', '1', 'True')
         else:
             data = json.loads(request.body)
             po_number = data.get('po_number', '').strip()
             dwg_file = None
+            is_angled = data.get('is_angled', False)
 
         if not po_number:
             # Auto-generate next number
@@ -4520,8 +4525,11 @@ def add_additional_boards_po(request, order_id):
 
         boards_po, created = BoardsPO.objects.get_or_create(
             po_number=po_number,
-            defaults={'boards_ordered': False},
+            defaults={'boards_ordered': False, 'is_angled': is_angled},
         )
+        if not created and is_angled:
+            boards_po.is_angled = is_angled
+            boards_po.save(update_fields=['is_angled'])
         order.additional_boards_pos.add(boards_po)
 
         # Attach DWG file if provided
@@ -7390,6 +7398,36 @@ def update_os_doors_po(request, order_id):
         messages.success(request, f'OS Doors PO updated for order {order.sale_number}.')
         return redirect('order_details', order_id=order_id)
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+def link_os_doors_po(request, order_id):
+    """Link an existing PurchaseOrder to this order as its OS Doors PO (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+    order = get_object_or_404(Order, id=order_id)
+
+    try:
+        data = json.loads(request.body)
+        display_number = data.get('display_number', '').strip()
+        if not display_number:
+            return JsonResponse({'success': False, 'error': 'No PO number provided'})
+
+        po = PurchaseOrder.objects.filter(display_number=display_number).first()
+        if not po:
+            return JsonResponse({'success': False, 'error': f'Purchase Order {display_number} not found'})
+
+        order.os_doors_po = display_number
+        order.save(update_fields=['os_doors_po'])
+
+        # Mark existing unlinked OS door items with this PO number
+        from django.db.models import Q
+        order.os_doors.filter(Q(po_number='') | Q(po_number__isnull=True)).update(po_number=display_number)
+
+        return JsonResponse({'success': True, 'po_number': display_number})
+    except (json.JSONDecodeError, Exception) as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 
 
 @login_required

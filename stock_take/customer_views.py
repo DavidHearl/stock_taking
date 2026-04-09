@@ -806,6 +806,50 @@ def sale_save(request, pk):
 
 
 @login_required
+def sale_link_order(request, pk):
+    """Link or unlink an Order to/from an AnthillSale (AJAX POST).
+
+    Accepts JSON body: { "order_id": <int|null> }
+    When linking, also propagates fit_date between sale and order.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    order_id = data.get('order_id')
+
+    if order_id is None:
+        # Unlink
+        sale.order = None
+        sale.save(update_fields=['order'])
+        return JsonResponse({'success': True, 'unlinked': True})
+
+    order = Order.objects.filter(id=order_id).first()
+    if not order:
+        return JsonResponse({'success': False, 'error': 'Order not found'})
+
+    sale.order = order
+    sale.save(update_fields=['order'])
+
+    # Propagate fit_date: sale → order (always update order to match the sale)
+    if sale.fit_date:
+        order.fit_date = sale.fit_date
+        order.save(update_fields=['fit_date'])
+    # Or order → sale (if sale doesn't have one)
+    elif order.fit_date and not sale.fit_date:
+        sale.fit_date = order.fit_date
+        sale.save(update_fields=['fit_date'])
+
+    return JsonResponse({'success': True, 'linked': True, 'sale_number': order.sale_number})
+
+
+@login_required
 def sale_detail(request, pk):
     """Display detailed view of a single Anthill event."""
     sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)

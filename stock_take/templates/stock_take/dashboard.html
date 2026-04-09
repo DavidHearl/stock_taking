@@ -15,164 +15,374 @@
 
 {% block content %}
 <div class="dashboard-page">
-    <!-- Stats Cards -->
-    <div class="dashboard-grid dashboard-grid-6">
-        <div class="dashboard-card accent-danger">
-            <h3 class="card-label">Outstanding Balance</h3>
-            <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
-            <div class="card-subtext">{{ outstanding_debtor_count }} debtors remaining
-                <span class="card-delta">Expected this week: <strong>&pound;{{ expected_this_week }}</strong></span>
-            </div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openOutstandingReport()">
-                    <i class="bi bi-bar-chart-line-fill"></i> View Report
-                </button>
-            </div>
+    <!-- Edit Mode Toggle -->
+    <button class="widget-edit-toggle" id="widgetEditToggle" onclick="toggleWidgetEditMode()">
+        <i class="bi bi-grid-3x3-gap"></i> Customise
+    </button>
+
+    <!-- Edit Mode Toolbar (visible when editing) -->
+    <div class="widget-edit-toolbar" id="widgetEditToolbar">
+        <span class="widget-edit-toolbar-hint"><i class="bi bi-info-circle"></i> Click a widget to configure &bull; Drag handles to reposition</span>
+        <div class="widget-edit-toolbar-actions">
+            <button class="btn-secondary btn-sm" onclick="openWidgetOverview()"><i class="bi bi-list-ul"></i> Widget Menu</button>
+            <button class="btn-cancel btn-sm" onclick="resetWidgetLayout()"><i class="bi bi-arrow-counterclockwise"></i> Reset</button>
+            <button class="btn-save btn-sm" onclick="saveWidgetLayout()"><i class="bi bi-check-lg"></i> Save Layout</button>
         </div>
-        <div class="dashboard-card accent-danger">
-            <div class="card-label">
-                Sales After
-                <div class="dash-cal-wrap" id="salesAfterCalWrap" title="" onclick="this.querySelector('input').showPicker()">
-                    <i class="bi bi-calendar3"></i>
-                    <input type="date" id="salesAfterDate" class="dash-date-overlay"
-                           value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalTitle('salesAfterDate','salesAfterCalWrap')">
+    </div>
+
+    <!-- Widget Overview Dialog -->
+    <dialog class="widget-overview-modal" id="widgetOverviewModal">
+        <div class="wom-header">
+            <div class="wom-title"><i class="bi bi-grid-3x3-gap"></i> Widget Menu</div>
+            <button class="wcm-close" onclick="document.getElementById('widgetOverviewModal').close()">&times;</button>
+        </div>
+        <div class="wom-body">
+            <table class="wom-table">
+                <thead>
+                    <tr>
+                        <th class="wom-col-icon"></th>
+                        <th class="wom-col-name">Widget</th>
+                        <th class="wom-col-size">Width</th>
+                        <th class="wom-col-size">Height</th>
+                        <th class="wom-col-variant">Variant</th>
+                        <th class="wom-col-vis">Visible</th>
+                        <th class="wom-col-settings"></th>
+                    </tr>
+                </thead>
+                <tbody id="womTableBody"></tbody>
+            </table>
+        </div>
+        <div class="wom-footer">
+            <button class="btn-cancel btn-sm" onclick="document.getElementById('widgetOverviewModal').close()">Close</button>
+        </div>
+    </dialog>
+
+    <!-- Widget Configuration Modal -->
+    <dialog class="widget-config-modal" id="widgetConfigModal">
+        <div class="wcm-header">
+            <div class="wcm-title">
+                <i class="bi bi-gear" id="wcmIcon"></i>
+                <span id="wcmName">Widget Settings</span>
+            </div>
+            <button class="wcm-close" onclick="closeWidgetConfig()">&times;</button>
+        </div>
+        <div class="wcm-body">
+            <!-- Size -->
+            <div class="wcm-section">
+                <div class="wcm-section-label">Size</div>
+                <div class="wcm-size-row">
+                    <div class="wcm-size-group">
+                        <label>Width</label>
+                        <select id="wcmWidth" class="wcm-select" onchange="applyWidgetConfig()"></select>
+                    </div>
+                    <span class="wcm-size-sep">&times;</span>
+                    <div class="wcm-size-group">
+                        <label>Height</label>
+                        <select id="wcmHeight" class="wcm-select" onchange="applyWidgetConfig()"></select>
+                    </div>
                 </div>
             </div>
-            <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
-            <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openSalesAfterReport()">
-                    <i class="bi bi-bar-chart-line-fill"></i> View Report
-                </button>
-            </div>
-        </div>
-        <div class="dashboard-card">
-            <div class="card-label">
-                Stock Value
-                <div class="dash-cal-wrap" id="stockReportCalWrap" title="" onclick="this.querySelector('input').showPicker()">
-                    <i class="bi bi-calendar3"></i>
-                    <input type="date" id="stockReportDate" class="dash-date-overlay"
-                           value="{{ today_str }}" onchange="updateCalTitle('stockReportDate','stockReportCalWrap')">
+
+            <!-- Variant -->
+            <div class="wcm-section" id="wcmVariantSection">
+                <div class="wcm-section-label">Variant</div>
+                <div class="wcm-variant-group" id="wcmVariant">
+                    <button class="wcm-variant-btn" data-value="compact" onclick="selectOption('variant','compact')">
+                        <div class="wcm-variant-preview wcm-vp-compact">
+                            <span class="wcm-vp-label"></span>
+                            <span class="wcm-vp-value"></span>
+                        </div>
+                        <span class="wcm-variant-name">Compact</span>
+                    </button>
+                    <button class="wcm-variant-btn" data-value="standard" onclick="selectOption('variant','standard')">
+                        <div class="wcm-variant-preview wcm-vp-standard">
+                            <span class="wcm-vp-label"></span>
+                            <span class="wcm-vp-value"></span>
+                            <span class="wcm-vp-sub"></span>
+                        </div>
+                        <span class="wcm-variant-name">Standard</span>
+                    </button>
+                    <button class="wcm-variant-btn" data-value="detailed" onclick="selectOption('variant','detailed')">
+                        <div class="wcm-variant-preview wcm-vp-detailed">
+                            <span class="wcm-vp-label"></span>
+                            <span class="wcm-vp-value"></span>
+                            <span class="wcm-vp-sub"></span>
+                            <div class="wcm-vp-table">
+                                <span class="wcm-vp-row"></span>
+                                <span class="wcm-vp-row"></span>
+                                <span class="wcm-vp-row"></span>
+                            </div>
+                        </div>
+                        <span class="wcm-variant-name">Detailed</span>
+                    </button>
                 </div>
             </div>
-            <div class="card-value">&pound;{{ total_stock_value }}</div>
-            <div class="card-subtext">{{ stock_item_count }} items in stock
-                {% if stock_value_7day_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ stock_value_7day_delta_str }}</span>
-                {% elif stock_value_7day_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ stock_value_7day_delta_str }}</span>{% endif %}
-            </div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openStockReport('report')">
-                    <i class="bi bi-bar-chart-line-fill"></i> View Report
-                </button>
-            </div>
-        </div>
-        <div class="dashboard-card">
-            <h3 class="card-label">This Week's Sales</h3>
-            <div class="card-value">&pound;{{ this_week_sales }}</div>
-            <div class="card-subtext">Fits scheduled this week
-                {% if week_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ week_delta_str }} vs last week</span>
-                {% elif week_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ week_delta_str }} vs last week</span>{% endif %}
-            </div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openWeekReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
-            </div>
-        </div>
-        <div class="dashboard-card accent-success">
-            <div class="card-label">
-                <div class="month-switcher-inline">
-                    <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
-                    <span id="monthLabel"></span>
-                    <button class="month-arrow" id="nextMonthBtn" onclick="changeMonth(1)" title="Next month"><i class="bi bi-chevron-right"></i></button>
+
+            <!-- Layout -->
+            <div class="wcm-section" id="wcmLayoutSection">
+                <div class="wcm-section-label">Alignment</div>
+                <div class="wcm-option-group" id="wcmLayout">
+                    <button class="wcm-option-btn" data-value="center" onclick="selectOption('layout','center')"><i class="bi bi-text-center"></i> Center</button>
+                    <button class="wcm-option-btn" data-value="left" onclick="selectOption('layout','left')"><i class="bi bi-text-left"></i> Left</button>
                 </div>
             </div>
-            <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
-            <div class="card-subtext" id="monthlySalesCount">Total monthly sales
-                {% if month_delta > 0 %}<span class="card-delta card-delta-positive" id="monthlyDelta">&#9650; &pound;{{ month_delta_str }} vs prev month</span>
-                {% elif month_delta < 0 %}<span class="card-delta card-delta-negative" id="monthlyDelta">&#9660; &pound;{{ month_delta_str }} vs prev month</span>
-                {% else %}<span class="card-delta" id="monthlyDelta"></span>{% endif %}
-            </div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openMonthlyReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
-            </div>
-        </div>
-        <div class="dashboard-card">
-            <h3 class="card-label">Average Sale Value</h3>
-            <div class="card-value">&pound;{{ avg_daily_sale }}</div>
-            <div class="card-subtext">Avg daily revenue</div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openAvgReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
+
+            <!-- Visibility -->
+            <div class="wcm-section">
+                <div class="wcm-section-label">Visibility</div>
+                <label class="wcm-toggle-row">
+                    <span>Show this widget</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="wcmVisible" checked onchange="applyWidgetConfig()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </label>
             </div>
         </div>
-    </div>
-    <div class="charts-row">
-        <!-- Fits Per Week Chart -->
-        <div class="chart-container">
-            <h3 id="fitsChartTitle">Fits Per Week</h3>
-            <div class="chart-wrapper">
-                <canvas id="fitsPerWeekChart"></canvas>
+        <div class="wcm-footer">
+            <button class="btn-cancel btn-sm" onclick="closeWidgetConfig()">Close</button>
+        </div>
+    </dialog>
+
+    <!-- Widget Grid (12-column system) -->
+    <div class="widget-grid" id="widgetGrid">
+
+        <!-- Stat Cards -->
+        <div class="widget" data-widget-id="outstanding" data-default-w="2" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card accent-danger">
+                <h3 class="card-label">Outstanding Balance</h3>
+                <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
+                <div class="card-subtext">{{ outstanding_debtor_count }} debtors remaining
+                    <span class="card-delta">Expected this week: <strong>&pound;{{ expected_this_week }}</strong></span>
+                </div>
+                <div class="widget-preview" id="outstandingPreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openOutstandingReport()">
+                        <i class="bi bi-bar-chart-line-fill"></i> View Report
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Sales Per Week Chart -->
-        <div class="chart-container">
-            <h3 id="salesChartTitle">Sales Per Week</h3>
-            <div class="chart-wrapper">
-                <canvas id="salesPerWeekChart"></canvas>
+        <div class="widget" data-widget-id="sales_after" data-default-w="2" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card accent-danger">
+                <div class="card-label">
+                    Sales After
+                    <div class="dash-cal-wrap" id="salesAfterCalWrap" title="" onclick="this.querySelector('input').showPicker()">
+                        <i class="bi bi-calendar3"></i>
+                        <input type="date" id="salesAfterDate" class="dash-date-overlay"
+                               value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalTitle('salesAfterDate','salesAfterCalWrap')">
+                    </div>
+                </div>
+                <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
+                <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
+                <div class="widget-preview" id="salesAfterPreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openSalesAfterReport()">
+                        <i class="bi bi-bar-chart-line-fill"></i> View Report
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Monthly Charts Row -->
-    <div class="charts-row">
-        <!-- Monthly Sales Chart -->
-        <div class="chart-container">
-            <h3><i class="bi bi-graph-up-arrow"></i> Monthly Sales</h3>
-            <div class="chart-wrapper">
-                <canvas id="monthlySalesChart"></canvas>
+        <div class="widget" data-widget-id="stock_value" data-default-w="2" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card">
+                <div class="card-label">
+                    Stock Value
+                    <div class="dash-cal-wrap" id="stockReportCalWrap" title="" onclick="this.querySelector('input').showPicker()">
+                        <i class="bi bi-calendar3"></i>
+                        <input type="date" id="stockReportDate" class="dash-date-overlay"
+                               value="{{ today_str }}" onchange="updateCalTitle('stockReportDate','stockReportCalWrap')">
+                    </div>
+                </div>
+                <div class="card-value">&pound;{{ total_stock_value }}</div>
+                <div class="card-subtext">{{ stock_item_count }} items in stock
+                    {% if stock_value_7day_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ stock_value_7day_delta_str }}</span>
+                    {% elif stock_value_7day_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ stock_value_7day_delta_str }}</span>{% endif %}
+                </div>
+                <div class="widget-preview" id="stockValuePreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openStockReport('report')">
+                        <i class="bi bi-bar-chart-line-fill"></i> View Report
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Monthly Board Costs Chart -->
-        <div class="chart-container">
-            <h3><i class="bi bi-box-seam"></i> Monthly Board Costs</h3>
-            <div class="chart-wrapper">
-                <canvas id="boardCostsChart"></canvas>
+        <div class="widget" data-widget-id="week_sales" data-default-w="2" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card">
+                <h3 class="card-label">This Week's Sales</h3>
+                <div class="card-value">&pound;{{ this_week_sales }}</div>
+                <div class="card-subtext">Fits scheduled this week
+                    {% if week_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ week_delta_str }} vs last week</span>
+                    {% elif week_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ week_delta_str }} vs last week</span>{% endif %}
+                </div>
+                <div class="widget-preview" id="weekSalesPreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openWeekReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Weighted Average Sale Value Per Fit Chart -->
-    <div class="chart-container">
-        <h3 id="weightedAvgChartTitle">Avg Sale Value Per Fit</h3>
-        <div class="chart-wrapper">
-            <canvas id="weightedAvgChart"></canvas>
+        <div class="widget" data-widget-id="monthly_sales" data-default-w="2" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card accent-success">
+                <div class="card-label">
+                    <div class="month-switcher-inline">
+                        <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
+                        <span id="monthLabel"></span>
+                        <button class="month-arrow" id="nextMonthBtn" onclick="changeMonth(1)" title="Next month"><i class="bi bi-chevron-right"></i></button>
+                    </div>
+                </div>
+                <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
+                <div class="card-subtext" id="monthlySalesCount">Total monthly sales
+                    {% if month_delta > 0 %}<span class="card-delta card-delta-positive" id="monthlyDelta">&#9650; &pound;{{ month_delta_str }} vs prev month</span>
+                    {% elif month_delta < 0 %}<span class="card-delta card-delta-negative" id="monthlyDelta">&#9660; &pound;{{ month_delta_str }} vs prev month</span>
+                    {% else %}<span class="card-delta" id="monthlyDelta"></span>{% endif %}
+                </div>
+                <div class="widget-preview" id="monthlySalesPreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openMonthlyReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
+                </div>
+            </div>
         </div>
-    </div>
 
-    <!-- Pending Purchase Orders + Item Shortages + Incoming Materials -->
-    <div class="dashboard-grid dashboard-grid-3">
-        <div class="dashboard-card accent-warning">
-            <div class="card-label"><i class="bi bi-receipt" style="color:var(--warning-color);"></i> Pending Purchase Orders</div>
-            <div class="card-value">{{ pending_pos_count }}</div>
-            <div class="card-subtext">Approved and awaiting arrival</div>
-        </div>
-        <div class="dashboard-card {% if shortage_count > 0 %}accent-danger{% else %}accent-success{% endif %}">
-            <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};"></i> Item Shortages</div>
-            <div class="card-value">{{ shortage_count }}</div>
-            <div class="card-subtext">Items below par level</div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openShortagesModal()">View All</button>
+        <div class="widget" data-widget-id="avg_sale" data-default-w="2" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card">
+                <h3 class="card-label">Average Sale Value</h3>
+                <div class="card-value">&pound;{{ avg_daily_sale }}</div>
+                <div class="card-subtext">Avg daily revenue</div>
+                <div class="widget-preview" id="avgSalePreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openAvgReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
+                </div>
             </div>
         </div>
-        <div class="dashboard-card accent-info">
-            <div class="card-label"><i class="bi bi-truck" style="color:var(--info-color);"></i> Incoming Materials</div>
-            <div class="card-value">{{ incoming_materials_count }}</div>
-            <div class="card-subtext">Purchase orders in transit</div>
-            <div class="card-action">
-                <button class="card-action-btn" onclick="openIncomingModal()">View All</button>
+
+        <!-- Charts -->
+        <div class="widget" data-widget-id="fits_chart" data-default-w="6" data-default-h="6" data-min-h="4">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 id="fitsChartTitle">Fits Per Week</h3>
+                    <div class="chart-type-toggle" data-chart-id="fitsPerWeekChart">
+                        <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                        <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="fitsPerWeekChart"></canvas>
+                </div>
             </div>
         </div>
-    </div>
+
+        <div class="widget" data-widget-id="sales_chart" data-default-w="6" data-default-h="6" data-min-h="4">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 id="salesChartTitle">Sales Per Week</h3>
+                    <div class="chart-type-toggle" data-chart-id="salesPerWeekChart">
+                        <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                        <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="salesPerWeekChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="widget" data-widget-id="monthly_sales_chart" data-default-w="6" data-default-h="6" data-min-h="4">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3><i class="bi bi-graph-up-arrow"></i> Monthly Sales</h3>
+                    <div class="chart-type-toggle" data-chart-id="monthlySalesChart">
+                        <button class="chart-type-btn" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                        <button class="chart-type-btn active" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="monthlySalesChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="widget" data-widget-id="board_costs_chart" data-default-w="6" data-default-h="6" data-min-h="4">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3><i class="bi bi-box-seam"></i> Monthly Board Costs</h3>
+                    <div class="chart-type-toggle" data-chart-id="boardCostsChart">
+                        <button class="chart-type-btn" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                        <button class="chart-type-btn active" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="boardCostsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="widget" data-widget-id="weighted_avg_chart" data-default-w="12" data-default-h="6" data-min-h="4">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 id="weightedAvgChartTitle">Avg Sale Value Per Fit</h3>
+                    <div class="chart-type-toggle" data-chart-id="weightedAvgChart">
+                        <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                        <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="weightedAvgChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Stat Cards -->
+        <div class="widget" data-widget-id="pending_pos" data-default-w="4" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card accent-warning">
+                <div class="card-label"><i class="bi bi-receipt" style="color:var(--warning-color);"></i> Pending Purchase Orders</div>
+                <div class="card-value">{{ pending_pos_count }}</div>
+                <div class="card-subtext">Approved and awaiting arrival</div>
+                <div class="widget-preview" id="pendingPosPreview"></div>
+            </div>
+        </div>
+
+        <div class="widget" data-widget-id="shortages" data-default-w="4" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card {% if shortage_count > 0 %}accent-danger{% else %}accent-success{% endif %}">
+                <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};"></i> Item Shortages</div>
+                <div class="card-value">{{ shortage_count }}</div>
+                <div class="card-subtext">Items below par level</div>
+                <div class="widget-preview" id="shortagesPreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openShortagesModal()">View All</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="widget" data-widget-id="incoming" data-default-w="4" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card accent-info">
+                <div class="card-label"><i class="bi bi-truck" style="color:var(--info-color);"></i> Incoming Materials</div>
+                <div class="card-value">{{ incoming_materials_count }}</div>
+                <div class="card-subtext">Purchase orders in transit</div>
+                <div class="widget-preview" id="incomingPreview"></div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openIncomingModal()">View All</button>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /widget-grid -->
 </div>
 
 <!-- Item Shortages Modal -->
@@ -243,6 +453,559 @@
         <button onclick="document.getElementById('incomingModal').close()" class="card-action-btn" style="width:auto;">Close</button>
     </div>
 </dialog>
+
+<script>
+/* ========== Widget Layout System ========== */
+(function() {
+    const savedLayout = {{ dashboard_layout_json|default:"null"|safe }};
+    window._dashboardSavedLayout = savedLayout;
+    const grid = document.getElementById('widgetGrid');
+    const widgets = Array.from(grid.querySelectorAll('.widget'));
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+                      || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+
+    // Track which widget the modal is editing
+    let activeWidget = null;
+
+    // Widget display names & icons
+    const widgetNames = {
+        outstanding: 'Outstanding Balance',
+        sales_after: 'Sales After',
+        stock_value: 'Stock Value',
+        week_sales: "This Week's Sales",
+        monthly_sales: 'Monthly Sales',
+        avg_sale: 'Average Sale Value',
+        fits_chart: 'Fits Per Week',
+        sales_chart: 'Sales Per Week',
+        monthly_sales_chart: 'Monthly Sales Chart',
+        board_costs_chart: 'Monthly Board Costs',
+        weighted_avg_chart: 'Avg Sale Value Per Fit',
+        pending_pos: 'Pending POs',
+        shortages: 'Item Shortages',
+        incoming: 'Incoming Materials'
+    };
+    const widgetIcons = {
+        outstanding: 'bi-cash-stack',
+        sales_after: 'bi-calendar-check',
+        stock_value: 'bi-box-seam',
+        week_sales: 'bi-graph-up',
+        monthly_sales: 'bi-calendar3',
+        avg_sale: 'bi-calculator',
+        fits_chart: 'bi-graph-up',
+        sales_chart: 'bi-graph-up',
+        monthly_sales_chart: 'bi-bar-chart-fill',
+        board_costs_chart: 'bi-box-seam',
+        weighted_avg_chart: 'bi-graph-up',
+        pending_pos: 'bi-receipt',
+        shortages: 'bi-exclamation-triangle',
+        incoming: 'bi-truck'
+    };
+
+    // Apply saved layout or defaults
+    function applyLayout(layout) {
+        if (layout && Array.isArray(layout)) {
+            const configMap = {};
+            layout.forEach(item => { configMap[item.id] = item; });
+            widgets.forEach(w => {
+                const id = w.dataset.widgetId;
+                const cfg = configMap[id];
+                const width = cfg && cfg.w ? cfg.w : parseInt(w.dataset.defaultW) || 2;
+                const height = cfg && cfg.h ? cfg.h : parseInt(w.dataset.defaultH) || 4;
+                w.style.setProperty('--w', width);
+                w.style.setProperty('--h', height);
+                if (cfg && cfg.c && cfg.r) {
+                    w.style.setProperty('--c', cfg.c);
+                    w.style.setProperty('--r', cfg.r);
+                } else {
+                    w.style.removeProperty('--c');
+                    w.style.removeProperty('--r');
+                }
+                if (cfg && cfg.hidden) {
+                    w.classList.add('widget-hidden');
+                } else {
+                    w.classList.remove('widget-hidden');
+                }
+                // Apply style props
+                if (cfg && cfg.variant) w.dataset.variant = cfg.variant;
+                if (cfg && cfg.layout) w.dataset.layout = cfg.layout;
+                applyStyleProps(w);
+            });
+        } else {
+            widgets.forEach(w => {
+                w.style.setProperty('--w', parseInt(w.dataset.defaultW) || 2);
+                w.style.setProperty('--h', parseInt(w.dataset.defaultH) || 4);
+                w.style.removeProperty('--c');
+                w.style.removeProperty('--r');
+            });
+        }
+    }
+
+    // Apply variant / layout to a widget's inner card/chart
+    function applyStyleProps(w) {
+        const card = w.querySelector('.dashboard-card');
+        const chart = w.querySelector('.chart-container');
+        const target = card || chart;
+        if (!target) return;
+
+        // Variant
+        const vr = w.dataset.variant || 'standard';
+        target.classList.remove('widget-compact', 'widget-standard', 'widget-detailed');
+        target.classList.add('widget-' + vr);
+
+        // Layout (cards only)
+        if (card) {
+            const ly = w.dataset.layout || 'center';
+            card.classList.remove('widget-layout-center', 'widget-layout-left');
+            card.classList.add('widget-layout-' + ly);
+        }
+    }
+
+    function getCurrentLayout() {
+        return Array.from(grid.querySelectorAll('.widget')).map(w => {
+            const cs = getComputedStyle(w);
+            const entry = {
+                id: w.dataset.widgetId,
+                w: parseInt(cs.getPropertyValue('--w')) || parseInt(w.dataset.defaultW) || 2,
+                h: parseInt(cs.getPropertyValue('--h')) || parseInt(w.dataset.defaultH) || 4,
+                hidden: w.classList.contains('widget-hidden'),
+            };
+            const c = cs.getPropertyValue('--c').trim();
+            const r = cs.getPropertyValue('--r').trim();
+            if (c && r) { entry.c = parseInt(c); entry.r = parseInt(r); }
+            // Style props
+            if (w.dataset.variant && w.dataset.variant !== 'standard') entry.variant = w.dataset.variant;
+            if (w.dataset.layout && w.dataset.layout !== 'center') entry.layout = w.dataset.layout;
+            // Chart type
+            const ct = w.querySelector('.chart-type-toggle');
+            if (ct) {
+                const activeBtn = ct.querySelector('.chart-type-btn.active');
+                if (activeBtn) entry.chartType = activeBtn.dataset.type;
+            }
+            return entry;
+        });
+    }
+
+    // ── Open widget configuration modal ──
+    window.openWidgetConfig = function(w) {
+        if (!grid.classList.contains('widget-edit-mode')) return;
+        activeWidget = w;
+        const id = w.dataset.widgetId;
+        const modal = document.getElementById('widgetConfigModal');
+        const isChart = !!w.querySelector('.chart-container');
+
+        // Set title
+        document.getElementById('wcmIcon').className = 'bi ' + (widgetIcons[id] || 'bi-gear');
+        document.getElementById('wcmName').textContent = widgetNames[id] || id;
+
+        // Populate width select
+        const wSel = document.getElementById('wcmWidth');
+        const cs = getComputedStyle(w);
+        const curW = parseInt(cs.getPropertyValue('--w')) || parseInt(w.dataset.defaultW) || 2;
+        const curH = parseInt(cs.getPropertyValue('--h')) || parseInt(w.dataset.defaultH) || 4;
+        const minH = parseInt(w.dataset.minH) || 3;
+
+        wSel.innerHTML = '';
+        for (let i = 1; i <= 12; i++) {
+            const opt = document.createElement('option');
+            opt.value = i; opt.textContent = i;
+            if (i === curW) opt.selected = true;
+            wSel.appendChild(opt);
+        }
+        const hSel = document.getElementById('wcmHeight');
+        hSel.innerHTML = '';
+        for (let i = minH; i <= 12; i++) {
+            const opt = document.createElement('option');
+            opt.value = i; opt.textContent = i;
+            if (i === curH) opt.selected = true;
+            hSel.appendChild(opt);
+        }
+
+        // Variant
+        const variantSection = document.getElementById('wcmVariantSection');
+        if (isChart) {
+            variantSection.style.display = 'none';
+        } else {
+            variantSection.style.display = '';
+            const vr = w.dataset.variant || 'standard';
+            setOptionGroup('wcmVariant', vr);
+        }
+
+        // Layout (hide for charts)
+        const layoutSection = document.getElementById('wcmLayoutSection');
+        if (isChart) {
+            layoutSection.style.display = 'none';
+        } else {
+            layoutSection.style.display = '';
+            const ly = w.dataset.layout || 'center';
+            setOptionGroup('wcmLayout', ly);
+        }
+
+        // Visibility
+        document.getElementById('wcmVisible').checked = !w.classList.contains('widget-hidden');
+
+        // Highlight active widget
+        widgets.forEach(x => x.classList.remove('widget-config-active'));
+        w.classList.add('widget-config-active');
+
+        modal.showModal();
+    };
+
+    window.closeWidgetConfig = function() {
+        const modal = document.getElementById('widgetConfigModal');
+        modal.close();
+        if (activeWidget) activeWidget.classList.remove('widget-config-active');
+        activeWidget = null;
+    };
+
+    // Apply changes from modal to the active widget
+    window.applyWidgetConfig = function() {
+        if (!activeWidget) return;
+        const w = activeWidget;
+        const minH = parseInt(w.dataset.minH) || 3;
+
+        // Size
+        const newW = parseInt(document.getElementById('wcmWidth').value);
+        let newH = parseInt(document.getElementById('wcmHeight').value);
+        if (newH < minH) newH = minH;
+        w.style.setProperty('--w', newW);
+        w.style.setProperty('--h', newH);
+
+        // Visibility
+        const visible = document.getElementById('wcmVisible').checked;
+        w.classList.toggle('widget-hidden', !visible);
+
+        // Apply style props
+        applyStyleProps(w);
+
+        // Resize chart
+        const canvas = w.querySelector('canvas');
+        if (canvas) {
+            const ci = Chart.getChart(canvas);
+            if (ci) requestAnimationFrame(() => ci.resize());
+        }
+    };
+
+    // Select an option in a button group
+    window.selectOption = function(prop, value) {
+        if (!activeWidget) return;
+        activeWidget.dataset[prop] = value;
+        setOptionGroup('wcm' + prop.charAt(0).toUpperCase() + prop.slice(1), value);
+        applyStyleProps(activeWidget);
+        // Also trigger chart resize for corner changes
+        const canvas = activeWidget.querySelector('canvas');
+        if (canvas) {
+            const ci = Chart.getChart(canvas);
+            if (ci) requestAnimationFrame(() => ci.resize());
+        }
+    };
+
+    function setOptionGroup(groupId, activeValue) {
+        const grp = document.getElementById(groupId);
+        if (!grp) return;
+        grp.querySelectorAll('.wcm-option-btn, .wcm-variant-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === activeValue);
+        });
+    }
+
+    // Toggle edit mode
+    window.toggleWidgetEditMode = function() {
+        const toolbar = document.getElementById('widgetEditToolbar');
+        const toggle = document.getElementById('widgetEditToggle');
+        const isOn = grid.classList.contains('widget-edit-mode');
+
+        if (isOn) {
+            grid.classList.remove('widget-edit-mode');
+            toolbar.classList.remove('open');
+            toggle.classList.remove('active');
+            toggle.innerHTML = '<i class="bi bi-grid-3x3-gap"></i> Customise';
+            // Close config modal if open
+            closeWidgetConfig();
+        } else {
+            grid.classList.add('widget-edit-mode');
+            toolbar.classList.add('open');
+            toggle.classList.add('active');
+            toggle.innerHTML = '<i class="bi bi-check-lg"></i> Done';
+        }
+    };
+
+    // Save layout
+    window.saveWidgetLayout = function() {
+        const layout = getCurrentLayout();
+        fetch('/dashboard/save-layout/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(layout),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                toggleWidgetEditMode();
+            } else {
+                alert(data.error || 'Save failed');
+            }
+        });
+    };
+
+    // Reset to defaults
+    window.resetWidgetLayout = function() {
+        widgets.forEach(w => {
+            w.style.setProperty('--w', parseInt(w.dataset.defaultW) || 2);
+            w.style.setProperty('--h', parseInt(w.dataset.defaultH) || 4);
+            w.style.removeProperty('--c');
+            w.style.removeProperty('--r');
+            w.style.order = '';
+            w.classList.remove('widget-hidden');
+            delete w.dataset.variant;
+            delete w.dataset.layout;
+            applyStyleProps(w);
+        });
+
+        widgets.forEach(w => {
+            const canvas = w.querySelector('canvas');
+            if (canvas) {
+                const ci = Chart.getChart(canvas);
+                if (ci) requestAnimationFrame(() => ci.resize());
+            }
+        });
+
+        fetch('/dashboard/save-layout/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(null),
+        });
+    };
+
+    // ── Widget Overview Dialog ──
+    window.openWidgetOverview = function() {
+        const tbody = document.getElementById('womTableBody');
+        tbody.innerHTML = '';
+        widgets.forEach(w => {
+            const id = w.dataset.widgetId;
+            const isChart = !!w.querySelector('.chart-container');
+            const cs = getComputedStyle(w);
+            const curW = parseInt(cs.getPropertyValue('--w')) || parseInt(w.dataset.defaultW) || 2;
+            const curH = parseInt(cs.getPropertyValue('--h')) || parseInt(w.dataset.defaultH) || 4;
+            const minH = parseInt(w.dataset.minH) || 3;
+            const variant = w.dataset.variant || 'standard';
+            const visible = !w.classList.contains('widget-hidden');
+            const icon = widgetIcons[id] || 'bi-gear';
+            const name = widgetNames[id] || id;
+
+            const tr = document.createElement('tr');
+            tr.dataset.widgetId = id;
+
+            // Icon
+            const tdIcon = document.createElement('td');
+            tdIcon.innerHTML = '<i class="bi ' + icon + '"></i>';
+            tdIcon.className = 'wom-cell-icon';
+            tr.appendChild(tdIcon);
+
+            // Name
+            const tdName = document.createElement('td');
+            tdName.textContent = name;
+            tdName.className = 'wom-cell-name';
+            tr.appendChild(tdName);
+
+            // Width select
+            const tdW = document.createElement('td');
+            const wSel = document.createElement('select');
+            wSel.className = 'wcm-select wom-select';
+            for (let i = 1; i <= 12; i++) {
+                const o = document.createElement('option');
+                o.value = i; o.textContent = i;
+                if (i === curW) o.selected = true;
+                wSel.appendChild(o);
+            }
+            wSel.onchange = function() {
+                w.style.setProperty('--w', parseInt(this.value));
+                const canvas = w.querySelector('canvas');
+                if (canvas) { const ci = Chart.getChart(canvas); if (ci) requestAnimationFrame(() => ci.resize()); }
+            };
+            tdW.appendChild(wSel);
+            tr.appendChild(tdW);
+
+            // Height select
+            const tdH = document.createElement('td');
+            const hSel = document.createElement('select');
+            hSel.className = 'wcm-select wom-select';
+            for (let i = minH; i <= 12; i++) {
+                const o = document.createElement('option');
+                o.value = i; o.textContent = i;
+                if (i === curH) o.selected = true;
+                hSel.appendChild(o);
+            }
+            hSel.onchange = function() {
+                w.style.setProperty('--h', parseInt(this.value));
+                const canvas = w.querySelector('canvas');
+                if (canvas) { const ci = Chart.getChart(canvas); if (ci) requestAnimationFrame(() => ci.resize()); }
+            };
+            tdH.appendChild(hSel);
+            tr.appendChild(tdH);
+
+            // Variant
+            const tdV = document.createElement('td');
+            if (isChart) {
+                tdV.innerHTML = '<span class="text-muted" style="font-size:0.75rem;">N/A</span>';
+            } else {
+                const btnGroup = document.createElement('div');
+                btnGroup.className = 'wom-variant-group';
+                ['compact','standard','detailed'].forEach(v => {
+                    const btn = document.createElement('button');
+                    btn.className = 'wom-variant-btn' + (v === variant ? ' active' : '');
+                    btn.textContent = v.charAt(0).toUpperCase();
+                    btn.title = v.charAt(0).toUpperCase() + v.slice(1);
+                    btn.onclick = function() {
+                        btnGroup.querySelectorAll('.wom-variant-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        w.dataset.variant = v;
+                        applyStyleProps(w);
+                    };
+                    btnGroup.appendChild(btn);
+                });
+                tdV.appendChild(btnGroup);
+            }
+            tr.appendChild(tdV);
+
+            // Visibility toggle
+            const tdVis = document.createElement('td');
+            tdVis.className = 'wom-cell-vis';
+            const lbl = document.createElement('label');
+            lbl.className = 'toggle-switch';
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = visible;
+            chk.onchange = function() {
+                w.classList.toggle('widget-hidden', !this.checked);
+            };
+            const slider = document.createElement('span');
+            slider.className = 'toggle-slider';
+            lbl.appendChild(chk);
+            lbl.appendChild(slider);
+            tdVis.appendChild(lbl);
+            tr.appendChild(tdVis);
+
+            // Settings button
+            const tdSet = document.createElement('td');
+            tdSet.className = 'wom-cell-settings';
+            const gearBtn = document.createElement('button');
+            gearBtn.className = 'wom-settings-btn';
+            gearBtn.title = 'Widget Settings';
+            gearBtn.innerHTML = '<i class="bi bi-gear-fill"></i>';
+            gearBtn.onclick = function() {
+                document.getElementById('widgetOverviewModal').close();
+                openWidgetConfig(w);
+            };
+            tdSet.appendChild(gearBtn);
+            tr.appendChild(tdSet);
+
+            tbody.appendChild(tr);
+        });
+        document.getElementById('widgetOverviewModal').showModal();
+    };
+
+    // ── Pointer-based drag with explicit grid placement ──
+    let dragState = null;
+
+    function getGridCell(clientX, clientY) {
+        const gridRect = grid.getBoundingClientRect();
+        const gridStyles = getComputedStyle(grid);
+        const gap = parseFloat(gridStyles.gap) || 20;
+        const cols = 12;
+        const localX = clientX - gridRect.left;
+        const localY = clientY - gridRect.top + grid.scrollTop;
+        const colWidth = (gridRect.width - gap * (cols - 1)) / cols;
+        const rowHeight = 50;
+        const col = Math.max(1, Math.min(cols, Math.floor(localX / (colWidth + gap)) + 1));
+        const row = Math.max(1, Math.floor(localY / (rowHeight + gap)) + 1);
+        return { col, row };
+    }
+
+    function createPlaceholder(spanW, spanH) {
+        const ph = document.createElement('div');
+        ph.className = 'widget-drop-placeholder';
+        ph.style.gridColumn = '1 / span ' + spanW;
+        ph.style.gridRow = '1 / span ' + spanH;
+        return ph;
+    }
+
+    function onDragMove(e) {
+        if (!dragState) return;
+        e.preventDefault();
+        dragState.clone.style.left = (e.clientX - dragState.offsetX) + 'px';
+        dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
+        if (e.clientY < 60) window.scrollBy(0, -10);
+        else if (e.clientY > window.innerHeight - 60) window.scrollBy(0, 10);
+        const cell = getGridCell(e.clientX, e.clientY);
+        const maxCol = 12 - dragState.spanW + 1;
+        const col = Math.min(cell.col, maxCol);
+        const row = Math.max(1, cell.row);
+        dragState.placeholder.style.gridColumn = col + ' / span ' + dragState.spanW;
+        dragState.placeholder.style.gridRow = row + ' / span ' + dragState.spanH;
+        dragState.targetCol = col;
+        dragState.targetRow = row;
+    }
+
+    function onDragEnd() {
+        if (!dragState) return;
+        document.removeEventListener('pointermove', onDragMove);
+        document.removeEventListener('pointerup', onDragEnd);
+        const w = dragState.widget;
+        w.style.setProperty('--c', dragState.targetCol);
+        w.style.setProperty('--r', dragState.targetRow);
+        dragState.placeholder.remove();
+        w.classList.remove('widget-dragging');
+        dragState.clone.remove();
+        grid.classList.remove('widget-dragging-active');
+        const canvas = w.querySelector('canvas');
+        if (canvas) {
+            const ci = Chart.getChart(canvas);
+            if (ci) requestAnimationFrame(() => ci.resize());
+        }
+        dragState = null;
+    }
+
+    widgets.forEach(w => {
+        const handle = w.querySelector('.widget-handle');
+        handle.addEventListener('pointerdown', e => {
+            if (!grid.classList.contains('widget-edit-mode')) return;
+            e.preventDefault();
+            const rect = w.getBoundingClientRect();
+            const cs = getComputedStyle(w);
+            const spanW = parseInt(cs.getPropertyValue('--w')) || parseInt(w.dataset.defaultW) || 2;
+            const spanH = parseInt(cs.getPropertyValue('--h')) || parseInt(w.dataset.defaultH) || 4;
+            const clone = w.cloneNode(true);
+            clone.className = 'widget-drag-clone';
+            clone.style.width = rect.width + 'px';
+            clone.style.height = rect.height + 'px';
+            clone.style.left = rect.left + 'px';
+            clone.style.top = rect.top + 'px';
+            document.body.appendChild(clone);
+            const startCell = getGridCell(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            const maxCol = 12 - spanW + 1;
+            const col = Math.min(startCell.col, maxCol);
+            const placeholder = createPlaceholder(spanW, spanH);
+            placeholder.style.gridColumn = col + ' / span ' + spanW;
+            placeholder.style.gridRow = startCell.row + ' / span ' + spanH;
+            grid.appendChild(placeholder);
+            w.classList.add('widget-dragging');
+            grid.classList.add('widget-dragging-active');
+            dragState = {
+                widget: w, clone, placeholder,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+                spanW, spanH,
+                targetCol: col,
+                targetRow: startCell.row
+            };
+            document.addEventListener('pointermove', onDragMove);
+            document.addEventListener('pointerup', onDragEnd);
+        });
+    });
+
+    // Init
+    applyLayout(savedLayout);
+})();
+</script>
 
 <script>
 // Month Switcher
@@ -358,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const fitsAvg = fitsNonZero.length ? fitsNonZero.reduce((a, b) => a + b, 0) / fitsNonZero.length : 0;
     document.getElementById('fitsChartTitle').textContent = 'Fits Per Week — Avg: ' + fitsAvg.toFixed(1);
     
-    new Chart(fitsCtx, {
+    const fitsChart = new Chart(fitsCtx, {
         type: 'line',
         data: {
             labels: fitsChartData.labels,
@@ -499,7 +1262,7 @@ document.addEventListener('DOMContentLoaded', function() {
     salesGradient.addColorStop(0, 'rgba(40, 167, 69, 0.4)');
     salesGradient.addColorStop(1, 'rgba(40, 167, 69, 0.05)');
     
-    new Chart(salesCtx, {
+    const salesChart = new Chart(salesCtx, {
         type: 'line',
         data: {
             labels: salesChartData.labels,
@@ -652,7 +1415,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'rgba(40, 167, 69, 0.7)';
     });
 
-    new Chart(monthlySalesCtx, {
+    const monthlySalesChart = new Chart(monthlySalesCtx, {
         type: 'bar',
         data: {
             labels: monthlySalesChartData.labels,
@@ -775,7 +1538,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'rgba(255, 159, 64, 0.7)';
     });
     
-    new Chart(boardCtx, {
+    const boardCostsChart = new Chart(boardCtx, {
         type: 'bar',
         data: {
             labels: boardChartData.labels,
@@ -900,7 +1663,7 @@ document.addEventListener('DOMContentLoaded', function() {
     waGradient.addColorStop(0, 'rgba(153, 102, 255, 0.35)');
     waGradient.addColorStop(1, 'rgba(153, 102, 255, 0.03)');
 
-    new Chart(waCtx, {
+    const weightedAvgChart = new Chart(waCtx, {
         type: 'line',
         data: {
             labels: fitsChartData.labels,
@@ -1009,6 +1772,102 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             interaction: { intersect: false, mode: 'index' }
         }
+    });
+
+    // ── Chart Type Switcher ──────────────────────────────────────────────
+    // Apply saved chart types from layout
+    const savedLayout = window._dashboardSavedLayout;
+    if (savedLayout && Array.isArray(savedLayout)) {
+        savedLayout.forEach(item => {
+            if (item.chartType) {
+                const widget = document.querySelector('[data-widget-id="' + item.id + '"]');
+                if (widget) {
+                    const chartToggle = widget.querySelector('.chart-type-toggle');
+                    if (chartToggle) {
+                        const canvas = document.getElementById(chartToggle.dataset.chartId);
+                        if (canvas) {
+                            const chart = Chart.getChart(canvas);
+                            if (chart) {
+                                chart.config.type = item.chartType;
+                                // Adjust dataset properties for type switch
+                                chart.data.datasets.forEach(ds => {
+                                    if (item.chartType === 'bar') {
+                                        ds.borderRadius = ds.borderRadius || 4;
+                                    }
+                                });
+                                chart.update();
+                                // Update active button state
+                                chartToggle.querySelectorAll('.chart-type-btn').forEach(b => {
+                                    b.classList.toggle('active', b.dataset.type === item.chartType);
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Handle chart type toggle clicks
+    document.querySelectorAll('.chart-type-toggle').forEach(toggle => {
+        toggle.querySelectorAll('.chart-type-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const newType = this.dataset.type;
+                const chartId = toggle.dataset.chartId;
+                const canvas = document.getElementById(chartId);
+                if (!canvas) return;
+                const chart = Chart.getChart(canvas);
+                if (!chart || chart.config.type === newType) return;
+
+                // Update active state
+                toggle.querySelectorAll('.chart-type-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+
+                // Switch chart type
+                chart.config.type = newType;
+                chart.data.datasets.forEach(ds => {
+                    if (newType === 'bar') {
+                        ds.borderRadius = ds.borderRadius || 4;
+                    }
+                });
+                chart.update();
+
+                // Auto-save chart type preference
+                const widget = this.closest('.widget');
+                if (widget) {
+                    const widgetId = widget.dataset.widgetId;
+                    // Save to layout via a quick fetch
+                    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+                                      || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+                    // Get current layout, update chart type, save
+                    const layoutWidgets = document.querySelectorAll('#widgetGrid .widget');
+                    const layout = Array.from(layoutWidgets).map(w => {
+                        const cs = getComputedStyle(w);
+                        const entry = {
+                            id: w.dataset.widgetId,
+                            w: parseInt(cs.getPropertyValue('--w')) || parseInt(w.dataset.defaultW) || 2,
+                            h: parseInt(cs.getPropertyValue('--h')) || parseInt(w.dataset.defaultH) || 4,
+                            hidden: w.classList.contains('widget-hidden'),
+                        };
+                        const c = cs.getPropertyValue('--c').trim();
+                        const r = cs.getPropertyValue('--r').trim();
+                        if (c && r) { entry.c = parseInt(c); entry.r = parseInt(r); }
+                        // Save chart type if this widget has a chart type toggle
+                        const ct = w.querySelector('.chart-type-toggle');
+                        if (ct) {
+                            const activeBtn = ct.querySelector('.chart-type-btn.active');
+                            if (activeBtn) entry.chartType = activeBtn.dataset.type;
+                        }
+                        return entry;
+                    });
+                    fetch('/dashboard/save-layout/', {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(layout),
+                    });
+                }
+            });
+        });
     });
 });
 </script>
@@ -2042,7 +2901,14 @@ function openAvgReport() {
 </script>
 
 <script>
+const _pendingPosData = {{ pending_pos_json|safe }};
 const _shortagesData = {{ shortage_items_json|safe }};
+const _outstandingPreview = {{ outstanding_preview_json|safe }};
+const _salesAfterPreview = {{ sales_after_preview_json|safe }};
+const _stockPreview = {{ stock_preview_json|safe }};
+const _weekPreview = {{ week_preview_json|safe }};
+const _monthlyPreview = {{ monthly_preview_json|safe }};
+const _avgPreview = {{ avg_preview_json|safe }};
 
 function openShortagesModal() {
     const modal = document.getElementById('shortagesModal');
@@ -2116,6 +2982,137 @@ function openIncomingModal() {
     }
     modal.showModal();
 }
+</script>
+
+<script>
+/* ── Widget Preview Lists (populated from existing JSON data) ── */
+(function() {
+    function buildPreviewRows(container, items, rowBuilder) {
+        if (!container || !items || items.length === 0) return;
+        var html = '<table class="widget-preview-table">';
+        items.forEach(function(item) { html += rowBuilder(item); });
+        html += '</table>';
+        container.innerHTML = html;
+    }
+
+    // Pending POs preview
+    buildPreviewRows(
+        document.getElementById('pendingPosPreview'),
+        _pendingPosData,
+        function(po) {
+            return '<tr>' +
+                '<td class="wp-cell-primary">' + po.number + '</td>' +
+                '<td class="wp-cell-secondary wp-truncate">' + po.supplier + '</td>' +
+                '<td class="wp-cell-value">&pound;' + po.total.toLocaleString('en', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Shortages preview
+    buildPreviewRows(
+        document.getElementById('shortagesPreview'),
+        _shortagesData,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.name + '</td>' +
+                '<td class="wp-cell-value" style="color:var(--danger-color);">' + item.quantity + '</td>' +
+                '<td class="wp-cell-secondary">/ ' + item.par_level + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Incoming preview
+    buildPreviewRows(
+        document.getElementById('incomingPreview'),
+        _incomingData,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.name + '</td>' +
+                '<td class="wp-cell-secondary wp-truncate">' + item.supplier + '</td>' +
+                '<td class="wp-cell-value">' + item.qty_outstanding + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Outstanding Balance preview — top debtors
+    var fmt = function(n) { return '\u00a3' + Math.round(n).toLocaleString(); };
+    buildPreviewRows(
+        document.getElementById('outstandingPreview'),
+        _outstandingPreview,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.customer + '</td>' +
+                '<td class="wp-cell-secondary">' + fmt(item.sale_value) + '</td>' +
+                '<td class="wp-cell-value" style="color:var(--danger-color);">' + fmt(item.outstanding) + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Sales After preview — upcoming fits
+    buildPreviewRows(
+        document.getElementById('salesAfterPreview'),
+        _salesAfterPreview,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.customer + '</td>' +
+                '<td class="wp-cell-secondary">' + item.fit_date + '</td>' +
+                '<td class="wp-cell-value">' + fmt(item.value) + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Stock Value preview — top items by value
+    buildPreviewRows(
+        document.getElementById('stockValuePreview'),
+        _stockPreview,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.name + '</td>' +
+                '<td class="wp-cell-secondary">' + item.qty + '</td>' +
+                '<td class="wp-cell-value">' + fmt(item.value) + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Week Sales preview — this week's fits
+    buildPreviewRows(
+        document.getElementById('weekSalesPreview'),
+        _weekPreview,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.customer + '</td>' +
+                '<td class="wp-cell-secondary">' + item.fit_date + '</td>' +
+                '<td class="wp-cell-value">' + fmt(item.value) + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Monthly Sales preview — this month's fits
+    buildPreviewRows(
+        document.getElementById('monthlySalesPreview'),
+        _monthlyPreview,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary wp-truncate">' + item.customer + '</td>' +
+                '<td class="wp-cell-secondary">' + item.fit_date + '</td>' +
+                '<td class="wp-cell-value">' + fmt(item.value) + '</td>' +
+                '</tr>';
+        }
+    );
+
+    // Average Sale preview — monthly breakdown
+    buildPreviewRows(
+        document.getElementById('avgSalePreview'),
+        _avgPreview,
+        function(item) {
+            return '<tr>' +
+                '<td class="wp-cell-primary">' + item.month + '</td>' +
+                '<td class="wp-cell-secondary">' + item.count + ' fits</td>' +
+                '<td class="wp-cell-value">' + fmt(item.avg) + '</td>' +
+                '</tr>';
+        }
+    );
+})();
 </script>
 
 {% endblock %}

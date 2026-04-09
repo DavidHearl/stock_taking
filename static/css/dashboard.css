@@ -38,12 +38,15 @@
     border: 1px solid var(--border-color);
     border-left: 4px solid var(--accent-color);
     border-radius: 16px;
-    padding: 16px;
+    padding: 10px 16px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
     text-align: center;
     overflow: hidden;
+    position: relative;
 }
 
 /* Per-card accent colours */
@@ -61,23 +64,23 @@
     justify-content: center;
     align-items: center;
     width: 100%;
-    padding: 8px 16px;
+    padding: 5px 12px;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: 16px;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--text-secondary);
     cursor: pointer;
-    gap: 6px;
+    gap: 4px;
     transition: all 0.2s ease;
-    margin-top: 4px;
+    margin-top: 2px;
 }
 
 .card-action-btn i {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     opacity: 0.7;
 }
 
@@ -90,6 +93,73 @@
 
 .card-action-btn:hover i {
     opacity: 1;
+}
+
+/* ── Widget Preview Tables ── */
+.dashboard-card:has(.widget-preview) {
+    justify-content: flex-start;
+}
+
+.widget-preview {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    width: 100%;
+    margin-top: 4px;
+    text-align: left;
+    border-top: 1px solid var(--border-color);
+    padding-top: 4px;
+}
+
+.widget-preview:empty {
+    display: none;
+}
+
+.widget-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.72rem;
+    table-layout: fixed;
+}
+
+.widget-preview-table tr {
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.widget-preview-table tr:last-child {
+    border-bottom: none;
+}
+
+.widget-preview-table td {
+    padding: 3px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wp-cell-primary {
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+}
+
+.wp-cell-secondary {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.wp-cell-value {
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* Outstanding report modal */
@@ -523,7 +593,6 @@ html:has(.dash-report-modal[open]) {
     letter-spacing: 0.01em;
     margin: 0;
     padding: 0;
-    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -533,12 +602,12 @@ html:has(.dash-report-modal[open]) {
 
 
 
-/* Calendar button pinned to right side of label */
-.card-label .dash-cal-wrap {
+/* Calendar button pinned to top-right corner of dashboard card */
+.dashboard-card .dash-cal-wrap {
     position: absolute;
-    right: -4px;
-    top: 50%;
-    transform: translateY(-50%);
+    right: 10px;
+    top: 10px;
+    z-index: 2;
 }
 
 /* Tiny inline icon inside the label */
@@ -548,7 +617,7 @@ html:has(.dash-report-modal[open]) {
 }
 
 .dashboard-card .card-value {
-    font-size: 1.85rem;
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
     line-height: 1;
@@ -575,16 +644,15 @@ html:has(.dash-report-modal[open]) {
     justify-content: center;
     align-self: center;
     position: relative;
-    width: 32px;
-    height: 32px;
-    border-radius: 16px;
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
     border: 1px solid var(--border-color);
     background: var(--bg-primary);
     color: var(--text-secondary);
     cursor: pointer;
     transition: border-color 0.15s, color 0.15s;
     flex-shrink: 0;
-    title: attr(title);
 }
 
 .dash-cal-wrap:hover {
@@ -593,7 +661,7 @@ html:has(.dash-report-modal[open]) {
 }
 
 .dash-cal-wrap i {
-    font-size: 0.95rem;
+    font-size: 0.8rem;
     pointer-events: none;
     align-content: center;
 }
@@ -610,29 +678,826 @@ html:has(.dash-report-modal[open]) {
     z-index: 1;
 }
 
-.charts-row {
+/* ─── Widget Grid (12-column system) ─── */
+.widget-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
-    margin-bottom: 24px;
+    grid-template-columns: repeat(12, 1fr);
+    grid-auto-rows: 50px;
+    gap: 20px;
+    padding: 0;
+    position: relative;
 }
 
-.charts-row .chart-container {
+.widget {
+    position: relative;
+    min-width: 0;
+    z-index: 1;
+    overflow: hidden;
+}
+
+/* Default span (no explicit position = auto-flow) */
+.widget:not([style*="--c"]) {
+    grid-column: span var(--w, 2);
+    grid-row: span var(--h, 4);
+}
+
+/* Explicit placement when --c and --r are set */
+.widget[style*="--c"] {
+    grid-column: var(--c) / span var(--w, 2);
+    grid-row: var(--r, 1) / span var(--h, 4);
+}
+
+.widget > .dashboard-card,
+.widget > .chart-container {
+    height: 100%;
     margin-bottom: 0;
 }
 
-@media (max-width: 992px) {
-    .charts-row {
+/* Edit mode toggle button */
+.widget-edit-toggle {
+    position: fixed;
+    bottom: var(--sp-4);
+    right: var(--sp-4);
+    z-index: 100;
+    padding: 8px 16px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition);
+    box-shadow: var(--shadow-md);
+}
+
+.widget-edit-toggle:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.widget-edit-toggle.active {
+    background: var(--primary-color);
+    color: #fff;
+    border-color: var(--primary-color);
+}
+
+/* ─── Widget Editor Toolbar (fixed top bar in edit mode) ─── */
+.widget-edit-toolbar {
+    display: none;
+    position: fixed;
+    top: var(--topbar-height);
+    left: var(--sidebar-width);
+    right: 0;
+    z-index: 101;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 20px;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: var(--transition);
+}
+
+.main-content.expanded .widget-edit-toolbar {
+    left: var(--sidebar-collapsed-width);
+}
+
+.widget-edit-toolbar.open {
+    display: flex;
+}
+
+.widget-edit-toolbar-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.widget-edit-toolbar-hint i {
+    color: var(--primary-color);
+}
+
+.widget-edit-toolbar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ─── Widget Settings Button (per-widget gear icon) ─── */
+.widget-settings-btn {
+    display: none;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 5;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    border: none;
+    font-size: 0.85rem;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.widget-settings-btn:hover {
+    background: var(--primary-color);
+    transform: rotate(30deg);
+}
+
+.widget-grid.widget-edit-mode .widget-settings-btn {
+    display: flex;
+}
+
+/* Highlight active widget being configured */
+.widget.widget-config-active {
+    outline: 2px solid var(--primary-color) !important;
+    outline-offset: -2px;
+    z-index: 2;
+}
+
+/* ─── Widget Configuration Modal ─── */
+.widget-config-modal {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0;
+    width: 380px;
+    max-width: 90vw;
+    box-shadow: var(--shadow-lg);
+    margin: auto;
+}
+
+.widget-config-modal::backdrop {
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.wcm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.wcm-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.wcm-title i {
+    color: var(--primary-color);
+    font-size: 1rem;
+}
+
+.wcm-close {
+    background: none;
+    border: none;
+    font-size: 1.4rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+}
+
+.wcm-close:hover {
+    color: var(--text-primary);
+}
+
+.wcm-body {
+    padding: 16px 20px;
+}
+
+.wcm-section {
+    margin-bottom: 16px;
+}
+
+.wcm-section:last-child {
+    margin-bottom: 0;
+}
+
+.wcm-section-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.wcm-size-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wcm-size-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wcm-size-group label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.wcm-select {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 5px 8px;
+    cursor: pointer;
+    outline: none;
+    min-width: 52px;
+    text-align: center;
+}
+
+.wcm-select:hover {
+    border-color: var(--text-muted);
+}
+
+.wcm-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.wcm-size-sep {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+/* Option button groups (text size, corners, layout) */
+.wcm-option-group {
+    display: flex;
+    gap: 4px;
+}
+
+.wcm-option-btn {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.wcm-option-btn:hover {
+    border-color: var(--text-muted);
+    color: var(--text-primary);
+}
+
+.wcm-option-btn.active {
+    background: var(--primary-subtle);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.wcm-option-btn i {
+    font-size: 0.8rem;
+}
+
+/* Variant picker buttons */
+.wcm-variant-group {
+    display: flex;
+    gap: 8px;
+}
+
+.wcm-variant-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 6px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-input);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.wcm-variant-btn:hover {
+    border-color: var(--text-muted);
+}
+
+.wcm-variant-btn.active {
+    border-color: var(--primary-color);
+    background: var(--primary-subtle);
+}
+
+.wcm-variant-preview {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-height: 48px;
+    justify-content: center;
+}
+
+.wcm-vp-label {
+    width: 50%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--text-muted);
+    opacity: 0.5;
+}
+
+.wcm-vp-value {
+    width: 40%;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--primary-color);
+}
+
+.wcm-vp-sub {
+    width: 60%;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--text-muted);
+    opacity: 0.3;
+}
+
+.wcm-vp-table {
+    width: 80%;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 3px;
+    padding-top: 3px;
+    border-top: 1px solid var(--border-color);
+}
+
+.wcm-vp-row {
+    width: 100%;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--text-muted);
+    opacity: 0.25;
+}
+
+/* Compact preview: smaller value bar */
+.wcm-vp-compact .wcm-vp-value {
+    height: 6px;
+    width: 30%;
+}
+
+/* Detailed preview: same value size as standard, shows table rows */
+.wcm-vp-detailed .wcm-vp-value {
+    height: 8px;
+    width: 40%;
+}
+
+.wcm-variant-name {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.wcm-variant-btn.active .wcm-variant-name {
+    color: var(--primary-color);
+}
+
+.wcm-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.wcm-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* ─── Widget Overview Modal ─── */
+.widget-overview-modal {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lg);
+    padding: 0;
+    width: 620px;
+    max-width: 92vw;
+    max-height: 80vh;
+    margin: auto;
+}
+
+.widget-overview-modal[open] {
+    display: flex;
+    flex-direction: column;
+}
+
+.widget-overview-modal::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.wom-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.wom-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wom-title i {
+    color: var(--primary-color);
+}
+
+.wom-body {
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.wom-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.wom-table thead th {
+    padding: 8px 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+}
+
+.wom-table tbody tr {
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.12s;
+}
+
+.wom-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.wom-table tbody tr:hover {
+    background: var(--bg-hover);
+}
+
+.wom-table td {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    vertical-align: middle;
+}
+
+.wom-cell-icon {
+    width: 32px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+.wom-cell-name {
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.wom-cell-vis {
+    text-align: center;
+}
+
+.wom-col-size {
+    width: 70px;
+}
+
+.wom-col-variant {
+    width: 110px;
+}
+
+.wom-col-vis {
+    width: 60px;
+    text-align: center;
+}
+
+.wom-col-icon {
+    width: 32px;
+}
+
+.wom-col-settings {
+    width: 36px;
+}
+
+.wom-select {
+    width: 64px;
+    padding: 3px 6px;
+    font-size: 0.78rem;
+}
+
+/* Variant button group in overview table */
+.wom-variant-group {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.wom-variant-btn {
+    flex: 1;
+    padding: 3px 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    border: none;
+    border-right: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.wom-variant-btn:last-child {
+    border-right: none;
+}
+
+.wom-variant-btn.active {
+    background: var(--primary-color);
+    color: var(--text-on-color);
+}
+
+.wom-variant-btn:hover:not(.active) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* Settings gear button in overview table */
+.wom-cell-settings {
+    text-align: center;
+}
+
+.wom-settings-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    transition: all 0.15s;
+    padding: 0;
+}
+
+.wom-settings-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: var(--primary-subtle);
+}
+
+.wom-footer {
+    padding: 10px 20px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* ─── Widget Style Variants ─── */
+/* Compact: minimal – just label + value, smaller text, no tables */
+.widget-compact .card-subtext,
+.widget-compact .card-delta,
+.widget-compact .card-action,
+.widget-compact .widget-preview { display: none !important; }
+.widget-compact .card-value  { font-size: 1.1rem !important; }
+.widget-compact .card-label  { font-size: 0.7rem !important; }
+
+/* Standard: default – everything visible at normal size, no tables */
+.widget-standard .card-value  { font-size: 1.5rem !important; }
+.widget-standard .card-label  { font-size: 0.8rem !important; }
+.widget-standard .widget-preview { display: none !important; }
+
+/* Detailed: same text size as standard but with preview tables visible */
+.widget-detailed .card-value  { font-size: 1.5rem !important; }
+.widget-detailed .card-label  { font-size: 0.8rem !important; }
+
+/* Layout */
+.widget-layout-center {
+    text-align: center;
+    align-items: center;
+}
+
+.widget-layout-left {
+    text-align: left;
+    align-items: flex-start;
+}
+
+.widget-layout-left .card-label {
+    justify-content: flex-start;
+}
+
+/* Widget handle (drag) */
+.widget-handle {
+    display: none;
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: rgba(0,0,0,0.4);
+    color: #fff;
+    font-size: 0.9rem;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+}
+
+.widget-handle:active {
+    cursor: grabbing;
+}
+
+/* Show drag handles in edit mode */
+.widget-grid.widget-edit-mode .widget-handle {
+    display: flex;
+}
+
+/* Hidden widgets are fully removed */
+.widget.widget-hidden {
+    display: none !important;
+}
+
+/* Toggle switch */
+.toggle-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--border-color);
+    border-radius: 10px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--primary-color);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+}
+
+/* Floating drag clone */
+.widget-drag-clone {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    opacity: 0.85;
+    transform: rotate(1deg);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.widget-grid.widget-edit-mode .widget {
+    outline: 2px dashed var(--border-color);
+    outline-offset: -2px;
+    border-radius: var(--radius-md);
+}
+
+/* Disable widget content interaction in edit mode (but allow settings button) */
+.widget-grid.widget-edit-mode .widget > .dashboard-card,
+.widget-grid.widget-edit-mode .widget > .chart-container {
+    opacity: 0.6;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.widget.widget-dragging {
+    display: none !important;
+}
+
+.widget.widget-drag-over {
+    outline-color: var(--primary-color) !important;
+    outline-style: solid !important;
+}
+
+/* Drop placeholder */
+.widget-drop-placeholder {
+    border: 2px dashed var(--primary-color);
+    border-radius: var(--radius-md);
+    background: rgba(13, 110, 253, 0.08);
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* Responsive: collapse to single column on small screens */
+@media (max-width: 768px) {
+    .widget-grid {
         grid-template-columns: 1fr;
+        grid-auto-rows: auto;
+    }
+    .widget {
+        grid-column: 1 / -1 !important;
+        grid-row: auto !important;
+    }
+    .widget-edit-toolbar {
+        left: 0 !important;
+        padding: 6px 12px;
+        flex-wrap: wrap;
+        gap: 6px;
     }
 }
 
+@media (max-width: 1200px) and (min-width: 769px) {
+    .widget-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+/* ─── Chart containers ─── */
 .chart-container {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 24px;
-    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.chart-header h3 {
+    margin: 0 !important;
 }
 
 .chart-container h3 {
@@ -649,62 +1514,58 @@ html:has(.dash-report-modal[open]) {
     color: var(--accent-color);
 }
 
+/* ─── Chart Type Toggle ─── */
+.chart-type-toggle {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.chart-type-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.15s ease;
+}
+
+.chart-type-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.chart-type-btn.active {
+    background: var(--primary-color);
+    color: var(--text-on-color);
+    box-shadow: var(--shadow-sm);
+}
+
 .chart-wrapper {
     position: relative;
-    height: 350px;
+    flex: 1;
+    min-height: 150px;
     width: 100%;
-}
-
-/* ─── Grid column variants ─── */
-.dashboard-grid-1 {
-    grid-template-columns: minmax(240px, 320px);
-}
-
-.dashboard-grid-2 {
-    grid-template-columns: repeat(2, minmax(240px, 320px));
-}
-
-.dashboard-grid-3 {
-    grid-template-columns: repeat(3, minmax(220px, 320px));
-}
-
-.dashboard-grid-5 {
-    grid-template-columns: repeat(5, 1fr);
-}
-
-.dashboard-grid-6 {
-    grid-template-columns: repeat(6, 1fr);
-}
-
-@media (max-width: 1400px) {
-    .dashboard-grid-6 {
-        grid-template-columns: repeat(3, 1fr);
-    }
-}
-
-@media (max-width: 1200px) {
-    .dashboard-grid-5 {
-        grid-template-columns: repeat(3, 1fr);
-    }
-}
-
-@media (max-width: 768px) {
-    .dashboard-grid-3,
-    .dashboard-grid-5,
-    .dashboard-grid-6 {
-        grid-template-columns: 1fr;
-    }
 }
 
 .month-switcher-inline {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     width: 100%;
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
+    gap: 8px;
 }
 
 .month-arrow {
@@ -722,6 +1583,19 @@ html:has(.dash-report-modal[open]) {
     font-size: 0.8rem;
     transition: all 0.15s ease;
     line-height: 1;
+    position: absolute;
+    z-index: 2;
+}
+
+.month-arrow:first-child {
+    left: 10px;
+    top: 10px;
+}
+
+.month-arrow:last-child,
+.month-arrow#nextMonthBtn {
+    right: 10px;
+    top: 10px;
 }
 
 .month-arrow:hover:not(:disabled) {

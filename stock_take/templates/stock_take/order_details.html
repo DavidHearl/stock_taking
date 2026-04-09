@@ -614,7 +614,7 @@
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
+                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.is_angled %} <span class="badge badge-info">ANGLED</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
                 </div>
                 <div class="header-actions">
                     <!-- File status indicators -->
@@ -686,7 +686,7 @@
                                 <i class="bi bi-check-lg"></i> Save Changes
                             </button>
                         {% endif %}
-                        <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
+                        <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" data-is-angled="{{ bpo_data.po.is_angled|yesno:'true,false' }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
                             <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
@@ -709,7 +709,13 @@
                                     <th><input type="checkbox" class="select-all-pnx" data-boards-po-id="{{ bpo_data.po.id }}"></th>
                                     <th>Barcode</th>
                                     <th>Material</th>
+                                    {% if bpo_data.po.is_angled %}
+                                    <th class="col-dim">L Height</th>
+                                    <th class="col-dim">R Height</th>
+                                    <th class="col-dim">Top Edge</th>
+                                    {% else %}
                                     <th class="col-dim">Length</th>
+                                    {% endif %}
                                     <th class="col-dim">Width</th>
                                     <th class="col-cnt">QTY</th>
                                     <th title="PRFID1">E1</th>
@@ -737,7 +743,10 @@
                                                data-prfid1="{% if item.prfid1 %}1{% else %}0{% endif %}"
                                                data-prfid2="{% if item.prfid2 %}1{% else %}0{% endif %}"
                                                data-prfid3="{% if item.prfid3 %}1{% else %}0{% endif %}"
-                                               data-prfid4="{% if item.prfid4 %}1{% else %}0{% endif %}"></td>
+                                               data-prfid4="{% if item.prfid4 %}1{% else %}0{% endif %}"
+                                               data-left-height="{% if item.left_height %}{{ item.left_height|floatformat:0 }}{% endif %}"
+                                               data-right-height="{% if item.right_height %}{{ item.right_height|floatformat:0 }}{% endif %}"
+                                               data-top-edge="{{ item.top_edge|floatformat:0 }}"></td>
                                     <td>
                                         <input type="text" 
                                                class="quantity-input pnx-text-input" 
@@ -756,6 +765,41 @@
                                                data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.matname }}">
                                     </td>
+                                    {% if bpo_data.po.is_angled %}
+                                    <td>
+                                        <input type="number" 
+                                               class="quantity-input pnx-dimension-input" 
+                                               min="0" 
+                                               step="1"
+                                               value="{% if item.left_height %}{{ item.left_height|floatformat:0 }}{% else %}0{% endif %}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="left_height"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-original-value="{% if item.left_height %}{{ item.left_height|floatformat:0 }}{% else %}0{% endif %}">
+                                    </td>
+                                    <td>
+                                        <input type="number" 
+                                               class="quantity-input pnx-dimension-input" 
+                                               min="0" 
+                                               step="1"
+                                               value="{% if item.right_height %}{{ item.right_height|floatformat:0 }}{% else %}0{% endif %}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="right_height"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-original-value="{% if item.right_height %}{{ item.right_height|floatformat:0 }}{% else %}0{% endif %}">
+                                    </td>
+                                    <td>
+                                        <input type="number" 
+                                               class="quantity-input pnx-dimension-input" 
+                                               min="0" 
+                                               step="1"
+                                               value="{{ item.top_edge|floatformat:0 }}"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-field="top_edge"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-original-value="{{ item.top_edge|floatformat:0 }}">
+                                    </td>
+                                    {% else %}
                                     <td>
                                         <input type="number" 
                                                class="quantity-input pnx-dimension-input" 
@@ -767,6 +811,7 @@
                                                data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.cleng|floatformat:0 }}">
                                     </td>
+                                    {% endif %}
                                     <td>
                                         <input type="number" 
                                                class="quantity-input pnx-dimension-input" 
@@ -829,7 +874,7 @@
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
-                                    <td colspan="12"><strong>Total Cost:</strong></td>
+                                    <td colspan="{% if bpo_data.po.is_angled %}14{% else %}12{% endif %}"><strong>Total Cost:</strong></td>
                                     <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
@@ -1026,12 +1071,26 @@
                     </form>
                     {% endif %}
                     {% if not order.os_doors_po %}
-                    <button type="button"
-                            class="btn btn-sm btn-create-po-icon"
-                            title="Create a local PO for OS Doors"
-                            onclick="createOSDoorsPO({{ order.id }})">
-                        <i class="bi bi-file-earmark-plus"></i>
-                    </button>
+                    <!-- Search / link existing PO -->
+                    <div class="os-doors-po-combo" style="position:relative; display:inline-block;">
+                        <div class="flex-row-gap">
+                            <div style="position:relative;">
+                                <input type="text" class="form-input" id="os-doors-po-search"
+                                       placeholder="Search PO..."
+                                       autocomplete="off"
+                                       style="width:150px; height:28px; font-size:0.8rem;"
+                                       oninput="searchOSDoorsPO(this.value)"
+                                       onfocus="this.select(); searchOSDoorsPO(this.value);">
+                                <div class="boards-po-results" id="os-doors-po-results" style="display:none;"></div>
+                            </div>
+                            <button type="button"
+                                    class="btn btn-sm btn-create-po-icon"
+                                    title="Create a local PO for OS Doors"
+                                    onclick="createOSDoorsPO({{ order.id }})">
+                                <i class="bi bi-file-earmark-plus"></i>
+                            </button>
+                        </div>
+                    </div>
                     {% endif %}
                     <button type="button" class="btn btn-sm btn-save-dims" id="save-os-doors-changes" style="display: none;">
                         <i class="bi bi-save"></i> Save Changes
@@ -1981,7 +2040,8 @@
                     <label for="add-board-matname">Material Name *</label>
                     <input type="text" class="form-input" id="add-board-matname" placeholder="e.g., White Gloss 18mm">
                 </div>
-                <div class="form-row">
+                <!-- Standard dimension fields (Length/Width) -->
+                <div class="form-row" id="standard-dims-row">
                     <div class="form-group">
                         <label for="add-board-length">Length (mm) *</label>
                         <input type="number" class="form-input" id="add-board-length" step="0.1" min="0" placeholder="e.g., 2800">
@@ -1993,6 +2053,38 @@
                     <div class="form-group">
                         <label for="add-board-count">Count *</label>
                         <input type="number" class="form-input" id="add-board-count" step="1" min="1" value="1" placeholder="e.g., 2">
+                    </div>
+                </div>
+                <!-- Angled dimension fields (Left Height / Right Height / Width) -->
+                <div id="angled-dims-section" style="display: none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-board-left-height">Left Height (mm) *</label>
+                            <input type="number" class="form-input" id="add-board-left-height" step="0.1" min="0" placeholder="e.g., 2400" oninput="drawAngledPreview()">
+                        </div>
+                        <div class="form-group">
+                            <label for="add-board-right-height">Right Height (mm) *</label>
+                            <input type="number" class="form-input" id="add-board-right-height" step="0.1" min="0" placeholder="e.g., 2200" oninput="drawAngledPreview()">
+                        </div>
+                        <div class="form-group">
+                            <label for="add-board-angled-width">Width (mm) *</label>
+                            <input type="number" class="form-input" id="add-board-angled-width" step="0.1" min="0" placeholder="e.g., 600" oninput="drawAngledPreview()">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-board-top-edge">Top Edge (mm)</label>
+                            <input type="number" class="form-input" id="add-board-top-edge" step="0.1" min="0" value="0" placeholder="0" oninput="drawAngledPreview()">
+                            <small class="form-help">Flat section on the shorter side (5-piece doors). 0 = no top edge.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="add-board-angled-count">Count *</label>
+                            <input type="number" class="form-input" id="add-board-angled-count" step="1" min="1" value="1" placeholder="e.g., 2">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Preview</label>
+                        <canvas id="angled-board-canvas" width="360" height="200" style="width: 100%; max-width: 360px; border: 1px solid var(--border-color, #3a3d45); border-radius: 6px; background: var(--bg-secondary, #1e2127);"></canvas>
                     </div>
                 </div>
                 <div class="form-group">
@@ -2414,6 +2506,13 @@
                         <label for="additional-po-dwg">Attach DWG File (Optional)</label>
                         <input type="file" id="additional-po-dwg" name="dwg_file" class="form-input" accept=".dwg,.DWG">
                         <small class="form-help">DWG drawing file to send to the manufacturer</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="additional-po-angled" name="is_angled">
+                            <span>Angled Boards PO</span>
+                        </label>
+                        <small class="form-help">Boards with different left and right edge heights (tapered/angled cuts)</small>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -4301,11 +4400,21 @@ function closeModal(modalId) {
 
 // ── Add / Copy Board (queue-based) ───────────────────────────────────────────
 let boardQueue = [];
+let activePoIsAngled = false;
 
 function openAddBoardModal(boardsPoId) {
     activeBoardsPoId = boardsPoId;
     const poSelect = document.getElementById('add-board-po-select');
     if (poSelect) poSelect.value = boardsPoId;
+
+    // Detect if this is an angled PO
+    const addBtn = document.querySelector(`.btn-add-icon[data-boards-po-id="${boardsPoId}"]`);
+    const isAngled = addBtn && addBtn.dataset.isAngled === 'true';
+    activePoIsAngled = isAngled;
+
+    // Toggle standard vs angled dimension fields
+    document.getElementById('standard-dims-row').style.display = isAngled ? 'none' : '';
+    document.getElementById('angled-dims-section').style.display = isAngled ? '' : 'none';
 
     // Reset queue
     boardQueue = [];
@@ -4315,31 +4424,49 @@ function openAddBoardModal(boardsPoId) {
     const title = document.getElementById('add-board-modal-title');
 
     if (checkedBox) {
-        title.textContent = 'Copy Board';
+        title.textContent = isAngled ? 'Copy Angled Board' : 'Copy Board';
         document.getElementById('add-board-barcode').value  = checkedBox.dataset.barcode  || '';
         document.getElementById('add-board-matname').value  = checkedBox.dataset.matname  || '';
-        document.getElementById('add-board-length').value   = checkedBox.dataset.cleng    || '';
-        document.getElementById('add-board-width').value    = checkedBox.dataset.cwidth   || '';
-        document.getElementById('add-board-count').value    = checkedBox.dataset.cnt      || '1';
         document.getElementById('add-board-grain').value    = checkedBox.dataset.grain    || 'N';
         document.getElementById('add-board-partdesc').value = checkedBox.dataset.partdesc || '';
         document.getElementById('add-board-prfid1').checked = checkedBox.dataset.prfid1 === '1';
         document.getElementById('add-board-prfid3').checked = checkedBox.dataset.prfid3 === '1';
         document.getElementById('add-board-prfid4').checked = checkedBox.dataset.prfid4 === '1';
         document.getElementById('add-board-prfid2').checked = checkedBox.dataset.prfid2 === '1';
+        if (isAngled) {
+            document.getElementById('add-board-left-height').value  = checkedBox.dataset.leftHeight  || '';
+            document.getElementById('add-board-right-height').value = checkedBox.dataset.rightHeight || '';
+            document.getElementById('add-board-angled-width').value = checkedBox.dataset.cwidth      || '';
+            document.getElementById('add-board-top-edge').value     = checkedBox.dataset.topEdge     || '0';
+            document.getElementById('add-board-angled-count').value = checkedBox.dataset.cnt         || '1';
+            drawAngledPreview();
+        } else {
+            document.getElementById('add-board-length').value = checkedBox.dataset.cleng  || '';
+            document.getElementById('add-board-width').value  = checkedBox.dataset.cwidth || '';
+            document.getElementById('add-board-count').value  = checkedBox.dataset.cnt    || '1';
+        }
     } else {
-        title.textContent = 'Add Board';
+        title.textContent = isAngled ? 'Add Angled Board' : 'Add Board';
         document.getElementById('add-board-barcode').value  = '';
         document.getElementById('add-board-matname').value  = '';
-        document.getElementById('add-board-length').value   = '';
-        document.getElementById('add-board-width').value    = '';
-        document.getElementById('add-board-count').value    = '1';
         document.getElementById('add-board-grain').value    = 'N';
         document.getElementById('add-board-partdesc').value = '';
         document.getElementById('add-board-prfid1').checked = false;
         document.getElementById('add-board-prfid3').checked = false;
         document.getElementById('add-board-prfid4').checked = false;
         document.getElementById('add-board-prfid2').checked = false;
+        if (isAngled) {
+            document.getElementById('add-board-left-height').value  = '';
+            document.getElementById('add-board-right-height').value = '';
+            document.getElementById('add-board-angled-width').value = '';
+            document.getElementById('add-board-top-edge').value     = '0';
+            document.getElementById('add-board-angled-count').value = '1';
+            drawAngledPreview();
+        } else {
+            document.getElementById('add-board-length').value = '';
+            document.getElementById('add-board-width').value  = '';
+            document.getElementById('add-board-count').value  = '1';
+        }
     }
     openModal('addBoardModal');
 }
@@ -4356,9 +4483,6 @@ function updateAddBoardButtonState(boardsPoId) {
 function getBoardFormData() {
     const barcode  = document.getElementById('add-board-barcode').value.trim();
     const matname  = document.getElementById('add-board-matname').value.trim();
-    const cleng    = parseFloat(document.getElementById('add-board-length').value) || 0;
-    const cwidth   = parseFloat(document.getElementById('add-board-width').value)  || 0;
-    const cnt      = parseInt(document.getElementById('add-board-count').value)    || 1;
     const grain    = document.getElementById('add-board-grain').value;
     const partdesc = document.getElementById('add-board-partdesc').value.trim();
     const prfid1   = document.getElementById('add-board-prfid1').checked ? 'Sliderobe_Edge_08' : '';
@@ -4368,8 +4492,31 @@ function getBoardFormData() {
 
     if (!barcode)    { showAlert('Barcode is required', 'danger');            return null; }
     if (!matname)    { showAlert('Material Name is required', 'danger');      return null; }
-    if (cleng <= 0)  { showAlert('Length must be greater than 0', 'danger'); return null; }
-    if (cwidth <= 0) { showAlert('Width must be greater than 0', 'danger');  return null; }
+
+    let cleng, cwidth, cnt, left_height, right_height;
+
+    if (activePoIsAngled) {
+        left_height  = parseFloat(document.getElementById('add-board-left-height').value)  || 0;
+        right_height = parseFloat(document.getElementById('add-board-right-height').value) || 0;
+        cwidth       = parseFloat(document.getElementById('add-board-angled-width').value)  || 0;
+        cnt          = parseInt(document.getElementById('add-board-angled-count').value)    || 1;
+        cleng        = Math.max(left_height, right_height); // store max as length for compatibility
+        var top_edge = parseFloat(document.getElementById('add-board-top-edge').value) || 0;
+
+        if (left_height <= 0)  { showAlert('Left Height must be greater than 0', 'danger');  return null; }
+        if (right_height <= 0) { showAlert('Right Height must be greater than 0', 'danger'); return null; }
+        if (cwidth <= 0)       { showAlert('Width must be greater than 0', 'danger');        return null; }
+    } else {
+        cleng  = parseFloat(document.getElementById('add-board-length').value) || 0;
+        cwidth = parseFloat(document.getElementById('add-board-width').value)  || 0;
+        cnt    = parseInt(document.getElementById('add-board-count').value)    || 1;
+        left_height = null;
+        right_height = null;
+        var top_edge = 0;
+
+        if (cleng <= 0)  { showAlert('Length must be greater than 0', 'danger'); return null; }
+        if (cwidth <= 0) { showAlert('Width must be greater than 0', 'danger');  return null; }
+    }
 
     return {
         boards_po_id: document.getElementById('add-board-po-select')
@@ -4377,7 +4524,9 @@ function getBoardFormData() {
             : activeBoardsPoId,
         order_id: {{ order.id }},
         barcode, matname, cleng, cwidth, cnt, grain, partdesc,
-        prfid1, prfid2, prfid3, prfid4
+        prfid1, prfid2, prfid3, prfid4,
+        left_height, right_height, top_edge,
+        is_angled: activePoIsAngled
     };
 }
 
@@ -4388,9 +4537,18 @@ function addBoardToQueue() {
     renderBoardStagingList();
     // Keep matname/grain for quick repeat entry; clear identifying fields
     document.getElementById('add-board-barcode').value = '';
-    document.getElementById('add-board-length').value  = '';
-    document.getElementById('add-board-width').value   = '';
-    document.getElementById('add-board-count').value   = '1';
+    if (activePoIsAngled) {
+        document.getElementById('add-board-left-height').value  = '';
+        document.getElementById('add-board-right-height').value = '';
+        document.getElementById('add-board-angled-width').value = '';
+        document.getElementById('add-board-top-edge').value     = '0';
+        document.getElementById('add-board-angled-count').value = '1';
+        drawAngledPreview();
+    } else {
+        document.getElementById('add-board-length').value  = '';
+        document.getElementById('add-board-width').value   = '';
+        document.getElementById('add-board-count').value   = '1';
+    }
     document.getElementById('add-board-barcode').focus();
 }
 
@@ -4414,12 +4572,16 @@ function renderBoardStagingList() {
     saveBtn.textContent = boardQueue.length > 0 ? `Save All (${boardQueue.length})` : 'Save Board';
     area.style.display  = boardQueue.length > 0 ? '' : 'none';
 
-    list.innerHTML = boardQueue.map((b, i) => `
+    list.innerHTML = boardQueue.map((b, i) => {
+        const dims = b.is_angled
+            ? `L:${b.left_height} R:${b.right_height} W:${b.cwidth}${b.top_edge ? ' TE:' + b.top_edge : ''}`
+            : `${b.cleng}&times;${b.cwidth}`;
+        return `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg-tertiary,#2a2d35);border-radius:4px;margin-bottom:4px;font-size:0.8rem;">
-            <span><strong>${b.barcode}</strong> &mdash; ${b.matname} &mdash; ${b.cleng}&times;${b.cwidth} &times;&nbsp;${b.cnt}</span>
+            <span><strong>${b.barcode}</strong> &mdash; ${b.matname} &mdash; ${dims} &times;&nbsp;${b.cnt}</span>
             <button type="button" onclick="removeFromBoardQueue(${i})" style="background:none;border:none;color:var(--text-secondary,#6c757d);cursor:pointer;font-size:1rem;padding:0 4px;line-height:1;">&times;</button>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 async function submitAllBoards() {
@@ -4468,6 +4630,124 @@ async function submitAllBoards() {
     } else {
         showAlert('Error adding boards: ' + lastError, 'danger');
         renderBoardStagingList();
+    }
+}
+
+// Draw angled board preview on canvas
+function drawAngledPreview() {
+    const canvas = document.getElementById('angled-board-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const lh = parseFloat(document.getElementById('add-board-left-height').value)  || 0;
+    const rh = parseFloat(document.getElementById('add-board-right-height').value) || 0;
+    const bw = parseFloat(document.getElementById('add-board-angled-width').value)  || 0;
+    const te = parseFloat(document.getElementById('add-board-top-edge').value)     || 0;
+
+    if (lh <= 0 && rh <= 0 && bw <= 0) return;
+
+    const pad = 40;
+    const drawW = W - pad * 2;
+    const drawH = H - pad * 2;
+
+    // Scale to fit
+    const scaleX = drawW / (bw || 1);
+    const scaleY = drawH / (Math.max(lh, rh) || 1);
+    const scale = Math.min(scaleX, scaleY);
+
+    const shapeW = (bw || 0) * scale;
+    const shapeLH = (lh || 0) * scale;
+    const shapeRH = (rh || 0) * scale;
+    const shapeTE = (te || 0) * scale;
+
+    // Center horizontally
+    const offsetX = (W - shapeW) / 2;
+    // Align bottom, leave pad
+    const baseY = H - pad;
+
+    // Bottom corners
+    const bl = { x: offsetX, y: baseY };
+    const br = { x: offsetX + shapeW, y: baseY };
+
+    // Build the shape points based on which side is taller
+    let points;
+    if (lh >= rh && te > 0) {
+        // Left is taller — top edge flat is on the right (shorter) side
+        const tl = { x: offsetX, y: baseY - shapeLH };
+        const teCorner = { x: offsetX + shapeTE, y: baseY - shapeLH };
+        const tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+        points = [bl, br, tr, teCorner, tl];
+    } else if (rh > lh && te > 0) {
+        // Right is taller — top edge flat is on the left (shorter) side
+        const tl = { x: offsetX, y: baseY - shapeLH };
+        const teCorner = { x: offsetX + shapeW - shapeTE, y: baseY - shapeRH };
+        const tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+        points = [bl, br, tr, teCorner, tl];
+    } else {
+        // No top edge or equal heights — simple trapezoid
+        const tl = { x: offsetX, y: baseY - shapeLH };
+        const tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+        points = [bl, br, tr, tl];
+    }
+
+    // Draw filled shape
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+    ctx.fill();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Dimension labels
+    ctx.fillStyle = '#e0e0e0';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Left height label
+    const tl = { x: offsetX, y: baseY - shapeLH };
+    const tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+    if (lh > 0) {
+        ctx.save();
+        ctx.translate(bl.x - 14, (bl.y + tl.y) / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(lh + 'mm', 0, 0);
+        ctx.restore();
+    }
+    // Right height label
+    if (rh > 0) {
+        ctx.save();
+        ctx.translate(br.x + 16, (br.y + tr.y) / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(rh + 'mm', 0, 0);
+        ctx.restore();
+    }
+    // Width label (bottom)
+    if (bw > 0) {
+        ctx.fillText(bw + 'mm', (bl.x + br.x) / 2, bl.y + 14);
+    }
+    // Top edge label
+    if (te > 0) {
+        if (lh >= rh) {
+            // Top edge flat is on the left side at the top
+            const teStart = tl;
+            const teEnd = { x: offsetX + shapeTE, y: baseY - shapeLH };
+            ctx.fillText(te + 'mm', (teStart.x + teEnd.x) / 2, teStart.y - 12);
+        } else {
+            // Top edge flat is on the right side at the top
+            const teStart = { x: offsetX + shapeW - shapeTE, y: baseY - shapeRH };
+            const teEnd = tr;
+            ctx.fillText(te + 'mm', (teStart.x + teEnd.x) / 2, teEnd.y - 12);
+        }
     }
 }
 
@@ -6057,6 +6337,82 @@ function createOSDoorsPO(orderId) {
         showAlert('Error creating OS Doors PO: ' + error.message, 'danger');
     });
 }
+
+// ─── OS Doors PO search-based combo ──────────────────────────────────────
+let _osDoorsPOSearchTimer = null;
+
+function searchOSDoorsPO(query) {
+    clearTimeout(_osDoorsPOSearchTimer);
+    const resultsDiv = document.getElementById('os-doors-po-results');
+
+    if (query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    _osDoorsPOSearchTimer = setTimeout(() => {
+        fetch(`{% url 'purchase_order_search' %}?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                resultsDiv.innerHTML = '';
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No purchase orders found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                data.results.forEach(po => {
+                    const item = document.createElement('div');
+                    item.className = 'boards-po-result-item';
+                    item.innerHTML = `
+                        <span class="boards-po-result-number">${po.display_number}</span>
+                        <span class="boards-po-result-meta">${po.supplier_name}${po.project_number ? ' · ' + po.project_number : ''}</span>
+                        <span class="boards-po-result-status badge-${(po.status || 'draft').toLowerCase()}">${po.status}</span>
+                    `;
+                    item.addEventListener('click', () => selectOSDoorsPO({{ order.id }}, po));
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = 'block';
+            })
+            .catch(() => {
+                resultsDiv.style.display = 'none';
+            });
+    }, 250);
+}
+
+function selectOSDoorsPO(orderId, po) {
+    const input = document.getElementById('os-doors-po-search');
+    const resultsDiv = document.getElementById('os-doors-po-results');
+    input.value = po.display_number;
+    resultsDiv.style.display = 'none';
+
+    fetch(`/order/${orderId}/link-os-doors-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ display_number: po.display_number })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`OS Doors linked to ${po.display_number}`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(err => showAlert('Error linking OS Doors PO', 'danger'));
+}
+
+// Close OS Doors PO results dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const combo = document.querySelector('.os-doors-po-combo');
+    const results = document.getElementById('os-doors-po-results');
+    if (combo && results && !combo.contains(e.target)) {
+        results.style.display = 'none';
+    }
+});
 
 function syncOSDoorsPO(orderId, poDisplayNumber, tableId) {
     const btn = document.getElementById('update-os-doors-po-btn');

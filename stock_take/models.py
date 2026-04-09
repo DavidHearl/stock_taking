@@ -347,6 +347,7 @@ class BoardsPO(models.Model):
     csv_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='CSV version of the PNX file')
     dwg_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='DWG drawing file for manufacturer')
     boards_ordered = models.BooleanField(default=False)
+    is_angled = models.BooleanField(default=False, help_text='Whether this PO contains angled/tapered boards')
 
     def __str__(self):
         return self.po_number
@@ -557,6 +558,11 @@ class PNXItem(models.Model):
     prfid4 = models.CharField(max_length=100, blank=True, default='', help_text='Edge profile 4')
     ordername = models.CharField(max_length=100, blank=True, default='', help_text='Order/Sale number from PNX')
 
+    # Angled board fields (only used when parent BoardsPO.is_angled is True)
+    left_height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Left edge height for angled boards (mm)')
+    right_height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Right edge height for angled boards (mm)')
+    top_edge = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Top edge flat width for 5-piece doors (mm), 0 if no top edge')
+
     # Price per square meter for boards
     PRICE_PER_SQM = 50
 
@@ -584,12 +590,24 @@ class PNXItem(models.Model):
         # Convert price to Decimal for consistent calculations
         price_per_sqm = Decimal(str(price_per_sqm))
         
-        # Convert mm to meters
-        length_m = self.cleng / 1000
-        width_m = self.cwidth / 1000
-        
-        # Calculate area in square meters
-        area_sqm = length_m * width_m
+        # Check if this is an angled board (trapezoid/pentagon area)
+        if self.left_height is not None and self.right_height is not None:
+            # Trapezoid area = ((left_height + right_height) / 2) * width
+            avg_height_m = (self.left_height + self.right_height) / 2 / 1000
+            width_m = self.cwidth / 1000
+            area_sqm = avg_height_m * width_m
+            # Subtract the top edge triangle cutoff for 5-piece doors
+            top_edge = self.top_edge or 0
+            if top_edge > 0:
+                height_diff = abs(self.left_height - self.right_height)
+                triangle_h = height_diff / 1000
+                triangle_w = top_edge / 1000
+                area_sqm -= (triangle_h * triangle_w / 2)
+        else:
+            # Standard rectangular board
+            length_m = self.cleng / 1000
+            width_m = self.cwidth / 1000
+            area_sqm = length_m * width_m
         
         # Multiply by count and price per sqm
         return area_sqm * self.cnt * price_per_sqm
@@ -2081,6 +2099,7 @@ class UserProfile(models.Model):
     dark_mode = models.BooleanField(default=True, help_text='Enable dark mode theme')
     selected_location = models.CharField(max_length=100, blank=True, default='', help_text='Currently selected site location')
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
+    dashboard_layout = models.JSONField(blank=True, null=True, help_text='Per-user dashboard widget layout config')
 
     def __str__(self):
         role_display = self.role.get_name_display() if self.role else 'No Role'
