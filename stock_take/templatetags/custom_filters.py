@@ -89,6 +89,15 @@ def multiply(value, arg):
 
 
 @register.filter
+def make_range(value):
+    """Return range(value) for iteration in templates. Usage: {% for i in total|make_range %}"""
+    try:
+        return range(int(value))
+    except (ValueError, TypeError):
+        return range(0)
+
+
+@register.filter
 def short_timesince(value):
     """Show hours ago if under 48h, otherwise days ago."""
     from django.utils import timezone

@@ -9134,6 +9134,7 @@ def save_workflow_stage(request):
     from .models import WorkflowStage
     
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         stage_id = request.POST.get('stage_id')
         name = request.POST.get('name')
         phase = request.POST.get('phase')
@@ -9163,6 +9164,19 @@ def save_workflow_stage(request):
                 order=max_order + 1
             )
         
+        if is_ajax:
+            return JsonResponse({
+                'success': True,
+                'stage': {
+                    'id': stage.id,
+                    'name': stage.name,
+                    'phase': stage.phase,
+                    'role': stage.role,
+                    'description': stage.description,
+                    'expected_days': stage.expected_days,
+                    'order': stage.order,
+                },
+            })
         return redirect('workflow')
     
     return redirect('workflow')
@@ -11872,7 +11886,9 @@ def gantt_chart(request):
     tab = request.GET.get('tab', 'workflow')  # 'workflow' or 'timeline'
 
     # ── Workflow stages (used by both tabs) ──
-    all_stages = list(WorkflowStage.objects.filter(phase='sale').order_by('order'))
+    all_stages = list(WorkflowStage.objects.filter(phase='sale').prefetch_related('tasks').order_by('order'))
+    enquiry_stages = list(WorkflowStage.objects.filter(phase='enquiry').prefetch_related('tasks').order_by('order'))
+    lead_stages = list(WorkflowStage.objects.filter(phase='lead').prefetch_related('tasks').order_by('order'))
 
     # Role colours for workflow stages
     role_colours = {
@@ -11893,6 +11909,24 @@ def gantt_chart(request):
         .select_related('order', 'order__customer', 'current_stage')
         .order_by('current_stage__order', 'order__fit_date')
     )
+
+    # ── Get orders with workflow progress in the Enquiry phase ──
+    enquiry_stage_ids = [s.id for s in enquiry_stages]
+    enquiry_progress_qs = (
+        OrderWorkflowProgress.objects
+        .filter(current_stage_id__in=enquiry_stage_ids)
+        .select_related('order', 'order__customer', 'current_stage')
+        .order_by('current_stage__order', 'order__fit_date')
+    ) if enquiry_stage_ids else OrderWorkflowProgress.objects.none()
+
+    # ── Get orders with workflow progress in the Lead phase ──
+    lead_stage_ids = [s.id for s in lead_stages]
+    lead_progress_qs = (
+        OrderWorkflowProgress.objects
+        .filter(current_stage_id__in=lead_stage_ids)
+        .select_related('order', 'order__customer', 'current_stage')
+        .order_by('current_stage__order', 'order__fit_date')
+    ) if lead_stage_ids else OrderWorkflowProgress.objects.none()
 
     # Build stage lookup: stage.order value -> index
     stage_index_map = {}
@@ -11938,7 +11972,44 @@ def gantt_chart(request):
             'stage_colour': role_colours.get(wp.current_stage.role, '#94a3b8'),
         })
 
+    # ── Build order rows for Enquiry phase ──
+    enquiry_stage_index_map = {s.id: idx for idx, s in enumerate(enquiry_stages)}
+    enquiry_order_rows = []
+    for wp in enquiry_progress_qs:
+        order = wp.order
+        if not order or order.job_finished:
+            continue
+        display_name = ''
+        if order.customer:
+            display_name = f"{order.customer.first_name} {order.customer.last_name}".strip()
+        if not display_name:
+            display_name = f"{order.first_name} {order.last_name}".strip()
+        enquiry_order_rows.append({
+            'order': order,
+            'display_name': display_name or order.sale_number,
+            'current_stage': wp.current_stage,
+        })
+
+    # ── Build order rows for Lead phase ──
+    lead_stage_index_map = {s.id: idx for idx, s in enumerate(lead_stages)}
+    lead_order_rows = []
+    for wp in lead_progress_qs:
+        order = wp.order
+        if not order or order.job_finished:
+            continue
+        display_name = ''
+        if order.customer:
+            display_name = f"{order.customer.first_name} {order.customer.last_name}".strip()
+        if not display_name:
+            display_name = f"{order.first_name} {order.last_name}".strip()
+        lead_order_rows.append({
+            'order': order,
+            'display_name': display_name or order.sale_number,
+            'current_stage': wp.current_stage,
+        })
+
     # ── Traditional Gantt: stages as rows with sequential bars ──
+    # Sale phase
     stage_order_counts = {}
     for row in order_rows:
         sid = row['current_stage'].id
@@ -11957,6 +12028,46 @@ def gantt_chart(request):
         })
         cumulative_day += days
     total_workflow_days = cumulative_day
+
+    # Enquiry phase
+    enquiry_stage_order_counts = {}
+    for row in enquiry_order_rows:
+        sid = row['current_stage'].id
+        enquiry_stage_order_counts[sid] = enquiry_stage_order_counts.get(sid, 0) + 1
+
+    enquiry_cumulative_day = 0
+    enquiry_stage_rows = []
+    for stage in enquiry_stages:
+        days = stage.expected_days if stage.expected_days else 1
+        enquiry_stage_rows.append({
+            'stage': stage,
+            'start_day': enquiry_cumulative_day,
+            'days': days,
+            'role_colour': role_colours.get(stage.role, '#94a3b8'),
+            'order_count': enquiry_stage_order_counts.get(stage.id, 0),
+        })
+        enquiry_cumulative_day += days
+    total_enquiry_days = enquiry_cumulative_day
+
+    # Lead phase
+    lead_stage_order_counts = {}
+    for row in lead_order_rows:
+        sid = row['current_stage'].id
+        lead_stage_order_counts[sid] = lead_stage_order_counts.get(sid, 0) + 1
+
+    lead_cumulative_day = 0
+    lead_stage_rows = []
+    for stage in lead_stages:
+        days = stage.expected_days if stage.expected_days else 1
+        lead_stage_rows.append({
+            'stage': stage,
+            'start_day': lead_cumulative_day,
+            'days': days,
+            'role_colour': role_colours.get(stage.role, '#94a3b8'),
+            'order_count': lead_stage_order_counts.get(stage.id, 0),
+        })
+        lead_cumulative_day += days
+    total_lead_days = lead_cumulative_day
 
     # ── Timeline tab data (date-based Gantt) ──
     timeline_rows = []
@@ -11993,6 +12104,20 @@ def gantt_chart(request):
         if sale_numbers:
             for sale in AnthillSale.objects.filter(anthill_activity_id__in=sale_numbers):
                 anthill_map[sale.anthill_activity_id] = sale
+
+        # Fetch stage completion dates for all timeline orders
+        from .models import WorkflowStageDate
+        order_ids = [o.id for o in orders]
+        stage_date_qs = (
+            WorkflowStageDate.objects
+            .filter(order_id__in=order_ids)
+            .select_related('stage')
+            .order_by('stage__order')
+        )
+        # Build map: order_id -> list of {stage, date, offset}
+        stage_dates_map = {}
+        for sd in stage_date_qs:
+            stage_dates_map.setdefault(sd.order_id, []).append(sd)
 
         total_days = (range_end - range_start).days + 1
         for i in range(total_days):
@@ -12057,6 +12182,43 @@ def gantt_chart(request):
             if not display_name:
                 display_name = f"{order.first_name} {order.last_name}".strip()
 
+            # Build segmented bar from stage dates
+            order_stage_dates = stage_dates_map.get(order.id, [])
+            stage_segments = []
+            if order_stage_dates:
+                # Sort by stage order
+                sorted_sds = sorted(order_stage_dates, key=lambda sd: sd.stage.order)
+                # First segment starts at order_date (or first stage date)
+                seg_start = start
+                for sd in sorted_sds:
+                    seg_end = sd.completed_date
+                    if seg_end < range_start:
+                        seg_start = seg_end
+                        continue
+                    clamped_start = max(seg_start, range_start)
+                    clamped_end = min(seg_end, range_end)
+                    seg_offset = (clamped_start - range_start).days
+                    seg_width = max((clamped_end - clamped_start).days, 1)
+                    stage_segments.append({
+                        'name': sd.stage.name,
+                        'colour': role_colours.get(sd.stage.role, '#94a3b8'),
+                        'offset': seg_offset,
+                        'width': seg_width,
+                    })
+                    seg_start = seg_end
+                # Final segment: from last completed stage to fit_date (current stage)
+                if seg_start < end and seg_start <= range_end:
+                    clamped_start = max(seg_start, range_start)
+                    clamped_end = min(end, range_end)
+                    seg_offset = (clamped_start - range_start).days
+                    seg_width = max((clamped_end - clamped_start).days, 1)
+                    stage_segments.append({
+                        'name': stage_name or 'Current',
+                        'colour': stage_colour,
+                        'offset': seg_offset,
+                        'width': seg_width,
+                    })
+
             timeline_rows.append({
                 'order': order,
                 'display_name': display_name or order.sale_number,
@@ -12064,10 +12226,21 @@ def gantt_chart(request):
                 'width': width,
                 'stage_name': stage_name,
                 'stage_colour': stage_colour,
+                'stage_segments': stage_segments,
                 'goods_due_offset': goods_due_offset,
                 'goods_due_in': goods_due_in,
                 'fit_offset': fit_offset,
                 'time_allowance': order.time_allowance(),
+                'stage_markers': [
+                    {
+                        'name': sd.stage.name,
+                        'date': sd.completed_date,
+                        'offset': (sd.completed_date - range_start).days,
+                        'colour': role_colours.get(sd.stage.role, '#94a3b8'),
+                    }
+                    for sd in stage_dates_map.get(order.id, [])
+                    if range_start <= sd.completed_date <= range_end
+                ],
             })
 
     context = {
@@ -12076,6 +12249,14 @@ def gantt_chart(request):
         'all_stages': all_stages,
         'stage_rows': stage_rows,
         'total_workflow_days': total_workflow_days,
+        'enquiry_stages': enquiry_stages,
+        'enquiry_stage_rows': enquiry_stage_rows,
+        'total_enquiry_days': total_enquiry_days,
+        'enquiry_order_rows': enquiry_order_rows,
+        'lead_stages': lead_stages,
+        'lead_stage_rows': lead_stage_rows,
+        'total_lead_days': total_lead_days,
+        'lead_order_rows': lead_order_rows,
         'timeline_rows': timeline_rows,
         'day_columns': day_columns,
         'month_headers': month_headers,
@@ -12087,6 +12268,8 @@ def gantt_chart(request):
         'weeks_back': weeks_back,
         'weeks_ahead': weeks_ahead,
         'role_colours': role_colours,
+        'phase_choices': WorkflowStage.PHASE_CHOICES,
+        'role_choices': WorkflowStage.ROLE_CHOICES,
     }
 
     return render(request, 'stock_take/gantt_chart.html', context)
@@ -12381,6 +12564,26 @@ def sync_anthill_workflow(request, order_id):
         elif created:
             updated = True
 
+    # ── Save stage completion dates ───────────────────────────────────────
+    from .models import WorkflowStageDate
+    dates_saved = 0
+    for action in parser.actions:
+        if action['status'] in ('completed', 'cancelled') and action['completed_date']:
+            local_name = ANTHILL_TO_LOCAL.get(action['name'])
+            if local_name and local_name in sale_stages:
+                try:
+                    comp_date = dt.strptime(action['completed_date'], '%d/%m/%Y').date()
+                    _, created = WorkflowStageDate.objects.update_or_create(
+                        order=order,
+                        stage=sale_stages[local_name],
+                        defaults={'completed_date': comp_date},
+                    )
+                    if created:
+                        dates_saved += 1
+                        updated = True
+                except (ValueError, TypeError):
+                    pass
+
     return JsonResponse({
         'success': True,
         'order_id': order.id,
@@ -12388,4 +12591,5 @@ def sync_anthill_workflow(request, order_id):
         'anthill_stages': anthill_stages,
         'current_stage': current_stage.name if current_stage else None,
         'updated': updated,
+        'dates_saved': dates_saved,
     })

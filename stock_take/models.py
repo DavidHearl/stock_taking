@@ -1541,6 +1541,21 @@ class TaskCompletion(models.Model):
         return f"{status} {self.order_progress.order.sale_number} - {self.task.description}"
 
 
+class WorkflowStageDate(models.Model):
+    """Records the date each workflow stage was completed for an order (synced from Anthill)."""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='stage_dates')
+    stage = models.ForeignKey(WorkflowStage, on_delete=models.CASCADE, related_name='order_dates')
+    completed_date = models.DateField(help_text='Date this stage was completed')
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['order', 'stage']
+        ordering = ['stage__order']
+
+    def __str__(self):
+        return f"{self.order.sale_number} - {self.stage.name} ({self.completed_date})"
+
+
 class Fitter(models.Model):
     """Model for installation fitters"""
     code = models.CharField(max_length=1, blank=True, default='', help_text='Single-letter code used on the calendar (e.g. R, G)')

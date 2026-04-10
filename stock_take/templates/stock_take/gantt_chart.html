@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load custom_filters %}
 
 {% block title %}Gantt Chart{% endblock %}
 
@@ -22,7 +23,10 @@
         <a href="?tab=timeline" class="btn btn-primary">Reset</a>
         {% else %}
         <h2 class="calendar-date">Workflow Gantt</h2>
-        <button type="button" class="btn btn-secondary" onclick="syncAllAnthill()" id="btnSyncAll" title="Sync workflow stages from Anthill for all visible orders">
+        <button type="button" class="btn btn-secondary" onclick="openManageStagesModal()" title="Add, edit, reorder and delete workflow stages">
+            <i class="bi bi-gear"></i> Manage Stages
+        </button>
+        <button type="button" class="btn btn-primary" onclick="syncAllAnthill()" id="btnSyncAll" title="Sync workflow stages from Anthill for all visible orders">
             <i class="bi bi-arrow-repeat"></i> Sync from Anthill
         </button>
         {% endif %}
@@ -50,6 +54,10 @@
         <span class="gantt-legend-swatch gantt-legend-marker-fit"></span>
         <span class="gantt-legend-label">Fit Date</span>
     </div>
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch gantt-legend-marker-stage"></span>
+        <span class="gantt-legend-label">Stage Completed</span>
+    </div>
     {% endif %}
 </div>
 
@@ -57,8 +65,94 @@
 <!-- ══════════════════════════════════════════════════════════
      WORKFLOW GANTT — traditional: stages as rows, time as bars
      ══════════════════════════════════════════════════════════ -->
+
+<!-- ── Enquiry Workflow ── -->
+{% if enquiry_stage_rows %}
+<h3 class="gantt-phase-heading">Enquiry Workflow</h3>
+<div class="gantt-wrapper">
+    <div class="gantt-wf-scroll" style="--total-wf-days: {{ total_enquiry_days }};">
+        <!-- Day header -->
+        <div class="gantt-wf-row gantt-wf-day-header">
+            <div class="gantt-wf-label gantt-wf-header-label">Stage</div>
+            <div class="gantt-wf-track">
+                <div class="gantt-wf-day-track">
+                    {% for d in total_enquiry_days|make_range %}
+                    <div class="gantt-wf-day-cell" style="left: calc({{ d }} / var(--total-wf-days) * 100%); width: calc(1 / var(--total-wf-days) * 100%);">{{ d|add:1 }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% for row in enquiry_stage_rows %}
+        <div class="gantt-wf-row">
+            <div class="gantt-wf-label">
+                <span class="gantt-stage-dot" style="background: {{ row.role_colour }};"></span>
+                <span class="gantt-wf-name">{{ row.stage.name }}</span>
+                {% if row.order_count %}
+                <span class="gantt-wf-count">{{ row.order_count }}</span>
+                {% endif %}
+            </div>
+            <div class="gantt-wf-track">
+                <div class="gantt-wf-bar" style="--bar-start: {{ row.start_day }}; --bar-days: {{ row.days }}; background: {{ row.role_colour }};" onclick="openStageModal({{ row.stage.id }})" role="button">
+                    <span class="gantt-wf-bar-text">{{ row.days }}d</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Lead Workflow ── -->
+{% if lead_stage_rows %}
+<h3 class="gantt-phase-heading">Lead Workflow</h3>
+<div class="gantt-wrapper">
+    <div class="gantt-wf-scroll" style="--total-wf-days: {{ total_lead_days }};">
+        <!-- Day header -->
+        <div class="gantt-wf-row gantt-wf-day-header">
+            <div class="gantt-wf-label gantt-wf-header-label">Stage</div>
+            <div class="gantt-wf-track">
+                <div class="gantt-wf-day-track">
+                    {% for d in total_lead_days|make_range %}
+                    <div class="gantt-wf-day-cell" style="left: calc({{ d }} / var(--total-wf-days) * 100%); width: calc(1 / var(--total-wf-days) * 100%);">{{ d|add:1 }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% for row in lead_stage_rows %}
+        <div class="gantt-wf-row">
+            <div class="gantt-wf-label">
+                <span class="gantt-stage-dot" style="background: {{ row.role_colour }};"></span>
+                <span class="gantt-wf-name">{{ row.stage.name }}</span>
+                {% if row.order_count %}
+                <span class="gantt-wf-count">{{ row.order_count }}</span>
+                {% endif %}
+            </div>
+            <div class="gantt-wf-track">
+                <div class="gantt-wf-bar" style="--bar-start: {{ row.start_day }}; --bar-days: {{ row.days }}; background: {{ row.role_colour }};" onclick="openStageModal({{ row.stage.id }})" role="button">
+                    <span class="gantt-wf-bar-text">{{ row.days }}d</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Sale Workflow ── -->
+<h3 class="gantt-phase-heading">Sale Workflow</h3>
 <div class="gantt-wrapper">
     <div class="gantt-wf-scroll" style="--total-wf-days: {{ total_workflow_days }};">
+        <!-- Day header -->
+        <div class="gantt-wf-row gantt-wf-day-header">
+            <div class="gantt-wf-label gantt-wf-header-label">Stage</div>
+            <div class="gantt-wf-track">
+                <div class="gantt-wf-day-track">
+                    {% for d in total_workflow_days|make_range %}
+                    <div class="gantt-wf-day-cell" style="left: calc({{ d }} / var(--total-wf-days) * 100%); width: calc(1 / var(--total-wf-days) * 100%);">{{ d|add:1 }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
         {% for row in stage_rows %}
         <div class="gantt-wf-row">
             <div class="gantt-wf-label">
@@ -69,7 +163,7 @@
                 {% endif %}
             </div>
             <div class="gantt-wf-track">
-                <div class="gantt-wf-bar" style="--bar-start: {{ row.start_day }}; --bar-days: {{ row.days }}; background: {{ row.role_colour }};">
+                <div class="gantt-wf-bar" style="--bar-start: {{ row.start_day }}; --bar-days: {{ row.days }}; background: {{ row.role_colour }};" onclick="openStageModal({{ row.stage.id }})" role="button">
                     <span class="gantt-wf-bar-text">{{ row.days }}d</span>
                 </div>
             </div>
@@ -78,11 +172,232 @@
     </div>
 </div>
 
-{% if not stage_rows %}
+{% if not stage_rows and not enquiry_stage_rows and not lead_stage_rows %}
 <div class="gantt-empty">
     <p>No workflow stages defined.</p>
 </div>
 {% endif %}
+
+<!-- Stage Detail Modal -->
+<div class="modal-overlay" id="stageModal" onclick="if(event.target===this)closeStageModal()">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3 id="stageModalTitle"></h3>
+            <button type="button" class="modal-close" onclick="closeStageModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="stageModalBody"></div>
+    </div>
+</div>
+
+<!-- Sync Log Modal -->
+<div class="modal-overlay" id="syncModal" onclick="if(event.target===this)closeSyncModal()">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3 id="syncModalTitle"><i class="bi bi-arrow-repeat"></i> Syncing from Anthill</h3>
+            <button type="button" class="modal-close" onclick="closeSyncModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="sync-progress-bar"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
+            <div class="sync-status" id="syncStatus">Preparing...</div>
+            <div class="sync-log" id="syncLog"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="syncCloseBtn" onclick="closeSyncModal()" disabled>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Stages Modal -->
+<div class="modal-overlay" id="manageModal" onclick="if(event.target===this)closeManageStagesModal()">
+    <div class="modal-dialog modal-dialog-wide">
+        <div class="modal-header">
+            <h3><i class="bi bi-gear"></i> Manage Workflow Stages</h3>
+            <button type="button" class="modal-close" onclick="closeManageStagesModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <!-- Phase tabs -->
+            <div class="manage-phase-tabs">
+                <button class="manage-phase-tab active" data-phase="enquiry" onclick="switchManagePhase('enquiry')">Enquiry</button>
+                <button class="manage-phase-tab" data-phase="lead" onclick="switchManagePhase('lead')">Lead</button>
+                <button class="manage-phase-tab" data-phase="sale" onclick="switchManagePhase('sale')">Sale</button>
+            </div>
+
+            <!-- Stage list -->
+            <div class="manage-stage-list" id="manageStageList"></div>
+
+            <!-- Add stage form -->
+            <div class="manage-add-form">
+                <h4><i class="bi bi-plus-circle"></i> Add New Stage</h4>
+                <div class="manage-form-row">
+                    <input type="text" id="addStageName" class="manage-input" placeholder="Stage name">
+                    <select id="addStageRole" class="manage-select">
+                        {% for val, label in role_choices %}
+                        <option value="{{ val }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" id="addStageDays" class="manage-input manage-input-days" placeholder="Days" min="1">
+                </div>
+                <div class="manage-form-row">
+                    <input type="text" id="addStageDesc" class="manage-input manage-input-wide" placeholder="Description (optional)">
+                    <button type="button" class="btn btn-primary" onclick="addStage()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden stage data for modal -->
+{% for row in enquiry_stage_rows %}
+<template id="stage-tpl-{{ row.stage.id }}">
+    <div class="gantt-modal-stage {{ row.stage.role }}">
+        <div class="gantt-modal-meta">
+            <span class="stage-role-badge {{ row.stage.role }}">{{ row.stage.get_role_display }}</span>
+            {% if row.days %}<span class="gantt-modal-days">{{ row.days }} Day{{ row.days|pluralize }}</span>{% endif %}
+            {% if row.order_count %}<span class="gantt-modal-orders">{{ row.order_count }} order{{ row.order_count|pluralize }}</span>{% endif %}
+        </div>
+        <p class="gantt-modal-desc">{{ row.stage.description }}</p>
+        {% if row.stage.tasks.all %}
+        <hr>
+        {% for task in row.stage.tasks.all %}
+        <div class="gantt-modal-task task-type-{{ task.task_type }}">
+            {% if task.task_type == 'decision_matrix' %}
+            <div class="task-decision-matrix">
+                <strong>{{ task.description }}</strong>
+                <div class="decision-options">
+                    <button class="decision-btn decision-proceed" disabled><i class="bi bi-arrow-right-circle"></i> Proceed</button>
+                    <button class="decision-btn decision-postpone" disabled><i class="bi bi-clock-history"></i> Postpone</button>
+                    <button class="decision-btn decision-dead" disabled><i class="bi bi-x-circle"></i> Dead</button>
+                </div>
+            </div>
+            {% elif task.task_type == 'radio' %}
+            <div class="task-radio-group">
+                <strong>{{ task.description }}</strong>
+                {% if task.options %}
+                {% for option in task.options|split_options %}
+                <label class="radio-option"><input type="radio" name="modal_task_{{ task.id }}" disabled/> {{ option }}</label>
+                {% endfor %}
+                {% endif %}
+            </div>
+            {% elif task.task_type == 'dropdown' %}
+            <div class="task-dropdown-group">
+                <label><strong>{{ task.description }}</strong>
+                    <select disabled class="task-select"><option>Select...</option>{% if task.options %}{% for option in task.options|split_options %}<option>{{ option }}</option>{% endfor %}{% endif %}</select>
+                </label>
+            </div>
+            {% else %}
+            <label><input type="checkbox" disabled/> {{ task.description }}
+                {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
+                {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
+            </label>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+</template>
+{% endfor %}
+
+{% for row in lead_stage_rows %}
+<template id="stage-tpl-{{ row.stage.id }}">
+    <div class="gantt-modal-stage {{ row.stage.role }}">
+        <div class="gantt-modal-meta">
+            <span class="stage-role-badge {{ row.stage.role }}">{{ row.stage.get_role_display }}</span>
+            {% if row.days %}<span class="gantt-modal-days">{{ row.days }} Day{{ row.days|pluralize }}</span>{% endif %}
+            {% if row.order_count %}<span class="gantt-modal-orders">{{ row.order_count }} order{{ row.order_count|pluralize }}</span>{% endif %}
+        </div>
+        <p class="gantt-modal-desc">{{ row.stage.description }}</p>
+        {% if row.stage.tasks.all %}
+        <hr>
+        {% for task in row.stage.tasks.all %}
+        <div class="gantt-modal-task task-type-{{ task.task_type }}">
+            {% if task.task_type == 'decision_matrix' %}
+            <div class="task-decision-matrix">
+                <strong>{{ task.description }}</strong>
+                <div class="decision-options">
+                    <button class="decision-btn decision-proceed" disabled><i class="bi bi-arrow-right-circle"></i> Proceed</button>
+                    <button class="decision-btn decision-postpone" disabled><i class="bi bi-clock-history"></i> Postpone</button>
+                    <button class="decision-btn decision-dead" disabled><i class="bi bi-x-circle"></i> Dead</button>
+                </div>
+            </div>
+            {% elif task.task_type == 'radio' %}
+            <div class="task-radio-group">
+                <strong>{{ task.description }}</strong>
+                {% if task.options %}
+                {% for option in task.options|split_options %}
+                <label class="radio-option"><input type="radio" name="modal_task_{{ task.id }}" disabled/> {{ option }}</label>
+                {% endfor %}
+                {% endif %}
+            </div>
+            {% elif task.task_type == 'dropdown' %}
+            <div class="task-dropdown-group">
+                <label><strong>{{ task.description }}</strong>
+                    <select disabled class="task-select"><option>Select...</option>{% if task.options %}{% for option in task.options|split_options %}<option>{{ option }}</option>{% endfor %}{% endif %}</select>
+                </label>
+            </div>
+            {% else %}
+            <label><input type="checkbox" disabled/> {{ task.description }}
+                {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
+                {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
+            </label>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+</template>
+{% endfor %}
+
+{% for row in stage_rows %}
+<template id="stage-tpl-{{ row.stage.id }}">
+    <div class="gantt-modal-stage {{ row.stage.role }}">
+        <div class="gantt-modal-meta">
+            <span class="stage-role-badge {{ row.stage.role }}">{{ row.stage.get_role_display }}</span>
+            {% if row.days %}<span class="gantt-modal-days">{{ row.days }} Day{{ row.days|pluralize }}</span>{% endif %}
+            {% if row.order_count %}<span class="gantt-modal-orders">{{ row.order_count }} order{{ row.order_count|pluralize }}</span>{% endif %}
+        </div>
+        <p class="gantt-modal-desc">{{ row.stage.description }}</p>
+        {% if row.stage.tasks.all %}
+        <hr>
+        {% for task in row.stage.tasks.all %}
+        <div class="gantt-modal-task task-type-{{ task.task_type }}">
+            {% if task.task_type == 'decision_matrix' %}
+            <div class="task-decision-matrix">
+                <strong>{{ task.description }}</strong>
+                <div class="decision-options">
+                    <button class="decision-btn decision-proceed" disabled><i class="bi bi-arrow-right-circle"></i> Proceed</button>
+                    <button class="decision-btn decision-postpone" disabled><i class="bi bi-clock-history"></i> Postpone</button>
+                    <button class="decision-btn decision-dead" disabled><i class="bi bi-x-circle"></i> Dead</button>
+                </div>
+            </div>
+            {% elif task.task_type == 'radio' %}
+            <div class="task-radio-group">
+                <strong>{{ task.description }}</strong>
+                {% if task.options %}
+                {% for option in task.options|split_options %}
+                <label class="radio-option"><input type="radio" name="modal_task_{{ task.id }}" disabled/> {{ option }}</label>
+                {% endfor %}
+                {% endif %}
+            </div>
+            {% elif task.task_type == 'dropdown' %}
+            <div class="task-dropdown-group">
+                <label><strong>{{ task.description }}</strong>
+                    <select disabled class="task-select"><option>Select...</option>{% if task.options %}{% for option in task.options|split_options %}<option>{{ option }}</option>{% endfor %}{% endif %}</select>
+                </label>
+            </div>
+            {% else %}
+            <label><input type="checkbox" disabled/> {{ task.description }}
+                {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
+                {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
+            </label>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+</template>
+{% endfor %}
 
 {% else %}
 <!-- ══════════════════════════════════════════════════════════
@@ -141,6 +456,17 @@
                     <div class="gantt-grid-cell {% if d.weekday == 5 or d.weekday == 6 %}gantt-grid-weekend{% endif %}"></div>
                     {% endfor %}
 
+                    {% if row.stage_segments %}
+                    {% for seg in row.stage_segments %}
+                    <div class="gantt-bar gantt-bar-segment"
+                         style="left: calc({{ seg.offset }} * var(--day-width));
+                                width: calc({{ seg.width }} * var(--day-width));
+                                background: {{ seg.colour }};"
+                         title="{{ seg.name }} ({{ seg.width }}d)">
+                        <span class="gantt-bar-text">{{ seg.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% else %}
                     <div class="gantt-bar"
                          style="left: calc({{ row.offset }} * var(--day-width));
                                 width: calc({{ row.width }} * var(--day-width));
@@ -150,6 +476,7 @@
                             {% if row.stage_name %}{{ row.stage_name }}{% else %}{{ row.order.sale_number }}{% endif %}
                         </span>
                     </div>
+                    {% endif %}
 
                     {% if row.goods_due_offset is not None %}
                     <div class="gantt-marker gantt-marker-goods"
@@ -166,6 +493,14 @@
                         <i class="bi bi-wrench"></i>
                     </div>
                     {% endif %}
+
+                    {% for sm in row.stage_markers %}
+                    <div class="gantt-marker gantt-marker-stage"
+                         style="left: calc({{ sm.offset }} * var(--day-width) + var(--day-width) / 2); color: {{ sm.colour }};"
+                         title="{{ sm.name }}: {{ sm.date|date:'d/m/Y' }}">
+                        <i class="bi bi-diamond-fill"></i>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endfor %}
@@ -184,34 +519,96 @@
 
 {% if tab == 'workflow' %}
 <script>
-const ORDER_IDS = [{% for row in order_rows %}{{ row.order.id }}{% if not forloop.last %},{% endif %}{% endfor %}];
+function openStageModal(stageId) {
+    const tpl = document.getElementById('stage-tpl-' + stageId);
+    if (!tpl) return;
+    const title = tpl.content.querySelector('.stage-role-badge');
+    const bar = document.querySelector('[onclick="openStageModal(' + stageId + ')"]');
+    const barText = bar ? bar.closest('.gantt-wf-row').querySelector('.gantt-wf-name') : null;
+    document.getElementById('stageModalTitle').textContent = barText ? barText.textContent : 'Stage Details';
+    document.getElementById('stageModalBody').innerHTML = '';
+    document.getElementById('stageModalBody').appendChild(tpl.content.cloneNode(true));
+    document.getElementById('stageModal').classList.add('active');
+}
+
+function closeStageModal() {
+    document.getElementById('stageModal').classList.remove('active');
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeStageModal();
+        closeManageStagesModal();
+    }
+});
+
+const ORDER_IDS = [{% for row in order_rows %}{{ row.order.id }}{% if not forloop.last %},{% endif %}{% endfor %}{% if order_rows and enquiry_order_rows %},{% endif %}{% for row in enquiry_order_rows %}{{ row.order.id }}{% if not forloop.last %},{% endif %}{% endfor %}{% if lead_order_rows and order_rows or lead_order_rows and enquiry_order_rows %},{% endif %}{% for row in lead_order_rows %}{{ row.order.id }}{% if not forloop.last %},{% endif %}{% endfor %}];
+
+function openSyncModal() {
+    document.getElementById('syncLog').innerHTML = '';
+    document.getElementById('syncProgressFill').style.width = '0%';
+    document.getElementById('syncStatus').textContent = 'Preparing...';
+    document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Syncing from Anthill';
+    document.getElementById('syncCloseBtn').disabled = true;
+    document.getElementById('syncModal').classList.add('active');
+}
+
+function closeSyncModal() {
+    document.getElementById('syncModal').classList.remove('active');
+}
+
+function syncLog(html, cls) {
+    const log = document.getElementById('syncLog');
+    const entry = document.createElement('div');
+    entry.className = 'sync-log-entry' + (cls ? ' ' + cls : '');
+    entry.innerHTML = html;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
 
 function syncAllAnthill() {
     const btn = document.getElementById('btnSyncAll');
     btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Syncing...';
+    openSyncModal();
 
     let completed = 0;
     let updated = 0;
-    let errors = [];
+    let errorCount = 0;
+
+    const ORDER_NAMES = { {% for row in order_rows %}{{ row.order.id }}:'{{ row.order.sale_number }}',{% endfor %}{% for row in enquiry_order_rows %}{{ row.order.id }}:'{{ row.order.sale_number }}',{% endfor %}{% for row in lead_order_rows %}{{ row.order.id }}:'{{ row.order.sale_number }}',{% endfor %} };
+
+    syncLog('<i class="bi bi-info-circle"></i> Starting sync for <strong>' + ORDER_IDS.length + '</strong> orders...', 'sync-info');
 
     function syncNext(idx) {
         if (idx >= ORDER_IDS.length) {
-            btn.innerHTML = '<i class="bi bi-check-lg"></i> Done (' + updated + ' updated)';
-            if (errors.length) {
-                console.warn('Sync errors:', errors);
+            const pct = 100;
+            document.getElementById('syncProgressFill').style.width = pct + '%';
+            syncLog('<hr>');
+            if (errorCount > 0) {
+                syncLog('<i class="bi bi-exclamation-triangle"></i> Completed with <strong>' + errorCount + '</strong> error(s)', 'sync-warn');
             }
             if (updated > 0) {
-                setTimeout(() => location.reload(), 1500);
+                syncLog('<i class="bi bi-check-circle"></i> <strong>' + updated + '</strong> order(s) updated — page will reload', 'sync-success');
+                document.getElementById('syncStatus').textContent = updated + ' updated — reloading...';
+                document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+                document.getElementById('syncCloseBtn').disabled = false;
+                setTimeout(() => location.reload(), 2500);
             } else {
-                setTimeout(() => {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync from Anthill';
-                }, 2000);
+                syncLog('<i class="bi bi-check-circle"></i> All orders are already up to date', 'sync-success');
+                document.getElementById('syncStatus').textContent = 'All up to date';
+                document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+                document.getElementById('syncCloseBtn').disabled = false;
+                btn.disabled = false;
             }
             return;
         }
+
         const oid = ORDER_IDS[idx];
+        const saleName = ORDER_NAMES[oid] || oid;
+        const pct = Math.round((idx / ORDER_IDS.length) * 100);
+        document.getElementById('syncProgressFill').style.width = pct + '%';
+        document.getElementById('syncStatus').textContent = 'Syncing ' + (idx + 1) + ' of ' + ORDER_IDS.length + ' (' + saleName + ')';
+
         fetch(`{% url 'gantt_chart' %}sync-anthill/${oid}/`, {
             method: 'POST',
             headers: {'X-CSRFToken': '{{ csrf_token }}'},
@@ -219,25 +616,225 @@ function syncAllAnthill() {
         .then(r => r.json())
         .then(data => {
             completed++;
-            if (data.success && data.updated) updated++;
-            if (!data.success) errors.push({id: oid, error: data.error});
-            btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> ' + completed + '/' + ORDER_IDS.length;
+            if (data.success) {
+                if (data.updated) {
+                    updated++;
+                    let detail = data.current_stage || 'synced';
+                    if (data.dates_saved) detail += ' (' + data.dates_saved + ' date' + (data.dates_saved > 1 ? 's' : '') + ' saved)';
+                    syncLog('<i class="bi bi-arrow-right-circle"></i> <strong>' + saleName + '</strong> → ' + detail, 'sync-updated');
+                } else {
+                    syncLog('<i class="bi bi-dash-circle"></i> ' + saleName + ' — no change', 'sync-skip');
+                }
+            } else {
+                errorCount++;
+                syncLog('<i class="bi bi-x-circle"></i> ' + saleName + ' — ' + (data.error || 'unknown error'), 'sync-error');
+            }
             syncNext(idx + 1);
         })
         .catch(err => {
             completed++;
-            errors.push({id: oid, error: err.message});
-            btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> ' + completed + '/' + ORDER_IDS.length;
+            errorCount++;
+            syncLog('<i class="bi bi-x-circle"></i> ' + saleName + ' — ' + err.message, 'sync-error');
             syncNext(idx + 1);
         });
     }
 
     if (ORDER_IDS.length === 0) {
+        syncLog('<i class="bi bi-info-circle"></i> No orders to sync', 'sync-info');
+        document.getElementById('syncStatus').textContent = 'Nothing to do';
+        document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+        document.getElementById('syncCloseBtn').disabled = false;
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> No orders to sync';
         return;
     }
     syncNext(0);
+}
+
+/* ── Manage Stages Modal ─────────────────────────────────────── */
+const ROLE_COLOURS = { {% for role, colour in role_colours.items %}'{{ role }}': '{{ colour }}',{% endfor %} };
+const CSRF = '{{ csrf_token }}';
+let currentManagePhase = 'enquiry';
+
+// Build stage data from Django context
+const ALL_STAGES = {
+    'enquiry': [{% for s in enquiry_stages %}{ id:{{ s.id }},name:'{{ s.name|escapejs }}',role:'{{ s.role }}',description:'{{ s.description|escapejs }}',expected_days:{{ s.expected_days|default_if_none:"null" }},order:{{ s.order }} },{% endfor %}],
+    'lead': [{% for s in lead_stages %}{ id:{{ s.id }},name:'{{ s.name|escapejs }}',role:'{{ s.role }}',description:'{{ s.description|escapejs }}',expected_days:{{ s.expected_days|default_if_none:"null" }},order:{{ s.order }} },{% endfor %}],
+    'sale': [{% for s in all_stages %}{ id:{{ s.id }},name:'{{ s.name|escapejs }}',role:'{{ s.role }}',description:'{{ s.description|escapejs }}',expected_days:{{ s.expected_days|default_if_none:"null" }},order:{{ s.order }} },{% endfor %}],
+};
+
+function openManageStagesModal() {
+    document.getElementById('manageModal').classList.add('active');
+    renderStageList();
+}
+
+function closeManageStagesModal() {
+    document.getElementById('manageModal').classList.remove('active');
+}
+
+function switchManagePhase(phase) {
+    currentManagePhase = phase;
+    document.querySelectorAll('.manage-phase-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.phase === phase);
+    });
+    renderStageList();
+}
+
+function renderStageList() {
+    const list = document.getElementById('manageStageList');
+    const stages = ALL_STAGES[currentManagePhase] || [];
+    if (stages.length === 0) {
+        list.innerHTML = '<div class="manage-empty">No stages defined for this phase.</div>';
+        return;
+    }
+    let html = '<div class="manage-stage-header"><span class="manage-col-order">#</span><span class="manage-col-name">Name</span><span class="manage-col-role">Role</span><span class="manage-col-days">Days</span><span class="manage-col-actions"></span></div>';
+    stages.forEach((s, idx) => {
+        const colour = ROLE_COLOURS[s.role] || '#94a3b8';
+        html += `<div class="manage-stage-row" data-id="${s.id}">
+            <span class="manage-col-order">
+                <button class="manage-move-btn" onclick="moveStage(${s.id},-1)" ${idx === 0 ? 'disabled' : ''} title="Move up"><i class="bi bi-chevron-up"></i></button>
+                <button class="manage-move-btn" onclick="moveStage(${s.id},1)" ${idx === stages.length - 1 ? 'disabled' : ''} title="Move down"><i class="bi bi-chevron-down"></i></button>
+            </span>
+            <span class="manage-col-name">
+                <span class="gantt-stage-dot" style="background:${colour};"></span>
+                <input type="text" class="manage-inline-input" value="${s.name}" onchange="updateStageField(${s.id},'name',this.value)">
+            </span>
+            <span class="manage-col-role">
+                <select class="manage-inline-select" onchange="updateStageField(${s.id},'role',this.value)">
+                    {% for val, label in role_choices %}
+                    <option value="{{ val }}" ${s.role==='{{ val }}'?'selected':''}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </span>
+            <span class="manage-col-days">
+                <input type="number" class="manage-inline-input manage-inline-days" value="${s.expected_days || ''}" min="1" placeholder="—" onchange="updateStageField(${s.id},'expected_days',this.value)">
+            </span>
+            <span class="manage-col-actions">
+                <button class="manage-delete-btn" onclick="deleteStage(${s.id},'${s.name.replace(/'/g,"\\'")}')" title="Delete stage"><i class="bi bi-trash"></i></button>
+            </span>
+        </div>`;
+    });
+    list.innerHTML = html;
+}
+
+function updateStageField(stageId, field, value) {
+    // Use save_workflow_stage with all current fields
+    const stages = ALL_STAGES[currentManagePhase];
+    const s = stages.find(x => x.id === stageId);
+    if (!s) return;
+
+    // Apply the change locally first
+    const updated = Object.assign({}, s);
+    updated[field] = value;
+
+    const fd = new FormData();
+    fd.append('stage_id', stageId);
+    fd.append('name', updated.name);
+    fd.append('phase', updated.phase || currentManagePhase);
+    fd.append('role', updated.role);
+    fd.append('description', updated.description || '');
+    fd.append('expected_days', updated.expected_days || '');
+
+    fetch(`{% url 'save_workflow_stage' %}`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest'},
+        body: fd,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            Object.assign(s, data.stage);
+            if (field === 'role') renderStageList();
+        } else {
+            alert(data.error || 'Update failed');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function moveStage(stageId, direction) {
+    const dir = direction === -1 ? 'up' : 'down';
+    const fd = new FormData();
+    fd.append('direction', dir);
+
+    fetch(`{% url 'move_workflow_stage' stage_id=0 %}`.replace('/0/', '/' + stageId + '/'), {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF},
+        body: fd,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const stages = ALL_STAGES[currentManagePhase];
+            const idx = stages.findIndex(x => x.id === stageId);
+            const swapIdx = idx + direction;
+            if (idx >= 0 && swapIdx >= 0 && swapIdx < stages.length) {
+                const tmpOrder = stages[idx].order;
+                stages[idx].order = stages[swapIdx].order;
+                stages[swapIdx].order = tmpOrder;
+                [stages[idx], stages[swapIdx]] = [stages[swapIdx], stages[idx]];
+            }
+            renderStageList();
+        } else {
+            alert('Failed to reorder');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function addStage() {
+    const name = document.getElementById('addStageName').value.trim();
+    const role = document.getElementById('addStageRole').value;
+    const days = document.getElementById('addStageDays').value;
+    const desc = document.getElementById('addStageDesc').value.trim();
+
+    if (!name) { alert('Stage name is required.'); return; }
+
+    const fd = new FormData();
+    fd.append('name', name);
+    fd.append('phase', currentManagePhase);
+    fd.append('role', role);
+    fd.append('description', desc);
+    fd.append('expected_days', days);
+
+    fetch(`{% url 'save_workflow_stage' %}`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest'},
+        body: fd,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            ALL_STAGES[currentManagePhase].push(data.stage);
+            renderStageList();
+            document.getElementById('addStageName').value = '';
+            document.getElementById('addStageDays').value = '';
+            document.getElementById('addStageDesc').value = '';
+        } else {
+            alert(data.error || 'Failed to add stage');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function deleteStage(stageId, stageName) {
+    if (!confirm('Delete stage "' + stageName + '"? This cannot be undone.')) return;
+
+    fetch(`{% url 'delete_workflow_stage' stage_id=0 %}`.replace('/0/', '/' + stageId + '/'), {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const stages = ALL_STAGES[currentManagePhase];
+            const idx = stages.findIndex(x => x.id === stageId);
+            if (idx > -1) stages.splice(idx, 1);
+            renderStageList();
+        } else {
+            alert(data.error || 'Failed to delete stage');
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
 }
 </script>
 <style>
