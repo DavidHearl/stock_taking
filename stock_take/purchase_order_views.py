@@ -15,6 +15,162 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 
+def _generate_angled_board_preview(left_height, right_height, width, top_edge=0):
+    """Generate a PNG preview image of an angled board shape using Pillow.
+    Returns bytes of the PNG image."""
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    lh = float(left_height or 0)
+    rh = float(right_height or 0)
+    bw = float(width or 0)
+    te = float(top_edge or 0)
+
+    img_w, img_h = 400, 280
+    pad = 55
+    img = Image.new('RGB', (img_w, img_h), '#1e2127')
+    draw = ImageDraw.Draw(img)
+
+    if lh <= 0 and rh <= 0 and bw <= 0:
+        return None
+
+    draw_w = img_w - pad * 2
+    draw_h = img_h - pad * 2
+    scale_x = draw_w / (bw or 1)
+    scale_y = draw_h / (max(lh, rh) or 1)
+    scale = min(scale_x, scale_y)
+
+    shape_w = bw * scale
+    shape_lh = lh * scale
+    shape_rh = rh * scale
+    shape_te = te * scale
+
+    offset_x = (img_w - shape_w) / 2
+    base_y = img_h - pad
+
+    bl = (offset_x, base_y)
+    br = (offset_x + shape_w, base_y)
+
+    if lh >= rh and te > 0:
+        tl = (offset_x, base_y - shape_lh)
+        te_corner = (offset_x + shape_te, base_y - shape_lh)
+        tr = (offset_x + shape_w, base_y - shape_rh)
+        points = [bl, br, tr, te_corner, tl]
+    elif rh > lh and te > 0:
+        tl = (offset_x, base_y - shape_lh)
+        te_corner = (offset_x + shape_w - shape_te, base_y - shape_rh)
+        tr = (offset_x + shape_w, base_y - shape_rh)
+        points = [bl, br, tr, te_corner, tl]
+    else:
+        tl = (offset_x, base_y - shape_lh)
+        tr = (offset_x + shape_w, base_y - shape_rh)
+        points = [bl, br, tr, tl]
+
+    # Fill
+    draw.polygon(points, fill='#1a2744', outline='#3b82f6')
+    # Stroke (thicker outline)
+    for i in range(len(points)):
+        p1 = points[i]
+        p2 = points[(i + 1) % len(points)]
+        draw.line([p1, p2], fill='#3b82f6', width=2)
+
+    # Dimension labels
+    try:
+        font = ImageFont.truetype("arial.ttf", 13)
+    except (IOError, OSError):
+        font = ImageFont.load_default()
+
+    label_color = '#e0e0e0'
+
+    # Left height
+    if lh > 0:
+        lx = bl[0] - 8
+        ly = (bl[1] + tl[1]) / 2
+        label = f'{lh:.0f}mm'
+        # Draw rotated text using a temporary image
+        txt_img = Image.new('RGBA', (80, 20), (0, 0, 0, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
+        txt_draw.text((0, 0), label, fill=label_color, font=font)
+        txt_img = txt_img.rotate(90, expand=True)
+        tw, th = txt_img.size
+        img.paste(txt_img, (int(lx - tw), int(ly - th / 2)), txt_img)
+
+    # Right height
+    if rh > 0:
+        rx = br[0] + 6
+        ry = (br[1] + tr[1]) / 2
+        label = f'{rh:.0f}mm'
+        txt_img = Image.new('RGBA', (80, 20), (0, 0, 0, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
+        txt_draw.text((0, 0), label, fill=label_color, font=font)
+        txt_img = txt_img.rotate(90, expand=True)
+        tw, th = txt_img.size
+        img.paste(txt_img, (int(rx), int(ry - th / 2)), txt_img)
+
+    # Width (bottom)
+    if bw > 0:
+        label = f'{bw:.0f}mm'
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw = bbox[2] - bbox[0]
+        cx = (bl[0] + br[0]) / 2
+        draw.text((cx - tw / 2, bl[1] + 8), label, fill=label_color, font=font)
+
+    # Top edge
+    if te > 0:
+        label = f'{te:.0f}mm'
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw = bbox[2] - bbox[0]
+        if lh >= rh:
+            cx = (tl[0] + tl[0] + shape_te) / 2
+            draw.text((cx - tw / 2, tl[1] - 20), label, fill=label_color, font=font)
+        else:
+            cx = (tr[0] - shape_te + tr[0]) / 2
+            draw.text((cx - tw / 2, tr[1] - 20), label, fill=label_color, font=font)
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def _ensure_angled_previews(purchase_order, boards_po):
+    """Auto-generate missing angled board preview images for an existing PO.
+    Called from the detail view so previews are available in the send modal."""
+    from collections import defaultdict
+    from django.core.files.base import ContentFile
+
+    groups = defaultdict(list)
+    for item in boards_po.pnx_items.all():
+        if item.left_height is not None:
+            key = (float(item.left_height or 0), float(item.right_height or 0),
+                   float(item.cwidth), float(item.top_edge or 0))
+            groups[key].append(item)
+
+    if not groups:
+        return
+
+    for (lh, rh, w, te), items in sorted(groups.items()):
+        fname = f'angled_preview_{int(lh)}x{int(rh)}x{int(w)}.png'
+        if purchase_order.attachments.filter(filename=fname).exists():
+            continue
+        try:
+            png_data = _generate_angled_board_preview(lh, rh, w, te)
+            if png_data:
+                desc = f'Angled board L:{int(lh)} R:{int(rh)} W:{int(w)}'
+                if te > 0:
+                    desc += f' TE:{int(te)}'
+                desc += f'mm (x{sum(int(i.cnt) for i in items)})'
+                att = PurchaseOrderAttachment(
+                    purchase_order=purchase_order,
+                    filename=fname,
+                    description=desc,
+                    uploaded_by='System',
+                )
+                att.file.save(fname, ContentFile(png_data), save=False)
+                att.save()
+        except Exception:
+            pass
+
+
 def _get_board_product_rows_for_pdf(po):
     """
     For Carnehill board POs, group PNX items by material + dimensions
@@ -382,7 +538,15 @@ def purchase_order_detail(request, po_id):
                 'is_board': True,
                 'items': grp['items'],
                 'item_ids': ','.join(str(i.id) for i in grp['items']),
+                'left_height': grp['left_height'],
+                'right_height': grp['right_height'],
+                'top_edge': grp['top_edge'],
+                'cwidth': grp['cwidth'],
             })
+
+        # Auto-generate missing angled preview images
+        if is_angled_po:
+            _ensure_angled_previews(purchase_order, boards_po)
     
     # Compute total board counts for template display
     total_board_items = len(pnx_items)  # individual PNX rows (before grouping)
@@ -2917,6 +3081,38 @@ def _attach_boards_files_to_po(po, boards_po, user):
         except Exception:
             pass
 
+    # Generate and attach preview images for angled boards
+    if boards_po.is_angled:
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for item in boards_po.pnx_items.all():
+            if item.left_height is not None:
+                key = (float(item.left_height or 0), float(item.right_height or 0),
+                       float(item.cwidth), float(item.top_edge or 0))
+                groups[key].append(item)
+
+        for idx, ((lh, rh, w, te), items) in enumerate(sorted(groups.items()), 1):
+            fname = f'angled_preview_{int(lh)}x{int(rh)}x{int(w)}.png'
+            if po.attachments.filter(filename=fname).exists():
+                continue
+            try:
+                png_data = _generate_angled_board_preview(lh, rh, w, te)
+                if png_data:
+                    desc = f'Angled board L:{int(lh)} R:{int(rh)} W:{int(w)}'
+                    if te > 0:
+                        desc += f' TE:{int(te)}'
+                    desc += f'mm (x{sum(int(i.cnt) for i in items)})'
+                    att = PurchaseOrderAttachment(
+                        purchase_order=po,
+                        filename=fname,
+                        description=desc,
+                        uploaded_by=user_name,
+                    )
+                    att.file.save(fname, ContentFile(png_data), save=False)
+                    att.save()
+            except Exception:
+                pass
+
 
 @login_required
 def create_os_doors_purchase_order(request, order_id):
@@ -2932,12 +3128,6 @@ def create_os_doors_purchase_order(request, order_id):
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
     order = get_object_or_404(Order, id=order_id)
-
-    if not order.os_doors.exists():
-        if is_ajax:
-            return JsonResponse({'success': False, 'error': 'This order has no OS door items. Add doors first.'})
-        messages.error(request, 'This order has no OS door items. Add doors first.')
-        return redirect('order_details', order_id=order_id)
 
     # If a PO already exists for this order's os_doors_po, just redirect
     if order.os_doors_po:
@@ -3000,13 +3190,15 @@ def create_os_doors_purchase_order(request, order_id):
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
-    # Add each OS door as a product line
+    # Add each OS door as a product line (if any exist)
     total = Decimal('0')
+    door_count = 0
     for idx, door in enumerate(order.os_doors.all()):
         unit_price = door.cost_price or Decimal('0')
         qty = Decimal(str(door.quantity))
         line_total = unit_price * qty
         total += line_total
+        door_count += 1
 
         PurchaseOrderProduct.objects.create(
             purchase_order=po,
@@ -3026,10 +3218,12 @@ def create_os_doors_purchase_order(request, order_id):
 
     # Link the PO number to the order and mark doors as ordered
     order.os_doors_po = po_number
-    order.save(update_fields=['os_doors_po'])
-    order.os_doors.update(ordered=True, po_number=po_number)
+    order.os_doors_required = True
+    order.save(update_fields=['os_doors_po', 'os_doors_required'])
+    if door_count:
+        order.os_doors.update(ordered=True, po_number=po_number)
 
-    messages.success(request, f'OS Doors Purchase Order {po_number} created with {order.os_doors.count()} door item(s).')
+    messages.success(request, f'OS Doors Purchase Order {po_number} created with {door_count} door item(s).')
     if is_ajax:
         return JsonResponse({'success': True, 'po_number': po_number, 'workguru_id': po.workguru_id})
     return redirect('order_details', order_id=order_id)
@@ -3232,13 +3426,25 @@ def create_stock_shortage_po(request):
 
     description = f'Stock shortage order — generated {_dt.date.today().strftime("%d %B %Y")}'
 
+    # Resolve supplier from the stock items (use the first one that has a supplier)
+    supplier_id = None
+    supplier_name = ''
+    item_skus = [item.get('sku', '') for item in items if item.get('sku')]
+    if item_skus:
+        stock_item_with_supplier = StockItem.objects.filter(
+            sku__in=item_skus, supplier__isnull=False
+        ).select_related('supplier').first()
+        if stock_item_with_supplier and stock_item_with_supplier.supplier:
+            supplier_id = stock_item_with_supplier.supplier.workguru_id
+            supplier_name = stock_item_with_supplier.supplier.name
+
     po = PurchaseOrder.objects.create(
         workguru_id=manual_id,
         number=display_number,
         display_number=display_number,
         description=description,
-        supplier_id=None,
-        supplier_name='',
+        supplier_id=supplier_id,
+        supplier_name=supplier_name,
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
         po_type='supplier',
         status='Draft',
@@ -3258,11 +3464,12 @@ def create_stock_shortage_po(request):
         total += line_total
         sku = item.get('sku', '')
         stock_item = StockItem.objects.filter(sku=sku).first()
+        sup_code = (stock_item.supplier_code or sku) if stock_item else sku
 
         PurchaseOrderProduct.objects.create(
             purchase_order=po,
             sku=sku,
-            supplier_code=sku,
+            supplier_code=sup_code,
             name=item.get('name', ''),
             order_price=unit_cost,
             order_quantity=qty,

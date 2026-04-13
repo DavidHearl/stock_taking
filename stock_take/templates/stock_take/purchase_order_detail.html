@@ -471,6 +471,9 @@
                         <td><code class="board-sku">{{ bp.sku }}</code></td>
                         <td>
                             <span>{{ bp.name }}</span>
+                            {% if bp.left_height != None %}
+                            <button class="btn-board-preview" onclick="openBoardPreviewPO({{ bp.left_height }}, {{ bp.right_height }}, {{ bp.cwidth }}, {{ bp.top_edge }})" title="Preview shape"><i class="bi bi-eye"></i></button>
+                            {% endif %}
                         </td>
                         <td class="text-right">£{{ bp.order_price|floatformat:2 }}</td>
                         <td class="text-right">{{ bp.order_quantity|floatformat:0 }}</td>
@@ -937,9 +940,15 @@
                         {% for att in attachments %}
                         <tr id="attachment-row-{{ att.id }}">
                             <td>
+                                {% if att.filename|lower|slice:"-4:" == ".png" or att.filename|lower|slice:"-4:" == ".jpg" or att.filename|lower|slice:"-5:" == ".jpeg" %}
+                                <a href="{{ att.file.url }}" target="_blank" class="po-boards-file-link">
+                                    <i class="bi bi-image"></i> {{ att.filename }}
+                                </a>
+                                {% else %}
                                 <a href="{{ att.file.url }}" download class="po-boards-file-link">
                                     <i class="bi bi-file-earmark-arrow-down"></i> {{ att.filename }}
                                 </a>
+                                {% endif %}
                             </td>
                             <td>{{ att.description }}</td>
                             <td>{{ att.uploaded_by }}</td>
@@ -950,6 +959,13 @@
                                 </button>
                             </td>
                         </tr>
+                        {% if att.filename|lower|slice:"-4:" == ".png" or att.filename|lower|slice:"-4:" == ".jpg" or att.filename|lower|slice:"-5:" == ".jpeg" %}
+                        <tr class="attachment-preview-row">
+                            <td colspan="5" style="padding: 8px 16px;">
+                                <img src="{{ att.file.url }}" alt="{{ att.description }}" style="max-width: 380px; border-radius: 6px; border: 1px solid var(--border-color);">
+                            </td>
+                        </tr>
+                        {% endif %}
                         {% endfor %}
                     </tbody>
                 </table>
@@ -1368,9 +1384,11 @@ Sliderobes</textarea>
                     </label>
                     {% for att in attachments %}
                     <label class="email-attachment-item">
-                        <input type="checkbox" class="email-att-checkbox" value="{{ att.id }}">
-                        <i class="bi bi-file-earmark-arrow-down"></i>
+                        <input type="checkbox" class="email-att-checkbox" value="{{ att.id }}"
+                               {% if 'angled_preview' in att.filename %}checked{% endif %}>
+                        <i class="bi bi-{% if 'angled_preview' in att.filename %}image{% else %}file-earmark-arrow-down{% endif %}"></i>
                         <span>{{ att.filename }}</span>
+                        {% if 'angled_preview' in att.filename %}<span class="attachment-auto-tag">preview</span>{% endif %}
                     </label>
                     {% endfor %}
                 </div>
@@ -1463,9 +1481,117 @@ Sliderobes</textarea>
     </div>
 </div>
 
+<!-- Board Preview Modal -->
+<div class="modal-overlay" id="board-preview-modal" style="display:none;" onclick="closeBoardPreviewModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 440px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-eye"></i> Board Shape Preview</h3>
+            <button class="modal-close" onclick="closeBoardPreviewModal()">&times;</button>
+        </div>
+        <div class="modal-body" style="display: flex; justify-content: center; padding: 16px;">
+            <canvas id="board-preview-canvas-po" width="380" height="260" style="border-radius: 6px; background: var(--bg-primary);"></canvas>
+        </div>
+    </div>
+</div>
+
 <script>
 let editMode = false;
 const poId = {{ purchase_order.workguru_id }};
+
+// ===== Board Shape Preview =====
+function openBoardPreviewPO(lh, rh, bw, te) {
+    document.getElementById('board-preview-modal').style.display = 'flex';
+    setTimeout(function() {
+        const canvas = document.getElementById('board-preview-canvas-po');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        if (lh <= 0 && rh <= 0 && bw <= 0) return;
+
+        const pad = 50;
+        const drawW = W - pad * 2;
+        const drawH = H - pad * 2;
+        const scaleX = drawW / (bw || 1);
+        const scaleY = drawH / (Math.max(lh, rh) || 1);
+        const scale = Math.min(scaleX, scaleY);
+
+        const shapeW = (bw || 0) * scale;
+        const shapeLH = (lh || 0) * scale;
+        const shapeRH = (rh || 0) * scale;
+        const shapeTE = (te || 0) * scale;
+
+        const offsetX = (W - shapeW) / 2;
+        const baseY = H - pad;
+
+        const bl = { x: offsetX, y: baseY };
+        const br = { x: offsetX + shapeW, y: baseY };
+        let tl, tr, points;
+
+        if (lh >= rh && te > 0) {
+            tl = { x: offsetX, y: baseY - shapeLH };
+            const teCorner = { x: offsetX + shapeTE, y: baseY - shapeLH };
+            tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+            points = [bl, br, tr, teCorner, tl];
+        } else if (rh > lh && te > 0) {
+            tl = { x: offsetX, y: baseY - shapeLH };
+            const teCorner = { x: offsetX + shapeW - shapeTE, y: baseY - shapeRH };
+            tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+            points = [bl, br, tr, teCorner, tl];
+        } else {
+            tl = { x: offsetX, y: baseY - shapeLH };
+            tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+            points = [bl, br, tr, tl];
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+        ctx.fill();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const isLight = document.body.classList.contains('light-mode');
+        ctx.fillStyle = isLight ? '#1a1c20' : '#e0e0e0';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        if (lh > 0) {
+            ctx.save();
+            ctx.translate(bl.x - 18, (bl.y + tl.y) / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(lh + 'mm', 0, 0);
+            ctx.restore();
+        }
+        if (rh > 0) {
+            ctx.save();
+            ctx.translate(br.x + 20, (br.y + tr.y) / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(rh + 'mm', 0, 0);
+            ctx.restore();
+        }
+        if (bw > 0) {
+            ctx.fillText(bw + 'mm', (bl.x + br.x) / 2, bl.y + 18);
+        }
+        if (te > 0) {
+            if (lh >= rh) {
+                ctx.fillText(te + 'mm', (tl.x + tl.x + shapeTE) / 2, tl.y - 14);
+            } else {
+                ctx.fillText(te + 'mm', (tr.x - shapeTE + tr.x) / 2, tr.y - 14);
+            }
+        }
+    }, 50);
+}
+
+function closeBoardPreviewModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('board-preview-modal').style.display = 'none';
+}
 
 // ===== Multi-Project Management =====
 

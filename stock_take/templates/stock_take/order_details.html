@@ -266,9 +266,6 @@
 
                             {% if anthill_sales %}
                             {% for sale in anthill_sales %}
-                            {% if sale.contract_number or sale.range_name or sale.door_type or sale.source or sale.discount or sale.goods_due_in %}
-                            <div class="info-separator"></div>
-                            {% endif %}
                             {% if sale.range_name %}
                             <div class="field-row-sb">
                                 <span class="field-label">Range</span>
@@ -725,6 +722,7 @@
                                     <th class="col-stock">Stock</th>
                                     <th>Status</th>
                                     <th>Cost</th>
+                                    {% if bpo_data.po.is_angled %}<th style="width:36px;"></th>{% endif %}
                                 </tr>
                             </thead>
                             <tbody>
@@ -871,10 +869,20 @@
                                         {% endif %}
                                     </td>
                                     <td>£{{ item.calculated_cost|floatformat:2 }}</td>
+                                    {% if bpo_data.po.is_angled %}
+                                    <td style="text-align:center;">
+                                        {% if item.left_height %}
+                                        <button type="button" class="btn-board-preview" title="Preview shape"
+                                                onclick="openBoardPreview({{ item.left_height|floatformat:0 }}, {{ item.right_height|floatformat:0 }}, {{ item.cwidth|floatformat:0 }}, {{ item.top_edge|floatformat:0 }})">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                        {% endif %}
+                                    </td>
+                                    {% endif %}
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
-                                    <td colspan="{% if bpo_data.po.is_angled %}14{% else %}12{% endif %}"><strong>Total Cost:</strong></td>
+                                    <td colspan="{% if bpo_data.po.is_angled %}15{% else %}12{% endif %}"><strong>Total Cost:</strong></td>
                                     <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
                                 </tr>
                             </tbody>
@@ -1275,6 +1283,12 @@
                 <div class="card-header">
                     <h3>OS Doors</h3>
                     <div class="header-actions">
+                        <button type="button"
+                                class="btn btn-sm btn-create-po-icon"
+                                title="Create a new PO for OS Doors"
+                                onclick="createOSDoorsPO({{ order.id }})">
+                            <i class="bi bi-file-earmark-plus"></i>
+                        </button>
                         <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
                             <i class="bi bi-plus-lg"></i>
                         </button>
@@ -2362,6 +2376,48 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('addItemModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Accessory Quantity Modal -->
+<div class="modal" id="accessoryQtyModal">
+    <div class="modal-overlay" onclick="closeModal('accessoryQtyModal')"></div>
+    <div class="modal-dialog" style="max-width: 360px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Set Quantity</h3>
+                <button type="button" class="modal-close" onclick="closeModal('accessoryQtyModal')">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <p id="accessory-qty-sku" style="font-weight: 600; margin: 0 0 4px;"></p>
+                <p id="accessory-qty-name" style="font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 16px;"></p>
+                <label for="accessory-qty-input" class="field-label">Quantity</label>
+                <input type="number" class="form-input" id="accessory-qty-input" 
+                       min="1" step="1" value="1" style="margin-top: 4px;"
+                       onkeydown="if(event.key==='Enter'){confirmAccessoryQty();}">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('accessoryQtyModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmAccessoryQty()">Add</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Board Shape Preview Modal -->
+<div class="modal" id="boardPreviewModal">
+    <div class="modal-overlay" onclick="closeModal('boardPreviewModal')"></div>
+    <div class="modal-dialog" style="max-width: 420px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Board Preview</h3>
+                <button type="button" class="modal-close" onclick="closeModal('boardPreviewModal')">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 20px; text-align: center;">
+                <canvas id="board-preview-canvas" width="380" height="260"
+                        style="width: 100%; max-width: 380px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary);"></canvas>
             </div>
         </div>
     </div>
@@ -4793,7 +4849,8 @@ function drawAngledPreview() {
     ctx.stroke();
 
     // Dimension labels
-    ctx.fillStyle = '#e0e0e0';
+    const isLight = document.body.classList.contains('light-mode');
+    ctx.fillStyle = isLight ? '#1a1c20' : '#e0e0e0';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -4834,6 +4891,97 @@ function drawAngledPreview() {
             ctx.fillText(te + 'mm', (teStart.x + teEnd.x) / 2, teEnd.y - 12);
         }
     }
+}
+
+// Open board shape preview modal for an angled board item
+function openBoardPreview(lh, rh, bw, te) {
+    openModal('boardPreviewModal');
+    setTimeout(function() {
+        const canvas = document.getElementById('board-preview-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        if (lh <= 0 && rh <= 0 && bw <= 0) return;
+
+        const pad = 50;
+        const drawW = W - pad * 2;
+        const drawH = H - pad * 2;
+        const scaleX = drawW / (bw || 1);
+        const scaleY = drawH / (Math.max(lh, rh) || 1);
+        const scale = Math.min(scaleX, scaleY);
+
+        const shapeW = (bw || 0) * scale;
+        const shapeLH = (lh || 0) * scale;
+        const shapeRH = (rh || 0) * scale;
+        const shapeTE = (te || 0) * scale;
+
+        const offsetX = (W - shapeW) / 2;
+        const baseY = H - pad;
+
+        const bl = { x: offsetX, y: baseY };
+        const br = { x: offsetX + shapeW, y: baseY };
+        let tl, tr, points;
+
+        if (lh >= rh && te > 0) {
+            tl = { x: offsetX, y: baseY - shapeLH };
+            const teCorner = { x: offsetX + shapeTE, y: baseY - shapeLH };
+            tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+            points = [bl, br, tr, teCorner, tl];
+        } else if (rh > lh && te > 0) {
+            tl = { x: offsetX, y: baseY - shapeLH };
+            const teCorner = { x: offsetX + shapeW - shapeTE, y: baseY - shapeRH };
+            tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+            points = [bl, br, tr, teCorner, tl];
+        } else {
+            tl = { x: offsetX, y: baseY - shapeLH };
+            tr = { x: offsetX + shapeW, y: baseY - shapeRH };
+            points = [bl, br, tr, tl];
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+        ctx.fill();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const isLight = document.body.classList.contains('light-mode');
+        ctx.fillStyle = isLight ? '#1a1c20' : '#e0e0e0';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        if (lh > 0) {
+            ctx.save();
+            ctx.translate(bl.x - 18, (bl.y + tl.y) / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(lh + 'mm', 0, 0);
+            ctx.restore();
+        }
+        if (rh > 0) {
+            ctx.save();
+            ctx.translate(br.x + 20, (br.y + tr.y) / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(rh + 'mm', 0, 0);
+            ctx.restore();
+        }
+        if (bw > 0) {
+            ctx.fillText(bw + 'mm', (bl.x + br.x) / 2, bl.y + 18);
+        }
+        if (te > 0) {
+            if (lh >= rh) {
+                ctx.fillText(te + 'mm', (tl.x + tl.x + shapeTE) / 2, tl.y - 14);
+            } else {
+                ctx.fillText(te + 'mm', (tr.x - shapeTE + tr.x) / 2, tr.y - 14);
+            }
+        }
+    }, 50);
 }
 
 // Regenerate PNX and CSV files from database items
@@ -5241,19 +5389,30 @@ function displayAddItemResults(results) {
     container.innerHTML = html;
 }
 
+let _pendingAccessory = null;
+
 function addItemToOrder(stockItemId, sku, name) {
-    const quantity = prompt(`How many ${sku} do you want to add?`, '1');
-    
-    if (quantity === null || quantity === '') {
-        return;
-    }
-    
-    const qty = parseFloat(quantity);
+    _pendingAccessory = { stockItemId, sku, name };
+    document.getElementById('accessory-qty-sku').textContent = sku;
+    document.getElementById('accessory-qty-name').textContent = name;
+    const qtyInput = document.getElementById('accessory-qty-input');
+    qtyInput.value = 1;
+    openModal('accessoryQtyModal');
+    setTimeout(() => { qtyInput.focus(); qtyInput.select(); }, 100);
+}
+
+function confirmAccessoryQty() {
+    if (!_pendingAccessory) return;
+    const qty = parseFloat(document.getElementById('accessory-qty-input').value);
     if (isNaN(qty) || qty <= 0) {
         showAlert('Please enter a valid quantity', 'danger');
         return;
     }
     
+    const { stockItemId, sku } = _pendingAccessory;
+    _pendingAccessory = null;
+    closeModal('accessoryQtyModal');
+
     fetch(`/stock-take/add-accessory-item/{{ order.id }}/`, {
         method: 'POST',
         headers: {
