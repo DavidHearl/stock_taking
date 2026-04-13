@@ -135,6 +135,11 @@ Workflow Management
                         <div class="stage-title-group">
                             <h3 class="stage-title">{{ stage.name }}</h3>
                             <span class="stage-role-badge {{ stage.role }}">{{ stage.get_role_display }}</span>
+                            {% if stage.order_count %}
+                            <button class="stage-order-count" onclick="openStageOrders({{ stage.id }})" title="View customers at this stage">
+                                <i class="bi bi-people-fill"></i> {{ stage.order_count }}
+                            </button>
+                            {% endif %}
                         </div>
                         <div class="stage-actions">
                             {% if stage.expected_days %}
@@ -351,6 +356,39 @@ Workflow Management
     </div>
 </div>
 
+<!-- Stage Orders Modal -->
+<div class="modal" id="stageOrdersModal">
+    <div class="modal-overlay" onclick="closeModal('stageOrdersModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="stageOrdersTitle">Customers at Stage</h3>
+                <button type="button" class="modal-close" onclick="closeModal('stageOrdersModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="stageOrdersMeta" style="color: var(--text-secondary); margin-bottom: 12px;"></p>
+                <div id="stageOrdersLoading" style="text-align: center; padding: 20px;">
+                    <i class="bi bi-arrow-repeat spin"></i> Loading...
+                </div>
+                <table id="stageOrdersTable" class="stage-orders-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Sale Number</th>
+                            <th>At Stage Since</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="stageOrdersBody"></tbody>
+                </table>
+                <p id="stageOrdersEmpty" style="display: none; text-align: center; color: var(--text-secondary); padding: 20px;">
+                    No customers at this stage.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 function openModal(modalId) {
     document.getElementById(modalId).style.display = 'flex';
@@ -474,6 +512,41 @@ function moveStageDown(stageId) {
             location.reload();
         }
     });
+}
+function openStageOrders(stageId) {
+    document.getElementById('stageOrdersLoading').style.display = 'block';
+    document.getElementById('stageOrdersTable').style.display = 'none';
+    document.getElementById('stageOrdersEmpty').style.display = 'none';
+    document.getElementById('stageOrdersTitle').textContent = 'Customers at Stage';
+    document.getElementById('stageOrdersMeta').textContent = '';
+    openModal('stageOrdersModal');
+    
+    fetch(`/workflow/stage/${stageId}/orders/`)
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('stageOrdersLoading').style.display = 'none';
+            document.getElementById('stageOrdersTitle').textContent = data.stage_name;
+            document.getElementById('stageOrdersMeta').textContent = `${data.phase} · ${data.stage_role} · ${data.count} customer${data.count !== 1 ? 's' : ''}`;
+            
+            if (data.orders.length === 0) {
+                document.getElementById('stageOrdersEmpty').style.display = 'block';
+                return;
+            }
+            
+            const tbody = document.getElementById('stageOrdersBody');
+            tbody.innerHTML = '';
+            data.orders.forEach(order => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${order.customer_name}</td>
+                    <td>${order.sale_number}</td>
+                    <td>${order.stage_started}</td>
+                    <td><a href="/order/${order.id}/" class="btn-icon" title="View Order"><i class="bi bi-box-arrow-up-right"></i></a></td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('stageOrdersTable').style.display = 'table';
+        });
 }
 </script>
 {% endblock %}

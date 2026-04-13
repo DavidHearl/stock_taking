@@ -382,6 +382,9 @@
             </div>
         </div>
 
+        <!-- Workflow Role Widgets (rendered by JS) -->
+        <div id="workflowWidgetSlot"></div>
+
     </div><!-- /widget-grid -->
 </div>
 
@@ -3114,5 +3117,111 @@ function openIncomingModal() {
     );
 })();
 </script>
+
+<!-- Workflow Pipeline Rendering -->
+<script>
+(function() {
+    const workflowRoles = {{ workflow_roles_json|safe }};
+    const slot = document.getElementById('workflowWidgetSlot');
+    if (!workflowRoles || workflowRoles.length === 0) return;
+    
+    const activeRoles = workflowRoles.filter(r => r.total_orders > 0);
+    if (activeRoles.length === 0) return;
+    
+    let html = '';
+    activeRoles.forEach(function(role) {
+        const widgetId = 'wf_' + role.role.replace(/-/g, '_');
+        html += '<div class="widget" data-widget-id="' + widgetId + '" data-default-w="2" data-default-h="3">';
+        html += '<div class="widget-handle"><i class="bi bi-grip-vertical"></i></div>';
+        html += '<button class="widget-settings-btn" onclick="openWidgetConfig(this.closest(\'.widget\'))"><i class="bi bi-gear-fill"></i></button>';
+        html += '<div class="dashboard-card" style="border-left-color: ' + role.colour + ';">';
+        html += '<div class="card-label">' + role.role_display + '</div>';
+        html += '<div class="card-value">' + role.total_orders + '</div>';
+        html += '<div class="card-subtext">customers in pipeline</div>';
+        html += '<div class="widget-preview">';
+        html += '<table class="widget-preview-table">';
+        role.stages.forEach(function(stage) {
+            if (stage.count === 0) return;
+            html += '<tr onclick="openDashStageOrders(' + stage.id + ')" style="cursor:pointer;">';
+            html += '<td class="wp-cell-primary">' + stage.name + '</td>';
+            html += '<td class="wp-cell-secondary">' + stage.phase + '</td>';
+            html += '<td class="wp-cell-value">' + stage.count + '</td>';
+            html += '</tr>';
+        });
+        html += '</table></div>';
+        html += '</div></div>';
+    });
+    
+    slot.outerHTML = html;
+})();
+
+function openDashStageOrders(stageId) {
+    const modal = document.getElementById('dashStageOrdersModal');
+    const title = document.getElementById('dashStageOrdersTitle');
+    const tbody = document.getElementById('dashStageOrdersBody');
+    const table = document.getElementById('dashStageOrdersTable');
+    const loading = document.getElementById('dashStageOrdersLoading');
+    const empty = document.getElementById('dashStageOrdersEmpty');
+    const meta = document.getElementById('dashStageOrdersMeta');
+    
+    title.textContent = 'Customers at Stage';
+    meta.textContent = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+    empty.style.display = 'none';
+    modal.showModal();
+    
+    fetch('/workflow/stage/' + stageId + '/orders/')
+        .then(r => r.json())
+        .then(function(data) {
+            loading.style.display = 'none';
+            title.textContent = data.stage_name;
+            meta.textContent = data.phase + ' · ' + data.stage_role + ' · ' + data.count + ' customer' + (data.count !== 1 ? 's' : '');
+            
+            if (data.orders.length === 0) {
+                empty.style.display = 'block';
+                return;
+            }
+            
+            tbody.innerHTML = '';
+            data.orders.forEach(function(order) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + order.customer_name + '</td>' +
+                    '<td>' + order.sale_number + '</td>' +
+                    '<td>' + order.stage_started + '</td>' +
+                    '<td><a href="/order/' + order.id + '/" style="color:var(--primary-color);"><i class="bi bi-box-arrow-up-right"></i></a></td>';
+                tbody.appendChild(tr);
+            });
+            table.style.display = 'table';
+        });
+}
+</script>
+
+<!-- Dashboard Stage Orders Modal -->
+<dialog id="dashStageOrdersModal" class="dash-report-modal" style="max-width:700px;">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-people-fill" style="color:var(--primary-color);"></i>
+            <span id="dashStageOrdersTitle">Customers at Stage</span>
+            <span class="dash-report-meta" id="dashStageOrdersMeta"></span>
+        </div>
+        <button class="dash-report-close" onclick="document.getElementById('dashStageOrdersModal').close()">&times;</button>
+    </div>
+    <div class="dash-report-body">
+        <div id="dashStageOrdersLoading" style="text-align:center;padding:24px;color:var(--text-secondary);">Loading...</div>
+        <table class="dash-report-table" id="dashStageOrdersTable" style="display:none;">
+            <thead>
+                <tr>
+                    <th>Customer</th>
+                    <th>Sale Number</th>
+                    <th>At Stage Since</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="dashStageOrdersBody"></tbody>
+        </table>
+        <p id="dashStageOrdersEmpty" style="display:none;text-align:center;color:var(--text-secondary);padding:24px;">No customers at this stage.</p>
+    </div>
+</dialog>
 
 {% endblock %}

@@ -347,6 +347,7 @@ urlpatterns = [
     path('workflow/', views.workflow, name='workflow'),
     path('workflow/stage/save/', views.save_workflow_stage, name='save_workflow_stage'),
     path('workflow/stage/<int:stage_id>/', views.get_workflow_stage, name='get_workflow_stage'),
+    path('workflow/stage/<int:stage_id>/orders/', views.get_stage_orders, name='get_stage_orders'),
     path('workflow/stage/<int:stage_id>/delete/', views.delete_workflow_stage, name='delete_workflow_stage'),
     path('workflow/stage/<int:stage_id>/move/', views.move_workflow_stage, name='move_workflow_stage'),
     path('workflow/task/save/', views.save_workflow_task, name='save_workflow_task'),

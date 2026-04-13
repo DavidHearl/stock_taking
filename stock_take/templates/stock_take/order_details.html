@@ -2053,9 +2053,9 @@
                 <h3 id="add-board-modal-title">Add Board</h3>
                 <button type="button" class="modal-close" onclick="closeModal('addBoardModal')">✕</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
                 {% if boards_po_list|length > 1 %}
-                <div class="form-group" id="board-po-select-group">
+                <div class="form-group" id="board-po-select-group" style="margin-bottom: 0;">
                     <label for="add-board-po-select">Board PO *</label>
                     <select class="form-input" id="add-board-po-select">
                         {% for bpo_data in boards_po_list %}
@@ -2063,26 +2063,34 @@
                         {% endfor %}
                     </select>
                 </div>
+                <hr style="border: none; border-top: 1px solid var(--border-color, #3a3d45); margin: 0;">
                 {% endif %}
-                <div class="form-group">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="add-board-matname">Material *</label>
+                    <select class="form-input" id="add-board-matname-select" onchange="applyMaterialSelection()">
+                        <option value="">-- Select existing material --</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
                     <label for="add-board-barcode">Barcode *</label>
                     <input type="text" class="form-input" id="add-board-barcode" placeholder="e.g., BRD001">
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="margin-bottom: 0;">
                     <label for="add-board-matname">Material Name *</label>
                     <input type="text" class="form-input" id="add-board-matname" placeholder="e.g., White Gloss 18mm">
                 </div>
+                <hr style="border: none; border-top: 1px solid var(--border-color, #3a3d45); margin: 0;">
                 <!-- Standard dimension fields (Length/Width) -->
-                <div class="form-row" id="standard-dims-row">
-                    <div class="form-group">
+                <div class="form-row" id="standard-dims-row" style="margin-bottom: 0;">
+                    <div class="form-group" style="margin-bottom: 0;">
                         <label for="add-board-length">Length (mm) *</label>
                         <input type="number" class="form-input" id="add-board-length" step="0.1" min="0" placeholder="e.g., 2800">
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" style="margin-bottom: 0;">
                         <label for="add-board-width">Width (mm) *</label>
                         <input type="number" class="form-input" id="add-board-width" step="0.1" min="0" placeholder="e.g., 600">
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" style="margin-bottom: 0;">
                         <label for="add-board-count">Count *</label>
                         <input type="number" class="form-input" id="add-board-count" step="1" min="1" value="1" placeholder="e.g., 2">
                     </div>
@@ -2119,18 +2127,19 @@
                         <canvas id="angled-board-canvas" width="360" height="200" style="width: 100%; max-width: 360px; border: 1px solid var(--border-color, #3a3d45); border-radius: 6px; background: var(--bg-secondary, #1e2127);"></canvas>
                     </div>
                 </div>
-                <div class="form-group">
+                <hr style="border: none; border-top: 1px solid var(--border-color, #3a3d45); margin: 0;">
+                <div class="form-group" style="margin-bottom: 0;">
                     <label for="add-board-grain">Grain</label>
                     <select class="form-input" id="add-board-grain">
                         <option value="N">N</option>
                         <option value="Y">Y</option>
                     </select>
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="margin-bottom: 0;">
                     <label for="add-board-partdesc">Part Description</label>
                     <input type="text" class="form-input" id="add-board-partdesc" placeholder="e.g., Shelf">
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="margin-bottom: 0;">
                     <label>Edging (check sides that need edging)</label>
                     <div class="edging-checkboxes">
                         <label class="checkbox-label"><input type="checkbox" id="add-board-prfid1"> PRFID1</label>
@@ -4434,6 +4443,48 @@ function closeModal(modalId) {
 let boardQueue = [];
 let activePoIsAngled = false;
 
+// Material dropdown data
+const _boardMaterials = {{ board_materials_json|safe }};
+const _orderMaterials = {{ order_materials_json|safe }};
+(function populateMaterialSelect() {
+    const sel = document.getElementById('add-board-matname-select');
+    if (!sel) return;
+    
+    // Order materials group
+    if (_orderMaterials.length > 0) {
+        const grp1 = document.createElement('optgroup');
+        grp1.label = 'This Order';
+        _orderMaterials.forEach(function(name) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            grp1.appendChild(opt);
+        });
+        sel.appendChild(grp1);
+    }
+    
+    // All materials group (excluding ones already in order group)
+    const orderSet = new Set(_orderMaterials);
+    const otherMaterials = _boardMaterials.filter(m => !orderSet.has(m.matname));
+    if (otherMaterials.length > 0) {
+        const grp2 = document.createElement('optgroup');
+        grp2.label = 'All Materials';
+        otherMaterials.forEach(function(m) {
+            const opt = document.createElement('option');
+            opt.value = m.matname;
+            opt.textContent = m.matname;
+            grp2.appendChild(opt);
+        });
+        sel.appendChild(grp2);
+    }
+})();
+
+function applyMaterialSelection() {
+    const sel = document.getElementById('add-board-matname-select');
+    if (!sel.value) return;
+    document.getElementById('add-board-matname').value = sel.value;
+}
+
 function openAddBoardModal(boardsPoId) {
     activeBoardsPoId = boardsPoId;
     const poSelect = document.getElementById('add-board-po-select');
@@ -4459,6 +4510,7 @@ function openAddBoardModal(boardsPoId) {
         title.textContent = isAngled ? 'Copy Angled Board' : 'Copy Board';
         document.getElementById('add-board-barcode').value  = checkedBox.dataset.barcode  || '';
         document.getElementById('add-board-matname').value  = checkedBox.dataset.matname  || '';
+        document.getElementById('add-board-matname-select').value = checkedBox.dataset.matname || '';
         document.getElementById('add-board-grain').value    = checkedBox.dataset.grain    || 'N';
         document.getElementById('add-board-partdesc').value = checkedBox.dataset.partdesc || '';
         document.getElementById('add-board-prfid1').checked = checkedBox.dataset.prfid1 === '1';
@@ -4481,6 +4533,7 @@ function openAddBoardModal(boardsPoId) {
         title.textContent = isAngled ? 'Add Angled Board' : 'Add Board';
         document.getElementById('add-board-barcode').value  = '';
         document.getElementById('add-board-matname').value  = '';
+        document.getElementById('add-board-matname-select').value = '';
         document.getElementById('add-board-grain').value    = 'N';
         document.getElementById('add-board-partdesc').value = '';
         document.getElementById('add-board-prfid1').checked = false;

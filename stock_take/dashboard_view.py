@@ -675,6 +675,57 @@ def dashboard(request):
         for m in avg_monthly
     ][:6]
 
+    # ── Workflow stages grouped by role ──
+    from .models import WorkflowStage, OrderWorkflowProgress
+    from collections import OrderedDict
+    
+    all_wf_stages = WorkflowStage.objects.all().order_by('order', 'phase')
+    
+    # Count orders at each stage (active orders only)
+    wf_counts = dict(
+        OrderWorkflowProgress.objects.filter(
+            order__isnull=False,
+            order__job_finished=False,
+        )
+        .values('current_stage_id')
+        .annotate(count=Count('id'))
+        .values_list('current_stage_id', 'count')
+    )
+    
+    # Build role groups
+    role_colours = {
+        'customer-support': '#6366f1',
+        'design': '#3b82f6',
+        'fitter': '#10b981',
+        'operations': '#f59e0b',
+        'manufacturing': '#ef4444',
+        'enquiry': '#8b5cf6',
+        'waiting': '#94a3b8',
+    }
+    role_display = dict(WorkflowStage.ROLE_CHOICES)
+    workflow_by_role = OrderedDict()
+    for stage in all_wf_stages:
+        # Normalise legacy underscore roles to hyphenated form
+        role = stage.role.replace('_', '-') if stage.role else stage.role
+        if role not in workflow_by_role:
+            workflow_by_role[role] = {
+                'role': role,
+                'role_display': role_display.get(role, role),
+                'colour': role_colours.get(role, '#94a3b8'),
+                'stages': [],
+                'total_orders': 0,
+            }
+        count = wf_counts.get(stage.id, 0)
+        workflow_by_role[role]['stages'].append({
+            'id': stage.id,
+            'name': stage.name,
+            'phase': stage.get_phase_display(),
+            'count': count,
+        })
+        workflow_by_role[role]['total_orders'] += count
+    
+    workflow_roles = list(workflow_by_role.values())
+
     context = {
         'fits_chart_data': json.dumps({
             'labels': labels,
@@ -728,6 +779,7 @@ def dashboard(request):
         'week_preview_json': json.dumps(week_preview),
         'monthly_preview_json': json.dumps(monthly_preview),
         'avg_preview_json': json.dumps(avg_preview),
+        'workflow_roles_json': json.dumps(workflow_roles),
     }
     return render(request, 'stock_take/dashboard.html', context)
 

@@ -4967,6 +4967,28 @@ def order_details(request, order_id):
     # Linked Anthill sales for this order
     anthill_sales = order.anthill_sale.all().order_by('-activity_date') if hasattr(order, 'anthill_sale') else []
 
+    # Distinct material names for board add dropdown
+    distinct_materials = list(
+        PNXItem.objects.values('matname', 'barcode')
+        .distinct()
+        .order_by('matname')
+        .values('matname', 'barcode')
+    )
+    # Deduplicate by matname (keep first barcode per material)
+    seen_matnames = set()
+    unique_materials = []
+    for m in distinct_materials:
+        if m['matname'] not in seen_matnames:
+            seen_matnames.add(m['matname'])
+            unique_materials.append(m)
+
+    # Materials used in this order's boards (for priority section in dropdown)
+    order_matnames = set()
+    for item in order_pnx_items:
+        if item.matname:
+            order_matnames.add(item.matname)
+    order_materials = sorted(order_matnames)
+
     return render(request, 'stock_take/order_details.html', {
         'order': order,
         'form': form,
@@ -5011,6 +5033,8 @@ def order_details(request, order_id):
         'purchase_invoice_cost': purchase_invoice_cost,
         'purchase_invoice_ts_cost': purchase_invoice_ts_cost,
         'anthill_sales': anthill_sales,
+        'board_materials_json': json.dumps(unique_materials),
+        'order_materials_json': json.dumps(order_materials),
     })
 
 def completed_stock_takes(request):
@@ -9106,7 +9130,7 @@ def calendar_weekly(request):
 @login_required
 def workflow(request):
     """Display workflow stages for order management"""
-    from .models import WorkflowStage
+    from .models import WorkflowStage, OrderWorkflowProgress
     
     stages = WorkflowStage.objects.all().prefetch_related('tasks')
     phases = [
@@ -9114,6 +9138,22 @@ def workflow(request):
         ('lead', 'Lead'),
         ('sale', 'Sale'),
     ]
+    
+    # Count orders at each stage (only active orders)
+    from django.db.models import Count
+    stage_order_counts = dict(
+        OrderWorkflowProgress.objects.filter(
+            order__isnull=False,
+            order__job_finished=False,
+        )
+        .values('current_stage_id')
+        .annotate(count=Count('id'))
+        .values_list('current_stage_id', 'count')
+    )
+    
+    # Attach counts to stage objects
+    for stage in stages:
+        stage.order_count = stage_order_counts.get(stage.id, 0)
     
     # Group stages by phase for template iteration
     stages_by_phase = {}
@@ -9197,6 +9237,43 @@ def get_workflow_stage(request, stage_id):
         'expected_days': stage.expected_days,
     }
     return JsonResponse(data)
+
+
+@login_required
+def get_stage_orders(request, stage_id):
+    """Return JSON list of orders currently at a given workflow stage"""
+    from .models import WorkflowStage, OrderWorkflowProgress
+    
+    stage = get_object_or_404(WorkflowStage, id=stage_id)
+    progress_qs = (
+        OrderWorkflowProgress.objects
+        .filter(current_stage=stage, order__isnull=False, order__job_finished=False)
+        .select_related('order', 'order__customer')
+        .order_by('order__sale_number')
+    )
+    
+    orders = []
+    for wp in progress_qs:
+        order = wp.order
+        display_name = ''
+        if order.customer:
+            display_name = f"{order.customer.first_name} {order.customer.last_name}".strip()
+        if not display_name:
+            display_name = f"{order.first_name} {order.last_name}".strip()
+        orders.append({
+            'id': order.id,
+            'sale_number': order.sale_number or '',
+            'customer_name': display_name or order.sale_number or '-',
+            'stage_started': wp.stage_started_at.strftime('%d/%m/%Y') if wp.stage_started_at else '',
+        })
+    
+    return JsonResponse({
+        'stage_name': stage.name,
+        'stage_role': stage.get_role_display(),
+        'phase': stage.get_phase_display(),
+        'count': len(orders),
+        'orders': orders,
+    })
 
 
 @login_required
