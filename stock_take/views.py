@@ -8926,7 +8926,7 @@ def calendar_weekly(request):
             sale.order.fit_date = sale.fit_date
             sale.order.save(update_fields=['fit_date'])
 
-    # Auto-create FitAppointment for orders with fit_date but no appointment
+    # Auto-create or update FitAppointment for orders with fit_date this week
     orders_without_appt = (
         Order.objects
         .filter(fit_date__gte=week_start, fit_date__lte=week_end, job_finished=False)
@@ -8935,11 +8935,27 @@ def calendar_weekly(request):
         ).values_list('order_id', flat=True))
     )
     for order in orders_without_appt:
-        FitAppointment.objects.create(
-            order=order,
-            fit_date=order.fit_date,
-            fitter='R',  # Default fitter
-        )
+        # Check if an older appointment exists on a different date — update it
+        existing = FitAppointment.objects.filter(order=order).order_by('-id').first()
+        if existing:
+            existing.fit_date = order.fit_date
+            existing.save(update_fields=['fit_date'])
+        else:
+            FitAppointment.objects.create(
+                order=order,
+                fit_date=order.fit_date,
+                fitter='R',  # Default fitter
+            )
+
+    # Remove duplicate FitAppointments (keep the latest per order)
+    _seen_order_ids = set()
+    for appt in FitAppointment.objects.filter(
+        fit_date__gte=week_start, fit_date__lte=week_end, order__isnull=False
+    ).order_by('-id'):
+        if appt.order_id in _seen_order_ids:
+            appt.delete()
+        else:
+            _seen_order_ids.add(appt.order_id)
 
     appointments = list(
         FitAppointment.objects
