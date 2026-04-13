@@ -9259,6 +9259,7 @@ def save_workflow_task(request):
     from .models import WorkflowTask, WorkflowStage
     
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         stage_id = request.POST.get('stage_id')
         description = request.POST.get('description')
         task_type = request.POST.get('task_type', 'record')
@@ -9269,7 +9270,7 @@ def save_workflow_task(request):
         # Get the highest order number for tasks in this stage
         max_order = stage.tasks.aggregate(models.Max('order'))['order__max'] or 0
         
-        WorkflowTask.objects.create(
+        task = WorkflowTask.objects.create(
             stage=stage,
             description=description,
             task_type=task_type,
@@ -9277,6 +9278,16 @@ def save_workflow_task(request):
             order=max_order + 1
         )
         
+        if is_ajax:
+            return JsonResponse({
+                'success': True,
+                'task': {
+                    'id': task.id,
+                    'description': task.description,
+                    'task_type': task.task_type,
+                    'options': task.options,
+                },
+            })
         return redirect('workflow')
     
     return redirect('workflow')

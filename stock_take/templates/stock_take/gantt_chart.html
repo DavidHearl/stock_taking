@@ -23,7 +23,7 @@
         <a href="?tab=timeline" class="btn btn-primary">Reset</a>
         {% else %}
         <h2 class="calendar-date">Workflow Gantt</h2>
-        <button type="button" class="btn btn-secondary" onclick="openManageStagesModal()" title="Add, edit, reorder and delete workflow stages">
+        <button type="button" class="btn btn-outline-secondary" onclick="openManageStagesModal()" title="Add, edit, reorder and delete workflow stages">
             <i class="bi bi-gear"></i> Manage Stages
         </button>
         <button type="button" class="btn btn-primary" onclick="syncAllAnthill()" id="btnSyncAll" title="Sync workflow stages from Anthill for all visible orders">
@@ -251,7 +251,7 @@
 <!-- Hidden stage data for modal -->
 {% for row in enquiry_stage_rows %}
 <template id="stage-tpl-{{ row.stage.id }}">
-    <div class="gantt-modal-stage {{ row.stage.role }}">
+    <div class="gantt-modal-stage {{ row.stage.role }}" data-stage-id="{{ row.stage.id }}">
         <div class="gantt-modal-meta">
             <span class="stage-role-badge {{ row.stage.role }}">{{ row.stage.get_role_display }}</span>
             {% if row.days %}<span class="gantt-modal-days">{{ row.days }} Day{{ row.days|pluralize }}</span>{% endif %}
@@ -263,6 +263,7 @@
         {% for task in row.stage.tasks.all %}
         <div class="gantt-modal-task task-type-{{ task.task_type }}">
             {% if task.task_type == 'decision_matrix' %}
+            <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             <div class="task-decision-matrix">
                 <strong>{{ task.description }}</strong>
                 <div class="decision-options">
@@ -272,6 +273,7 @@
                 </div>
             </div>
             {% elif task.task_type == 'radio' %}
+            <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             <div class="task-radio-group">
                 <strong>{{ task.description }}</strong>
                 {% if task.options %}
@@ -281,27 +283,52 @@
                 {% endif %}
             </div>
             {% elif task.task_type == 'dropdown' %}
-            <div class="task-dropdown-group">
+            <div class="gantt-task-row">
                 <label><strong>{{ task.description }}</strong>
                     <select disabled class="task-select"><option>Select...</option>{% if task.options %}{% for option in task.options|split_options %}<option>{{ option }}</option>{% endfor %}{% endif %}</select>
                 </label>
+                <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             </div>
             {% else %}
-            <label><input type="checkbox" disabled/> {{ task.description }}
-                {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
-                {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
-            </label>
+            <div class="gantt-task-row">
+                <label><input type="checkbox" disabled/> {{ task.description }}
+                    {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
+                    {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
+                </label>
+                <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
+            </div>
             {% endif %}
         </div>
         {% endfor %}
         {% endif %}
+        <hr>
+        <button class="gantt-add-task-btn" onclick="ganttToggleAddTask(this)"><i class="bi bi-plus"></i> Add Task</button>
+        <div class="gantt-add-task-form" style="display:none;">
+            <div class="gantt-add-task-row">
+                <input type="text" class="gantt-add-task-input" placeholder="Task description" data-field="description">
+            </div>
+            <div class="gantt-add-task-row">
+                <select class="gantt-add-task-select" data-field="task_type" onchange="ganttToggleOptions(this)">
+                    <option value="record">Checkbox</option>
+                    <option value="requirement">Required Checkbox</option>
+                    <option value="attachment">Attachment</option>
+                    <option value="radio">Radio Buttons</option>
+                    <option value="dropdown">Dropdown</option>
+                    <option value="decision_matrix">Decision Matrix</option>
+                </select>
+                <button class="gantt-add-task-submit" onclick="ganttAddTask({{ row.stage.id }}, this)"><i class="bi bi-check-lg"></i> Add</button>
+            </div>
+            <div class="gantt-add-task-row gantt-options-row" style="display:none;">
+                <input type="text" class="gantt-add-task-input" placeholder="Options (comma-separated)" data-field="options">
+            </div>
+        </div>
     </div>
 </template>
 {% endfor %}
 
 {% for row in lead_stage_rows %}
 <template id="stage-tpl-{{ row.stage.id }}">
-    <div class="gantt-modal-stage {{ row.stage.role }}">
+    <div class="gantt-modal-stage {{ row.stage.role }}" data-stage-id="{{ row.stage.id }}">
         <div class="gantt-modal-meta">
             <span class="stage-role-badge {{ row.stage.role }}">{{ row.stage.get_role_display }}</span>
             {% if row.days %}<span class="gantt-modal-days">{{ row.days }} Day{{ row.days|pluralize }}</span>{% endif %}
@@ -313,6 +340,7 @@
         {% for task in row.stage.tasks.all %}
         <div class="gantt-modal-task task-type-{{ task.task_type }}">
             {% if task.task_type == 'decision_matrix' %}
+            <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             <div class="task-decision-matrix">
                 <strong>{{ task.description }}</strong>
                 <div class="decision-options">
@@ -322,6 +350,7 @@
                 </div>
             </div>
             {% elif task.task_type == 'radio' %}
+            <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             <div class="task-radio-group">
                 <strong>{{ task.description }}</strong>
                 {% if task.options %}
@@ -331,27 +360,52 @@
                 {% endif %}
             </div>
             {% elif task.task_type == 'dropdown' %}
-            <div class="task-dropdown-group">
+            <div class="gantt-task-row">
                 <label><strong>{{ task.description }}</strong>
                     <select disabled class="task-select"><option>Select...</option>{% if task.options %}{% for option in task.options|split_options %}<option>{{ option }}</option>{% endfor %}{% endif %}</select>
                 </label>
+                <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             </div>
             {% else %}
-            <label><input type="checkbox" disabled/> {{ task.description }}
-                {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
-                {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
-            </label>
+            <div class="gantt-task-row">
+                <label><input type="checkbox" disabled/> {{ task.description }}
+                    {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
+                    {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
+                </label>
+                <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
+            </div>
             {% endif %}
         </div>
         {% endfor %}
         {% endif %}
+        <hr>
+        <button class="gantt-add-task-btn" onclick="ganttToggleAddTask(this)"><i class="bi bi-plus"></i> Add Task</button>
+        <div class="gantt-add-task-form" style="display:none;">
+            <div class="gantt-add-task-row">
+                <input type="text" class="gantt-add-task-input" placeholder="Task description" data-field="description">
+            </div>
+            <div class="gantt-add-task-row">
+                <select class="gantt-add-task-select" data-field="task_type" onchange="ganttToggleOptions(this)">
+                    <option value="record">Checkbox</option>
+                    <option value="requirement">Required Checkbox</option>
+                    <option value="attachment">Attachment</option>
+                    <option value="radio">Radio Buttons</option>
+                    <option value="dropdown">Dropdown</option>
+                    <option value="decision_matrix">Decision Matrix</option>
+                </select>
+                <button class="gantt-add-task-submit" onclick="ganttAddTask({{ row.stage.id }}, this)"><i class="bi bi-check-lg"></i> Add</button>
+            </div>
+            <div class="gantt-add-task-row gantt-options-row" style="display:none;">
+                <input type="text" class="gantt-add-task-input" placeholder="Options (comma-separated)" data-field="options">
+            </div>
+        </div>
     </div>
 </template>
 {% endfor %}
 
 {% for row in stage_rows %}
 <template id="stage-tpl-{{ row.stage.id }}">
-    <div class="gantt-modal-stage {{ row.stage.role }}">
+    <div class="gantt-modal-stage {{ row.stage.role }}" data-stage-id="{{ row.stage.id }}">
         <div class="gantt-modal-meta">
             <span class="stage-role-badge {{ row.stage.role }}">{{ row.stage.get_role_display }}</span>
             {% if row.days %}<span class="gantt-modal-days">{{ row.days }} Day{{ row.days|pluralize }}</span>{% endif %}
@@ -363,6 +417,7 @@
         {% for task in row.stage.tasks.all %}
         <div class="gantt-modal-task task-type-{{ task.task_type }}">
             {% if task.task_type == 'decision_matrix' %}
+            <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             <div class="task-decision-matrix">
                 <strong>{{ task.description }}</strong>
                 <div class="decision-options">
@@ -372,6 +427,7 @@
                 </div>
             </div>
             {% elif task.task_type == 'radio' %}
+            <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             <div class="task-radio-group">
                 <strong>{{ task.description }}</strong>
                 {% if task.options %}
@@ -381,20 +437,45 @@
                 {% endif %}
             </div>
             {% elif task.task_type == 'dropdown' %}
-            <div class="task-dropdown-group">
+            <div class="gantt-task-row">
                 <label><strong>{{ task.description }}</strong>
                     <select disabled class="task-select"><option>Select...</option>{% if task.options %}{% for option in task.options|split_options %}<option>{{ option }}</option>{% endfor %}{% endif %}</select>
                 </label>
+                <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
             </div>
             {% else %}
-            <label><input type="checkbox" disabled/> {{ task.description }}
-                {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
-                {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
-            </label>
+            <div class="gantt-task-row">
+                <label><input type="checkbox" disabled/> {{ task.description }}
+                    {% if task.task_type == 'requirement' %}<span class="badge-required">Required</span>{% endif %}
+                    {% if task.task_type == 'attachment' %}<span class="badge-attachment"><i class="bi bi-paperclip"></i></span>{% endif %}
+                </label>
+                <button class="gantt-task-delete-btn" onclick="ganttDeleteTask({{ task.id }})" title="Delete task"><i class="bi bi-x"></i></button>
+            </div>
             {% endif %}
         </div>
         {% endfor %}
         {% endif %}
+        <hr>
+        <button class="gantt-add-task-btn" onclick="ganttToggleAddTask(this)"><i class="bi bi-plus"></i> Add Task</button>
+        <div class="gantt-add-task-form" style="display:none;">
+            <div class="gantt-add-task-row">
+                <input type="text" class="gantt-add-task-input" placeholder="Task description" data-field="description">
+            </div>
+            <div class="gantt-add-task-row">
+                <select class="gantt-add-task-select" data-field="task_type" onchange="ganttToggleOptions(this)">
+                    <option value="record">Checkbox</option>
+                    <option value="requirement">Required Checkbox</option>
+                    <option value="attachment">Attachment</option>
+                    <option value="radio">Radio Buttons</option>
+                    <option value="dropdown">Dropdown</option>
+                    <option value="decision_matrix">Decision Matrix</option>
+                </select>
+                <button class="gantt-add-task-submit" onclick="ganttAddTask({{ row.stage.id }}, this)"><i class="bi bi-check-lg"></i> Add</button>
+            </div>
+            <div class="gantt-add-task-row gantt-options-row" style="display:none;">
+                <input type="text" class="gantt-add-task-input" placeholder="Options (comma-separated)" data-field="options">
+            </div>
+        </div>
     </div>
 </template>
 {% endfor %}
@@ -462,16 +543,20 @@
                          style="left: calc({{ seg.offset }} * var(--day-width));
                                 width: calc({{ seg.width }} * var(--day-width));
                                 background: {{ seg.colour }};"
-                         title="{{ seg.name }} ({{ seg.width }}d)">
+                         data-tip-title="{{ seg.name }}"
+                         data-tip-detail="{{ seg.width }} day{{ seg.width|pluralize }}"
+                         data-tip-sub="{{ row.order.sale_number }} — {{ row.display_name }}">
                         <span class="gantt-bar-text">{{ seg.name }}</span>
                     </div>
                     {% endfor %}
                     {% else %}
-                    <div class="gantt-bar"
+                    <div class="gantt-bar gantt-bar-segment"
                          style="left: calc({{ row.offset }} * var(--day-width));
                                 width: calc({{ row.width }} * var(--day-width));
                                 background: {{ row.stage_colour }};"
-                         title="{{ row.display_name }}{% if row.stage_name %} — {{ row.stage_name }}{% endif %}{% if row.time_allowance %} ({{ row.time_allowance }} days){% endif %}">
+                         data-tip-title="{% if row.stage_name %}{{ row.stage_name }}{% else %}{{ row.order.sale_number }}{% endif %}"
+                         data-tip-detail="{% if row.time_allowance %}{{ row.time_allowance }} day{{ row.time_allowance|pluralize }} allowance{% endif %}"
+                         data-tip-sub="{{ row.order.sale_number }} — {{ row.display_name }}">
                         <span class="gantt-bar-text">
                             {% if row.stage_name %}{{ row.stage_name }}{% else %}{{ row.order.sale_number }}{% endif %}
                         </span>
@@ -515,6 +600,39 @@
 </div>
 {% endif %}
 
+<!-- Floating tooltip -->
+<div class="gantt-bar-tooltip-float" id="ganttTooltip"></div>
+<script>
+(function() {
+    const tip = document.getElementById('ganttTooltip');
+    if (!tip) return;
+    document.addEventListener('mouseover', function(e) {
+        const bar = e.target.closest('[data-tip-title]');
+        if (!bar) { tip.classList.remove('visible'); return; }
+        const title = bar.dataset.tipTitle || '';
+        const detail = bar.dataset.tipDetail || '';
+        const sub = bar.dataset.tipSub || '';
+        let html = '<div class="gantt-bar-tooltip-title">' + title + '</div>';
+        if (detail) html += '<div class="gantt-bar-tooltip-detail">' + detail + '</div>';
+        if (sub) html += '<div class="gantt-bar-tooltip-detail">' + sub + '</div>';
+        tip.innerHTML = html;
+        tip.classList.add('visible');
+        const rect = bar.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - tip.offsetWidth / 2;
+        let top = rect.top - tip.offsetHeight - 6;
+        if (top < 4) top = rect.bottom + 6;
+        if (left < 4) left = 4;
+        if (left + tip.offsetWidth > window.innerWidth - 4) left = window.innerWidth - tip.offsetWidth - 4;
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+    });
+    document.addEventListener('mouseout', function(e) {
+        const bar = e.target.closest('[data-tip-title]');
+        if (bar && !bar.contains(e.relatedTarget)) tip.classList.remove('visible');
+    });
+})();
+</script>
+
 {% endif %}
 
 {% if tab == 'workflow' %}
@@ -533,6 +651,52 @@ function openStageModal(stageId) {
 
 function closeStageModal() {
     document.getElementById('stageModal').classList.remove('active');
+}
+
+/* ── Task CRUD inside stage modals ──────────────────────── */
+function ganttDeleteTask(taskId) {
+    if (!confirm('Delete this task?')) return;
+    fetch('/workflow/task/' + taskId + '/delete/', {
+        method: 'POST',
+        headers: {'X-CSRFToken': '{{ csrf_token }}'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) location.reload();
+        else alert('Error: ' + (data.error || 'Unknown'));
+    });
+}
+
+function ganttToggleAddTask(btn) {
+    const form = btn.nextElementSibling;
+    const showing = form.style.display !== 'none';
+    form.style.display = showing ? 'none' : 'block';
+    btn.style.display = showing ? '' : 'none';
+}
+
+function ganttToggleOptions(sel) {
+    const row = sel.closest('.gantt-add-task-form').querySelector('.gantt-options-row');
+    row.style.display = (sel.value === 'radio' || sel.value === 'dropdown') ? 'flex' : 'none';
+}
+
+function ganttAddTask(stageId, btn) {
+    const form = btn.closest('.gantt-add-task-form');
+    const desc = form.querySelector('[data-field="description"]').value.trim();
+    const taskType = form.querySelector('[data-field="task_type"]').value;
+    const optionsEl = form.querySelector('[data-field="options"]');
+    const options = optionsEl ? optionsEl.value.trim() : '';
+    if (!desc) { alert('Please enter a task description.'); return; }
+    const body = new URLSearchParams({stage_id: stageId, description: desc, task_type: taskType, options: options});
+    fetch('{% url "save_workflow_task" %}', {
+        method: 'POST',
+        headers: {'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) location.reload();
+        else alert('Error: ' + JSON.stringify(data));
+    });
 }
 
 document.addEventListener('keydown', function(e) {

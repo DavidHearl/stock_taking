@@ -507,12 +507,12 @@ def purchase_order_detail(request, po_id):
     if supplier_obj and supplier_obj.vat_rate is not None:
         po_vat_rate = supplier_obj.vat_rate
     if po_vat_rate is not None:
-        net = purchase_order.total or 0
+        net = float(purchase_order.total or 0) + float(purchase_order.freight_cost or 0)
         # Always calculate VAT from the supplier's rate
-        vat_amt = round(float(net) * float(po_vat_rate) / 100, 2)
+        vat_amt = round(net * float(po_vat_rate) / 100, 2)
         po_net_total = net
         po_vat_amount = vat_amt
-        po_gross_total = round(float(net) + float(vat_amt), 2)
+        po_gross_total = round(net + vat_amt, 2)
 
     # ── Linked purchase invoice totals ───────────────────────────────────────
     _pi_agg = purchase_order.linked_purchase_invoices.aggregate(

@@ -422,15 +422,19 @@ def generate_purchase_order_pdf(purchase_order, products, supplier_vat_rate=None
     if purchase_order.total and abs(purchase_order.total - subtotal) > Decimal('0.01'):
         subtotal = purchase_order.total
 
+    # Add freight to subtotal so VAT is applied to the full amount
+    freight = Decimal(str(purchase_order.freight_cost or 0))
+    net_total = subtotal + freight
+
     # Calculate VAT from the supplier's rate (set on supplier page)
     if supplier_vat_rate is not None:
         vat_pct = Decimal(str(supplier_vat_rate)) / Decimal('100')
-        tax_total = (subtotal * vat_pct).quantize(Decimal('0.01'))
+        tax_total = (net_total * vat_pct).quantize(Decimal('0.01'))
     else:
         # Fallback: use WorkGuru tax_total if available, otherwise 0
         tax_total = purchase_order.tax_total or Decimal('0')
 
-    grand_total = subtotal + tax_total
+    grand_total = net_total + tax_total
 
     totals_data = [
         [
@@ -438,17 +442,23 @@ def generate_purchase_order_pdf(purchase_order, products, supplier_vat_rate=None
             Paragraph('Subtotal', styles['TotalLabel']),
             Paragraph(f'{currency_sym} {subtotal:,.2f}', styles['TotalValue']),
         ],
-        [
-            '', '',
-            Paragraph('VAT', styles['TotalLabel']),
-            Paragraph(f'{currency_sym} {tax_total:,.2f}', styles['TotalValue']),
-        ],
-        [
-            '', '',
-            Paragraph('<b>Total</b>', styles['GrandTotalLabel']),
-            Paragraph(f'<b>{currency_sym} {grand_total:,.2f}</b>', styles['GrandTotalValue']),
-        ],
     ]
+    if freight:
+        totals_data.append([
+            '', '',
+            Paragraph('Freight', styles['TotalLabel']),
+            Paragraph(f'{currency_sym} {freight:,.2f}', styles['TotalValue']),
+        ])
+    totals_data.append([
+        '', '',
+        Paragraph('VAT', styles['TotalLabel']),
+        Paragraph(f'{currency_sym} {tax_total:,.2f}', styles['TotalValue']),
+    ])
+    totals_data.append([
+        '', '',
+        Paragraph('<b>Total</b>', styles['GrandTotalLabel']),
+        Paragraph(f'<b>{currency_sym} {grand_total:,.2f}</b>', styles['GrandTotalValue']),
+    ])
 
     totals_table = Table(
         totals_data,
