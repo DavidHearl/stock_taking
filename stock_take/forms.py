@@ -97,12 +97,13 @@ class SubstitutionForm(forms.ModelForm):
     class Meta:
         model = Substitution
         fields = [
-            'missing_sku', 'missing_name', 'replacement_sku'
+            'missing_sku', 'missing_name', 'replacement_sku', 'replacement_name'
         ]
         widgets = {
             'missing_sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Missing SKU'}),
             'missing_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Missing Item Name'}),
             'replacement_sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Replacement SKU'}),
+            'replacement_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Replacement Item Name'}),
         }
 
 

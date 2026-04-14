@@ -177,9 +177,9 @@ def ordering(request):
     anthill_orders_to_place_count = AnthillOrderToPlace.objects.filter(resolved=False).count()
 
     # All sale numbers across ALL orders (used for Anthill modal matching, not tab-filtered)
-    all_existing_sale_numbers = list(
+    all_existing_sale_numbers = dict(
         Order.objects.exclude(sale_number__isnull=True).exclude(sale_number='')
-        .values_list('sale_number', flat=True)
+        .values_list('sale_number', 'id')
     )
 
     return render(request, 'stock_take/ordering.html', {
@@ -2768,7 +2768,21 @@ def substitutions(request):
     skip_form = CSVSkipItemForm(request.POST or None)
     
     if request.method == 'POST' and form.is_valid():
-        form.save()
+        sub = form.save(commit=False)
+        # Auto-populate names from StockItem if they exist
+        try:
+            missing_item = StockItem.objects.filter(sku=sub.missing_sku).first()
+            if missing_item:
+                sub.missing_name = missing_item.name
+        except Exception:
+            pass
+        try:
+            replacement_item = StockItem.objects.filter(sku=sub.replacement_sku).first()
+            if replacement_item:
+                sub.replacement_name = replacement_item.name
+        except Exception:
+            pass
+        sub.save()
         messages.success(request, 'Substitution added successfully.')
         return redirect('substitutions')
     
@@ -5592,6 +5606,8 @@ def stock_list(request):
         cached_data['substitutions'] = list(Substitution.objects.all())
         cached_data['skip_items'] = list(CSVSkipItem.objects.filter(order__isnull=True))
         cached_data['substitution_skus'] = set(s.replacement_sku for s in cached_data['substitutions'])
+        cached_data['missing_skus'] = set(s.missing_sku for s in cached_data['substitutions'])
+        cached_data['replacement_skus'] = set(s.replacement_sku for s in cached_data['substitutions'])
         return render(request, 'stock_take/stock_list.html', cached_data)
     
     # Don't auto-create schedules on every page load - too slow
@@ -5672,6 +5688,8 @@ def stock_list(request):
     all_substitutions = list(Substitution.objects.all())
     all_skip_items = list(CSVSkipItem.objects.filter(order__isnull=True))
     substitution_skus = set(s.replacement_sku for s in all_substitutions)
+    missing_skus = set(s.missing_sku for s in all_substitutions)
+    replacement_skus = set(s.replacement_sku for s in all_substitutions)
     
     # Add performance timing
     end_time = time.time()
@@ -5694,6 +5712,8 @@ def stock_list(request):
         'substitutions': all_substitutions,
         'skip_items': all_skip_items,
         'substitution_skus': substitution_skus,
+        'missing_skus': missing_skus,
+        'replacement_skus': replacement_skus,
         'query_time': f'{query_time:.3f}',
         'current_filters': {
             'search': search,
@@ -5707,6 +5727,24 @@ def stock_list(request):
     cache.set(cache_key, context, timeout=60*60*24)  # Cache for 24 hours
     
     return render(request, 'stock_take/stock_list.html', context)
+
+@login_required
+def product_catalog_pdf(request):
+    """Generate and download a product catalog PDF grouped by category and supplier."""
+    from .catalog_pdf_generator import generate_product_catalog_pdf
+    from .models import StockItem
+
+    include_images = request.GET.get('images') == '1'
+
+    items = StockItem.objects.select_related('category', 'supplier').order_by(
+        'category__name', 'supplier__name', 'sku'
+    )
+    buffer = generate_product_catalog_pdf(items, include_images=include_images)
+
+    suffix = '_with_images' if include_images else ''
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="Product_Catalog{suffix}_{datetime.datetime.now().strftime("%Y%m%d")}.pdf"'
+    return response
 
 def category_list(request):
     """Display all categories with stock take groups"""
@@ -5782,12 +5820,21 @@ def edit_substitution(request, substitution_id):
             'missing_sku': substitution.missing_sku,
             'missing_name': substitution.missing_name,
             'replacement_sku': substitution.replacement_sku,
+            'replacement_name': substitution.replacement_name,
         })
     
     if request.method == 'POST':
         form = SubstitutionForm(request.POST, instance=substitution)
         if form.is_valid():
-            form.save()
+            sub = form.save(commit=False)
+            # Auto-populate names from StockItem
+            missing_item = StockItem.objects.filter(sku=sub.missing_sku).first()
+            if missing_item:
+                sub.missing_name = missing_item.name
+            replacement_item = StockItem.objects.filter(sku=sub.replacement_sku).first()
+            if replacement_item:
+                sub.replacement_name = replacement_item.name
+            sub.save()
             return JsonResponse({'success': True})
         return JsonResponse({'success': False, 'errors': form.errors}, status=400)
     
@@ -8461,7 +8508,20 @@ def update_stock_items_batch(request):
                     if 'name' in item_data:
                         item.name = item_data['name']
                     if 'cost' in item_data:
-                        item.cost = Decimal(str(item_data['cost']))
+                        old_cost = item.cost
+                        new_cost = Decimal(str(item_data['cost']))
+                        if new_cost != old_cost:
+                            from .models import PriceHistory
+                            PriceHistory.objects.create(
+                                stock_item=item,
+                                old_price=old_cost,
+                                new_price=new_cost,
+                                change_source='manual',
+                                reference='Product detail edit',
+                                notes=f'Cost changed from £{old_cost} to £{new_cost} via product detail',
+                                created_by=request.user if request.user.is_authenticated else None,
+                            )
+                        item.cost = new_cost
                     if 'location' in item_data:
                         item.location = item_data['location']
                     if 'quantity' in item_data:
@@ -8512,6 +8572,8 @@ def update_stock_items_batch(request):
                     if 'box_quantity' in item_data:
                         value = item_data['box_quantity']
                         item.box_quantity = int(value) if value else None
+                    if 'product_url' in item_data:
+                        item.product_url = item_data['product_url']
                     
                     item.save()
                     updated_count += 1

@@ -2210,6 +2210,27 @@
     </div>
 </div>
 
+<!-- Confirm Swap Modal -->
+<div class="modal" id="confirmSwapModal">
+    <div class="modal-overlay" onclick="closeModal('confirmSwapModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Swap</h3>
+                <button type="button" class="modal-close" onclick="closeModal('confirmSwapModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>Swap to <strong id="confirmSwapSku"></strong> - <span id="confirmSwapName"></span>?</p>
+                <p class="text-muted" style="margin-top: 8px;">This will update the accessory and regenerate the processed CSV.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('confirmSwapModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmSwapBtn">Confirm Swap</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for Adding Timesheet -->
 <div class="modal" id="addTimesheetModal">
     <div class="modal-overlay" onclick="closeModal('addTimesheetModal')"></div>
@@ -5164,35 +5185,43 @@ function displaySearchResults(results) {
 }
 
 function performSwap(newStockItemId, newSku, newName) {
-    if (!confirm(`Swap to ${newSku} - ${newName}?\n\nThis will update the accessory and regenerate the processed CSV.`)) {
-        return;
-    }
-    
-    fetch(`/stock-take/swap-accessory/${currentAccessoryId}/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({ 
-            new_stock_item_id: newStockItemId 
+    document.getElementById('confirmSwapSku').textContent = newSku;
+    document.getElementById('confirmSwapName').textContent = newName;
+    const confirmBtn = document.getElementById('confirmSwapBtn');
+    confirmBtn.onclick = function() {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Swapping...';
+        fetch(`/stock-take/swap-accessory/${currentAccessoryId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({ 
+                new_stock_item_id: newStockItemId 
+            })
         })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closeModal('swapItemModal');
-            showAlert(data.message, 'success');
-            // Reload page to show updated accessory
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            showAlert('Error: ' + data.error, 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Swap error:', error);
-        showAlert('Error swapping item', 'danger');
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                closeModal('confirmSwapModal');
+                closeModal('swapItemModal');
+                showAlert(data.message, 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Confirm Swap';
+                showAlert('Error: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Swap error:', error);
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Confirm Swap';
+            showAlert('Error swapping item', 'danger');
+        });
+    };
+    openModal('confirmSwapModal');
 }
 
 // Add new item functionality

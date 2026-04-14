@@ -1,13 +1,16 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, log_activity
+from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, PriceHistory, log_activity
 import json
 from decimal import Decimal
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.db import models
 from django.db.models import Sum
+
+
+from django.views.decorators.http import require_POST
 
 
 @login_required
@@ -164,6 +167,11 @@ def product_detail(request, item_id):
         models.Q(missing_sku=product.sku) | models.Q(replacement_sku=product.sku)
     )
     
+    # Price history for this product
+    price_history = PriceHistory.objects.filter(
+        stock_item=product
+    ).select_related('created_by').order_by('-created_at')[:50]
+    
     return render(request, 'stock_take/product_detail.html', {
         'product': product,
         'categories': json.dumps(categories),
@@ -178,6 +186,40 @@ def product_detail(request, item_id):
         'order_accessories': order_accessories,
         'stock_changes': stock_changes,
         'substitutions': substitutions,
+        'price_history': price_history,
+    })
+
+
+@login_required
+@require_POST
+def product_add_substitution(request, item_id):
+    """Add a substitution from the product detail page via AJAX."""
+    product = get_object_or_404(StockItem, id=item_id)
+    missing_sku = request.POST.get('missing_sku', '').strip()
+    missing_name = request.POST.get('missing_name', '').strip()
+    replacement_sku = request.POST.get('replacement_sku', '').strip()
+    replacement_name = request.POST.get('replacement_name', '').strip()
+
+    if not missing_sku or not replacement_sku:
+        return JsonResponse({'success': False, 'error': 'Both missing and replacement SKU are required.'}, status=400)
+
+    sub = Substitution.objects.create(
+        missing_sku=missing_sku,
+        missing_name=missing_name,
+        replacement_sku=replacement_sku,
+        replacement_name=replacement_name,
+    )
+    return JsonResponse({
+        'success': True,
+        'substitution': {
+            'id': sub.id,
+            'missing_sku': sub.missing_sku,
+            'missing_name': sub.missing_name,
+            'replacement_sku': sub.replacement_sku,
+            'replacement_name': sub.replacement_name,
+            'created_at': sub.created_at.strftime('%d/%m/%Y'),
+            'direction': 'replaces' if sub.replacement_sku == product.sku else 'replaced_by',
+        }
     })
 
 
@@ -222,8 +264,9 @@ def add_product(request):
             )
             
             # Supplier fields
-            product.supplier_code = data.get('supplier_code', '')
-            product.supplier_sku = data.get('supplier_sku', '')
+            supplier_sku = data.get('supplier_sku', '')
+            product.supplier_sku = supplier_sku
+            product.supplier_code = supplier_sku
 
             # Optional FK fields
             category_id = data.get('category_id')

@@ -821,6 +821,10 @@ class StockItem(models.Model):
     box_height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Box height in mm')
     box_quantity = models.IntegerField(null=True, blank=True, help_text='Number of items per box')
     
+    # Pricing
+    average_landed_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Average cost per item across POs')
+    product_url = models.URLField(max_length=500, blank=True, default='', help_text='Link to supplier product page')
+    
     class Meta:
         indexes = [
             models.Index(fields=['tracking_type', 'quantity']),
@@ -830,6 +834,11 @@ class StockItem(models.Model):
     @property
     def total_value(self):
         return self.cost * self.quantity
+    
+    @property
+    def sell_price(self):
+        """Sell price = (cost + 10) * 1.1"""
+        return (self.cost + Decimal('10')) * Decimal('1.1')
     
     @property
     def needs_stock_take(self):
@@ -867,6 +876,28 @@ class StockHistory(models.Model):
     
     def __str__(self):
         return f"{self.stock_item.sku} - {self.quantity} units ({self.created_at.strftime('%Y-%m-%d')})"
+
+
+class PriceHistory(models.Model):
+    """Track cost price changes for a product over time"""
+    stock_item = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='price_history')
+    old_price = models.DecimalField(max_digits=10, decimal_places=2)
+    new_price = models.DecimalField(max_digits=10, decimal_places=2)
+    change_source = models.CharField(max_length=50, choices=[
+        ('invoice', 'Invoice Price Update'),
+        ('manual', 'Manual Edit'),
+        ('import', 'CSV Import'),
+    ], default='manual')
+    reference = models.CharField(max_length=100, blank=True, help_text='PO number or other reference')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.stock_item.sku}: £{self.old_price} → £{self.new_price} ({self.created_at.strftime('%Y-%m-%d')})"
 
 
 class Supplier(models.Model):

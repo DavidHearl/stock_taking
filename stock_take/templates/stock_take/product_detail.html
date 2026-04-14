@@ -5,7 +5,12 @@
 
 {% block nav_stock_active %}active{% endblock %}
 
-{% block page_title %}Product Details{% endblock %}
+{% block page_title %}
+<span class="page-title-row">
+    <a href="{% url 'stock_list' %}" class="back-link" title="Back to Products"><i class="bi bi-arrow-left"></i></a>
+    Product Details
+</span>
+{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/order_details.css' %}">
@@ -19,7 +24,27 @@
     <!-- Product Header -->
     <div class="product-header">
         <div class="product-title-section">
-            <div class="product-sku">{{ product.sku }}</div>
+            <div class="product-sku">
+                <div class="product-image-wrapper" style="position: relative;">
+                    {% if product.image %}
+                    <img src="{{ product.image.url }}" alt="{{ product.name }}" class="product-image" id="productImagePreview">
+                    {% else %}
+                    <div class="product-image" id="productImagePreview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+                        <i class="bi bi-image" style="font-size: 1.4rem;"></i>
+                    </div>
+                    {% endif %}
+                    <div class="image-upload-overlay" id="imageUploadOverlay" style="display: none;">
+                        <label for="imageUploadInput" class="image-upload-label">
+                            <i class="bi bi-camera"></i>
+                        </label>
+                        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;" onchange="uploadProductImage(this)">
+                    </div>
+                </div>
+                <div>
+                    <span>{{ product.sku }}</span>
+                    <div style="font-size: 0.85rem; font-weight: 400; color: var(--text-secondary); margin-top: 2px;">{{ product.name }}</div>
+                </div>
+            </div>
         </div>
         <div class="product-actions">
             <button class="btn btn-sm btn-warning" onclick="openAdjustStockModal()">
@@ -36,9 +61,6 @@
             </button>
             <a href="{% url 'add_product' %}?copy_from={{ product.id }}" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-files"></i> Copy Product
-            </a>
-            <a href="{% url 'stock_list' %}" class="btn btn-sm btn-secondary">
-                <i class="bi bi-arrow-left"></i> Back to Products
             </a>
             <div class="product-more-menu">
                 <button class="btn btn-sm btn-secondary product-more-btn" onclick="toggleProductMoreMenu(event)" title="More actions">
@@ -67,232 +89,171 @@
 
     <!-- Overview Tab Content -->
     <div class="tab-content" id="overview" style="display: block;">
-        <div class="info-grid">
-            <!-- Product Info Section -->
-            <div class="info-group">
-                <h3>Product Information</h3>
-                <div class="product-image-wrapper" style="margin-bottom: 16px; position: relative;">
-                    {% if product.image %}
-                    <img src="{{ product.image.url }}" alt="{{ product.name }}" class="product-image" id="productImagePreview">
+        <table class="product-table">
+            <!-- Product Details -->
+            <tr class="section-header-row">
+                <td colspan="4">Product Details</td>
+            </tr>
+            <tr>
+                <td class="info-label">SKU</td>
+                <td class="info-value" data-field="sku" data-value="{{ product.sku }}">{{ product.sku }}</td>
+                <td class="info-label">Cost Price</td>
+                <td class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Name</td>
+                <td class="info-value" data-field="name" data-value="{{ product.name }}">{{ product.name }}</td>
+                <td class="info-label">Average Landed Cost</td>
+                <td class="info-value">£{{ product.average_landed_price|default:product.cost|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Description</td>
+                <td class="info-value" data-field="description" data-value="{{ product.description }}">{{ product.description|default:"-" }}</td>
+                <td class="info-label">Sell Price</td>
+                <td class="info-value">£{{ product.sell_price|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Category</td>
+                <td class="info-value" data-field="category_id" data-value="{{ product.category.id }}">{{ product.category.name|default:"Not Set" }}</td>
+                <td class="info-label">Total Value</td>
+                <td class="info-value">£{{ product.total_value|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Tracking Type</td>
+                <td class="info-value" data-field="tracking_type" data-value="{{ product.tracking_type }}">{{ product.get_tracking_type_display }}</td>
+                <td class="info-label">VAT Rate</td>
+                <td class="info-value">
+                    {% if product.supplier and product.supplier.vat_rate is not None %}
+                        {{ product.supplier.vat_rate|floatformat:2 }}%
                     {% else %}
-                    <div class="product-image" id="productImagePreview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-                        <i class="bi bi-image" style="font-size: 2rem;"></i>
-                    </div>
+                        <span style="opacity:.6;">Not set</span>
                     {% endif %}
-                    <div class="image-upload-overlay" id="imageUploadOverlay" style="display: none;">
-                        <label for="imageUploadInput" class="image-upload-label">
-                            <i class="bi bi-camera"></i> Change Image
-                        </label>
-                        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;" onchange="uploadProductImage(this)">
-                        {% if product.image %}
-                        <button class="btn btn-sm btn-danger" onclick="removeProductImage()" style="margin-top: 6px; font-size: 0.75rem;">
-                            <i class="bi bi-trash"></i> Remove
-                        </button>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">SKU</div>
-                    <div class="info-value" data-field="sku" data-value="{{ product.sku }}">{{ product.sku }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Name</div>
-                    <div class="info-value" data-field="name" data-value="{{ product.name }}">{{ product.name }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Description</div>
-                    <div class="info-value" data-field="description" data-value="{{ product.description }}">{{ product.description|default:"-" }}</div>
-                </div>
-            </div>
+                </td>
+            </tr>
 
-            <!-- Pricing Section -->
-            <div class="info-group">
-                <h3>Pricing</h3>
-                <div class="info-row">
-                    <div class="info-label">Cost Price</div>
-                    <div class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:2 }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Average Landed Cost</div>
-                    <div class="info-value">£{{ product.cost|floatformat:2 }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Sell Price</div>
-                    <div class="info-value">£0.00</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">RRP</div>
-                    <div class="info-value">£0.00</div>
-                </div>
-            </div>
+            <!-- Stock Levels -->
+            <tr class="section-header-row">
+                <td colspan="4">Stock Levels</td>
+            </tr>
+            <tr>
+                <td class="info-label">Current Quantity</td>
+                <td class="info-value" id="qty-display">{{ product.quantity }}</td>
+                <td class="info-label">Par Level</td>
+                <td class="info-value" data-field="par_level" data-value="{{ product.par_level }}">{{ product.par_level|default:"0" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Allocated to Jobs</td>
+                <td class="info-value" style="color: #ffc107;">{{ allocated }}</td>
+                <td class="info-label">Location</td>
+                <td class="info-value" data-field="location" data-value="{{ product.location }}">{{ product.location|default:"-" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Remaining Available</td>
+                <td class="info-value" style="{% if remaining < product.par_level %}color: #dc3545;{% else %}color: #28a745;{% endif %}">{{ remaining }}{% if incoming %} <span style="color: #0d6efd; font-size: 0.85rem;">(+{{ incoming }} incoming)</span>{% endif %}</td>
+                <td class="info-label">Stock Take Group</td>
+                <td class="info-value" data-field="stock_take_group_id" data-value="{{ product.stock_take_group.id }}">{{ product.stock_take_group.name|default:"Not Set" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Serial/Batch</td>
+                <td class="info-value" data-field="serial_or_batch" data-value="{{ product.serial_or_batch }}">{{ product.serial_or_batch|default:"-" }}</td>
+                <td class="info-label">Min Order Qty</td>
+                <td class="info-value" data-field="min_order_qty" data-value="{{ product.min_order_qty }}">{{ product.min_order_qty|default:"-" }}</td>
+            </tr>
 
-            <!-- Product Details Section -->
-            <div class="info-group">
-                <h3>Product Details</h3>
-                <div class="info-row">
-                    <div class="info-label">Brand</div>
-                    <div class="info-value">-</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Is Active</div>
-                    <div class="info-value">True</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Barcode</div>
-                    <div class="info-value">-</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Category</div>
-                    <div class="info-value" data-field="category_id" data-value="{{ product.category.id }}">{{ product.category.name|default:"Not Set" }}</div>
-                </div>
-            </div>
+            <!-- Supplier Information -->
+            <tr class="section-header-row">
+                <td colspan="4">Supplier Information</td>
+            </tr>
+            <tr>
+                <td class="info-label">Supplier</td>
+                <td class="info-value" data-field="supplier_id" data-value="{{ product.supplier_id|default:'' }}">{{ product.supplier.name|default:"-" }}</td>
+                <td class="info-label">Supplier SKU</td>
+                <td class="info-value" data-field="supplier_sku" data-value="{{ product.supplier_sku }}">{{ product.supplier_sku|default:product.supplier_code|default:"-" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Product URL</td>
+                <td class="info-value" colspan="3" data-field="product_url" data-value="{{ product.product_url }}">
+                    {% if product.product_url %}
+                        <a href="{{ product.product_url }}" target="_blank" rel="noopener noreferrer" style="color: var(--accent-blue, #0d6efd);">
+                            <i class="bi bi-box-arrow-up-right"></i> {{ product.product_url }}
+                        </a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
 
-            <!-- Tax & Classification Section -->
-            <div class="info-group">
-                <h3>Tax &amp; Classification</h3>
-                <div class="info-row">
-                    <div class="info-label">Tracking Type</div>
-                    <div class="info-value" data-field="tracking_type" data-value="{{ product.tracking_type }}">{{ product.get_tracking_type_display }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">VAT Rate</div>
-                    <div class="info-value">
-                        {% if product.supplier and product.supplier.vat_rate is not None %}
-                            {{ product.supplier.vat_rate|floatformat:2 }}%
-                        {% else %}
-                            <span style="opacity:.6;">Not set — configure on supplier</span>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Show On Kiosk</div>
-                    <div class="info-value">False</div>
-                </div>
-            </div>
-
-            <!-- Supplier Section -->
-            <div class="info-group">
-                <h3>Supplier Information</h3>
-                <div class="info-row">
-                    <div class="info-label">Supplier</div>
-                    <div class="info-value" data-field="supplier_id" data-value="{{ product.supplier_id|default:'' }}">{{ product.supplier.name|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Supplier Code</div>
-                    <div class="info-value" data-field="supplier_code" data-value="{{ product.supplier_code }}">{{ product.supplier_code|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Supplier SKU</div>
-                    <div class="info-value" data-field="supplier_sku" data-value="{{ product.supplier_sku }}">{{ product.supplier_sku|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Minimum Order Quantity</div>
-                    <div class="info-value" data-field="min_order_qty" data-value="{{ product.min_order_qty }}">{{ product.min_order_qty|default:"-" }}</div>
-                </div>
-            </div>
-
-            <!-- Accounting Section -->
-            <div class="info-group">
-                <h3>Accounting</h3>
-                <div class="info-row">
-                    <div class="info-label">Revenue Account</div>
-                    <div class="info-value">-</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Expense Account</div>
-                    <div class="info-value">-</div>
-                </div>
-            </div>
-
-            <!-- Dimensions Section -->
-            <div class="info-group">
-                <h3>Product Dimensions</h3>
-                <div class="info-row">
-                    <div class="info-label">Length (mm)</div>
-                    <div class="info-value" data-field="length" data-value="{{ product.length|default:'' }}">{{ product.length|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Width (mm)</div>
-                    <div class="info-value" data-field="width" data-value="{{ product.width|default:'' }}">{{ product.width|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Height (mm)</div>
-                    <div class="info-value" data-field="height" data-value="{{ product.height|default:'' }}">{{ product.height|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Weight (kg)</div>
-                    <div class="info-value" data-field="weight" data-value="{{ product.weight|default:'' }}">{{ product.weight|default:"-" }}</div>
-                </div>
-            </div>
-
-            <!-- Box Dimensions Section -->
-            <div class="info-group">
-                <h3>Box / Packaging</h3>
-                <div class="info-row">
-                    <div class="info-label">Box Length (mm)</div>
-                    <div class="info-value" data-field="box_length" data-value="{{ product.box_length|default:'' }}">{{ product.box_length|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Box Width (mm)</div>
-                    <div class="info-value" data-field="box_width" data-value="{{ product.box_width|default:'' }}">{{ product.box_width|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Box Height (mm)</div>
-                    <div class="info-value" data-field="box_height" data-value="{{ product.box_height|default:'' }}">{{ product.box_height|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Items Per Box</div>
-                    <div class="info-value" data-field="box_quantity" data-value="{{ product.box_quantity|default:'' }}">{{ product.box_quantity|default:"-" }}</div>
-                </div>
-            </div>
-
-            <!-- Stock Levels Section -->
-            <div class="info-group">
-                <h3>Stock Levels &amp; Location</h3>
-                <div class="info-row">
-                    <div class="info-label">Current Quantity</div>
-                    <div class="info-value" style="font-weight: 600; font-size: 1.1rem;" id="qty-display">{{ product.quantity }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Allocated to Jobs</div>
-                    <div class="info-value" style="color: #ffc107;">{{ allocated }}</div>
-                </div>
-                {% if incoming %}
-                <div class="info-row">
-                    <div class="info-label">Incoming (POs)</div>
-                    <div class="info-value" style="color: #0d6efd;">+{{ incoming }}</div>
-                </div>
-                {% endif %}
-                <div class="info-row">
-                    <div class="info-label">Remaining Available</div>
-                    <div class="info-value" style="{% if remaining < product.par_level %}color: #dc3545; font-weight: 600;{% else %}color: #28a745;{% endif %}">{{ remaining }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Par Level</div>
-                    <div class="info-value" data-field="par_level" data-value="{{ product.par_level }}">{{ product.par_level|default:"0" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Stock Take Group</div>
-                    <div class="info-value" data-field="stock_take_group_id" data-value="{{ product.stock_take_group.id }}">{{ product.stock_take_group.name|default:"Not Set" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Location</div>
-                    <div class="info-value" data-field="location" data-value="{{ product.location }}">{{ product.location|default:"-" }}</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">Serial/Batch</div>
-                    <div class="info-value" data-field="serial_or_batch" data-value="{{ product.serial_or_batch }}">{{ product.serial_or_batch|default:"-" }}</div>
-                </div>
-            </div>
-        </div>
+            <!-- Dimensions -->
+            <tr class="section-header-row">
+                <td colspan="4">Dimensions &amp; Packaging</td>
+            </tr>
+            <tr>
+                <td class="info-label">Length (mm)</td>
+                <td class="info-value" data-field="length" data-value="{{ product.length|default:'' }}">{{ product.length|default:"-" }}</td>
+                <td class="info-label">Box Length (mm)</td>
+                <td class="info-value" data-field="box_length" data-value="{{ product.box_length|default:'' }}">{{ product.box_length|default:"-" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Width (mm)</td>
+                <td class="info-value" data-field="width" data-value="{{ product.width|default:'' }}">{{ product.width|default:"-" }}</td>
+                <td class="info-label">Box Width (mm)</td>
+                <td class="info-value" data-field="box_width" data-value="{{ product.box_width|default:'' }}">{{ product.box_width|default:"-" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Height (mm)</td>
+                <td class="info-value" data-field="height" data-value="{{ product.height|default:'' }}">{{ product.height|default:"-" }}</td>
+                <td class="info-label">Box Height (mm)</td>
+                <td class="info-value" data-field="box_height" data-value="{{ product.box_height|default:'' }}">{{ product.box_height|default:"-" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Weight (kg)</td>
+                <td class="info-value" data-field="weight" data-value="{{ product.weight|default:'' }}">{{ product.weight|default:"-" }}</td>
+                <td class="info-label">Items Per Box</td>
+                <td class="info-value" data-field="box_quantity" data-value="{{ product.box_quantity|default:'' }}">{{ product.box_quantity|default:"-" }}</td>
+            </tr>
+        </table>
     </div>
 
     <!-- Price History Tab -->
     <div class="tab-content" id="price-history" style="display: none;">
-        <div class="info-group">
-            <h3>Price Change History</h3>
-            <p class="text-muted fill-text">No price history available yet.</p>
-        </div>
+        {% if price_history %}
+        <table class="product-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Old Price</th>
+                    <th></th>
+                    <th>New Price</th>
+                    <th>Source</th>
+                    <th>Reference</th>
+                    <th>By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in price_history %}
+                <tr>
+                    <td>{{ entry.created_at|date:"d/m/Y H:i" }}</td>
+                    <td>£{{ entry.old_price|floatformat:2 }}</td>
+                    <td class="text-center">
+                        {% if entry.new_price > entry.old_price %}
+                            <i class="bi bi-arrow-up" style="color: #dc3545;"></i>
+                        {% elif entry.new_price < entry.old_price %}
+                            <i class="bi bi-arrow-down" style="color: #28a745;"></i>
+                        {% else %}
+                            <i class="bi bi-dash" style="color: var(--text-secondary);"></i>
+                        {% endif %}
+                    </td>
+                    <td style="font-weight: 600;">£{{ entry.new_price|floatformat:2 }}</td>
+                    <td>{{ entry.get_change_source_display }}</td>
+                    <td>{{ entry.reference|default:"-" }}</td>
+                    <td>{{ entry.created_by.get_full_name|default:entry.created_by.username|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted fill-text" style="padding: 20px;">No price history available yet.</p>
+        {% endif %}
     </div>
 
     <!-- Notes Tab -->
@@ -496,21 +457,28 @@
 
     <!-- Substitutions Tab -->
     <div class="tab-content" id="substitutions" style="display: none;">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+            <button class="btn btn-sm btn-success" onclick="openAddSubstitutionModal()">
+                <i class="bi bi-plus-lg"></i> Add Substitution
+            </button>
+        </div>
         {% if substitutions %}
         <div class="table-container">
-            <table class="table">
+            <table class="table" id="substitutions-table">
                 <thead>
                     <tr>
                         <th>Direction</th>
                         <th>Missing SKU</th>
                         <th>Missing Name</th>
                         <th>Replacement SKU</th>
+                        <th>Replacement Name</th>
                         <th>Created</th>
+                        <th style="text-align:center;width:100px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for sub in substitutions %}
-                    <tr>
+                    <tr data-sub-id="{{ sub.id }}">
                         <td>
                             {% if sub.replacement_sku == product.sku %}
                                 <span class="status-badge approved">Replaces</span>
@@ -521,14 +489,19 @@
                         <td>{{ sub.missing_sku }}</td>
                         <td>{{ sub.missing_name }}</td>
                         <td>{{ sub.replacement_sku }}</td>
+                        <td>{{ sub.replacement_name }}</td>
                         <td>{{ sub.created_at|date:"d/m/Y" }}</td>
+                        <td style="text-align:center;white-space:nowrap;">
+                            <button class="btn btn-sm btn-outline-primary" onclick="editSubstitution({{ sub.id }})" title="Edit"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteSubstitution({{ sub.id }})" title="Delete"><i class="bi bi-trash"></i></button>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
         {% else %}
-        <p class="text-muted" style="padding: 16px 0;">No substitutions involve this product.</p>
+        <p class="text-muted" id="no-substitutions-msg" style="padding: 16px 0;">No substitutions involve this product.</p>
         {% endif %}
     </div>
 </div>
@@ -550,6 +523,40 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeAddNoteModal()">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="saveNote()">Save Note</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Substitution Modal -->
+<div class="modal" id="addSubstitutionModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 id="subModalTitle">Add Substitution</h5>
+                <button type="button" class="btn-close" onclick="closeSubstitutionModal()"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="subEditId" value="">
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label>Direction</label>
+                    <select class="form-control" id="subDirection" onchange="updateSubDirectionFields()">
+                        <option value="replaced_by">This product is replaced by...</option>
+                        <option value="replaces">This product replaces...</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label id="subOtherSkuLabel">Replacement SKU</label>
+                    <input type="text" class="form-control" id="subOtherSku" placeholder="Enter SKU">
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label id="subOtherNameLabel">Replacement Name</label>
+                    <input type="text" class="form-control" id="subOtherName" placeholder="Enter name (optional)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeSubstitutionModal()">Cancel</button>
+                <button type="button" class="btn btn-success" id="subSaveBtn" onclick="saveSubstitution()">Add Substitution</button>
             </div>
         </div>
     </div>
@@ -1009,6 +1016,145 @@ function saveNote() {
     
     alert('Note functionality will be implemented soon');
     closeAddNoteModal();
+}
+
+// ── Substitutions CRUD ─────────────────────────────────────────────────
+const PRODUCT_SKU = '{{ product.sku|escapejs }}';
+const PRODUCT_NAME = '{{ product.name|escapejs }}';
+const PRODUCT_ID = {{ product.id }};
+
+function openAddSubstitutionModal() {
+    document.getElementById('subEditId').value = '';
+    document.getElementById('subModalTitle').textContent = 'Add Substitution';
+    document.getElementById('subSaveBtn').textContent = 'Add Substitution';
+    document.getElementById('subDirection').value = 'replaced_by';
+    document.getElementById('subOtherSku').value = '';
+    document.getElementById('subOtherName').value = '';
+    updateSubDirectionFields();
+    document.getElementById('addSubstitutionModal').classList.add('show');
+}
+
+function closeSubstitutionModal() {
+    document.getElementById('addSubstitutionModal').classList.remove('show');
+}
+
+function updateSubDirectionFields() {
+    const dir = document.getElementById('subDirection').value;
+    const skuLabel = document.getElementById('subOtherSkuLabel');
+    const nameLabel = document.getElementById('subOtherNameLabel');
+    if (dir === 'replaced_by') {
+        skuLabel.textContent = 'Replacement SKU';
+        nameLabel.textContent = 'Replacement Name';
+    } else {
+        skuLabel.textContent = 'Missing SKU';
+        nameLabel.textContent = 'Missing Name';
+    }
+}
+
+function saveSubstitution() {
+    const editId = document.getElementById('subEditId').value;
+    const direction = document.getElementById('subDirection').value;
+    const otherSku = document.getElementById('subOtherSku').value.trim();
+    const otherName = document.getElementById('subOtherName').value.trim();
+
+    if (!otherSku) {
+        alert('Please enter a SKU.');
+        return;
+    }
+
+    let missing_sku, missing_name, replacement_sku, replacement_name;
+    if (direction === 'replaced_by') {
+        missing_sku = PRODUCT_SKU;
+        missing_name = PRODUCT_NAME;
+        replacement_sku = otherSku;
+        replacement_name = otherName;
+    } else {
+        missing_sku = otherSku;
+        missing_name = otherName;
+        replacement_sku = PRODUCT_SKU;
+        replacement_name = PRODUCT_NAME;
+    }
+
+    const body = new URLSearchParams({
+        missing_sku, missing_name, replacement_sku, replacement_name
+    });
+
+    if (editId) {
+        // Edit existing
+        fetch(`/substitution/edit/${editId}/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                closeSubstitutionModal();
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || JSON.stringify(data.errors) || 'Unknown error'));
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+    } else {
+        // Add new
+        fetch(`/product/${PRODUCT_ID}/add-substitution/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                closeSubstitutionModal();
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+    }
+}
+
+function editSubstitution(subId) {
+    fetch(`/substitution/edit/${subId}/`)
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('subEditId').value = subId;
+        document.getElementById('subModalTitle').textContent = 'Edit Substitution';
+        document.getElementById('subSaveBtn').textContent = 'Save Changes';
+
+        // Determine direction based on which SKU matches the current product
+        if (data.replacement_sku === PRODUCT_SKU) {
+            document.getElementById('subDirection').value = 'replaces';
+            document.getElementById('subOtherSku').value = data.missing_sku;
+            document.getElementById('subOtherName').value = data.missing_name || '';
+        } else {
+            document.getElementById('subDirection').value = 'replaced_by';
+            document.getElementById('subOtherSku').value = data.replacement_sku;
+            document.getElementById('subOtherName').value = data.replacement_name || '';
+        }
+        updateSubDirectionFields();
+        document.getElementById('addSubstitutionModal').classList.add('show');
+    })
+    .catch(err => alert('Error loading substitution: ' + err.message));
+}
+
+function deleteSubstitution(subId) {
+    if (!confirm('Delete this substitution?')) return;
+    fetch(`/substitution/delete/${subId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
 }
 
 async function uploadProductImage(input) {

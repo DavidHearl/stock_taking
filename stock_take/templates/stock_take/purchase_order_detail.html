@@ -68,7 +68,7 @@
         </div>
         <div class="po-detail-actions">
             {% if purchase_order.status == 'Draft' %}
-            <button class="btn btn-sm btn-approve" id="approve-btn" onclick="updatePOStatus('Approved')">
+            <button class="btn btn-sm btn-approve" id="approve-btn" onclick="openApproveModal()">
                 <i class="bi bi-check-circle"></i> Approve
             </button>
             {% endif %}
@@ -1280,6 +1280,56 @@
 <!-- Product search dropdown (outside table container to avoid overflow clipping) -->
 <div class="product-search-results" id="product-search-results" style="display:none;"></div>
 
+<!-- Approve PO Modal -->
+<div class="modal-overlay" id="approve-modal" style="display:none;" onclick="closeApproveModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-check-circle"></i> Approve Purchase Order</h3>
+            <button class="modal-close" onclick="closeApproveModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 14px; color: var(--text-secondary);">Confirm approval for the following purchase order:</p>
+            <div class="approve-summary">
+                <div class="approve-summary-row">
+                    <span class="approve-label">PO Number</span>
+                    <span class="approve-value" style="font-weight:600;">{{ purchase_order.display_number }}</span>
+                </div>
+                <div class="approve-summary-row">
+                    <span class="approve-label">Supplier</span>
+                    <span class="approve-value">{{ purchase_order.supplier_name|default:"Not set" }}</span>
+                </div>
+                {% if purchase_order.description %}
+                <div class="approve-summary-row">
+                    <span class="approve-label">Description</span>
+                    <span class="approve-value">{{ purchase_order.description|truncatewords:12 }}</span>
+                </div>
+                {% endif %}
+                <div class="approve-summary-row">
+                    <span class="approve-label">Items</span>
+                    <span class="approve-value">
+                        {% if total_board_qty %}{{ total_board_items }} item{{ total_board_items|pluralize }} &middot; {{ total_board_qty|floatformat:0 }} boards
+                        {% elif products.count %}{{ products.count }} item{{ products.count|pluralize }}
+                        {% else %}0 items{% endif %}
+                    </span>
+                </div>
+                <div class="approve-summary-row approve-summary-total">
+                    <span class="approve-label">Total</span>
+                    <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ purchase_order.total|floatformat:2 }}</span>
+                </div>
+            </div>
+            <p style="margin-top: 14px; font-size: 0.8rem; color: var(--text-muted);">
+                <i class="bi bi-info-circle"></i> This will mark the PO as approved by <strong>{{ request.user.get_full_name|default:request.user.username }}</strong> on today's date.
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-md btn-secondary" onclick="closeApproveModal()">Cancel</button>
+            <button class="btn btn-md btn-approve" id="confirm-approve-btn" onclick="confirmApprove()">
+                <i class="bi bi-check-circle"></i> Approve
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Receive PO Modal (Partial / Full) -->
 <div class="modal-overlay" id="receive-modal" style="display:none;" onclick="closeReceiveModal(event)">
     <div class="modal-dialog receive-modal-dialog" onclick="event.stopPropagation()">
@@ -2343,6 +2393,22 @@ document.addEventListener('keydown', function(e) {
 function cancelPO() {
     if (!confirm('Are you sure you want to cancel this purchase order? It will no longer count as incoming stock.')) return;
     updatePOStatus('Cancelled', true);
+}
+
+function openApproveModal() {
+    document.getElementById('approve-modal').style.display = 'flex';
+}
+
+function closeApproveModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('approve-modal').style.display = 'none';
+}
+
+function confirmApprove() {
+    const btn = document.getElementById('confirm-approve-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Approving...';
+    updatePOStatus('Approved', true);
 }
 
 function updatePOStatus(newStatus, skipConfirm) {

@@ -71,6 +71,12 @@
                 <button class="dots-menu-item" onclick="openModal('substitutionsModal'); closeDotsMenu()">
                     <i class="bi bi-arrow-left-right"></i> Substitutions
                 </button>
+                <a class="dots-menu-item" href="{% url 'product_catalog_pdf' %}" onclick="closeDotsMenu()">
+                    <i class="bi bi-file-earmark-pdf"></i> Product Catalog
+                </a>
+                <a class="dots-menu-item" href="{% url 'product_catalog_pdf' %}?images=1" onclick="closeDotsMenu()">
+                    <i class="bi bi-file-earmark-image"></i> Product Catalog (with Images)
+                </a>
             </div>
         </div>
     </div>
@@ -91,6 +97,7 @@
                     <th>Tracking</th>
                     <th class="text-center">Qty</th>
                     <th class="text-right">Value</th>
+                    <th class="text-center img-col"><i class="bi bi-link-45deg"></i></th>
                     <th class="text-center img-col"><i class="bi bi-image"></i></th>
                 </tr>
             </thead>
@@ -98,7 +105,7 @@
                 {% for item in all_stock_items %}
                 <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="{{ item.stock_status }}">
                     <td class="text-center cb-col"><input type="checkbox" class="row-cb" value="{{ item.id }}" onclick="updateSelection()"></td>
-                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in substitution_skus %}<i class="bi bi-arrow-left-right sub-marker" title="Has substitution"></i>{% endif %}</td>
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in missing_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: #e74c3c;" title="Being replaced"></i>{% endif %}{% if item.sku in replacement_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: #27ae60;" title="Replaces another product"></i>{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                     <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
@@ -111,6 +118,7 @@
                     </td>
                     <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }} {% if item.stock_status == 'in-stock' %}<i class="bi bi-check-circle stock-icon-in" title="In Stock"></i>{% elif item.stock_status == 'low-stock' %}<i class="bi bi-exclamation-triangle stock-icon-low" title="Low Stock"></i>{% elif item.stock_status == 'out-of-stock' %}<i class="bi bi-x-circle stock-icon-out" title="Out of Stock"></i>{% else %}<i class="bi bi-dash-circle stock-icon-non" title="Non-Stock"></i>{% endif %}</td>
                     <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
+                    <td class="text-center img-col">{% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" style="color: var(--primary-color);"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
                     <td class="text-center img-col">{% if item.image %}<i class="bi bi-image-fill stock-has-image" title="Has image"></i>{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -188,7 +196,6 @@
                 <h4 class="sub-section-title">Substitutions</h4>
                 <div class="sub-add-row">
                     <input type="text" id="addMissingSku" class="form-control" placeholder="Missing SKU">
-                    <input type="text" id="addMissingName" class="form-control" placeholder="Missing Name">
                     <input type="text" id="addReplacementSku" class="form-control" placeholder="Replacement SKU">
                     <button class="btn btn-primary btn-sm" onclick="addSubstitution()"><i class="bi bi-plus-lg"></i></button>
                 </div>
@@ -196,8 +203,9 @@
                     <table class="sub-table">
                         <thead>
                             <tr>
+                                <th></th>
                                 <th>Missing SKU</th>
-                                <th>Missing Name</th>
+                                <th></th>
                                 <th>Replacement SKU</th>
                                 <th class="text-center actions-col">Actions</th>
                             </tr>
@@ -205,16 +213,17 @@
                         <tbody id="substitutionsBody">
                             {% for sub in substitutions %}
                             <tr data-id="{{ sub.id }}">
+                                <td class="text-center"><i class="bi bi-arrow-left-right" style="color: #e74c3c;" title="Being replaced"></i></td>
                                 <td>{{ sub.missing_sku }}</td>
-                                <td>{{ sub.missing_name }}</td>
-                                <td>{{ sub.replacement_sku }}</td>
+                                <td class="text-center"><i class="bi bi-arrow-right" style="color: var(--text-secondary);"></i></td>
+                                <td><i class="bi bi-arrow-left-right" style="color: #27ae60; margin-right: 4px;"></i>{{ sub.replacement_sku }}</td>
                                 <td class="text-center actions-col">
                                     <button class="action-icon" title="Edit" onclick="editSubstitution({{ sub.id }})"><i class="bi bi-pencil"></i></button>
-                                    <button class="action-icon danger" title="Delete" onclick="deleteSubstitution({{ sub.id }}, '{{ sub.missing_name|escapejs }}')"><i class="bi bi-trash"></i></button>
+                                    <button class="action-icon danger" title="Delete" onclick="deleteSubstitution({{ sub.id }}, '{{ sub.missing_sku|escapejs }}')"><i class="bi bi-trash"></i></button>
                                 </td>
                             </tr>
                             {% empty %}
-                            <tr class="empty-row"><td colspan="4">No substitutions defined</td></tr>
+                            <tr class="empty-row"><td colspan="5">No substitutions defined</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -270,10 +279,6 @@
                 <div class="form-group">
                     <label for="editMissingSku">Missing SKU</label>
                     <input type="text" id="editMissingSku" class="form-control" required>
-                </div>
-                <div class="form-group">
-                    <label for="editMissingName">Missing Name</label>
-                    <input type="text" id="editMissingName" class="form-control" required>
                 </div>
                 <div class="form-group">
                     <label for="editReplacementSku">Replacement SKU</label>
@@ -651,14 +656,13 @@ const csrfToken = '{{ csrf_token }}';
 
 function addSubstitution() {
     const sku = document.getElementById('addMissingSku');
-    const name = document.getElementById('addMissingName');
     const repl = document.getElementById('addReplacementSku');
-    if (!sku.value.trim() || !name.value.trim() || !repl.value.trim()) return;
+    if (!sku.value.trim() || !repl.value.trim()) return;
 
     const form = new FormData();
     form.append('csrfmiddlewaretoken', csrfToken);
     form.append('missing_sku', sku.value.trim());
-    form.append('missing_name', name.value.trim());
+    form.append('missing_name', sku.value.trim());
     form.append('replacement_sku', repl.value.trim());
 
     fetch('{% url "substitutions" %}', { method: 'POST', body: form })
@@ -680,7 +684,6 @@ function editSubstitution(id) {
         .then(d => {
             document.getElementById('editSubId').value = d.id;
             document.getElementById('editMissingSku').value = d.missing_sku;
-            document.getElementById('editMissingName').value = d.missing_name;
             document.getElementById('editReplacementSku').value = d.replacement_sku;
             openModal('editSubModal');
         });
@@ -688,10 +691,11 @@ function editSubstitution(id) {
 
 function saveSubstitution() {
     const id = document.getElementById('editSubId').value;
+    const missingSku = document.getElementById('editMissingSku').value;
     const form = new FormData();
     form.append('csrfmiddlewaretoken', csrfToken);
-    form.append('missing_sku', document.getElementById('editMissingSku').value);
-    form.append('missing_name', document.getElementById('editMissingName').value);
+    form.append('missing_sku', missingSku);
+    form.append('missing_name', missingSku);
     form.append('replacement_sku', document.getElementById('editReplacementSku').value);
 
     fetch('/substitution/edit/' + id + '/', { method: 'POST', body: form })
