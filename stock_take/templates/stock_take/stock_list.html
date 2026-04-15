@@ -119,7 +119,7 @@
                     <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }} {% if item.stock_status == 'in-stock' %}<i class="bi bi-check-circle stock-icon-in" title="In Stock"></i>{% elif item.stock_status == 'low-stock' %}<i class="bi bi-exclamation-triangle stock-icon-low" title="Low Stock"></i>{% elif item.stock_status == 'out-of-stock' %}<i class="bi bi-x-circle stock-icon-out" title="Out of Stock"></i>{% else %}<i class="bi bi-dash-circle stock-icon-non" title="Non-Stock"></i>{% endif %}</td>
                     <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
                     <td class="text-center img-col">{% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" style="color: var(--primary-color);"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
-                    <td class="text-center img-col">{% if item.image %}<i class="bi bi-image-fill stock-has-image" title="Has image"></i>{% endif %}</td>
+                    <td class="text-center img-col">{% if item.image %}<i class="bi bi-camera-fill stock-has-image" title="View image" onclick="event.stopPropagation(); showImageLightbox('{{ item.image.url }}', '{{ item.name|escapejs }}')"></i>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -355,10 +355,12 @@ function applyFilters() {
     
     // Update filter count
     const countEl = document.getElementById('filter-count');
-    if (query || categoryFilter || stockTypeFilter) {
-        countEl.textContent = visibleCount + ' of ' + rows.length + ' shown';
-    } else {
-        countEl.textContent = '';
+    if (countEl) {
+        if (query || categoryFilter || stockTypeFilter) {
+            countEl.textContent = visibleCount + ' of ' + rows.length + ' shown';
+        } else {
+            countEl.textContent = '';
+        }
     }
 }
 
@@ -725,5 +727,28 @@ function deleteSkipItem(id, label) {
         .then(r => r.json())
         .then(d => { if (d.success) location.reload(); else alert(d.error); });
 }
+</script>
+
+<!-- Image Lightbox -->
+<div class="img-lightbox" id="imgLightbox" style="display:none;" onclick="closeImageLightbox()">
+    <img id="lightboxImg" src="" alt="">
+</div>
+
+<script>
+function showImageLightbox(url, name) {
+    const lb = document.getElementById('imgLightbox');
+    const img = document.getElementById('lightboxImg');
+    img.src = url;
+    img.alt = name;
+    lb.style.display = 'flex';
+}
+
+function closeImageLightbox() {
+    document.getElementById('imgLightbox').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeImageLightbox();
+});
 </script>
 {% endblock %}

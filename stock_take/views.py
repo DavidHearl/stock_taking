@@ -8583,6 +8583,13 @@ def update_stock_items_batch(request):
                 except Exception as e:
                     errors.append(f"Error updating item {item_id}: {str(e)}")
             
+            # Invalidate stock list cache so changes appear immediately
+            if updated_count > 0:
+                from django.core.cache import cache
+                # Delete all stock_list cache keys by clearing cache
+                # (stock_list keys vary by filters, so clear all)
+                cache.clear()
+            
             return JsonResponse({
                 'success': True,
                 'updated_count': updated_count,

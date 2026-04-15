@@ -25,21 +25,6 @@
     <div class="product-header">
         <div class="product-title-section">
             <div class="product-sku">
-                <div class="product-image-wrapper" style="position: relative;">
-                    {% if product.image %}
-                    <img src="{{ product.image.url }}" alt="{{ product.name }}" class="product-image" id="productImagePreview">
-                    {% else %}
-                    <div class="product-image" id="productImagePreview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-                        <i class="bi bi-image" style="font-size: 1.4rem;"></i>
-                    </div>
-                    {% endif %}
-                    <div class="image-upload-overlay" id="imageUploadOverlay" style="display: none;">
-                        <label for="imageUploadInput" class="image-upload-label">
-                            <i class="bi bi-camera"></i>
-                        </label>
-                        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;" onchange="uploadProductImage(this)">
-                    </div>
-                </div>
                 <div>
                     <span>{{ product.sku }}</span>
                     <div style="font-size: 0.85rem; font-weight: 400; color: var(--text-secondary); margin-top: 2px;">{{ product.name }}</div>
@@ -92,7 +77,14 @@
         <table class="product-table">
             <!-- Product Details -->
             <tr class="section-header-row">
-                <td colspan="4">Product Details</td>
+                <td colspan="4">
+                    <span style="display: flex; justify-content: space-between; align-items: center;">
+                        Product Details
+                        {% if product.image %}
+                        <i class="bi bi-camera-fill" style="font-size: 1rem; cursor: pointer; opacity: 0.7; text-transform: none; letter-spacing: 0; padding-right: 8px;" title="View image" onclick="showProductImage('{{ product.image.url }}', '{{ product.name|escapejs }}')"></i>
+                        {% endif %}
+                    </span>
+                </td>
             </tr>
             <tr>
                 <td class="info-label">SKU</td>
@@ -150,12 +142,6 @@
             <tr>
                 <td class="info-label">Remaining Available</td>
                 <td class="info-value" style="{% if remaining < product.par_level %}color: #dc3545;{% else %}color: #28a745;{% endif %}">{{ remaining }}{% if incoming %} <span style="color: #0d6efd; font-size: 0.85rem;">(+{{ incoming }} incoming)</span>{% endif %}</td>
-                <td class="info-label">Stock Take Group</td>
-                <td class="info-value" data-field="stock_take_group_id" data-value="{{ product.stock_take_group.id }}">{{ product.stock_take_group.name|default:"Not Set" }}</td>
-            </tr>
-            <tr>
-                <td class="info-label">Serial/Batch</td>
-                <td class="info-value" data-field="serial_or_batch" data-value="{{ product.serial_or_batch }}">{{ product.serial_or_batch|default:"-" }}</td>
                 <td class="info-label">Min Order Qty</td>
                 <td class="info-value" data-field="min_order_qty" data-value="{{ product.min_order_qty }}">{{ product.min_order_qty|default:"-" }}</td>
             </tr>
@@ -562,6 +548,29 @@
     </div>
 </div>
 
+<!-- Confirm Changes Modal -->
+<div class="modal-overlay" id="confirmChangesModal" style="display:none;" onclick="closeConfirmChanges(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 540px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-check-circle"></i> Confirm Changes</h3>
+            <button class="modal-close" onclick="closeConfirmChanges()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 14px; color: var(--text-secondary);">Review the following changes before saving:</p>
+            <div id="changesListContainer"></div>
+            <p style="margin-top: 14px; font-size: 0.8rem; color: var(--text-muted);">
+                <i class="bi bi-info-circle"></i> <span id="changesCount">0</span> field(s) will be updated.
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-md btn-secondary" onclick="closeConfirmChanges()">Cancel</button>
+            <button class="btn btn-md btn-success" id="confirmSaveBtn" onclick="confirmAndSave()">
+                <i class="bi bi-check-lg"></i> Save Changes
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
 let isEditMode = false;
 const originalValues = {};
@@ -883,14 +892,6 @@ function toggleEditMode() {
                 const selected = value == sup.id ? 'selected' : '';
                 input.innerHTML += `<option value="${sup.id}" ${selected}>${sup.name}</option>`;
             });
-        } else if (fieldName === 'stock_take_group_id') {
-            input = document.createElement('select');
-            input.className = 'form-select';
-            input.innerHTML = '<option value="">Not Set</option>';
-            stockTakeGroupsData.forEach(group => {
-                const selected = value == group.id ? 'selected' : '';
-                input.innerHTML += `<option value="${group.id}" ${selected}>${group.name}</option>`;
-            });
         } else if (fieldName === 'tracking_type') {
             input = document.createElement('select');
             input.className = 'form-select';
@@ -946,9 +947,6 @@ function cancelEdit() {
         } else if (fieldName === 'supplier_id') {
             const sup = suppliersData.find(s => s.id == displayValue);
             displayValue = sup ? sup.name : '-';
-        } else if (fieldName === 'stock_take_group_id') {
-            const group = stockTakeGroupsData.find(g => g.id == displayValue);
-            displayValue = group ? group.name : 'Not Set';
         } else if (fieldName === 'tracking_type') {
             const choice = trackingChoices.find(c => c[0] == displayValue);
             displayValue = choice ? choice[1] : displayValue;
@@ -959,16 +957,96 @@ function cancelEdit() {
 }
 
 async function saveProduct() {
+    const fieldLabels = {
+        sku: 'SKU', name: 'Name', description: 'Description', cost: 'Cost Price',
+        category_id: 'Category', tracking_type: 'Tracking Type', location: 'Location',
+        min_order_qty: 'Min Order Qty', par_level: 'Par Level',
+        supplier_id: 'Supplier', supplier_sku: 'Supplier SKU', product_url: 'Product URL',
+        length: 'Length', width: 'Width', height: 'Height', weight: 'Weight',
+        box_length: 'Box Length', box_width: 'Box Width', box_height: 'Box Height',
+        box_quantity: 'Items Per Box',
+    };
+
     const updates = {};
-    
+    const changes = [];
+
     document.querySelectorAll('.info-value[data-field]').forEach(field => {
         const fieldName = field.dataset.field;
         const input = field.querySelector('input, select, textarea');
         if (input) {
-            updates[fieldName] = input.value;
+            const newVal = input.value;
+            const oldVal = originalValues[fieldName] || '';
+            updates[fieldName] = newVal;
+
+            // Normalize empty-ish values so None/"None"/""/"null"/"-" all become ""
+            const norm = v => (v === null || v === undefined || v === 'None' || v === 'null' || v === '-' || v === '') ? '' : String(v).trim();
+            if (norm(newVal) !== norm(oldVal)) {
+                let oldDisplay = oldVal || '-';
+                let newDisplay = newVal || '-';
+
+                if (fieldName === 'cost') {
+                    oldDisplay = '£' + parseFloat(oldVal || 0).toFixed(2);
+                    newDisplay = '£' + parseFloat(newVal || 0).toFixed(2);
+                } else if (fieldName === 'category_id') {
+                    const oldCat = categoriesData.find(c => c.id == oldVal);
+                    const newCat = categoriesData.find(c => c.id == newVal);
+                    oldDisplay = oldCat ? oldCat.name : '-';
+                    newDisplay = newCat ? newCat.name : '-';
+                } else if (fieldName === 'supplier_id') {
+                    const oldSup = suppliersData.find(s => s.id == oldVal);
+                    const newSup = suppliersData.find(s => s.id == newVal);
+                    oldDisplay = oldSup ? oldSup.name : '-';
+                    newDisplay = newSup ? newSup.name : '-';
+                } else if (fieldName === 'tracking_type') {
+                    const oldC = trackingChoices.find(c => c[0] == oldVal);
+                    const newC = trackingChoices.find(c => c[0] == newVal);
+                    oldDisplay = oldC ? oldC[1] : oldVal;
+                    newDisplay = newC ? newC[1] : newVal;
+                }
+
+                changes.push({
+                    label: fieldLabels[fieldName] || fieldName,
+                    oldVal: oldDisplay,
+                    newVal: newDisplay,
+                });
+            }
         }
     });
-    
+
+    if (changes.length === 0) {
+        cancelEdit();
+        return;
+    }
+
+    // Build changes summary table
+    let html = '<table class="product-table" style="font-size: 0.82rem;">';
+    html += '<thead><tr><th>Field</th><th>Current</th><th></th><th>New</th></tr></thead><tbody>';
+    changes.forEach(c => {
+        html += `<tr>
+            <td style="font-weight:500; color:var(--text-secondary);">${c.label}</td>
+            <td style="color:var(--danger-color); text-decoration:line-through;">${c.oldVal}</td>
+            <td class="text-center"><i class="bi bi-arrow-right" style="color:var(--text-muted);"></i></td>
+            <td style="color:var(--success-color); font-weight:600;">${c.newVal}</td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+
+    document.getElementById('changesListContainer').innerHTML = html;
+    document.getElementById('changesCount').textContent = changes.length;
+    window._pendingUpdates = updates;
+    document.getElementById('confirmChangesModal').style.display = 'flex';
+}
+
+function closeConfirmChanges(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('confirmChangesModal').style.display = 'none';
+}
+
+async function confirmAndSave() {
+    const btn = document.getElementById('confirmSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
+
     try {
         const response = await fetch('{% url "update_stock_items_batch" %}', {
             method: 'POST',
@@ -979,22 +1057,25 @@ async function saveProduct() {
             body: JSON.stringify({
                 items: [{
                     id: {{ product.id }},
-                    ...updates
+                    ...window._pendingUpdates
                 }]
             })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
-            alert('Product updated successfully!');
             location.reload();
         } else {
             alert('Error: ' + (result.error || 'Failed to update product'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Save Changes';
         }
     } catch (error) {
         console.error('Error:', error);
         alert('Failed to save changes: ' + error);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Save Changes';
     }
 }
 
@@ -1352,5 +1433,21 @@ document.getElementById('delete-product-form').addEventListener('submit', functi
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Deleting...';
 });
+
+function showProductImage(url, name) {
+    let lb = document.getElementById('productLightbox');
+    if (!lb) {
+        lb = document.createElement('div');
+        lb.id = 'productLightbox';
+        lb.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;cursor:pointer;';
+        lb.onclick = function() { lb.style.display = 'none'; };
+        lb.innerHTML = '<img style="max-width:80vw;max-height:80vh;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.5);object-fit:contain;">';
+        document.body.appendChild(lb);
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') lb.style.display = 'none'; });
+    }
+    lb.querySelector('img').src = url;
+    lb.querySelector('img').alt = name;
+    lb.style.display = 'flex';
+}
 </script>
 {% endblock %}

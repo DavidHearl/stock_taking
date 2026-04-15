@@ -7,7 +7,10 @@ showing SKU, supplier code, cost, dimensions, etc.
 
 import io
 import os
+import tempfile
 from datetime import datetime
+from urllib.request import urlopen
+from urllib.error import URLError
 
 from django.conf import settings
 
@@ -295,13 +298,11 @@ def generate_product_catalog_pdf(stock_items, include_images=False):
                 if include_images:
                     img_cell = ''
                     if item.image:
-                        img_path = os.path.join(settings.MEDIA_ROOT, str(item.image))
-                        if os.path.exists(img_path):
-                            try:
-                                img_cell = Image(img_path, width=10 * mm, height=10 * mm, kind='proportional')
-                            except Exception:
-                                img_cell = Paragraph('-', styles['CellTextCenter'])
-                        else:
+                        try:
+                            img_url = item.image.url
+                            img_data = io.BytesIO(urlopen(img_url, timeout=10).read())
+                            img_cell = Image(img_data, width=10 * mm, height=10 * mm, kind='proportional')
+                        except Exception:
                             img_cell = Paragraph('-', styles['CellTextCenter'])
                     else:
                         img_cell = Paragraph('-', styles['CellTextCenter'])
