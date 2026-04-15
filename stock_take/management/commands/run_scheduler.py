@@ -35,6 +35,7 @@ from datetime import date, datetime
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
+from django.db import close_old_connections
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ def _run_job(command: str, kwargs: dict, stdout, style) -> None:
 
     stdout.write(style.NOTICE(f'[{ts()}] Running: {command}'))
     try:
+        close_old_connections()
         call_command(command, **kwargs)
         stdout.write(style.SUCCESS(f'[{ts()}] {command} completed successfully.'))
     except Exception as exc:
@@ -81,6 +83,8 @@ def _run_job(command: str, kwargs: dict, stdout, style) -> None:
             )
         except Exception:
             pass  # DB may be down — nothing more we can do
+    finally:
+        close_old_connections()
 
 
 class Command(BaseCommand):
