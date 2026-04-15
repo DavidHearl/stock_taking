@@ -379,6 +379,8 @@ def add_product(request):
 @login_required
 def upload_product_image(request, item_id):
     """Upload or remove a product image"""
+    from django.core.cache import cache
+
     product = get_object_or_404(StockItem, id=item_id)
     
     if request.method == 'POST':
@@ -392,6 +394,7 @@ def upload_product_image(request, item_id):
         
         product.image = image_file
         product.save()
+        cache.clear()
         return JsonResponse({'success': True})
     
     elif request.method == 'DELETE':
@@ -399,6 +402,7 @@ def upload_product_image(request, item_id):
             product.image.delete(save=False)
             product.image = None
             product.save()
+        cache.clear()
         return JsonResponse({'success': True})
     
     return JsonResponse({'success': False, 'error': 'Invalid method'}, status=405)

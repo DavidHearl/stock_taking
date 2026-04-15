@@ -5958,14 +5958,28 @@ def update_product_quantity(request):
 
 @login_required
 def bulk_update_products(request):
-    """Bulk update selected products' supplier, category, or tracking type"""
+    """Bulk update selected products' supplier, category, tracking type, or image"""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
     try:
         import json
         from .models import Supplier
-        data = json.loads(request.body)
-        item_ids = data.get('item_ids', [])
+        
+        # Support both JSON and FormData
+        if request.content_type and 'multipart' in request.content_type:
+            item_ids = json.loads(request.POST.get('item_ids', '[]'))
+            supplier_id = request.POST.get('supplier_id')
+            category_id = request.POST.get('category_id')
+            tracking_type = request.POST.get('tracking_type')
+            image_file = request.FILES.get('image')
+        else:
+            data = json.loads(request.body)
+            item_ids = data.get('item_ids', [])
+            supplier_id = data.get('supplier_id')
+            category_id = data.get('category_id')
+            tracking_type = data.get('tracking_type')
+            image_file = None
+        
         if not item_ids:
             return JsonResponse({'success': False, 'error': 'No items selected'}, status=400)
         
@@ -5974,20 +5988,30 @@ def bulk_update_products(request):
         items = StockItem.objects.filter(id__in=item_ids)
         
         update_fields = {}
-        if data.get('supplier_id'):
-            supplier = Supplier.objects.get(id=int(data['supplier_id']))
+        if supplier_id:
+            supplier = Supplier.objects.get(id=int(supplier_id))
             update_fields['supplier'] = supplier
-        if data.get('category_id'):
-            category = Category.objects.get(id=int(data['category_id']))
+        if category_id:
+            category = Category.objects.get(id=int(category_id))
             update_fields['category'] = category
-        if data.get('tracking_type'):
-            if data['tracking_type'] in ('stock', 'non-stock', 'not-classified'):
-                update_fields['tracking_type'] = data['tracking_type']
+        if tracking_type:
+            if tracking_type in ('stock', 'non-stock', 'not-classified'):
+                update_fields['tracking_type'] = tracking_type
         
-        if not update_fields:
+        if not update_fields and not image_file:
             return JsonResponse({'success': False, 'error': 'No fields to update'}, status=400)
         
-        count = items.update(**update_fields)
+        count = 0
+        if update_fields:
+            count = items.update(**update_fields)
+        
+        # Apply image to each item individually (ImageField needs per-instance save)
+        if image_file:
+            from django.core.files.base import ContentFile
+            image_data = image_file.read()
+            for item in items:
+                item.image.save(image_file.name, ContentFile(image_data), save=True)
+            count = max(count, items.count())
         
         # Clear cache
         from django.core.cache import cache
@@ -5998,6 +6022,31 @@ def bulk_update_products(request):
         return JsonResponse({'success': False, 'error': 'Invalid supplier or category'}, status=400)
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=400)
+
+@login_required
+def egger_colours(request):
+    """Return unique Egger board colours with images"""
+    import re
+    items = StockItem.objects.filter(
+        sku__startswith='SHT_MFC_EGG_',
+        image__isnull=False
+    ).exclude(image='').only('sku', 'image', 'name')
+    
+    seen_codes = {}
+    for item in items:
+        match = re.match(r'SHT_MFC_EGG_([A-Za-z0-9]+)_', item.sku)
+        if match:
+            code = match.group(1)
+            if code not in seen_codes:
+                seen_codes[code] = {
+                    'code': code,
+                    'image_url': item.image.url,
+                    'name': item.name,
+                }
+    
+    colours = sorted(seen_codes.values(), key=lambda x: x['code'])
+    return JsonResponse({'colours': colours})
+
 
 def update_item(request, item_id):
     """Update a single stock item via AJAX"""

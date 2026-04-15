@@ -58,6 +58,7 @@ urlpatterns = [
     path('update/<int:item_id>/', views.update_item, name='update_item'),
     path('update-product-quantity/', views.update_product_quantity, name='update_product_quantity'),
     path('bulk-update-products/', views.bulk_update_products, name='bulk_update_products'),
+    path('egger-colours/', views.egger_colours, name='egger_colours'),
     
     # Purchase Invoices (inbound / supplier invoices)
     path('purchase-invoices/', purchase_invoices_list, name='purchase_invoices_list'),

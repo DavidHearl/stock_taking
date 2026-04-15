@@ -77,6 +77,9 @@
                 <a class="dots-menu-item" href="{% url 'product_catalog_pdf' %}?images=1" onclick="closeDotsMenu()">
                     <i class="bi bi-file-earmark-image"></i> Product Catalog (with Images)
                 </a>
+                <button class="dots-menu-item" onclick="openEggerModal(); closeDotsMenu()">
+                    <i class="bi bi-palette"></i> Egger Colours
+                </button>
             </div>
         </div>
     </div>
@@ -118,8 +121,8 @@
                     </td>
                     <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }} {% if item.stock_status == 'in-stock' %}<i class="bi bi-check-circle stock-icon-in" title="In Stock"></i>{% elif item.stock_status == 'low-stock' %}<i class="bi bi-exclamation-triangle stock-icon-low" title="Low Stock"></i>{% elif item.stock_status == 'out-of-stock' %}<i class="bi bi-x-circle stock-icon-out" title="Out of Stock"></i>{% else %}<i class="bi bi-dash-circle stock-icon-non" title="Non-Stock"></i>{% endif %}</td>
                     <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
-                    <td class="text-center img-col">{% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" style="color: var(--primary-color);"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
-                    <td class="text-center img-col">{% if item.image %}<i class="bi bi-camera-fill stock-has-image" title="View image" onclick="event.stopPropagation(); showImageLightbox('{{ item.image.url }}', '{{ item.name|escapejs }}')"></i>{% endif %}</td>
+                    <td class="text-center img-col">{% if item.product_url and 'http' in item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" style="color: var(--primary-color);"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
+                    <td class="text-center img-col">{% if item.image %}<span class="img-preview-trigger" onclick="event.stopPropagation(); showImageLightbox('{{ item.image.url }}', '{{ item.name|escapejs }}')"><i class="bi bi-camera-fill stock-has-image" title="View image"></i><span class="img-preview-popup"><img src="{{ item.image.url }}" alt="{{ item.name }}"></span></span>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -170,6 +173,11 @@
                         <option value="non-stock">Non-Stock</option>
                         <option value="not-classified">Not Classified</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label for="bulkImage">Image</label>
+                    <input type="file" id="bulkImage" accept="image/*" class="form-control">
+                    <small class="bulk-edit-hint" style="margin-top:4px;">Applies the same image to all selected items.</small>
                 </div>
             </div>
             <div class="modal-footer">
@@ -263,6 +271,29 @@
             </div>
         </div>
     </div>
+</div>
+
+<!-- Egger Colours Modal -->
+<div class="modal" id="eggerColoursModal">
+    <div class="modal-overlay" onclick="closeModal('eggerColoursModal')"></div>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-palette"></i> Egger Colours</h3>
+                <button type="button" class="modal-close" onclick="closeModal('eggerColoursModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="eggerColoursGrid" class="egger-grid">
+                    <div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Egger Image Lightbox -->
+<div class="egger-lightbox" id="eggerLightbox" onclick="closeEggerLightbox()">
+    <img id="eggerLightboxImg" src="" alt="">
 </div>
 
 <!-- Edit Substitution Modal -->
@@ -600,28 +631,31 @@ function applyBulkEdit() {
     const supplier = document.getElementById('bulkSupplier').value;
     const category = document.getElementById('bulkCategory').value;
     const tracking = document.getElementById('bulkTracking').value;
+    const imageInput = document.getElementById('bulkImage');
+    const imageFile = imageInput.files && imageInput.files[0];
     
-    if (!supplier && !category && !tracking) {
+    if (!supplier && !category && !tracking && !imageFile) {
         alert('Please select at least one field to update.');
         return;
     }
-    
-    const payload = { item_ids: ids };
-    if (supplier) payload.supplier_id = supplier;
-    if (category) payload.category_id = category;
-    if (tracking) payload.tracking_type = tracking;
     
     const btn = event.target.closest('.btn');
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
     
+    const formData = new FormData();
+    formData.append('item_ids', JSON.stringify(ids));
+    if (supplier) formData.append('supplier_id', supplier);
+    if (category) formData.append('category_id', category);
+    if (tracking) formData.append('tracking_type', tracking);
+    if (imageFile) formData.append('image', imageFile);
+    
     fetch('{% url "bulk_update_products" %}', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}'
         },
-        body: JSON.stringify(payload)
+        body: formData
     })
     .then(r => r.json())
     .then(data => {
@@ -750,5 +784,63 @@ function closeImageLightbox() {
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') closeImageLightbox();
 });
+
+// Position image preview popups on hover (fixed positioning to escape overflow:hidden)
+document.querySelectorAll('.img-preview-trigger').forEach((trigger, index) => {
+    const popup = trigger.querySelector('.img-preview-popup');
+    trigger.addEventListener('mouseenter', function() {
+        const rect = trigger.getBoundingClientRect();
+        popup.style.display = 'block';
+        popup.style.left = (rect.left + rect.width / 2 - 100) + 'px';
+        // Show below for top rows, above for the rest
+        if (rect.top < 280) {
+            popup.style.top = (rect.bottom + 10) + 'px';
+        } else {
+            popup.style.top = (rect.top - 210) + 'px';
+        }
+    });
+    trigger.addEventListener('mouseleave', function() {
+        popup.style.display = 'none';
+    });
+});
+</script>
+
+<script>
+// Egger Colours Modal
+function openEggerModal() {
+    openModal('eggerColoursModal');
+    const grid = document.getElementById('eggerColoursGrid');
+    grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>';
+    
+    fetch("{% url 'egger_colours' %}", {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.colours || data.colours.length === 0) {
+            grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">No Egger colours with images found</div>';
+            return;
+        }
+        grid.innerHTML = data.colours.map(c => `
+            <div class="egger-tile" onclick="openEggerLightbox('${c.image_url}')">
+                <img src="${c.image_url}" alt="${c.code}" loading="lazy">
+                <div class="egger-tile-code">${c.code}</div>
+            </div>
+        `).join('');
+    })
+    .catch(() => {
+        grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">Failed to load colours</div>';
+    });
+}
+
+function openEggerLightbox(url) {
+    const lb = document.getElementById('eggerLightbox');
+    document.getElementById('eggerLightboxImg').src = url;
+    lb.style.display = 'flex';
+}
+
+function closeEggerLightbox() {
+    document.getElementById('eggerLightbox').style.display = 'none';
+}
 </script>
 {% endblock %}

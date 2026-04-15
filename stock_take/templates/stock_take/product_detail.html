@@ -499,6 +499,25 @@
     </div>
 </div>
 
+<!-- Image Confirm Modal -->
+<div class="modal" id="imageConfirmModal" style="z-index: 10001;">
+    <div class="modal-dialog" style="max-width: 400px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 id="imageConfirmTitle">Confirm</h5>
+                <button type="button" class="btn-close" onclick="closeImageConfirmModal()"></button>
+            </div>
+            <div class="modal-body">
+                <p id="imageConfirmMessage" style="margin: 0;"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeImageConfirmModal()">Cancel</button>
+                <button type="button" class="btn" id="imageConfirmBtn" onclick="executeImageAction()">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Add Note Modal -->
 <div class="modal" id="addNoteModal">
     <div class="modal-dialog">
@@ -1245,11 +1264,50 @@ function deleteSubstitution(subId) {
     .catch(err => alert('Error: ' + err.message));
 }
 
-async function uploadProductImage(input) {
+let _pendingImageAction = null;
+let _pendingImageFile = null;
+
+function closeImageConfirmModal() {
+    document.getElementById('imageConfirmModal').style.display = 'none';
+    _pendingImageAction = null;
+    _pendingImageFile = null;
+}
+
+function executeImageAction() {
+    const action = _pendingImageAction;
+    const file = _pendingImageFile;
+    closeImageConfirmModal();
+    if (action === 'remove') {
+        _doRemoveProductImage();
+    } else if (action === 'replace') {
+        _doUploadProductImage(file);
+    }
+}
+
+function uploadProductImage(input) {
     if (!input.files || !input.files[0]) return;
-    
+    const file = input.files[0];
+    // Reset input so the same file can be re-selected
+    const clonedInput = input.cloneNode(true);
+    input.parentNode.replaceChild(clonedInput, input);
+
+    {% if product.image %}
+    _pendingImageAction = 'replace';
+    _pendingImageFile = file;
+    document.getElementById('imageConfirmTitle').textContent = 'Replace Image';
+    document.getElementById('imageConfirmMessage').textContent = 'Replace the current product image with "' + file.name + '"?';
+    const btn = document.getElementById('imageConfirmBtn');
+    btn.textContent = 'Replace';
+    btn.className = 'btn btn-warning';
+    document.getElementById('imageConfirmModal').style.display = 'flex';
+    {% else %}
+    _doUploadProductImage(file);
+    {% endif %}
+}
+
+async function _doUploadProductImage(file) {
     const formData = new FormData();
-    formData.append('image', input.files[0]);
+    formData.append('image', file);
     
     try {
         const response = await fetch('{% url "upload_product_image" product.id %}', {
@@ -1271,9 +1329,17 @@ async function uploadProductImage(input) {
     }
 }
 
-async function removeProductImage() {
-    if (!confirm('Remove the product image?')) return;
-    
+function removeProductImage() {
+    _pendingImageAction = 'remove';
+    document.getElementById('imageConfirmTitle').textContent = 'Remove Image';
+    document.getElementById('imageConfirmMessage').textContent = 'Are you sure you want to remove the product image? This cannot be undone.';
+    const btn = document.getElementById('imageConfirmBtn');
+    btn.textContent = 'Remove';
+    btn.className = 'btn btn-danger';
+    document.getElementById('imageConfirmModal').style.display = 'flex';
+}
+
+async function _doRemoveProductImage() {
     try {
         const response = await fetch('{% url "upload_product_image" product.id %}', {
             method: 'DELETE',

@@ -642,21 +642,15 @@ def events_list(request):
 
 @login_required
 def sales_list(request):
-    """Display list of Anthill sales (Category 3 only) with search, date-bracket filters, and location."""
-    from django.utils import timezone
+    """Display list of Anthill sales (Category 3 only) with search and status filters."""
     from django.core.paginator import Paginator
-    from datetime import timedelta
 
     search_query = request.GET.get('q', '').strip()
-    age_filter = request.GET.get('age', '1y')
+    status_filter = request.GET.get('status', 'open')
 
     # Location from user profile
     profile = getattr(request.user, 'profile', None)
     location_filter = profile.selected_location if profile else ''
-
-    now = timezone.now()
-    cutoff_1y = now - timedelta(days=365)
-    cutoff_2y = now - timedelta(days=730)
 
     # Only Category 3 = actual sales (Room Sale + Historic Sale), exclude Cancelled
     sales_base = AnthillSale.objects.select_related('customer', 'order').filter(
@@ -690,54 +684,29 @@ def sales_list(request):
         for extra in per_term_qs[1:]:
             search_q &= extra
 
-    # Date bracket filters
-    # Historic = sales with activity_type starting with 'Historic'
-    # Date-based brackets exclude historic sales
-    def bracket_filter(qs, bracket):
-        if bracket == '1y':
-            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_1y)
-        elif bracket == '1_2y':
-            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_2y, activity_date__lt=cutoff_1y)
-        elif bracket == '2_10y':
-            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__lt=cutoff_2y).exclude(activity_date__isnull=True)
-        elif bracket == 'historic':
-            return qs.filter(activity_type__istartswith='Historic')
+    # Status-based filters
+    complete_statuses = ['complete', 'completed', 'won']
+
+    def status_bracket(qs, bracket):
+        if bracket == 'open':
+            return qs.exclude(status__iregex=r'^(' + '|'.join(complete_statuses) + ')$')
+        elif bracket == 'complete':
+            return qs.filter(status__iregex=r'^(' + '|'.join(complete_statuses) + ')$')
         return qs
 
-    count_1y = bracket_filter(sales_base, '1y').count()
-    count_1_2y = bracket_filter(sales_base, '1_2y').count()
-    count_2_10y = bracket_filter(sales_base, '2_10y').count()
-    count_historic = bracket_filter(sales_base, 'historic').count()
+    count_open = status_bracket(sales_base, 'open').count()
+    count_complete = status_bracket(sales_base, 'complete').count()
 
-    sales = bracket_filter(sales_base, age_filter)
+    sales = status_bracket(sales_base, status_filter)
 
-    search_expanded_from = None
     if search_q:
-        filtered = sales.filter(search_q)
-        if filtered.exists():
-            sales = filtered
-        else:
-            bracket_order = ['1y', '1_2y', '2_10y', 'historic']
-            try:
-                start_idx = bracket_order.index(age_filter) + 1
-            except ValueError:
-                start_idx = 0
-            remaining = bracket_order[start_idx:] + bracket_order[:bracket_order.index(age_filter)]
-            for bracket in remaining:
-                expanded_qs = bracket_filter(sales_base, bracket).filter(search_q)
-                if expanded_qs.exists():
-                    sales = expanded_qs
-                    search_expanded_from = bracket
-                    break
-            else:
-                sales = filtered
+        sales = sales.filter(search_q)
 
     page_number = request.GET.get('page', 1)
     paginator = Paginator(sales, 100)
     page_obj = paginator.get_page(page_number)
 
     # Build a fallback map: anthill_activity_id -> Order (via Order.sale_number match)
-    # Used when AnthillSale.order FK is not populated
     page_activity_ids = [s.anthill_activity_id for s in page_obj]
     matched_orders = Order.objects.filter(sale_number__in=page_activity_ids).only('id', 'sale_number')
     order_map = {o.sale_number: o for o in matched_orders}
@@ -747,13 +716,10 @@ def sales_list(request):
         'page_obj': page_obj,
         'filtered_count': paginator.count,
         'search_query': search_query,
-        'age_filter': age_filter,
+        'status_filter': status_filter,
         'location_filter': location_filter,
-        'count_1y': count_1y,
-        'count_1_2y': count_1_2y,
-        'count_2_10y': count_2_10y,
-        'count_historic': count_historic,
-        'search_expanded_from': search_expanded_from,
+        'count_open': count_open,
+        'count_complete': count_complete,
         'order_map': order_map,
     }
 
