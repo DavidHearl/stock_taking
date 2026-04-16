@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
 {% load static humanize %}
 
-{% block title %}Invoices{% endblock %}
-{% block page_title %}Invoices{% endblock %}
+{% block title %}Sales Invoices{% endblock %}
+{% block page_title %}Sales Invoices ({{ total_invoices|intcomma }}){% endblock %}
 
 {% block nav_invoices_active %}active{% endblock %}
 
@@ -12,98 +12,42 @@
 
 {% block content %}
 
-<!-- Sync Bar -->
-<div class="inv-sync-bar">
-    <div class="inv-sync-info">
-        {% if last_sync %}
-        <span class="inv-sync-label">Last synced: {{ last_sync|date:"d M Y H:i" }}</span>
-        {% else %}
-        <span class="inv-sync-label">Never synced</span>
-        {% endif %}
+<!-- Toolbar: tabs + search + actions -->
+<div class="inv-toolbar">
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="invoiceSearch" placeholder="Search invoices..." autocomplete="off">
     </div>
-    <div class="inv-sync-actions">
+    <div class="inv-toolbar-actions">
         <button class="inv-sync-btn" id="add-invoice-btn" onclick="toggleAddInvoiceModal()">
             <i class="bi bi-plus-lg"></i>
             <span>Add Invoice</span>
         </button>
-        <button class="inv-sync-btn secondary" id="full-sync-btn" onclick="syncInvoices(true)" title="Re-sync all invoices including payment data">
-            <i class="bi bi-arrow-clockwise"></i>
-            <span>Full Resync</span>
-        </button>
-        <button class="inv-sync-btn" id="sync-btn" onclick="syncInvoices(false)">
+        <button class="inv-sync-btn anthill" id="sync-btn" onclick="syncFromAnthill()">
             <i class="bi bi-arrow-repeat" id="sync-icon"></i>
-            <span id="sync-text">Sync Invoices</span>
+            <span id="sync-text">Sync from Anthill</span>
         </button>
-    </div>
-</div>
-
-<!-- Sync Progress -->
-<div class="inv-sync-progress" id="sync-progress" style="display:none;">
-    <div class="inv-sync-progress-inner">
-        <div class="spinner"></div>
-        <span id="sync-message">Syncing invoices...</span>
-    </div>
-    <div class="inv-sync-log" id="sync-log"></div>
-</div>
-
-<!-- Stats Bar -->
-<div class="inv-stats-bar">
-    <div class="inv-stat-card">
-        <span class="stat-label">Total Invoices</span>
-        <span class="stat-value primary">{{ total_invoices|intcomma }}</span>
-    </div>
-    <div class="inv-stat-card">
-        <span class="stat-label">Total Value</span>
-        <span class="stat-value">£{{ total_value|floatformat:2|intcomma }}</span>
-    </div>
-    <div class="inv-stat-card">
-        <span class="stat-label">Outstanding</span>
-        <span class="stat-value {% if total_outstanding > 0 %}danger{% else %}success{% endif %}">£{{ total_outstanding|floatformat:2|intcomma }}</span>
-    </div>
-    <div class="inv-stat-card">
-        <span class="stat-label">Paid</span>
-        <span class="stat-value success">£{{ total_paid|floatformat:2|intcomma }}</span>
-    </div>
-    <div class="inv-stat-card">
-        <span class="stat-label">Overdue</span>
-        <span class="stat-value {% if overdue_count > 0 %}danger{% else %}success{% endif %}">{{ overdue_count }}</span>
-    </div>
-</div>
-
-<!-- Filter Bar -->
-<div class="inv-filter-bar">
-    <div class="inv-search-box">
-        <form method="get" action="">
-            {% if status_filter != 'all' %}
-            <input type="hidden" name="status" value="{{ status_filter }}">
-            {% endif %}
-            <input type="text" name="q" value="{{ search_query }}" placeholder="  Search invoices..." autocomplete="off">
-        </form>
     </div>
 </div>
 
 <!-- Status Tabs -->
-<div class="inv-tabs">
-    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=all" 
-       class="inv-tab {% if status_filter == 'all' %}active{% endif %}">
-        All ({{ total_invoices }})
-    </a>
-    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=unpaid" 
-       class="inv-tab {% if status_filter == 'unpaid' %}active{% endif %}">
-        Unpaid ({{ unpaid_count }})
-    </a>
-    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=draft" 
-       class="inv-tab {% if status_filter == 'draft' %}active{% endif %}">
-        Draft
-    </a>
-    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=approved" 
-       class="inv-tab {% if status_filter == 'approved' %}active{% endif %}">
-        Approved
-    </a>
-    <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=sent" 
-       class="inv-tab {% if status_filter == 'sent' %}active{% endif %}">
-        Sent
-    </a>
+<div class="inv-toolbar" style="margin-bottom: 16px;">
+    <div class="tab-nav tab-nav-pills">
+        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=all" 
+           class="tab-button {% if status_filter == 'all' %}active{% endif %}">
+            All ({{ total_invoices }})
+        </a>
+        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=unpaid" 
+           class="tab-button {% if status_filter == 'unpaid' %}active{% endif %}">
+            Unpaid ({{ unpaid_count }})
+        </a>
+    </div>
+    <div style="margin-left: auto;">
+        <button class="inv-sync-btn" id="hide-no-date-btn" onclick="toggleHideNoDate()">
+            <i class="bi bi-calendar-x" id="hide-no-date-icon"></i>
+            <span id="hide-no-date-text">Show No-Date</span>
+        </button>
+    </div>
 </div>
 
 <!-- Invoices Table -->
@@ -112,32 +56,28 @@
     <table class="inv-table" id="invoices-table">
         <thead>
             <tr>
-                <th>Invoice #</th>
+                <th>Contract #</th>
                 <th>Client</th>
-                <th>Project</th>
+                <th>Showroom</th>
+                <th>Payment Type</th>
                 <th>Date</th>
-                <th>Due Date</th>
+                <th>Method</th>
                 <th>Status</th>
-                <th style="text-align: right;">Total</th>
-                <th style="text-align: right;">Outstanding</th>
+                <th style="text-align: right;">Amount</th>
                 <th>Payment</th>
-                <th style="width:30px;"></th>
             </tr>
         </thead>
         <tbody>
             {% for invoice in invoices %}
-            <tr onclick="window.location='{% url 'invoice_detail' invoice.id %}'" style="cursor:pointer;">
+            <tr onclick="window.location='{% url 'invoice_detail' invoice.id %}'" style="cursor:pointer;" data-has-date="{% if invoice.date %}1{% else %}0{% endif %}">
                 <td>
-                    <a href="{% url 'invoice_detail' invoice.id %}" class="inv-number">{{ invoice.invoice_number }}</a>
+                    <a href="{% url 'invoice_detail' invoice.id %}" class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</a>
                 </td>
                 <td>
                     <span class="inv-client" title="{{ invoice.client_name }}">{{ invoice.client_name }}</span>
                 </td>
-                <td>
-                    {% if invoice.project_number %}
-                    <span class="inv-project">{{ invoice.project_number }}</span>
-                    {% endif %}
-                </td>
+                <td>{{ invoice.showroom|default:"—" }}</td>
+                <td>{{ invoice.payment_type|default:"—" }}</td>
                 <td>
                     {% if invoice.date %}
                     {{ invoice.date|date:"d M Y" }}
@@ -145,27 +85,12 @@
                     —
                     {% endif %}
                 </td>
+                <td>{{ invoice.payment_method|default:"—" }}</td>
                 <td>
-                    {% if invoice.due_date %}
-                    <span {% if invoice.is_overdue %}style="color: #dc3545; font-weight: 600;"{% endif %}>
-                        {{ invoice.due_date|date:"d M Y" }}
-                    </span>
-                    {% else %}
-                    —
-                    {% endif %}
-                </td>
-                <td>
-                    <span class="inv-status {{ invoice.status|lower }}">{{ invoice.status }}</span>
+                    <span class="inv-status {{ invoice.anthill_payment_status|lower|default:invoice.status|lower }}">{{ invoice.anthill_payment_status|default:invoice.status }}</span>
                 </td>
                 <td class="number-cell">
                     £{{ invoice.total|floatformat:2|intcomma }}
-                </td>
-                <td class="number-cell">
-                    {% if invoice.amount_outstanding > 0 %}
-                    <span style="color: #dc3545;">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
-                    {% else %}
-                    <span style="color: #28a745;">£0.00</span>
-                    {% endif %}
                 </td>
                 <td>
                     {% if invoice.is_overdue %}
@@ -176,11 +101,6 @@
                     <span class="inv-payment partial">Partial</span>
                     {% else %}
                     <span class="inv-payment unpaid">Unpaid</span>
-                    {% endif %}
-                </td>
-                <td style="text-align:center;">
-                    {% if invoice.attachment %}
-                    <i class="bi bi-paperclip" style="color:var(--primary-color);" title="Has attachment"></i>
                     {% endif %}
                 </td>
             </tr>
@@ -255,6 +175,59 @@
     </div>
 </div>
 
+<!-- Anthill Sync Log Modal -->
+<div class="modal-overlay" id="anthill-sync-modal" style="display:none;" onclick="closeAnthillSyncModal(event)">
+    <div class="modal-dialog" style="max-width: 1200px; width: 95vw;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-cloud-download"></i> Anthill Payments Sync{% if current_location %} — {{ current_location }}{% endif %}</h3>
+            <button class="modal-close" onclick="closeAnthillSyncModal()">&times;</button>
+        </div>
+        <div class="modal-body" style="padding: 0; max-height: 65vh; overflow-y: auto;">
+            <!-- Period selection step -->
+            <div id="anthill-period-picker" style="padding: 20px 24px;">
+                <p style="margin: 0 0 12px; font-size: 0.85rem; color: var(--text-secondary);">Select a time period to sync:</p>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+                    <button class="btn-cancel" onclick="startSync('today')" style="justify-content: center;"><i class="bi bi-calendar-day"></i>&nbsp; Today</button>
+                    <button class="btn-cancel" onclick="startSync('this_week')" style="justify-content: center;"><i class="bi bi-calendar-week"></i>&nbsp; This Week</button>
+                    <button class="btn-cancel" onclick="startSync('last_7_days')" style="justify-content: center;"><i class="bi bi-calendar3"></i>&nbsp; Last 7 Days</button>
+                    <button class="btn-cancel" onclick="startSync('last_28_days')" style="justify-content: center;"><i class="bi bi-calendar3"></i>&nbsp; Last 28 Days</button>
+                    <button class="btn-cancel" onclick="startSync('this_month')" style="justify-content: center;"><i class="bi bi-calendar-month"></i>&nbsp; This Month</button>
+                    <button class="btn-cancel" onclick="startSync('this_year')" style="justify-content: center;"><i class="bi bi-calendar-range"></i>&nbsp; This Year</button>
+                    <button class="btn-cancel" onclick="startSync('last_12_months')" style="justify-content: center;"><i class="bi bi-calendar3-range"></i>&nbsp; Last 12 Months</button>
+                    <button class="btn-cancel" onclick="startSync('all_time')" style="justify-content: center;"><i class="bi bi-clock-history"></i>&nbsp; All Time</button>
+                </div>
+            </div>
+            <!-- Sync progress + results -->
+            <div id="anthill-sync-status" style="padding: 12px 16px; font-size: 0.85rem; color: var(--text-secondary); display: none;">
+                <i class="bi bi-arrow-repeat spinning"></i> Fetching payments from Anthill...
+            </div>
+            <table class="inv-table" id="anthill-sync-table" style="display:none;">
+                <thead>
+                    <tr>
+                        <th style="width:32px; text-align:center;"></th>
+                        <th>Showroom</th>
+                        <th>Date</th>
+                        <th>Customer</th>
+                        <th>Type</th>
+                        <th style="text-align:right;">Amount</th>
+                        <th>Status</th>
+                        <th>Contract #</th>
+                        <th>Method</th>
+                    </tr>
+                </thead>
+                <tbody id="anthill-sync-tbody"></tbody>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <span id="anthill-sync-summary" style="flex:1; font-size:0.82rem; color:var(--text-secondary);"></span>
+            <button type="button" class="btn-cancel" onclick="closeAnthillSyncModal()">Close</button>
+            <button type="button" class="btn-save" id="anthill-import-btn" style="display:none;" onclick="importNewInvoices()">
+                <i class="bi bi-plus-lg"></i> Import New
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -307,75 +280,239 @@ function submitNewInvoice() {
     .catch(err => alert('Error: ' + err.message));
 }
 
-// ── Sync via SSE ──────────────────────────────────────────────
-function syncInvoices(full) {
+// ── Sync via SSE stream ───────────────────────────────────────
+let _newPayments = [];  // payments not yet in our DB
+
+function syncFromAnthill() {
+    // Just open modal and show period picker
+    const modal = document.getElementById('anthill-sync-modal');
+    modal.style.display = 'flex';
+    document.getElementById('anthill-period-picker').style.display = '';
+    document.getElementById('anthill-sync-status').style.display = 'none';
+    document.getElementById('anthill-sync-table').style.display = 'none';
+    document.getElementById('anthill-sync-tbody').innerHTML = '';
+    document.getElementById('anthill-sync-summary').textContent = '';
+    document.getElementById('anthill-import-btn').style.display = 'none';
+}
+
+function startSync(period) {
     const btn = document.getElementById('sync-btn');
-    const fullBtn = document.getElementById('full-sync-btn');
     const icon = document.getElementById('sync-icon');
     const text = document.getElementById('sync-text');
-    const progress = document.getElementById('sync-progress');
-    const msgEl = document.getElementById('sync-message');
-    const logEl = document.getElementById('sync-log');
 
     btn.disabled = true;
-    fullBtn.disabled = true;
     icon.classList.add('spinning');
     text.textContent = 'Syncing...';
-    progress.style.display = '';
-    logEl.innerHTML = '';
+    _newPayments = [];
 
-    function addLog(msg) {
-        const time = new Date().toLocaleTimeString();
-        const entry = document.createElement('div');
-        entry.className = 'sync-log-entry';
-        entry.innerHTML = '<span class="log-time">' + time + '</span> ' + msg;
-        logEl.appendChild(entry);
-        logEl.scrollTop = logEl.scrollHeight;
+    // Hide picker, show status
+    document.getElementById('anthill-period-picker').style.display = 'none';
+    const statusEl = document.getElementById('anthill-sync-status');
+    const tableEl  = document.getElementById('anthill-sync-table');
+    const tbodyEl  = document.getElementById('anthill-sync-tbody');
+    const summaryEl = document.getElementById('anthill-sync-summary');
+    statusEl.style.display = '';
+    statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Connecting to Anthill...';
+    tableEl.style.display = 'none';
+    tbodyEl.innerHTML = '';
+    summaryEl.textContent = '';
+    document.getElementById('anthill-import-btn').style.display = 'none';
+
+    let rowCount = 0;
+    let matchedCount = 0;
+    let newCount = 0;
+
+    fetch('{% url "sync_invoices_anthill" %}?period=' + encodeURIComponent(period), { credentials: 'same-origin' })
+    .then(response => {
+        if (!response.ok) throw new Error('Server returned ' + response.status);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function processChunk({ done, value }) {
+            if (done) return;
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE lines are "data: {...}\n\n"
+            let boundary;
+            while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                const raw = buffer.slice(0, boundary).trim();
+                buffer = buffer.slice(boundary + 2);
+                if (!raw.startsWith('data: ')) continue;
+
+                let evt;
+                try { evt = JSON.parse(raw.slice(6)); } catch { continue; }
+                handleEvent(evt);
+            }
+            return reader.read().then(processChunk);
+        }
+
+        return reader.read().then(processChunk);
+    })
+    .catch(err => {
+        console.error('Sync stream error:', err);
+        statusEl.innerHTML =
+            '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + err.message;
+        btn.disabled = false;
+        icon.classList.remove('spinning');
+        text.textContent = 'Sync Invoices from Anthill';
+    });
+
+    function handleEvent(evt) {
+        switch (evt.type) {
+            case 'status':
+                statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> ' + evt.message;
+                break;
+
+            case 'page':
+                statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Scraping page ' +
+                    evt.current + ' of ' + evt.total + '...';
+                break;
+
+            case 'row': {
+                if (rowCount === 0) tableEl.style.display = '';
+                rowCount++;
+
+                const pay = evt.payment;
+                const isNew = evt.action === 'new';
+                if (isNew) {
+                    newCount++;
+                    _newPayments.push(pay);
+                } else {
+                    matchedCount++;
+                }
+
+                const tr = document.createElement('tr');
+                if (isNew) {
+                    tr.style.background = 'rgba(255,193,7,0.08)';
+                } else {
+                    tr.style.opacity = '0.45';
+                }
+
+                const icon = isNew
+                    ? '<i class="bi bi-plus-circle" style="color:var(--warning-color);"></i>'
+                    : '<i class="bi bi-check-circle" style="color:var(--success-color);"></i>';
+
+                tr.innerHTML =
+                    '<td style="text-align:center;">' + icon + '</td>' +
+                    '<td>' + (pay.showroom || '') + '</td>' +
+                    '<td>' + (pay.payment_date || '') + '</td>' +
+                    '<td>' + (pay.customer || '') + '</td>' +
+                    '<td>' + (pay.payment_type || '') + '</td>' +
+                    '<td class="number-cell">' + (pay.amount || '') + '</td>' +
+                    '<td><span class="inv-status ' + (pay.status || '').toLowerCase() + '">' + (pay.status || '') + '</span></td>' +
+                    '<td>' + (pay.contract_number || '') + '</td>' +
+                    '<td>' + (pay.method || '') + '</td>';
+                tbodyEl.appendChild(tr);
+
+                const body = tbodyEl.closest('.modal-body');
+                if (body) body.scrollTop = body.scrollHeight;
+
+                summaryEl.textContent = rowCount + ' row(s) — ' + matchedCount + ' matched, ' + newCount + ' new';
+                break;
+            }
+
+            case 'done':
+                btn.disabled = false;
+                icon.classList.remove('spinning');
+                text.textContent = 'Sync Invoices from Anthill';
+                statusEl.innerHTML =
+                    '<i class="bi bi-check-circle" style="color:var(--success-color);"></i> Sync complete — ' + evt.location;
+                summaryEl.textContent = evt.total + ' payment(s) — ' +
+                    evt.matched + ' matched, ' + evt.new + ' new';
+                if (evt.filtered_out > 0) {
+                    summaryEl.textContent += ' (' + evt.filtered_out + ' other locations filtered out)';
+                }
+                if (evt.new > 0) {
+                    document.getElementById('anthill-import-btn').style.display = '';
+                }
+                break;
+
+            case 'error':
+                btn.disabled = false;
+                icon.classList.remove('spinning');
+                text.textContent = 'Sync Invoices from Anthill';
+                statusEl.innerHTML =
+                    '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + evt.message;
+                break;
+        }
     }
+}
 
-    const url = '{% url "sync_invoices" %}' + (full ? '?full=1' : '');
-    const source = new EventSource(url);
+function importNewInvoices() {
+    if (_newPayments.length === 0) return;
+    const importBtn = document.getElementById('anthill-import-btn');
+    importBtn.disabled = true;
+    importBtn.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Importing...';
 
-    source.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-
-        if (data.error) {
-            msgEl.textContent = 'Error: ' + data.error;
-            addLog('<span class="log-error">Error: ' + data.error + '</span>');
-            source.close();
-            setTimeout(() => location.reload(), 3000);
-            return;
+    fetch('{% url "create_invoices_from_anthill" %}', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ payments: _newPayments })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            importBtn.innerHTML = '<i class="bi bi-check-lg"></i> ' + data.created + ' imported';
+            document.getElementById('anthill-sync-summary').textContent += ' — ' + data.created + ' imported!';
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            importBtn.disabled = false;
+            importBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Import New';
+            alert(data.error || 'Import failed');
         }
+    })
+    .catch(err => {
+        importBtn.disabled = false;
+        importBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Import New';
+        alert('Error: ' + err.message);
+    });
+}
 
-        if (data.message) {
-            msgEl.textContent = data.message;
-            addLog(data.message);
+function closeAnthillSyncModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('anthill-sync-modal').style.display = 'none';
+}
+
+// ── Hide invoices without a date (on by default) ─────────────
+let _hideNoDate = true;
+
+function applyDateFilter() {
+    const table = document.getElementById('invoices-table');
+    if (!table) return;
+    table.querySelectorAll('tbody tr').forEach(row => {
+        if (_hideNoDate && row.dataset.hasDate === '0') {
+            row.classList.add('hidden-no-date');
+        } else {
+            row.classList.remove('hidden-no-date');
         }
+    });
+}
 
-        if (data.status === 'complete') {
-            const skipped = data.skipped || 0;
-            const summary =
-                'Done: ' + data.created + ' created, ' + data.updated + ' updated, ' +
-                skipped + ' skipped' +
-                (data.errors && data.errors.length ? ', ' + data.errors.length + ' errors' : '');
-            msgEl.textContent = summary;
-            addLog('<span class="log-complete">' + summary + '</span>');
-            source.close();
-            setTimeout(() => location.reload(), 2000);
-        }
-    };
-
-    source.onerror = function() {
-        source.close();
-        msgEl.textContent = 'Connection lost. Reloading...';
-        addLog('<span class="log-error">Connection lost</span>');
-        setTimeout(() => location.reload(), 2000);
-    };
+function toggleHideNoDate() {
+    _hideNoDate = !_hideNoDate;
+    const text = document.getElementById('hide-no-date-text');
+    const icon = document.getElementById('hide-no-date-icon');
+    if (_hideNoDate) {
+        text.textContent = 'Show No-Date';
+        icon.className = 'bi bi-calendar-x';
+    } else {
+        text.textContent = 'Hide No-Date';
+        icon.className = 'bi bi-calendar-check';
+    }
+    applyDateFilter();
 }
 
 // ── Client-side search filtering ──────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-    const searchInput = document.querySelector('.inv-search-box input');
+    // Apply date filter on load (hidden by default)
+    applyDateFilter();
+
+    const searchInput = document.getElementById('invoiceSearch');
     const table = document.getElementById('invoices-table');
 
     if (searchInput && table) {
@@ -384,8 +521,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const rows = table.querySelectorAll('tbody tr');
 
             rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(filter) ? '' : 'none';
+                const matchesSearch = row.textContent.toLowerCase().includes(filter);
+                row.style.display = matchesSearch ? '' : 'none';
             });
         });
     }

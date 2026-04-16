@@ -4,11 +4,20 @@ Invoice views – displays invoices from the local DB.
 
 import json
 import logging
+import os
+import queue
+import re
+import threading
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from html.parser import HTMLParser
 
 from django.db.models import Q
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import StreamingHttpResponse, JsonResponse
+from django.utils import timezone
+
 
 from .models import Invoice, PurchaseOrder, PurchaseOrderProduct
 
@@ -46,7 +55,7 @@ def invoices_list(request):
             | Q(description__icontains=search_query)
         )
 
-    invoices = qs.select_related('customer', 'order')
+    invoices = qs.select_related('customer', 'order').order_by('-date')
 
     # Summary stats (over filtered set)
     total_invoices = invoices.count()
@@ -139,6 +148,382 @@ def sync_invoices_stream(request):
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
     return response
+
+
+# ── Sync from Anthill CRM ─────────────────────────────────────────
+class _AnthillPaymentsTableParser(HTMLParser):
+    """Extract rows from the first <table class="sortable"> tbody."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._in_target = False
+        self._in_tbody = False
+        self._depth = 0
+        self._in_row = False
+        self._in_cell = False
+        self._current_row = []
+        self._current_cell_parts = []
+        self.rows = []
+        self.found = False
+
+    def handle_starttag(self, tag, attrs):
+        attr_dict = dict(attrs)
+        if tag == 'table' and not self._in_target:
+            if 'sortable' in attr_dict.get('class', '').split():
+                self._in_target = True
+                self._depth = 1
+                return
+        if not self._in_target:
+            return
+        if tag == 'table':
+            self._depth += 1
+        elif tag == 'tbody':
+            self._in_tbody = True
+        elif tag == 'tr' and self._in_tbody:
+            self._in_row = True
+            self._current_row = []
+        elif tag in ('td', 'th') and self._in_row:
+            self._in_cell = True
+            self._current_cell_parts = []
+
+    def handle_endtag(self, tag):
+        if not self._in_target:
+            return
+        if tag == 'table':
+            self._depth -= 1
+            if self._depth == 0:
+                self._in_target = False
+                self.found = True
+        elif tag == 'tbody':
+            self._in_tbody = False
+        elif tag == 'tr' and self._in_row:
+            self._in_row = False
+            self.rows.append(list(self._current_row))
+        elif tag in ('td', 'th') and self._in_cell:
+            self._in_cell = False
+            text = re.sub(r'\s+', ' ', ' '.join(self._current_cell_parts)).strip()
+            self._current_row.append(text)
+
+    def handle_data(self, data):
+        if self._in_cell:
+            stripped = data.strip()
+            if stripped:
+                self._current_cell_parts.append(stripped)
+
+
+def _parse_amount(raw: str) -> Decimal:
+    """Parse '£1,234.56' → Decimal('1234.56')."""
+    try:
+        return Decimal(raw.replace('£', '').replace('€', '').replace(',', '').strip())
+    except (InvalidOperation, ValueError):
+        return Decimal('0')
+
+
+def _parse_date(raw: str):
+    """Parse 'dd Month yyyy' or 'dd/mm/yyyy' → date object."""
+    if not raw:
+        return None
+    for fmt in ('%d %B %Y', '%d/%m/%Y', '%d-%m-%Y', '%d %b %Y'):
+        try:
+            return datetime.strptime(raw.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _row_to_payment(row):
+    """Map a raw HTML table row (list of strings) to a payment dict."""
+    if len(row) < 12:
+        return None
+    return {
+        'showroom': row[0],
+        'payment_date': row[2],
+        'customer': row[3],
+        'payment_type': row[4],
+        'amount': row[5],
+        'created_by': row[6],
+        'status': row[8],
+        'contract_number': row[9],
+        'method': row[10],
+        'payment_received': row[11],
+    }
+
+
+def _check_payment(pay):
+    """Check if a payment already exists in the DB. Returns 'matched' or 'new'."""
+    amount = _parse_amount(pay['amount'])
+    payment_date = _parse_date(pay['payment_date'])
+    contract = pay['contract_number'].strip()
+
+    if not contract:
+        return 'new'
+
+    existing = Invoice.objects.filter(
+        contract_number=contract,
+        payment_type=pay['payment_type'],
+        total=amount,
+        date=payment_date,
+    ).exists()
+
+    return 'matched' if existing else 'new'
+
+
+def _create_invoice_from_payment(pay, now):
+    """Create a new Invoice from a payment dict."""
+    amount = _parse_amount(pay['amount'])
+    payment_date = _parse_date(pay['payment_date'])
+    received_date = _parse_date(pay['payment_received'])
+    contract = pay['contract_number'].strip()
+
+    Invoice.objects.create(
+        invoice_number=contract,
+        contract_number=contract,
+        client_name=pay['customer'],
+        showroom=pay['showroom'],
+        payment_type=pay['payment_type'],
+        total=amount,
+        amount_outstanding=amount,
+        date=payment_date,
+        payment_received_date=received_date,
+        payment_method=pay['method'],
+        anthill_payment_status=pay['status'],
+        created_by=pay['created_by'],
+        status='Approved' if pay['status'] == 'Confirmed' else 'Draft',
+        payment_status='unpaid',
+        synced_at=now,
+    )
+
+
+_SENTINEL = object()  # marks end of SSE stream
+
+
+@login_required
+def sync_invoices_from_anthill(request):
+    """
+    SSE streaming endpoint – scrapes the Anthill CRM payments screen page by
+    page and pushes each row to the browser as it arrives.
+
+    The heavy work (Playwright + ORM) runs in a background thread so it stays
+    fully synchronous.  Events are passed to the response generator via a
+    thread-safe queue.
+
+    Events:
+      {type: 'status',  message: '...'}
+      {type: 'page',    current: N, total: N}
+      {type: 'row',     payment: {...}, action: 'created'|'updated'|'skipped'}
+      {type: 'done',    created: N, updated: N, skipped: N, total: N}
+      {type: 'error',   message: '...'}
+    """
+    # Read user's selected location before spawning the thread
+    location_filter = ''
+    if hasattr(request.user, 'profile'):
+        location_filter = (request.user.profile.selected_location or '').strip()
+
+    # Read requested time period
+    VALID_PERIODS = {
+        'today', 'this_week', 'this_month', 'this_year',
+        'last_7_days', 'last_28_days', 'last_12_months', 'all_time',
+    }
+    period = request.GET.get('period', 'last_28_days')
+    if period not in VALID_PERIODS:
+        period = 'last_28_days'
+
+    q = queue.Queue()
+
+    def _emit(payload):
+        q.put(f"data: {json.dumps(payload)}\n\n")
+
+    def _worker():
+        """Runs in a daemon thread — all sync I/O is safe here."""
+        try:
+            username = os.getenv('ANTHILL_USER_USERNAME')
+            password = os.getenv('ANTHILL_USER_PASSWORD')
+            subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+
+            if not username or not password:
+                _emit({'type': 'error', 'message': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not configured.'})
+                return
+
+            base_url = f'https://{subdomain}.anthillcrm.com'
+            period_qs = '' if period == 'all_time' else period
+            target_url = f'{base_url}/n/screens/12/CAIaEgmLsAFMrjHYQhGCvnwKumuXYyiDAw?d={period_qs}'
+
+            try:
+                from playwright.sync_api import sync_playwright
+            except ImportError:
+                _emit({'type': 'error', 'message': 'Playwright is not installed on the server.'})
+                return
+
+            matched = new = filtered_out = total = 0
+            now = timezone.now()
+            loc_label = location_filter or 'All Locations'
+
+            with sync_playwright() as p:
+                _emit({'type': 'status', 'message': 'Launching browser...'})
+
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                )
+                page = context.new_page()
+
+                _emit({'type': 'status', 'message': 'Connecting to Anthill CRM...'})
+                page.goto(target_url, timeout=30000)
+                page.wait_for_load_state('domcontentloaded', timeout=15000)
+
+                # Handle login
+                current_url = page.url.lower()
+                if 'sign-in' in current_url or 'login' in current_url or 'signin' in current_url:
+                    _emit({'type': 'status', 'message': 'Logging in...'})
+                    all_inputs = page.locator('input:visible').all()
+                    text_inputs = [inp for inp in all_inputs
+                                   if (inp.get_attribute('type') or 'text').lower() in ('text', 'email', '')]
+                    pass_inputs = [inp for inp in all_inputs
+                                   if (inp.get_attribute('type') or '').lower() == 'password']
+                    if text_inputs:
+                        text_inputs[0].fill(username)
+                    if pass_inputs:
+                        pass_inputs[0].fill(password)
+                    submit = page.locator('button[type="submit"], input[type="submit"]').first
+                    submit.click()
+                    page.wait_for_load_state('networkidle', timeout=30000)
+                    if '/n/screens/12/' not in page.url:
+                        page.goto(target_url, timeout=30000)
+                        page.wait_for_load_state('networkidle', timeout=30000)
+
+                # Wait for the table
+                if location_filter:
+                    _emit({'type': 'status', 'message': f'Filtering for {loc_label}...'})
+                else:
+                    _emit({'type': 'status', 'message': 'Waiting for payments table...'})
+                try:
+                    page.wait_for_selector('table.sortable tbody tr', timeout=30000)
+                except Exception:
+                    pass
+
+                # Determine page count
+                pager = page.locator('#component-1 .pager select')
+                total_pages = 1
+                if pager.count() > 0:
+                    options = pager.locator('option').all()
+                    total_pages = len(options)
+
+                # ── Scrape page by page ───────────────────────────
+                for pg_num in range(1, total_pages + 1):
+                    _emit({'type': 'page', 'current': pg_num, 'total': total_pages})
+
+                    if pg_num > 1:
+                        pager.select_option(str(pg_num))
+                        page.wait_for_timeout(1500)
+                        try:
+                            page.wait_for_selector('table.sortable tbody tr', timeout=15000)
+                        except Exception:
+                            pass
+
+                    parser = _AnthillPaymentsTableParser()
+                    parser.feed(page.content())
+                    if not parser.found:
+                        continue
+
+                    for row in parser.rows:
+                        pay = _row_to_payment(row)
+                        if not pay:
+                            continue
+
+                        # Filter by selected location
+                        if location_filter:
+                            row_showroom = (pay['showroom'] or '').strip().lower()
+                            if location_filter.lower() not in row_showroom:
+                                filtered_out += 1
+                                continue
+
+                        total += 1
+                        action = _check_payment(pay)
+                        if action == 'matched':
+                            matched += 1
+                        else:
+                            new += 1
+                        _emit({'type': 'row', 'payment': pay, 'action': action})
+
+                browser.close()
+
+            _emit({
+                'type': 'done',
+                'matched': matched,
+                'new': new,
+                'filtered_out': filtered_out,
+                'total': total,
+                'location': loc_label,
+            })
+
+        except Exception as exc:
+            logger.exception('Anthill payments sync failed')
+            _emit({'type': 'error', 'message': str(exc)})
+        finally:
+            q.put(_SENTINEL)
+
+    def event_stream():
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        while True:
+            item = q.get()
+            if item is _SENTINEL:
+                break
+            yield item
+
+    response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@login_required
+def create_invoices_from_anthill(request):
+    """
+    POST endpoint – receives a JSON list of payment dicts from the browser
+    and creates Invoice records for the ones that don't already exist.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    payments = data.get('payments', [])
+    now = timezone.now()
+    created = 0
+    skipped = 0
+
+    for pay in payments:
+        contract = (pay.get('contract_number') or '').strip()
+        if not contract:
+            skipped += 1
+            continue
+
+        amount = _parse_amount(pay.get('amount', ''))
+        payment_date = _parse_date(pay.get('payment_date', ''))
+
+        exists = Invoice.objects.filter(
+            contract_number=contract,
+            payment_type=pay.get('payment_type', ''),
+            total=amount,
+            date=payment_date,
+        ).exists()
+
+        if exists:
+            skipped += 1
+            continue
+
+        _create_invoice_from_payment(pay, now)
+        created += 1
+
+    return JsonResponse({
+        'success': True,
+        'created': created,
+        'skipped': skipped,
+    })
 
 
 # ── Invoice search (for linking to POs) ──────────────────────────

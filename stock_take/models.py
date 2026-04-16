@@ -1746,7 +1746,7 @@ class Expense(models.Model):
 # =============================================
 
 class Invoice(models.Model):
-    """Invoice synced from WorkGuru."""
+    """Sales invoice — synced from Anthill CRM payments."""
 
     STATUS_CHOICES = [
         ('Draft', 'Draft'),
@@ -1762,7 +1762,7 @@ class Invoice(models.Model):
         ('unpaid', 'Unpaid'),
     ]
 
-    # WorkGuru identifiers
+    # WorkGuru identifiers (legacy, may be blank)
     workguru_id = models.IntegerField(unique=True, null=True, blank=True, help_text='WorkGuru Invoice ID')
     invoice_number = models.CharField(max_length=50, db_index=True)
 
@@ -1784,6 +1784,15 @@ class Invoice(models.Model):
         null=True, blank=True, related_name='invoices',
         help_text='Link to local Order record',
     )
+
+    # Anthill CRM fields
+    showroom = models.CharField(max_length=100, blank=True, help_text='Anthill showroom / location')
+    contract_number = models.CharField(max_length=100, blank=True, db_index=True, help_text='Anthill contract number e.g. BFS-SD-423514')
+    payment_type = models.CharField(max_length=100, blank=True, help_text='Deposit, Final Balance, Part Payment, etc.')
+    payment_method = models.CharField(max_length=100, blank=True, help_text='Cash, Credit Card, Debit Card, BACS, Finance, etc.')
+    anthill_payment_status = models.CharField(max_length=50, blank=True, help_text='Confirmed / Unconfirmed from Anthill')
+    payment_received_date = models.DateField(null=True, blank=True, help_text='Date payment was received per Anthill')
+    created_by = models.CharField(max_length=255, blank=True, help_text='Anthill user who created the payment')
 
     # Dates
     date = models.DateField(null=True, blank=True)

@@ -31,6 +31,11 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', '1') in ('1', 'True', 'true')
 
+# Allow synchronous ORM calls from threads spawned by the async-aware dev
+# server (e.g. SSE streaming views).  No effect under Gunicorn/WSGI.
+if DEBUG:
+    os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')
+
 ALLOWED_HOSTS = ['*', 'atlas-gxbq5.ondigitalocean.app']
 
 SITE_ID=1
