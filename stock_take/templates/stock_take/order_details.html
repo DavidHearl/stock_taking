@@ -683,7 +683,7 @@
                                 <i class="bi bi-check-lg"></i> Save Changes
                             </button>
                         {% endif %}
-                        <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" data-is-angled="{{ bpo_data.po.is_angled|yesno:'true,false' }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
+                        <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" data-is-angled="{{ bpo_data.po.is_angled|yesno:'true,false' }}" data-po-number="{{ bpo_data.po.po_number }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
                             <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
@@ -2081,9 +2081,9 @@
                 <h3 id="add-board-modal-title">Add Board</h3>
                 <button type="button" class="modal-close" onclick="closeModal('addBoardModal')">✕</button>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="modal-body">
                 {% if boards_po_list|length > 1 %}
-                <div class="form-group" id="board-po-select-group" style="margin-bottom: 0;">
+                <div class="form-group" id="board-po-select-group">
                     <label for="add-board-po-select">Board PO *</label>
                     <select class="form-input" id="add-board-po-select">
                         {% for bpo_data in boards_po_list %}
@@ -2091,98 +2091,173 @@
                         {% endfor %}
                     </select>
                 </div>
-                <hr style="border: none; border-top: 1px solid var(--border-color, #3a3d45); margin: 0;">
                 {% endif %}
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="add-board-matname">Material *</label>
-                    <select class="form-input" id="add-board-matname-select" onchange="applyMaterialSelection()">
-                        <option value="">-- Select existing material --</option>
-                    </select>
+                <div class="form-row partdesc-barcode-row">
+                    <div class="form-group">
+                        <label for="add-board-partdesc">Part Description *</label>
+                        <select class="form-input" id="add-board-partdesc" onchange="onPartDescChange()">
+                            <option value="">-- Select part type --</option>
+                            <option value="Board">Board</option>
+                            <option value="Shelf">Shelf</option>
+                            <option value="Lid">Lid</option>
+                            <option value="Back">Back</option>
+                            <option value="Drawer Front">Drawer Front</option>
+                            <option value="Drawer Base">Drawer Base</option>
+                            <option value="Drawer Side">Drawer Side</option>
+                            <option value="Panel">Panel</option>
+                            <option value="Gable">Gable</option>
+                            <option value="Hinge Door">Hinge Door</option>
+                            <option value="Cover Material">Cover Material</option>
+                            <option value="Custom">Custom...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="add-board-barcode">Barcode</label>
+                        <input type="text" class="form-input" id="add-board-barcode" placeholder="Auto-generated" readonly>
+                    </div>
                 </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="add-board-barcode">Barcode *</label>
-                    <input type="text" class="form-input" id="add-board-barcode" placeholder="e.g., BRD001">
+                <div class="form-group" id="custom-partdesc-group" style="display: none;">
+                    <label for="add-board-partdesc-custom">Custom Description *</label>
+                    <input type="text" class="form-input" id="add-board-partdesc-custom" placeholder="e.g., Base Unit Casing Top" oninput="updateBarcodePreview()">
                 </div>
-                <div class="form-group" style="margin-bottom: 0;">
+                <div class="form-group">
                     <label for="add-board-matname">Material Name *</label>
-                    <input type="text" class="form-input" id="add-board-matname" placeholder="e.g., White Gloss 18mm">
+                    <div class="matname-row">
+                        <input type="text" class="form-input" id="add-board-matname" placeholder="e.g., SHT_MFC_EGG_W1100ST9_18_">
+                        <button type="button" class="btn btn-sm btn-egger" onclick="openBoardEggerModal()" title="Pick Egger Colour">
+                            <i class="bi bi-palette"></i> Egger
+                        </button>
+                        <div class="thickness-toggle" id="thickness-toggle">
+                            <button type="button" class="thickness-btn active" data-thickness="18" onclick="setThickness(18)">18</button>
+                            <button type="button" class="thickness-btn" data-thickness="36" onclick="setThickness(36)">36</button>
+                        </div>
+                    </div>
                 </div>
-                <hr style="border: none; border-top: 1px solid var(--border-color, #3a3d45); margin: 0;">
                 <!-- Standard dimension fields (Length/Width) -->
-                <div class="form-row" id="standard-dims-row" style="margin-bottom: 0;">
-                    <div class="form-group" style="margin-bottom: 0;">
+                <div class="form-row" id="standard-dims-row">
+                    <div class="form-group">
                         <label for="add-board-length">Length (mm) *</label>
-                        <input type="number" class="form-input" id="add-board-length" step="0.1" min="0" placeholder="e.g., 2800">
+                        <input type="text" inputmode="decimal" class="form-input" id="add-board-length" placeholder="e.g., 2800">
+                        <div class="spinner-buttons">
+                            <button type="button" tabindex="-1" onclick="stepInput('add-board-length', 1)">&#9650;</button>
+                            <button type="button" tabindex="-1" onclick="stepInput('add-board-length', -1)">&#9660;</button>
+                        </div>
                     </div>
-                    <div class="form-group" style="margin-bottom: 0;">
+                    <div class="form-group">
                         <label for="add-board-width">Width (mm) *</label>
-                        <input type="number" class="form-input" id="add-board-width" step="0.1" min="0" placeholder="e.g., 600">
+                        <input type="text" inputmode="decimal" class="form-input" id="add-board-width" placeholder="e.g., 600">
+                        <div class="spinner-buttons">
+                            <button type="button" tabindex="-1" onclick="stepInput('add-board-width', 1)">&#9650;</button>
+                            <button type="button" tabindex="-1" onclick="stepInput('add-board-width', -1)">&#9660;</button>
+                        </div>
                     </div>
-                    <div class="form-group" style="margin-bottom: 0;">
+                    <div class="form-group">
                         <label for="add-board-count">Count *</label>
-                        <input type="number" class="form-input" id="add-board-count" step="1" min="1" value="1" placeholder="e.g., 2">
+                        <input type="text" inputmode="numeric" class="form-input" id="add-board-count" value="1" placeholder="e.g., 2" oninput="updateBarcodePreview()">
+                        <div class="spinner-buttons">
+                            <button type="button" tabindex="-1" onclick="stepInput('add-board-count', 1); updateBarcodePreview()">&#9650;</button>
+                            <button type="button" tabindex="-1" onclick="stepInput('add-board-count', -1); updateBarcodePreview()">&#9660;</button>
+                        </div>
                     </div>
                 </div>
                 <!-- Angled dimension fields (Left Height / Right Height / Width) -->
-                <div id="angled-dims-section" style="display: none;">
+                <div id="angled-dims-section">
                     <div class="form-row">
                         <div class="form-group">
                             <label for="add-board-left-height">Left Height (mm) *</label>
-                            <input type="number" class="form-input" id="add-board-left-height" step="0.1" min="0" placeholder="e.g., 2400" oninput="drawAngledPreview()">
+                            <input type="text" inputmode="decimal" class="form-input" id="add-board-left-height" placeholder="e.g., 2400" oninput="drawAngledPreview()">
+                            <div class="spinner-buttons">
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-left-height', 1); drawAngledPreview()">&#9650;</button>
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-left-height', -1); drawAngledPreview()">&#9660;</button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="add-board-right-height">Right Height (mm) *</label>
-                            <input type="number" class="form-input" id="add-board-right-height" step="0.1" min="0" placeholder="e.g., 2200" oninput="drawAngledPreview()">
+                            <input type="text" inputmode="decimal" class="form-input" id="add-board-right-height" placeholder="e.g., 2200" oninput="drawAngledPreview()">
+                            <div class="spinner-buttons">
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-right-height', 1); drawAngledPreview()">&#9650;</button>
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-right-height', -1); drawAngledPreview()">&#9660;</button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="add-board-angled-width">Width (mm) *</label>
-                            <input type="number" class="form-input" id="add-board-angled-width" step="0.1" min="0" placeholder="e.g., 600" oninput="drawAngledPreview()">
+                            <input type="text" inputmode="decimal" class="form-input" id="add-board-angled-width" placeholder="e.g., 600" oninput="drawAngledPreview()">
+                            <div class="spinner-buttons">
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-angled-width', 1); drawAngledPreview()">&#9650;</button>
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-angled-width', -1); drawAngledPreview()">&#9660;</button>
+                            </div>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="add-board-top-edge">Top Edge (mm)</label>
-                            <input type="number" class="form-input" id="add-board-top-edge" step="0.1" min="0" value="0" placeholder="0" oninput="drawAngledPreview()">
+                            <input type="text" inputmode="decimal" class="form-input" id="add-board-top-edge" value="0" placeholder="0" oninput="drawAngledPreview()">
+                            <div class="spinner-buttons">
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-top-edge', 1); drawAngledPreview()">&#9650;</button>
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-top-edge', -1); drawAngledPreview()">&#9660;</button>
+                            </div>
                             <small class="form-help">Flat section on the shorter side (5-piece doors). 0 = no top edge.</small>
                         </div>
                         <div class="form-group">
                             <label for="add-board-angled-count">Count *</label>
-                            <input type="number" class="form-input" id="add-board-angled-count" step="1" min="1" value="1" placeholder="e.g., 2">
+                            <input type="text" inputmode="numeric" class="form-input" id="add-board-angled-count" value="1" placeholder="e.g., 2" oninput="updateBarcodePreview()">
+                            <div class="spinner-buttons">
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-angled-count', 1); updateBarcodePreview()">&#9650;</button>
+                                <button type="button" tabindex="-1" onclick="stepInput('add-board-angled-count', -1); updateBarcodePreview()">&#9660;</button>
+                            </div>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Preview</label>
-                        <canvas id="angled-board-canvas" width="360" height="200" style="width: 100%; max-width: 360px; border: 1px solid var(--border-color, #3a3d45); border-radius: 6px; background: var(--bg-secondary, #1e2127);"></canvas>
+                        <canvas id="angled-board-canvas" width="360" height="200"></canvas>
                     </div>
                 </div>
-                <hr style="border: none; border-top: 1px solid var(--border-color, #3a3d45); margin: 0;">
-                <div class="form-group" style="margin-bottom: 0;">
+                <div class="form-group">
                     <label for="add-board-grain">Grain</label>
                     <select class="form-input" id="add-board-grain">
                         <option value="N">N</option>
                         <option value="Y">Y</option>
                     </select>
                 </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="add-board-partdesc">Part Description</label>
-                    <input type="text" class="form-input" id="add-board-partdesc" placeholder="e.g., Shelf">
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label>Edging (check sides that need edging)</label>
-                    <div class="edging-checkboxes">
-                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid1"> PRFID1</label>
-                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid3"> PRFID3</label>
-                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid4"> PRFID4</label>
-                        <label class="checkbox-label"><input type="checkbox" id="add-board-prfid2"> PRFID2</label>
+                <div class="form-group">
+                    <label>Edging</label>
+                    <div class="edging-layout">
+                        <div class="edging-list">
+                            <label class="edging-list-item" for="add-board-prfid1">
+                                <input type="checkbox" id="add-board-prfid1" onchange="updateEdgingDiagram()">
+                                <span>E1 <small>(Left)</small></span>
+                            </label>
+                            <label class="edging-list-item" for="add-board-prfid3">
+                                <input type="checkbox" id="add-board-prfid3" onchange="updateEdgingDiagram()">
+                                <span>E3 <small>(Right)</small></span>
+                            </label>
+                            <label class="edging-list-item" for="add-board-prfid4">
+                                <input type="checkbox" id="add-board-prfid4" onchange="updateEdgingDiagram()">
+                                <span>E4 <small>(Top)</small></span>
+                            </label>
+                            <label class="edging-list-item" for="add-board-prfid2">
+                                <input type="checkbox" id="add-board-prfid2" onchange="updateEdgingDiagram()">
+                                <span>E2 <small>(Bottom)</small></span>
+                            </label>
+                        </div>
+                        <div class="edging-diagram">
+                            <div class="edging-board">
+                                <div class="edging-edge edging-top" id="edging-edge-top"></div>
+                                <div class="edging-edge edging-right" id="edging-edge-right"></div>
+                                <div class="edging-edge edging-bottom" id="edging-edge-bottom"></div>
+                                <div class="edging-edge edging-left" id="edging-edge-left"></div>
+                                <span class="edging-board-label">Board</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <!-- Board staging queue -->
-                <div id="board-staging-area" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color, #3a3d45); padding-top: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <strong style="font-size: 0.875rem;">Queued (<span id="board-queue-count">0</span>)</strong>
-                        <button type="button" class="btn btn-sm" style="padding: 2px 8px; font-size: 0.75rem; color: var(--danger, #dc3545); background: none; border: 1px solid var(--danger, #dc3545); border-radius: 4px;" onclick="clearBoardQueue()">Clear All</button>
+                <div id="board-staging-area">
+                    <div class="staging-header">
+                        <strong>Queued (<span id="board-queue-count">0</span>)</strong>
+                        <button type="button" class="btn btn-sm btn-clear-queue" onclick="clearBoardQueue()">Clear All</button>
                     </div>
-                    <div id="board-staging-list" style="max-height: 160px; overflow-y: auto;"></div>
+                    <div id="board-staging-list"></div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -2192,6 +2267,29 @@
             </div>
         </div>
     </div>
+</div>
+
+<!-- Egger Colours Modal (Board Picker) -->
+<div class="modal" id="boardEggerColoursModal">
+    <div class="modal-overlay" onclick="closeModal('boardEggerColoursModal')"></div>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-palette"></i> Select Egger Colour</h3>
+                <button type="button" class="modal-close" onclick="closeModal('boardEggerColoursModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="boardEggerColoursGrid" class="egger-grid">
+                    <div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Egger Image Lightbox (Board Picker) -->
+<div class="egger-lightbox" id="boardEggerLightbox" onclick="closeBoardEggerLightbox()">
+    <img id="boardEggerLightboxImg" src="" alt="">
 </div>
 
 <!-- Modal for Swapping Accessory Item -->
@@ -4534,46 +4632,166 @@ function closeModal(modalId) {
 let boardQueue = [];
 let activePoIsAngled = false;
 
-// Material dropdown data
-const _boardMaterials = {{ board_materials_json|safe }};
-const _orderMaterials = {{ order_materials_json|safe }};
-(function populateMaterialSelect() {
-    const sel = document.getElementById('add-board-matname-select');
-    if (!sel) return;
-    
-    // Order materials group
-    if (_orderMaterials.length > 0) {
-        const grp1 = document.createElement('optgroup');
-        grp1.label = 'This Order';
-        _orderMaterials.forEach(function(name) {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            grp1.appendChild(opt);
-        });
-        sel.appendChild(grp1);
-    }
-    
-    // All materials group (excluding ones already in order group)
-    const orderSet = new Set(_orderMaterials);
-    const otherMaterials = _boardMaterials.filter(m => !orderSet.has(m.matname));
-    if (otherMaterials.length > 0) {
-        const grp2 = document.createElement('optgroup');
-        grp2.label = 'All Materials';
-        otherMaterials.forEach(function(m) {
-            const opt = document.createElement('option');
-            opt.value = m.matname;
-            opt.textContent = m.matname;
-            grp2.appendChild(opt);
-        });
-        sel.appendChild(grp2);
-    }
-})();
+function updateEdgingDiagram() {
+    const left   = document.getElementById('add-board-prfid1').checked;
+    const bottom = document.getElementById('add-board-prfid2').checked;
+    const right  = document.getElementById('add-board-prfid3').checked;
+    const top    = document.getElementById('add-board-prfid4').checked;
+    document.getElementById('edging-edge-top').classList.toggle('active', top);
+    document.getElementById('edging-edge-right').classList.toggle('active', right);
+    document.getElementById('edging-edge-bottom').classList.toggle('active', bottom);
+    document.getElementById('edging-edge-left').classList.toggle('active', left);
+}
 
-function applyMaterialSelection() {
-    const sel = document.getElementById('add-board-matname-select');
-    if (!sel.value) return;
-    document.getElementById('add-board-matname').value = sel.value;
+function stepInput(id, dir) {
+    const el = document.getElementById(id);
+    const isCount = id.includes('count');
+    const step = isCount ? 1 : 1;
+    const min = isCount ? 1 : 0;
+    const cur = parseFloat(el.value) || 0;
+    const next = cur + step * dir;
+    if (next >= min) el.value = isCount ? Math.round(next) : parseFloat(next.toFixed(4));
+    el.dispatchEvent(new Event('input'));
+}
+
+/**
+ * Get the most common material name from existing items in the given PO.
+ * Returns empty string if no items exist.
+ */
+function getDefaultMaterialForPO(boardsPoId) {
+    const counts = {};
+    document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`).forEach(cb => {
+        const mat = cb.dataset.matname || '';
+        if (mat) counts[mat] = (counts[mat] || 0) + 1;
+    });
+    let best = '', bestCount = 0;
+    for (const [mat, count] of Object.entries(counts)) {
+        if (count > bestCount) { best = mat; bestCount = count; }
+    }
+    return best;
+}
+
+/* ── Barcode generation ─── */
+
+// Abbreviation map for part descriptions → 3-letter codes
+const PART_ABBREV = {
+    'Board':          'BRD',
+    'Shelf':          'SHF',
+    'Lid':            'LID',
+    'Back':           'BCK',
+    'Drawer Front':   'DRF',
+    'Drawer Base':    'DRB',
+    'Drawer Side':    'DRS',
+    'Panel':          'PNL',
+    'Gable':          'GBL',
+    'Hinge Door':     'HGD',
+    'Cover Material': 'CVR',
+};
+
+// Store the active PO number when modal opens
+let activePoNumber = '';
+
+function getPartAbbrev(partdesc) {
+    if (PART_ABBREV[partdesc]) return PART_ABBREV[partdesc];
+    // For custom descriptions: take first 3 uppercase chars, strip spaces
+    const clean = partdesc.replace(/[^A-Za-z]/g, '').toUpperCase();
+    return clean.substring(0, 3) || 'CUS';
+}
+
+function buildBarcodePrefix(partdesc) {
+    if (!partdesc || !activePoNumber) return '';
+    return activePoNumber + '_' + getPartAbbrev(partdesc);
+}
+
+/**
+ * Find the next available sequence number for a given barcode prefix.
+ * Checks both existing items on the page (for the active PO) and
+ * any items already sitting in the board queue.
+ */
+function getNextSequence(prefix) {
+    let maxSeq = 0;
+    const pattern = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_(\\d+)$');
+
+    // Check existing items on the page for this PO
+    document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${activeBoardsPoId}"]`).forEach(cb => {
+        const bc = cb.dataset.barcode || '';
+        const m = bc.match(pattern);
+        if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
+    });
+
+    // Check items already in the queue
+    boardQueue.forEach(b => {
+        const m = (b.barcode || '').match(pattern);
+        if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
+    });
+
+    return maxSeq + 1;
+}
+
+function updateBarcodePreview() {
+    const barcodeInput = document.getElementById('add-board-barcode');
+    const partdesc = getPartDescValue();
+    const prefix = buildBarcodePrefix(partdesc);
+    if (!prefix) {
+        barcodeInput.value = '';
+        return;
+    }
+    const nextSeq = getNextSequence(prefix);
+    const cnt = activePoIsAngled
+        ? (parseInt(document.getElementById('add-board-angled-count').value) || 1)
+        : (parseInt(document.getElementById('add-board-count').value) || 1);
+    if (cnt === 1) {
+        barcodeInput.value = prefix + '_' + String(nextSeq).padStart(3, '0');
+    } else {
+        const endSeq = nextSeq + cnt - 1;
+        barcodeInput.value = prefix + '_' + String(nextSeq).padStart(3, '0') + ' … ' + prefix + '_' + String(endSeq).padStart(3, '0');
+    }
+}
+
+/* ── Part Description → Barcode auto-generation ─── */
+function onPartDescChange() {
+    const sel = document.getElementById('add-board-partdesc');
+    const customGroup = document.getElementById('custom-partdesc-group');
+    const customInput = document.getElementById('add-board-partdesc-custom');
+
+    if (sel.value === 'Custom') {
+        customGroup.style.display = '';
+        customInput.focus();
+    } else {
+        customGroup.style.display = 'none';
+        customInput.value = '';
+    }
+    updateBarcodePreview();
+}
+
+function getPartDescValue() {
+    const sel = document.getElementById('add-board-partdesc');
+    if (sel.value === 'Custom') {
+        return document.getElementById('add-board-partdesc-custom').value.trim();
+    }
+    return sel.value;
+}
+
+function setPartDescField(value) {
+    const sel = document.getElementById('add-board-partdesc');
+    const customGroup = document.getElementById('custom-partdesc-group');
+    const customInput = document.getElementById('add-board-partdesc-custom');
+    // Check if the value matches one of the standard options
+    const options = Array.from(sel.options).map(o => o.value);
+    if (options.includes(value) && value !== 'Custom') {
+        sel.value = value;
+        customGroup.style.display = 'none';
+        customInput.value = '';
+    } else if (value) {
+        sel.value = 'Custom';
+        customGroup.style.display = '';
+        customInput.value = value;
+    } else {
+        sel.value = '';
+        customGroup.style.display = 'none';
+        customInput.value = '';
+    }
+    updateBarcodePreview();
 }
 
 function openAddBoardModal(boardsPoId) {
@@ -4581,10 +4799,11 @@ function openAddBoardModal(boardsPoId) {
     const poSelect = document.getElementById('add-board-po-select');
     if (poSelect) poSelect.value = boardsPoId;
 
-    // Detect if this is an angled PO
+    // Detect if this is an angled PO and grab PO number
     const addBtn = document.querySelector(`.btn-add-icon[data-boards-po-id="${boardsPoId}"]`);
     const isAngled = addBtn && addBtn.dataset.isAngled === 'true';
     activePoIsAngled = isAngled;
+    activePoNumber = (addBtn && addBtn.dataset.poNumber) || '';
 
     // Toggle standard vs angled dimension fields
     document.getElementById('standard-dims-row').style.display = isAngled ? 'none' : '';
@@ -4599,15 +4818,14 @@ function openAddBoardModal(boardsPoId) {
 
     if (checkedBox) {
         title.textContent = isAngled ? 'Copy Angled Board' : 'Copy Board';
-        document.getElementById('add-board-barcode').value  = checkedBox.dataset.barcode  || '';
+        setPartDescField(checkedBox.dataset.partdesc || '');
         document.getElementById('add-board-matname').value  = checkedBox.dataset.matname  || '';
-        document.getElementById('add-board-matname-select').value = checkedBox.dataset.matname || '';
         document.getElementById('add-board-grain').value    = checkedBox.dataset.grain    || 'N';
-        document.getElementById('add-board-partdesc').value = checkedBox.dataset.partdesc || '';
         document.getElementById('add-board-prfid1').checked = checkedBox.dataset.prfid1 === '1';
         document.getElementById('add-board-prfid3').checked = checkedBox.dataset.prfid3 === '1';
         document.getElementById('add-board-prfid4').checked = checkedBox.dataset.prfid4 === '1';
         document.getElementById('add-board-prfid2').checked = checkedBox.dataset.prfid2 === '1';
+        updateEdgingDiagram();
         if (isAngled) {
             document.getElementById('add-board-left-height').value  = checkedBox.dataset.leftHeight  || '';
             document.getElementById('add-board-right-height').value = checkedBox.dataset.rightHeight || '';
@@ -4622,15 +4840,14 @@ function openAddBoardModal(boardsPoId) {
         }
     } else {
         title.textContent = isAngled ? 'Add Angled Board' : 'Add Board';
-        document.getElementById('add-board-barcode').value  = '';
-        document.getElementById('add-board-matname').value  = '';
-        document.getElementById('add-board-matname-select').value = '';
+        setPartDescField('');
+        document.getElementById('add-board-matname').value  = getDefaultMaterialForPO(boardsPoId);
         document.getElementById('add-board-grain').value    = 'N';
-        document.getElementById('add-board-partdesc').value = '';
         document.getElementById('add-board-prfid1').checked = false;
         document.getElementById('add-board-prfid3').checked = false;
         document.getElementById('add-board-prfid4').checked = false;
         document.getElementById('add-board-prfid2').checked = false;
+        updateEdgingDiagram();
         if (isAngled) {
             document.getElementById('add-board-left-height').value  = '';
             document.getElementById('add-board-right-height').value = '';
@@ -4657,16 +4874,15 @@ function updateAddBoardButtonState(boardsPoId) {
 }
 
 function getBoardFormData() {
-    const barcode  = document.getElementById('add-board-barcode').value.trim();
+    const partdesc = getPartDescValue();
     const matname  = document.getElementById('add-board-matname').value.trim();
     const grain    = document.getElementById('add-board-grain').value;
-    const partdesc = document.getElementById('add-board-partdesc').value.trim();
     const prfid1   = document.getElementById('add-board-prfid1').checked ? 'Sliderobe_Edge_08' : '';
     const prfid3   = document.getElementById('add-board-prfid3').checked ? 'Sliderobe_Edge_08' : '';
     const prfid4   = document.getElementById('add-board-prfid4').checked ? 'Sliderobe_Edge_08' : '';
     const prfid2   = document.getElementById('add-board-prfid2').checked ? 'Sliderobe_Edge_08' : '';
 
-    if (!barcode)    { showAlert('Barcode is required', 'danger');            return null; }
+    if (!partdesc)   { showAlert('Part Description is required', 'danger');   return null; }
     if (!matname)    { showAlert('Material Name is required', 'danger');      return null; }
 
     let cleng, cwidth, cnt, left_height, right_height;
@@ -4699,7 +4915,7 @@ function getBoardFormData() {
             ? document.getElementById('add-board-po-select').value
             : activeBoardsPoId,
         order_id: {{ order.id }},
-        barcode, matname, cleng, cwidth, cnt, grain, partdesc,
+        matname, cleng, cwidth, cnt, grain, partdesc,
         prfid1, prfid2, prfid3, prfid4,
         left_height, right_height, top_edge,
         is_angled: activePoIsAngled
@@ -4709,10 +4925,21 @@ function getBoardFormData() {
 function addBoardToQueue() {
     const data = getBoardFormData();
     if (!data) return;
-    boardQueue.push(data);
+
+    const prefix = buildBarcodePrefix(data.partdesc);
+    let nextSeq = getNextSequence(prefix);
+    const count = data.cnt;
+
+    // Expand into individual items, each with cnt=1 and a unique barcode
+    for (let i = 0; i < count; i++) {
+        const barcode = prefix + '_' + String(nextSeq).padStart(3, '0');
+        boardQueue.push(Object.assign({}, data, { barcode, cnt: 1 }));
+        nextSeq++;
+    }
+
     renderBoardStagingList();
     // Keep matname/grain for quick repeat entry; clear identifying fields
-    document.getElementById('add-board-barcode').value = '';
+    setPartDescField('');
     if (activePoIsAngled) {
         document.getElementById('add-board-left-height').value  = '';
         document.getElementById('add-board-right-height').value = '';
@@ -4725,17 +4952,19 @@ function addBoardToQueue() {
         document.getElementById('add-board-width').value   = '';
         document.getElementById('add-board-count').value   = '1';
     }
-    document.getElementById('add-board-barcode').focus();
+    document.getElementById('add-board-partdesc').focus();
 }
 
 function removeFromBoardQueue(index) {
     boardQueue.splice(index, 1);
     renderBoardStagingList();
+    updateBarcodePreview();
 }
 
 function clearBoardQueue() {
     boardQueue = [];
     renderBoardStagingList();
+    updateBarcodePreview();
 }
 
 function renderBoardStagingList() {
@@ -4754,7 +4983,7 @@ function renderBoardStagingList() {
             : `${b.cleng}&times;${b.cwidth}`;
         return `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg-tertiary,#2a2d35);border-radius:4px;margin-bottom:4px;font-size:0.8rem;">
-            <span><strong>${b.barcode}</strong> &mdash; ${b.matname} &mdash; ${dims} &times;&nbsp;${b.cnt}</span>
+            <span><strong>${b.barcode}</strong> &mdash; ${b.matname} &mdash; ${dims}</span>
             <button type="button" onclick="removeFromBoardQueue(${i})" style="background:none;border:none;color:var(--text-secondary,#6c757d);cursor:pointer;font-size:1rem;padding:0 4px;line-height:1;">&times;</button>
         </div>
     `}).join('');
@@ -4763,11 +4992,18 @@ function renderBoardStagingList() {
 async function submitAllBoards() {
     let toSubmit = [...boardQueue];
 
-    // If queue empty, try submitting the current form directly
+    // If queue empty, try submitting the current form directly (with barcode generation)
     if (toSubmit.length === 0) {
         const data = getBoardFormData();
         if (!data) return;
-        toSubmit = [data];
+        const prefix = buildBarcodePrefix(data.partdesc);
+        let nextSeq = getNextSequence(prefix);
+        const count = data.cnt;
+        for (let i = 0; i < count; i++) {
+            const barcode = prefix + '_' + String(nextSeq).padStart(3, '0');
+            toSubmit.push(Object.assign({}, data, { barcode, cnt: 1 }));
+            nextSeq++;
+        }
     }
 
     const saveBtn = document.getElementById('save-boards-btn');
@@ -7324,6 +7560,71 @@ function copyToClipboard(text, btn) {
 /* Delete order modal */
 function closeDeleteModal() {
     document.getElementById('deleteOrderModal').style.display = 'none';
+}
+
+/* ── Egger Colour Picker for Add Board Modal ─────────── */
+let selectedThickness = 18;
+
+function setThickness(value) {
+    selectedThickness = value;
+    document.querySelectorAll('.thickness-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.thickness) === value);
+    });
+    // Update the material name if it has an Egger pattern
+    updateEggerMaterialName();
+}
+
+function openBoardEggerModal() {
+    openModal('boardEggerColoursModal');
+    const grid = document.getElementById('boardEggerColoursGrid');
+    grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>';
+
+    fetch("{% url 'egger_colours' %}", {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.colours || data.colours.length === 0) {
+            grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">No Egger colours with images found</div>';
+            return;
+        }
+        grid.innerHTML = data.colours.map(c => `
+            <div class="egger-tile" onclick="selectEggerColour('${c.code}')">
+                <img src="${c.image_url}" alt="${c.code}" loading="lazy">
+                <div class="egger-tile-code">${c.code}</div>
+            </div>
+        `).join('');
+    })
+    .catch(() => {
+        grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">Failed to load colours</div>';
+    });
+}
+
+function selectEggerColour(code) {
+    // Build material name: SHT_MFC_EGG_{code}_{thickness}_
+    const matname = `SHT_MFC_EGG_${code}_${selectedThickness}_`;
+    document.getElementById('add-board-matname').value = matname;
+    closeModal('boardEggerColoursModal');
+}
+
+function updateEggerMaterialName() {
+    const input = document.getElementById('add-board-matname');
+    const val = input.value;
+    // Only update if the current value matches the Egger pattern
+    const match = val.match(/^SHT_MFC_EGG_([A-Za-z0-9]+)_\d+_$/);
+    if (match) {
+        input.value = `SHT_MFC_EGG_${match[1]}_${selectedThickness}_`;
+    }
+}
+
+function openBoardEggerLightbox(url) {
+    const lb = document.getElementById('boardEggerLightbox');
+    document.getElementById('boardEggerLightboxImg').src = url;
+    lb.style.display = 'flex';
+}
+
+function closeBoardEggerLightbox() {
+    document.getElementById('boardEggerLightbox').style.display = 'none';
 }
 </script>
 
