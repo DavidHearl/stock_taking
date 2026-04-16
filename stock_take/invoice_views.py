@@ -34,6 +34,13 @@ def invoices_list(request):
 
     qs = Invoice.objects.all()
 
+    # Location filter — match Anthill sync behaviour
+    location_filter = ''
+    if hasattr(request.user, 'profile'):
+        location_filter = (request.user.profile.selected_location or '').strip()
+    if location_filter:
+        qs = qs.filter(showroom__icontains=location_filter)
+
     # Status / payment filters
     if status_filter == 'unpaid':
         qs = qs.exclude(payment_status='paid')
@@ -120,6 +127,114 @@ def invoice_detail(request, invoice_id):
         'linked_pos_info': linked_pos_info,
     }
     return render(request, 'stock_take/invoice_detail.html', context)
+
+
+# ── Push single invoice to Xero as Draft ──────────────────────────
+@login_required
+def push_invoice_to_xero(request, invoice_id):
+    """Create a DRAFT sales invoice in Xero from a local Invoice record."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+
+    if invoice.xero_id:
+        return JsonResponse({'ok': False, 'error': 'Already pushed to Xero'})
+
+    from .services import xero_api
+
+    # Look up or create the contact in Xero
+    contact_id = ''
+    if invoice.client_name:
+        contact_id = xero_api.find_contact_by_name(invoice.client_name)
+
+    if not contact_id:
+        return JsonResponse({
+            'ok': False,
+            'error': f'Contact "{invoice.client_name}" not found in Xero. Create the contact first.',
+        })
+
+    # Build line items — single line with the invoice total
+    line_items = [{
+        "Description": f"{invoice.payment_type or 'Payment'} — {invoice.contract_number}",
+        "Quantity": "1",
+        "UnitAmount": str(invoice.total),
+        "AccountCode": "200",          # default Sales revenue account
+    }]
+
+    invoice_data = {
+        "Type": "ACCREC",
+        "Contact": {"ContactID": contact_id},
+        "Status": "DRAFT",
+        "CurrencyCode": invoice.currency or "GBP",
+        "LineItems": line_items,
+        "Reference": invoice.contract_number,
+    }
+
+    if invoice.date:
+        invoice_data["Date"] = invoice.date.isoformat()
+    if invoice.due_date:
+        invoice_data["DueDate"] = invoice.due_date.isoformat()
+
+    payload = {"Invoices": [invoice_data]}
+    result = xero_api._api_put("Invoices", payload)
+
+    if result is None:
+        err = xero_api.get_last_api_error() or 'Unknown Xero API error'
+        return JsonResponse({'ok': False, 'error': err})
+
+    # Extract the Xero InvoiceID from the response
+    invoices_resp = result.get('Invoices', [])
+    if invoices_resp:
+        invoice.xero_id = invoices_resp[0].get('InvoiceID', '')
+        invoice.save(update_fields=['xero_id'])
+
+    return JsonResponse({'ok': True, 'xero_id': invoice.xero_id})
+
+
+# ── Check invoices against Xero ──────────────────────────────────
+@login_required
+def check_invoices_in_xero(request):
+    """Check which local invoices (without xero_id) already exist in Xero.
+
+    Looks up each unique contract_number via the Xero search API and saves
+    the xero_id if a match is found.  Returns the list of invoice IDs that
+    were matched so the front-end can flip their buttons to ticks.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
+
+    from .services import xero_api
+
+    # Get all local invoices that don't yet have a xero_id and have a contract number
+    unlinked = Invoice.objects.filter(
+        xero_id__isnull=True,
+        contract_number__gt='',
+    ).exclude(xero_id='').values_list('id', 'contract_number')
+
+    # Also include ones where xero_id is empty string
+    unlinked = Invoice.objects.filter(
+        contract_number__gt='',
+    ).filter(
+        Q(xero_id__isnull=True) | Q(xero_id='')
+    ).values_list('id', 'contract_number')
+
+    # Deduplicate by contract number to avoid repeated API calls
+    contract_map = {}  # contract_number -> [invoice_ids]
+    for inv_id, contract in unlinked:
+        contract_map.setdefault(contract, []).append(inv_id)
+
+    matched_ids = []
+
+    for contract, inv_ids in contract_map.items():
+        xero_invoices = xero_api.get_invoices_by_reference(contract)
+        if xero_invoices:
+            xero_id = xero_invoices[0].get('InvoiceID', '')
+            if xero_id:
+                Invoice.objects.filter(id__in=inv_ids).update(xero_id=xero_id)
+                matched_ids.extend(inv_ids)
+
+    return JsonResponse({'ok': True, 'matched': matched_ids, 'checked': len(contract_map)})
 
 
 # ── Sync via SSE (WorkGuru removed — stub) ────────────────────────

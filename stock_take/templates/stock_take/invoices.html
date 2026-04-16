@@ -23,6 +23,10 @@
             <i class="bi bi-plus-lg"></i>
             <span>Add Invoice</span>
         </button>
+        <button class="inv-sync-btn" id="check-xero-btn" onclick="checkXero()">
+            <i class="bi bi-search" id="check-xero-icon"></i>
+            <span id="check-xero-text">Check Xero</span>
+        </button>
         <button class="inv-sync-btn anthill" id="sync-btn" onclick="syncFromAnthill()">
             <i class="bi bi-arrow-repeat" id="sync-icon"></i>
             <span id="sync-text">Sync from Anthill</span>
@@ -65,6 +69,7 @@
                 <th>Status</th>
                 <th style="text-align: right;">Amount</th>
                 <th>Payment</th>
+                <th style="text-align: center;">Xero</th>
             </tr>
         </thead>
         <tbody>
@@ -101,6 +106,15 @@
                     <span class="inv-payment partial">Partial</span>
                     {% else %}
                     <span class="inv-payment unpaid">Unpaid</span>
+                    {% endif %}
+                </td>
+                <td style="text-align: center;">
+                    {% if invoice.xero_id %}
+                    <span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>
+                    {% else %}
+                    <button class="inv-xero-push" title="Push to Xero as Draft" onclick="event.stopPropagation(); pushToXero({{ invoice.id }})">
+                        <i class="bi bi-cloud-upload"></i>
+                    </button>
                     {% endif %}
                 </td>
             </tr>
@@ -476,6 +490,83 @@ function importNewInvoices() {
 function closeAnthillSyncModal(e) {
     if (e && e.target !== e.currentTarget) return;
     document.getElementById('anthill-sync-modal').style.display = 'none';
+}
+
+// ── Push invoice to Xero as Draft ─────────────────────────────
+function pushToXero(invoiceId) {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i>';
+
+    fetch(`/invoices/${invoiceId}/push-to-xero/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            btn.outerHTML = '<span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>';
+        } else {
+            alert('Xero error: ' + (data.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
+        }
+    })
+    .catch(err => {
+        alert('Network error: ' + err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
+    });
+}
+
+// ── Check all invoices against Xero ───────────────────────────
+function checkXero() {
+    const btn = document.getElementById('check-xero-btn');
+    const icon = document.getElementById('check-xero-icon');
+    const text = document.getElementById('check-xero-text');
+    btn.disabled = true;
+    icon.className = 'bi bi-arrow-repeat spinning';
+    text.textContent = 'Checking...';
+
+    fetch('{% url "check_invoices_in_xero" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            // Flip matched rows from push-button to tick
+            const matched = new Set(data.matched);
+            document.querySelectorAll('.inv-xero-push').forEach(btn => {
+                const row = btn.closest('tr');
+                const onclick = btn.getAttribute('onclick') || '';
+                const m = onclick.match(/pushToXero\((\d+)\)/);
+                if (m && matched.has(parseInt(m[1]))) {
+                    btn.outerHTML = '<span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>';
+                }
+            });
+            text.textContent = `Checked ${data.checked} — ${data.matched.length} found`;
+        } else {
+            text.textContent = 'Error';
+            alert('Xero check failed: ' + (data.error || 'Unknown error'));
+        }
+        icon.className = 'bi bi-search';
+        btn.disabled = false;
+    })
+    .catch(err => {
+        icon.className = 'bi bi-search';
+        text.textContent = 'Check Xero';
+        btn.disabled = false;
+        alert('Network error: ' + err);
+    });
 }
 
 // ── Hide invoices without a date (on by default) ─────────────

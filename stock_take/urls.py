@@ -9,7 +9,7 @@ from .purchase_order_views import purchase_orders_list, purchase_order_detail, p
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, sale_save, sale_link_order, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage, bulk_delete_payments, xero_search_invoices, xero_link_invoice, customer_xero_search, customer_xero_link, customer_anthill_scrape, customer_distribute_payments
 from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log, resolve_error_log, error_log_history, admin_design_rules
 from .about_views import about_page
-from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products
+from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products, push_invoice_to_xero, check_invoices_in_xero
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
 from .gallery_views import gallery, gallery_upload, gallery_delete, gallery_update, gallery_customer_orders, gallery_rotate
@@ -88,6 +88,8 @@ urlpatterns = [
     path('invoices/<int:invoice_id>/unlink-po/', invoice_unlink_po, name='invoice_unlink_po'),
     path('invoices/<int:invoice_id>/upload-attachment/', invoice_upload_attachment, name='invoice_upload_attachment'),
     path('invoices/<int:invoice_id>/delete-attachment/', invoice_delete_attachment, name='invoice_delete_attachment'),
+    path('invoices/<int:invoice_id>/push-to-xero/', push_invoice_to_xero, name='push_invoice_to_xero'),
+    path('invoices/check-xero/', check_invoices_in_xero, name='check_invoices_in_xero'),
     path('invoices/<int:invoice_id>/set-linked-products/', invoice_set_linked_products, name='invoice_set_linked_products'),
     path('api/invoice-search/', invoice_search, name='invoice_search'),
     path('api/po-products/<int:po_id>/', po_products_for_linking, name='po_products_for_linking'),
