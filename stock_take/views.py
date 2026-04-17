@@ -11840,10 +11840,10 @@ def costing_report(request):
     from datetime import date
     import statistics
     
-    # Get all completed orders (job_finished=True OR fit_date has passed) for costing analysis
+    # Get all completed orders (job_finished=True OR fit_date has passed OR explicitly fully_costed) for costing analysis
     today = date.today()
     all_orders = Order.objects.filter(
-        Q(job_finished=True) | Q(fit_date__lte=today)
+        Q(job_finished=True) | Q(fit_date__lte=today) | Q(fully_costed=True)
     ).prefetch_related('timesheets').distinct()
     
     # Calculate actual costs from timesheets for each order
@@ -12011,11 +12011,107 @@ def costing_report(request):
         stats['total_installation'] = 0
         stats['total_manufacturing'] = 0
     
+    # Calculate average sale value across ALL completed orders for context
+    all_revenues = [float(o['revenue']) for o in orders_with_costs if float(o['revenue']) > 0]
+    stats['avg_sale_value'] = sum(all_revenues) / len(all_revenues) if all_revenues else 0
+
     return render(request, 'stock_take/costing_report.html', {
         'fully_costed': fully_costed,
         'partially_costed': partially_costed,
         'stats': stats,
     })
+
+
+# COSTING REPORT PDF
+# ============================================================================
+
+@login_required
+def costing_report_pdf(request):
+    """Generate PDF of costing report"""
+    from .pdf_generator import generate_costing_report_pdf
+    from .models import Order, Timesheet
+    from django.db.models import Q
+    from decimal import Decimal
+    from datetime import date
+    import statistics
+
+    today = date.today()
+    all_orders = Order.objects.filter(
+        Q(job_finished=True) | Q(fit_date__lte=today) | Q(fully_costed=True)
+    ).prefetch_related('timesheets').distinct()
+
+    orders_with_costs = []
+    for order in all_orders:
+        installation_timesheets = order.timesheets.filter(timesheet_type='installation')
+        calculated_installation = sum(ts.total_cost for ts in installation_timesheets) or Decimal('0')
+        installation_cost = calculated_installation if calculated_installation > 0 else (order.installation_cost or Decimal('0'))
+
+        manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing')
+        calculated_manufacturing = sum(ts.total_cost for ts in manufacturing_timesheets) or Decimal('0')
+        manufacturing_cost = calculated_manufacturing if calculated_manufacturing > 0 else (order.manufacturing_cost or Decimal('0'))
+
+        materials_cost = order.materials_cost or Decimal('0')
+        total_cost = materials_cost + installation_cost + manufacturing_cost
+        revenue = order.total_value_exc_vat or Decimal('0')
+        profit = revenue - total_cost
+        profit_margin = (profit / revenue * 100) if revenue > 0 else Decimal('0')
+
+        orders_with_costs.append({
+            'order': order,
+            'materials_cost': materials_cost,
+            'installation_cost': installation_cost,
+            'manufacturing_cost': manufacturing_cost,
+            'total_cost': total_cost,
+            'revenue': revenue,
+            'profit': profit,
+            'profit_margin': profit_margin,
+            'is_fully_costed': order.fully_costed,
+        })
+
+    fully_costed = [o for o in orders_with_costs if o['is_fully_costed']]
+    partially_costed = [o for o in orders_with_costs if not o['is_fully_costed']]
+
+    # Build stats
+    stats = {
+        'total_orders': len(orders_with_costs),
+        'fully_costed_count': len(fully_costed),
+        'partially_costed_count': len(partially_costed),
+        'costing_completion_rate': (len(fully_costed) / len(orders_with_costs) * 100) if orders_with_costs else 0,
+    }
+
+    all_revenues = [float(o['revenue']) for o in orders_with_costs if float(o['revenue']) > 0]
+    stats['avg_sale_value'] = sum(all_revenues) / len(all_revenues) if all_revenues else 0
+
+    if fully_costed:
+        profits = [float(o['profit']) for o in fully_costed]
+        profit_margins = [float(o['profit_margin']) for o in fully_costed]
+        revenues = [float(o['revenue']) for o in fully_costed]
+        materials_costs = [float(o['materials_cost']) for o in fully_costed]
+        installation_costs = [float(o['installation_cost']) for o in fully_costed]
+        manufacturing_costs = [float(o['manufacturing_cost']) for o in fully_costed]
+
+        stats['avg_profit'] = sum(profits) / len(profits)
+        stats['avg_profit_margin'] = sum(profit_margins) / len(profit_margins)
+        stats['avg_revenue'] = sum(revenues) / len(revenues)
+        stats['avg_materials_cost'] = sum(materials_costs) / len(materials_costs)
+        stats['avg_installation_cost'] = sum(installation_costs) / len(installation_costs)
+        stats['avg_manufacturing_cost'] = sum(manufacturing_costs) / len(manufacturing_costs)
+        stats['total_revenue'] = sum(revenues)
+        stats['total_costs'] = sum(float(o['total_cost']) for o in fully_costed)
+        stats['total_profit'] = sum(profits)
+        stats['materials_pct_of_revenue'] = (stats['avg_materials_cost'] / stats['avg_revenue']) * 100 if stats['avg_revenue'] > 0 else 0
+        stats['installation_pct_of_revenue'] = (stats['avg_installation_cost'] / stats['avg_revenue']) * 100 if stats['avg_revenue'] > 0 else 0
+        stats['manufacturing_pct_of_revenue'] = (stats['avg_manufacturing_cost'] / stats['avg_revenue']) * 100 if stats['avg_revenue'] > 0 else 0
+    else:
+        stats.update({k: 0 for k in ['avg_profit', 'avg_profit_margin', 'avg_revenue',
+                                       'avg_materials_cost', 'avg_installation_cost', 'avg_manufacturing_cost',
+                                       'total_revenue', 'total_costs', 'total_profit',
+                                       'materials_pct_of_revenue', 'installation_pct_of_revenue', 'manufacturing_pct_of_revenue']})
+
+    buffer = generate_costing_report_pdf(fully_costed, partially_costed, stats)
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="Costing_Report_{today.strftime("%Y%m%d")}.pdf"'
+    return response
 
 
 # ── Sales Appointment CRUD ──────────────────────────────────────

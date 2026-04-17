@@ -1024,11 +1024,187 @@ def generate_avg_sales_pdf(rows, grand_total=0, grand_count=0, period=''):
     table_data.append([
         Paragraph('<b>Total</b>', styles['CellText']),
         Paragraph(f'<b>{grand_count:,}</b>', styles['CellText']),
-        Paragraph(f'<b>\u00a3{grand_total:,.0f}</b>', styles['CellText']),
-        Paragraph(f'<b>\u00a3{avg_per_sale:,.0f}</b>', styles['CellText']),
+        Paragraph(f'<b>£{grand_total:,.0f}</b>', styles['CellText']),
+        Paragraph(f'<b>£{avg_per_sale:,.0f}</b>', styles['CellText']),
     ])
 
     elements.append(_build_table(table_data, col_widths, has_total_row=True))
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+# ── COSTING REPORT PDF ──────────────────────────────────────────
+
+def generate_costing_report_pdf(fully_costed, partially_costed, stats):
+    """Generate a PDF of the costing report with summary stats and order tables."""
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+        title='Costing Report',
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ── HEADER ──────────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=12 * mm)
+        logo.hAlign = 'LEFT'
+    else:
+        logo = Paragraph('<b>Sliderobes</b>', styles['Normal'])
+
+    title_para = Paragraph(
+        '<font size="16" color="#1a1a2e"><b>Costing Report</b></font>',
+        styles['Normal'],
+    )
+    header_table = Table(
+        [[logo, title_para]],
+        colWidths=[page_width * 0.5, page_width * 0.5],
+    )
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # ── SUMMARY INFO ────────────────────────────────────────────
+    info_data = [
+        ['Fully Costed', f'{stats["fully_costed_count"]}',
+         'Partially Costed', f'{stats["partially_costed_count"]}'],
+        ['Completion Rate', f'{stats["costing_completion_rate"]:.1f}%',
+         'Avg Profit Margin', f'{stats["avg_profit_margin"]:.1f}%'],
+        ['Avg Sale Value', f'£{stats["avg_sale_value"]:,.0f}',
+         'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
+    ]
+    info_table = Table(info_data, colWidths=[
+        page_width * 0.18, page_width * 0.32,
+        page_width * 0.18, page_width * 0.32,
+    ])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (2, 0), (2, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('TEXTCOLOR', (3, 0), (3, -1), TEXT_PRIMARY),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6 * mm))
+
+    # ── COST BREAKDOWN SUMMARY ──────────────────────────────────
+    if stats['fully_costed_count'] > 0:
+        elements.append(_section_header('Average Cost Breakdown (% of Revenue)', styles))
+        elements.append(Spacer(1, 2 * mm))
+
+        total_rev = stats.get('total_revenue', 0)
+        breakdown_data = [
+            ['Category', 'Avg Cost', '% of Revenue', 'Total'],
+            ['Materials',
+             f'£{stats["avg_materials_cost"]:,.0f}',
+             f'{stats["materials_pct_of_revenue"]:.1f}%',
+             f'£{total_rev * stats["materials_pct_of_revenue"] / 100:,.0f}' if total_rev > 0 else '£0'],
+            ['Installation',
+             f'£{stats["avg_installation_cost"]:,.0f}',
+             f'{stats["installation_pct_of_revenue"]:.1f}%',
+             f'£{total_rev * stats["installation_pct_of_revenue"] / 100:,.0f}' if total_rev > 0 else '£0'],
+            ['Manufacturing',
+             f'£{stats["avg_manufacturing_cost"]:,.0f}',
+             f'{stats["manufacturing_pct_of_revenue"]:.1f}%',
+             f'£{total_rev * stats["manufacturing_pct_of_revenue"] / 100:,.0f}' if total_rev > 0 else '£0'],
+            ['Profit',
+             f'£{stats["avg_profit"]:,.0f}',
+             f'{stats["avg_profit_margin"]:.1f}%',
+             f'£{stats["total_profit"]:,.0f}'],
+        ]
+        breakdown_data.append([
+            Paragraph('<b>Revenue</b>', styles['CellText']),
+            Paragraph(f'<b>£{stats["avg_revenue"]:,.0f}</b>', styles['CellText']),
+            Paragraph('<b>100%</b>', styles['CellText']),
+            Paragraph(f'<b>£{stats["total_revenue"]:,.0f}</b>', styles['CellText']),
+        ])
+
+        breakdown_widths = [page_width * 0.30, page_width * 0.23, page_width * 0.23, page_width * 0.24]
+        elements.append(_build_table(breakdown_data, breakdown_widths, has_total_row=True))
+        elements.append(Spacer(1, 6 * mm))
+
+    # ── FULLY COSTED ORDERS TABLE ───────────────────────────────
+    if fully_costed:
+        elements.append(_section_header(f'Fully Costed Orders ({len(fully_costed)})', styles))
+        elements.append(Spacer(1, 2 * mm))
+
+        col_widths = [
+            page_width * 0.10, page_width * 0.20, page_width * 0.10,
+            page_width * 0.10, page_width * 0.10, page_width * 0.10,
+            page_width * 0.10, page_width * 0.10, page_width * 0.10,
+        ]
+        headers = ['Order', 'Customer', 'Fit Date', 'Revenue', 'Materials',
+                    'Installation', 'Mfg', 'Profit', 'Margin']
+
+        table_data = [headers]
+        for item in fully_costed:
+            order = item['order']
+            customer = f'{order.first_name} {order.last_name}'
+            if len(customer) > 22:
+                customer = customer[:19] + '...'
+            fit_date = order.fit_date.strftime('%d/%m/%y') if order.fit_date else '-'
+
+            table_data.append([
+                str(order.sale_number),
+                Paragraph(customer, styles['CellText']),
+                fit_date,
+                f'£{float(item["revenue"]):,.0f}',
+                f'£{float(item["materials_cost"]):,.0f}',
+                f'£{float(item["installation_cost"]):,.0f}',
+                f'£{float(item["manufacturing_cost"]):,.0f}',
+                f'£{float(item["profit"]):,.0f}',
+                f'{float(item["profit_margin"]):.1f}%',
+            ])
+
+        elements.append(_build_table(table_data, col_widths))
+
+    # ── PARTIALLY COSTED ORDERS TABLE ───────────────────────────
+    if partially_costed:
+        elements.append(Spacer(1, 6 * mm))
+        elements.append(_section_header(f'Partially Costed Orders ({len(partially_costed)})', styles))
+        elements.append(Spacer(1, 2 * mm))
+
+        col_widths = [
+            page_width * 0.12, page_width * 0.28,
+            page_width * 0.15, page_width * 0.15, page_width * 0.15, page_width * 0.15,
+        ]
+        headers = ['Order', 'Customer', 'Revenue', 'Materials', 'Installation', 'Manufacturing']
+
+        table_data = [headers]
+        for item in partially_costed:
+            order = item['order']
+            customer = f'{order.first_name} {order.last_name}'
+            if len(customer) > 28:
+                customer = customer[:25] + '...'
+
+            table_data.append([
+                str(order.sale_number),
+                Paragraph(customer, styles['CellText']),
+                f'£{float(item["revenue"]):,.0f}' if float(item['revenue']) > 0 else '-',
+                f'£{float(item["materials_cost"]):,.0f}' if float(item['materials_cost']) > 0 else '-',
+                f'£{float(item["installation_cost"]):,.0f}' if float(item['installation_cost']) > 0 else '-',
+                f'£{float(item["manufacturing_cost"]):,.0f}' if float(item['manufacturing_cost']) > 0 else '-',
+            ])
+
+        elements.append(_build_table(table_data, col_widths))
+
     doc.build(elements)
     buffer.seek(0)
     return buffer

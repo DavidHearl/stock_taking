@@ -242,6 +242,7 @@ urlpatterns = [
     path('shortages/delete-raumplus-draft/<int:draft_id>/', delete_raumplus_draft, name='delete_raumplus_draft'),
     path('api/raumplus-copy-po/<int:po_id>/', raumplus_copy_po_items, name='raumplus_copy_po_items'),
     path('costing-report/', views.costing_report, name='costing_report'),
+    path('costing-report/pdf/', views.costing_report_pdf, name='costing_report_pdf'),
     path('substitutions/', views.substitutions, name='substitutions'),
     path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),
     path('substitution/edit/<int:substitution_id>/', views.edit_substitution, name='edit_substitution'),
