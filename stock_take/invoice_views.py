@@ -138,9 +138,6 @@ def push_invoice_to_xero(request, invoice_id):
 
     invoice = get_object_or_404(Invoice, id=invoice_id)
 
-    if invoice.xero_id:
-        return JsonResponse({'ok': False, 'error': 'Already pushed to Xero'})
-
     from .services import xero_api
 
     # Look up or create the contact in Xero
@@ -159,7 +156,7 @@ def push_invoice_to_xero(request, invoice_id):
         "Description": f"{invoice.payment_type or 'Payment'} — {invoice.contract_number}",
         "Quantity": "1",
         "UnitAmount": str(invoice.total),
-        "AccountCode": "200",          # default Sales revenue account
+        "AccountCode": "G1001",
     }]
 
     invoice_data = {
@@ -167,14 +164,14 @@ def push_invoice_to_xero(request, invoice_id):
         "Contact": {"ContactID": contact_id},
         "Status": "DRAFT",
         "CurrencyCode": invoice.currency or "GBP",
+        "LineAmountTypes": "Inclusive",
         "LineItems": line_items,
         "Reference": invoice.contract_number,
     }
 
     if invoice.date:
         invoice_data["Date"] = invoice.date.isoformat()
-    if invoice.due_date:
-        invoice_data["DueDate"] = invoice.due_date.isoformat()
+        invoice_data["DueDate"] = (invoice.due_date or invoice.date).isoformat()
 
     payload = {"Invoices": [invoice_data]}
     result = xero_api._api_put("Invoices", payload)

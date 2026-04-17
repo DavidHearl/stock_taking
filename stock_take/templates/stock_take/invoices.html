@@ -109,13 +109,14 @@
                     {% endif %}
                 </td>
                 <td style="text-align: center;">
-                    {% if invoice.xero_id %}
-                    <span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>
-                    {% else %}
-                    <button class="inv-xero-push" title="Push to Xero as Draft" onclick="event.stopPropagation(); pushToXero({{ invoice.id }})">
-                        <i class="bi bi-cloud-upload"></i>
-                    </button>
-                    {% endif %}
+                    <span class="inv-xero-cell">
+                        {% if invoice.xero_id %}
+                        <span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>
+                        {% endif %}
+                        <button class="inv-xero-push" title="Push to Xero as Draft" onclick="event.stopPropagation(); pushToXero({{ invoice.id }})">
+                            <i class="bi bi-cloud-upload"></i>
+                        </button>
+                    </span>
                 </td>
             </tr>
             {% endfor %}
@@ -509,7 +510,13 @@ function pushToXero(invoiceId) {
     .then(r => r.json())
     .then(data => {
         if (data.ok) {
-            btn.outerHTML = '<span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>';
+            const cell = btn.closest('.inv-xero-cell');
+            // Add checkmark if not already present
+            if (cell && !cell.querySelector('.inv-xero-badge')) {
+                btn.insertAdjacentHTML('beforebegin', '<span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>');
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
         } else {
             alert('Xero error: ' + (data.error || 'Unknown error'));
             btn.disabled = false;
