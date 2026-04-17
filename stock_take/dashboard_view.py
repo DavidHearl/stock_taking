@@ -726,6 +726,12 @@ def dashboard(request):
     
     workflow_roles = list(workflow_by_role.values())
 
+    # Stock take status — has any stock_take been recorded today?
+    stock_take_done_today = StockHistory.objects.filter(
+        change_type='stock_take',
+        created_at__date=today,
+    ).exists()
+
     context = {
         'fits_chart_data': json.dumps({
             'labels': labels,
@@ -780,6 +786,7 @@ def dashboard(request):
         'monthly_preview_json': json.dumps(monthly_preview),
         'avg_preview_json': json.dumps(avg_preview),
         'workflow_roles_json': json.dumps(workflow_roles),
+        'stock_take_done_today': stock_take_done_today,
     }
     return render(request, 'stock_take/dashboard.html', context)
 
