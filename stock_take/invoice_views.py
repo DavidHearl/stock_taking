@@ -222,6 +222,7 @@ def check_invoices_in_xero(request):
         contract_map.setdefault(contract, []).append(inv_id)
 
     matched_ids = []
+    matched_xero_ids = {}  # invoice_id -> xero_id
 
     for contract, inv_ids in contract_map.items():
         xero_invoices = xero_api.get_invoices_by_reference(contract)
@@ -230,8 +231,10 @@ def check_invoices_in_xero(request):
             if xero_id:
                 Invoice.objects.filter(id__in=inv_ids).update(xero_id=xero_id)
                 matched_ids.extend(inv_ids)
+                for inv_id in inv_ids:
+                    matched_xero_ids[inv_id] = xero_id
 
-    return JsonResponse({'ok': True, 'matched': matched_ids, 'checked': len(contract_map)})
+    return JsonResponse({'ok': True, 'matched': matched_ids, 'matched_xero_ids': matched_xero_ids, 'checked': len(contract_map)})
 
 
 # ── Sync via SSE (WorkGuru removed — stub) ────────────────────────
@@ -466,10 +469,11 @@ def sync_invoices_from_anthill(request):
                 _emit({'type': 'error', 'message': 'Playwright is not installed on the server.'})
                 return
 
-            matched = new = filtered_out = total = 0
-            now = timezone.now()
+            filtered_out = 0
             loc_label = location_filter or 'All Locations'
+            scraped_rows = []   # collect raw payment dicts here
 
+            # ── Phase 1: Scrape with Playwright (no ORM calls) ────
             with sync_playwright() as p:
                 _emit({'type': 'status', 'message': 'Launching browser...'})
 
@@ -549,22 +553,31 @@ def sync_invoices_from_anthill(request):
                                 filtered_out += 1
                                 continue
 
-                        total += 1
-                        action = _check_payment(pay)
-                        if action == 'matched':
-                            matched += 1
-                        else:
-                            new += 1
-                        _emit({'type': 'row', 'payment': pay, 'action': action})
+                        scraped_rows.append(pay)
 
                 browser.close()
+
+            # ── Phase 2: Check scraped rows against DB ────────────
+            # Playwright context is closed so there is no event loop
+            # on this thread — ORM calls are safe.
+            _emit({'type': 'status', 'message': f'Checking {len(scraped_rows)} payments against database...'})
+            matched = new = 0
+            now = timezone.now()
+
+            for pay in scraped_rows:
+                action = _check_payment(pay)
+                if action == 'matched':
+                    matched += 1
+                else:
+                    new += 1
+                _emit({'type': 'row', 'payment': pay, 'action': action})
 
             _emit({
                 'type': 'done',
                 'matched': matched,
                 'new': new,
                 'filtered_out': filtered_out,
-                'total': total,
+                'total': len(scraped_rows),
                 'location': loc_label,
             })
 

@@ -111,7 +111,7 @@
                 <td style="text-align: center;">
                     <span class="inv-xero-cell">
                         {% if invoice.xero_id %}
-                        <span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>
+                        <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" class="inv-xero-link" title="View in Xero" onclick="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>
                         {% endif %}
                         <button class="inv-xero-push" title="Push to Xero as Draft" onclick="event.stopPropagation(); pushToXero({{ invoice.id }})">
                             <i class="bi bi-cloud-upload"></i>
@@ -215,6 +215,7 @@
             <!-- Sync progress + results -->
             <div id="anthill-sync-status" style="padding: 12px 16px; font-size: 0.85rem; color: var(--text-secondary); display: none;">
                 <i class="bi bi-arrow-repeat spinning"></i> Fetching payments from Anthill...
+                <span id="anthill-sync-timer" style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;"></span>
             </div>
             <table class="inv-table" id="anthill-sync-table" style="display:none;">
                 <thead>
@@ -297,6 +298,24 @@ function submitNewInvoice() {
 
 // ── Sync via SSE stream ───────────────────────────────────────
 let _newPayments = [];  // payments not yet in our DB
+let _syncTimerInterval = null;
+let _syncStartTime = null;
+
+function _startSyncTimer() {
+    _syncStartTime = Date.now();
+    const timerEl = document.getElementById('anthill-sync-timer');
+    if (_syncTimerInterval) clearInterval(_syncTimerInterval);
+    _syncTimerInterval = setInterval(function() {
+        const elapsed = Math.floor((Date.now() - _syncStartTime) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        timerEl.textContent = (mins > 0 ? mins + 'm ' : '') + secs + 's';
+    }, 1000);
+}
+
+function _stopSyncTimer() {
+    if (_syncTimerInterval) { clearInterval(_syncTimerInterval); _syncTimerInterval = null; }
+}
 
 function syncFromAnthill() {
     // Just open modal and show period picker
@@ -319,6 +338,7 @@ function startSync(period) {
     icon.classList.add('spinning');
     text.textContent = 'Syncing...';
     _newPayments = [];
+    _startSyncTimer();
 
     // Hide picker, show status
     document.getElementById('anthill-period-picker').style.display = 'none';
@@ -366,6 +386,7 @@ function startSync(period) {
     })
     .catch(err => {
         console.error('Sync stream error:', err);
+        _stopSyncTimer();
         statusEl.innerHTML =
             '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + err.message;
         btn.disabled = false;
@@ -376,12 +397,14 @@ function startSync(period) {
     function handleEvent(evt) {
         switch (evt.type) {
             case 'status':
-                statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> ' + evt.message;
+                statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> ' + evt.message +
+                    '<span id="anthill-sync-timer" style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;"></span>';
                 break;
 
             case 'page':
                 statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Scraping page ' +
-                    evt.current + ' of ' + evt.total + '...';
+                    evt.current + ' of ' + evt.total + '...' +
+                    '<span id="anthill-sync-timer" style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;"></span>';
                 break;
 
             case 'row': {
@@ -428,11 +451,15 @@ function startSync(period) {
             }
 
             case 'done':
+                _stopSyncTimer();
                 btn.disabled = false;
                 icon.classList.remove('spinning');
                 text.textContent = 'Sync Invoices from Anthill';
+                var elapsed = Math.floor((Date.now() - _syncStartTime) / 1000);
+                var doneTime = (elapsed >= 60 ? Math.floor(elapsed/60) + 'm ' : '') + (elapsed % 60) + 's';
                 statusEl.innerHTML =
-                    '<i class="bi bi-check-circle" style="color:var(--success-color);"></i> Sync complete — ' + evt.location;
+                    '<i class="bi bi-check-circle" style="color:var(--success-color);"></i> Sync complete — ' + evt.location +
+                    '<span style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;">' + doneTime + '</span>';
                 summaryEl.textContent = evt.total + ' payment(s) — ' +
                     evt.matched + ' matched, ' + evt.new + ' new';
                 if (evt.filtered_out > 0) {
@@ -444,6 +471,7 @@ function startSync(period) {
                 break;
 
             case 'error':
+                _stopSyncTimer();
                 btn.disabled = false;
                 icon.classList.remove('spinning');
                 text.textContent = 'Sync Invoices from Anthill';
@@ -511,9 +539,10 @@ function pushToXero(invoiceId) {
     .then(data => {
         if (data.ok) {
             const cell = btn.closest('.inv-xero-cell');
-            // Add checkmark if not already present
-            if (cell && !cell.querySelector('.inv-xero-badge')) {
-                btn.insertAdjacentHTML('beforebegin', '<span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>');
+            // Add Xero link if not already present
+            if (cell && !cell.querySelector('.inv-xero-link') && data.xero_id) {
+                btn.insertAdjacentHTML('beforebegin',
+                    '<a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + data.xero_id + '" target="_blank" class="inv-xero-link" title="View in Xero" onclick="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>');
             }
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
@@ -550,14 +579,21 @@ function checkXero() {
     .then(r => r.json())
     .then(data => {
         if (data.ok) {
-            // Flip matched rows from push-button to tick
-            const matched = new Set(data.matched);
+            // Add Xero links to matched rows
+            const xeroIds = data.matched_xero_ids || {};
             document.querySelectorAll('.inv-xero-push').forEach(btn => {
-                const row = btn.closest('tr');
                 const onclick = btn.getAttribute('onclick') || '';
                 const m = onclick.match(/pushToXero\((\d+)\)/);
-                if (m && matched.has(parseInt(m[1]))) {
-                    btn.outerHTML = '<span class="inv-xero-badge synced" title="Synced to Xero"><i class="bi bi-check-circle-fill"></i></span>';
+                if (m) {
+                    const invId = parseInt(m[1]);
+                    const xeroId = xeroIds[invId];
+                    if (xeroId) {
+                        const cell = btn.closest('.inv-xero-cell');
+                        if (cell && !cell.querySelector('.inv-xero-link')) {
+                            btn.insertAdjacentHTML('beforebegin',
+                                '<a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + xeroId + '" target="_blank" class="inv-xero-link" title="View in Xero" onclick="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>');
+                        }
+                    }
                 }
             });
             text.textContent = `Checked ${data.checked} — ${data.matched.length} found`;

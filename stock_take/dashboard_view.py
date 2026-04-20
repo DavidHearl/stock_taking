@@ -732,6 +732,13 @@ def dashboard(request):
         created_at__date=today,
     ).exists()
 
+    # Hide the pulsing stock-take widget on weekends and before 1 PM
+    now = datetime.now()
+    hide_stock_take_widget = (
+        not stock_take_done_today
+        and (now.weekday() >= 5 or now.hour < 13)
+    )
+
     context = {
         'fits_chart_data': json.dumps({
             'labels': labels,
@@ -787,6 +794,7 @@ def dashboard(request):
         'avg_preview_json': json.dumps(avg_preview),
         'workflow_roles_json': json.dumps(workflow_roles),
         'stock_take_done_today': stock_take_done_today,
+        'hide_stock_take_widget': hide_stock_take_widget,
     }
     return render(request, 'stock_take/dashboard.html', context)
 
