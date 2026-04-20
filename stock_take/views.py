@@ -12175,14 +12175,13 @@ def move_sales_appointment(request, appointment_id):
 
 @login_required
 def gantt_chart(request):
-    """Display a Gantt chart of orders showing workflow stage progression and timeline."""
+    """Display a Gantt chart of orders showing workflow stage progression."""
     from datetime import datetime, timedelta
     from .models import WorkflowStage, OrderWorkflowProgress
 
     today = timezone.now().date()
-    tab = request.GET.get('tab', 'workflow')  # 'workflow' or 'timeline'
 
-    # ── Workflow stages (used by both tabs) ──
+    # ── Workflow stages ──
     all_stages = list(WorkflowStage.objects.filter(phase='sale').prefetch_related('tasks').order_by('order'))
     enquiry_stages = list(WorkflowStage.objects.filter(phase='enquiry').prefetch_related('tasks').order_by('order'))
     lead_stages = list(WorkflowStage.objects.filter(phase='lead').prefetch_related('tasks').order_by('order'))
@@ -12366,20 +12365,198 @@ def gantt_chart(request):
         lead_cumulative_day += days
     total_lead_days = lead_cumulative_day
 
-    # ── Timeline tab data (date-based Gantt) ──
+    context = {
+        'order_rows': order_rows,
+        'all_stages': all_stages,
+        'stage_rows': stage_rows,
+        'total_workflow_days': total_workflow_days,
+        'enquiry_stages': enquiry_stages,
+        'enquiry_stage_rows': enquiry_stage_rows,
+        'total_enquiry_days': total_enquiry_days,
+        'enquiry_order_rows': enquiry_order_rows,
+        'lead_stages': lead_stages,
+        'lead_stage_rows': lead_stage_rows,
+        'total_lead_days': total_lead_days,
+        'lead_order_rows': lead_order_rows,
+        'role_colours': role_colours,
+        'phase_choices': WorkflowStage.PHASE_CHOICES,
+        'role_choices': WorkflowStage.ROLE_CHOICES,
+    }
+
+    return render(request, 'stock_take/gantt_chart.html', context)
+
+
+@login_required
+def active_projects(request):
+    """Display active projects – overview (stages) or timeline (date-based Gantt)."""
+    from datetime import datetime, timedelta
+    from .models import WorkflowStage, OrderWorkflowProgress, WorkflowStageDate
+
+    today = timezone.now().date()
+    tab = request.GET.get('tab', 'overview')  # 'overview' or 'timeline'
+
+    # Role colours for workflow stages
+    role_colours = {
+        'customer-support': '#6366f1',
+        'design': '#3b82f6',
+        'fitter': '#10b981',
+        'operations': '#f59e0b',
+        'manufacturing': '#ef4444',
+        'enquiry': '#8b5cf6',
+        'waiting': '#94a3b8',
+    }
+
+    # ── Overview tab: stages with their orders ──
+    all_stages = list(WorkflowStage.objects.filter(phase='sale').order_by('order'))
+
+    sale_stage_ids = [s.id for s in all_stages]
+    progress_qs = (
+        OrderWorkflowProgress.objects
+        .filter(current_stage_id__in=sale_stage_ids)
+        .select_related('order', 'order__customer', 'current_stage')
+        .order_by('current_stage__order', 'order__fit_date')
+    )
+
+    # Pre-fetch AnthillSale financial data for all orders with sale_numbers
+    from .models import AnthillSale
+    from django.db.models import Sum, Q as DQ
+
+    # Group orders by stage
+    stage_orders_map = {s.id: [] for s in all_stages}
+    all_overview_order_ids = []
+    sale_numbers_needed = []
+    for wp in progress_qs:
+        order = wp.order
+        if not order or order.job_finished:
+            continue
+        display_name = ''
+        if order.customer:
+            display_name = f"{order.customer.first_name} {order.customer.last_name}".strip()
+        if not display_name:
+            display_name = f"{order.first_name} {order.last_name}".strip()
+        stage_orders_map[wp.current_stage_id].append({
+            'order': order,
+            'display_name': display_name or order.sale_number,
+        })
+        all_overview_order_ids.append(order.id)
+        if order.sale_number:
+            sale_numbers_needed.append(order.sale_number)
+
+    # Build financial lookup: sale_number -> {sale_value, total_paid}
+    financial_map = {}
+    if sale_numbers_needed:
+        anthill_sales = (
+            AnthillSale.objects
+            .filter(anthill_activity_id__in=sale_numbers_needed)
+            .annotate(
+                total_paid=Sum(
+                    'payments__amount',
+                    filter=DQ(payments__ignored=False),
+                )
+            )
+            .values('anthill_activity_id', 'anthill_customer_id', 'sale_value', 'discount', 'total_paid')
+        )
+        for row in anthill_sales:
+            sale_val = (row['sale_value'] or 0) - (row['discount'] or 0)
+            financial_map[row['anthill_activity_id']] = {
+                'sale_value': sale_val,
+                'total_paid': row['total_paid'] or 0,
+                'anthill_customer_id': row['anthill_customer_id'] or '',
+            }
+
+    # Inject financial data into each order entry
+    for stage_id, order_list in stage_orders_map.items():
+        for item in order_list:
+            fin = financial_map.get(item['order'].sale_number, {})
+            item['sale_value'] = fin.get('sale_value', 0)
+            item['total_paid'] = fin.get('total_paid', 0)
+            item['anthill_customer_id'] = fin.get('anthill_customer_id', '')
+
+    stage_groups = []
+    hidden_stages = []
+    for stage in all_stages:
+        entry = {
+            'stage': stage,
+            'colour': role_colours.get(stage.role, '#94a3b8'),
+            'orders': stage_orders_map[stage.id],
+            'count': len(stage_orders_map[stage.id]),
+        }
+        if stage_orders_map[stage.id]:
+            stage_groups.append(entry)
+        else:
+            hidden_stages.append(entry)
+
+    # ── All open sales for sync ──
+    # Match the sales page definition: category 3, not cancelled/complete/won.
+    # Include orders linked via FK *or* matched by sale_number.
+    open_anthill = (
+        AnthillSale.objects
+        .filter(category='3')
+        .exclude(status__iexact='cancelled')
+        .exclude(status__iregex=r'^(complete|completed|won)$')
+    )
+    # Orders linked via FK
+    fk_order_ids = set(
+        open_anthill
+        .filter(order__isnull=False)
+        .values_list('order_id', flat=True)
+    )
+    # Orders matched by sale_number for unlinked sales
+    unlinked_activity_ids = list(
+        open_anthill
+        .filter(order__isnull=True)
+        .values_list('anthill_activity_id', flat=True)
+    )
+    matched_orders = dict(
+        Order.objects
+        .filter(sale_number__in=unlinked_activity_ids)
+        .values_list('id', 'sale_number')
+    ) if unlinked_activity_ids else {}
+
+    # Also include any active order (job_finished=False) not already covered
+    active_orders = dict(
+        Order.objects
+        .filter(job_finished=False)
+        .exclude(sale_number='')
+        .exclude(sale_number__isnull=True)
+        .values_list('id', 'sale_number')
+    )
+
+    # Get sale_numbers for FK-linked order IDs
+    fk_sale_numbers = dict(
+        Order.objects
+        .filter(id__in=fk_order_ids)
+        .values_list('id', 'sale_number')
+    ) if fk_order_ids else {}
+
+    # Merge all sources (deduplicated by order PK)
+    all_sync_order_names = {}
+    all_sync_order_names.update(fk_sale_numbers)
+    all_sync_order_names.update(matched_orders)
+    all_sync_order_names.update(active_orders)
+    all_sync_order_ids = list(all_sync_order_names.keys())
+
+    # ── Last synced timestamp ──
+    last_synced = (
+        OrderWorkflowProgress.objects
+        .filter(order__job_finished=False)
+        .order_by('-stage_updated_at')
+        .values_list('stage_updated_at', flat=True)
+        .first()
+    )
+
+    # ── Timeline tab data ──
     timeline_rows = []
     day_columns = []
     month_headers = []
     total_days = 0
     today_offset = 0
-    weeks_back = 4
-    weeks_ahead = 8
+    weeks_back = int(request.GET.get('back', 4))
+    weeks_ahead = int(request.GET.get('ahead', 8))
     range_start = today
     range_end = today
 
     if tab == 'timeline':
-        weeks_back = int(request.GET.get('back', 4))
-        weeks_ahead = int(request.GET.get('ahead', 8))
         range_start = today - timedelta(weeks=weeks_back)
         range_end = today + timedelta(weeks=weeks_ahead)
 
@@ -12403,7 +12580,6 @@ def gantt_chart(request):
                 anthill_map[sale.anthill_activity_id] = sale
 
         # Fetch stage completion dates for all timeline orders
-        from .models import WorkflowStageDate
         order_ids = [o.id for o in orders]
         stage_date_qs = (
             WorkflowStageDate.objects
@@ -12411,7 +12587,6 @@ def gantt_chart(request):
             .select_related('stage')
             .order_by('stage__order')
         )
-        # Build map: order_id -> list of {stage, date, offset}
         stage_dates_map = {}
         for sd in stage_date_qs:
             stage_dates_map.setdefault(sd.order_id, []).append(sd)
@@ -12483,9 +12658,7 @@ def gantt_chart(request):
             order_stage_dates = stage_dates_map.get(order.id, [])
             stage_segments = []
             if order_stage_dates:
-                # Sort by stage order
                 sorted_sds = sorted(order_stage_dates, key=lambda sd: sd.stage.order)
-                # First segment starts at order_date (or first stage date)
                 seg_start = start
                 for sd in sorted_sds:
                     seg_end = sd.completed_date
@@ -12503,7 +12676,6 @@ def gantt_chart(request):
                         'width': seg_width,
                     })
                     seg_start = seg_end
-                # Final segment: from last completed stage to fit_date (current stage)
                 if seg_start < end and seg_start <= range_end:
                     clamped_start = max(seg_start, range_start)
                     clamped_end = min(end, range_end)
@@ -12542,18 +12714,12 @@ def gantt_chart(request):
 
     context = {
         'tab': tab,
-        'order_rows': order_rows,
-        'all_stages': all_stages,
-        'stage_rows': stage_rows,
-        'total_workflow_days': total_workflow_days,
-        'enquiry_stages': enquiry_stages,
-        'enquiry_stage_rows': enquiry_stage_rows,
-        'total_enquiry_days': total_enquiry_days,
-        'enquiry_order_rows': enquiry_order_rows,
-        'lead_stages': lead_stages,
-        'lead_stage_rows': lead_stage_rows,
-        'total_lead_days': total_lead_days,
-        'lead_order_rows': lead_order_rows,
+        'stage_groups': stage_groups,
+        'hidden_stages': hidden_stages,
+        'all_overview_order_ids': all_overview_order_ids,
+        'all_sync_order_ids': all_sync_order_ids,
+        'all_sync_order_names': all_sync_order_names,
+        'last_synced': last_synced,
         'timeline_rows': timeline_rows,
         'day_columns': day_columns,
         'month_headers': month_headers,
@@ -12565,11 +12731,9 @@ def gantt_chart(request):
         'weeks_back': weeks_back,
         'weeks_ahead': weeks_ahead,
         'role_colours': role_colours,
-        'phase_choices': WorkflowStage.PHASE_CHOICES,
-        'role_choices': WorkflowStage.ROLE_CHOICES,
     }
 
-    return render(request, 'stock_take/gantt_chart.html', context)
+    return render(request, 'stock_take/active_projects.html', context)
 
 
 @login_required

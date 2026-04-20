@@ -851,6 +851,22 @@ class StockItem(models.Model):
         return f"{self.sku} - {self.name}"
 
 
+class ProductLink(models.Model):
+    """Link two products together so adding one to an order automatically includes the other."""
+    product = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='linked_from')
+    linked_product = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='linked_to')
+    quantity_ratio = models.DecimalField(max_digits=10, decimal_places=2, default=1, help_text='How many of linked_product per 1 of product')
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('product', 'linked_product')
+        ordering = ['linked_product__name']
+
+    def __str__(self):
+        return f"{self.product.sku} → {self.linked_product.sku} (×{self.quantity_ratio})"
+
+
 class StockHistory(models.Model):
     """Track stock level changes over time for graphing and analysis"""
     stock_item = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='stock_history')

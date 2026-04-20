@@ -61,7 +61,7 @@
         <thead>
             <tr>
                 <th>Contract #</th>
-                <th>Client</th>
+                <th>Customer</th>
                 <th>Showroom</th>
                 <th>Payment Type</th>
                 <th>Date</th>
@@ -74,12 +74,12 @@
         </thead>
         <tbody>
             {% for invoice in invoices %}
-            <tr onclick="window.location='{% url 'invoice_detail' invoice.id %}'" style="cursor:pointer;" data-has-date="{% if invoice.date %}1{% else %}0{% endif %}">
+            <tr {% if invoice.sale_pk %}onclick="window.location='{% url 'sale_detail' invoice.sale_pk %}'" style="cursor:pointer;"{% endif %} data-has-date="{% if invoice.date %}1{% else %}0{% endif %}">
                 <td>
-                    <a href="{% url 'invoice_detail' invoice.id %}" class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</a>
+                    {% if invoice.sale_pk %}<a href="{% url 'sale_detail' invoice.sale_pk %}" class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</a>{% else %}<span class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</span>{% endif %}
                 </td>
                 <td>
-                    <span class="inv-client" title="{{ invoice.client_name }}">{{ invoice.client_name }}</span>
+                    {% if invoice.customer %}<a href="{% url 'customer_detail' invoice.customer.pk %}" class="inv-client" title="{{ invoice.client_name }}" onclick="event.stopPropagation();">{{ invoice.client_name }}</a>{% elif invoice.sale_customer_pk %}<a href="{% url 'customer_detail' invoice.sale_customer_pk %}" class="inv-client" title="{{ invoice.client_name }}" onclick="event.stopPropagation();">{{ invoice.client_name }}</a>{% else %}<span class="inv-client" title="{{ invoice.client_name }}">{{ invoice.client_name }}</span>{% endif %}
                 </td>
                 <td>{{ invoice.showroom|default:"—" }}</td>
                 <td>{{ invoice.payment_type|default:"—" }}</td>

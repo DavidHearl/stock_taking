@@ -1,5 +1,5 @@
 ﻿{% extends 'base.html' %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Sale {{ sale.contract_number|default:sale.anthill_activity_id }} - Detail{% endblock %}
 
@@ -24,7 +24,7 @@
 
     <!-- ===== CUSTOMER HERO CARD ===== -->
     <div class="card sale-hero-card">
-        <div class="card-header card-header-customer sale-hero-header">
+        <div class="card-header sale-hero-header">
             <div class="sale-hero-layout">
                 <div class="sale-hero-avatar">
                     <i class="bi bi-person-fill"></i>
@@ -47,20 +47,18 @@
                             </span>
                             {% endif %}
                         {% endif %}
+                        {% if sale.created_at %}<span><i class="bi bi-clock"></i> Created {{ sale.created_at|date:"d M Y" }}</span>{% endif %}
+                        {% if sale.updated_at %}<span><i class="bi bi-arrow-repeat"></i> Updated {{ sale.updated_at|date:"d M Y" }}</span>{% endif %}
                     </div>
                 </div>
             </div>
             <div class="sale-hero-actions">
-                {% if sale.anthill_customer_id %}
-                <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success" title="View customer in Anthill CRM">
-                    <i class="bi bi-box-arrow-up-right"></i> Anthill
-                </a>
-                {% endif %}
-                {% if sale.customer %}
-                <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary" title="View full customer record">
-                    <i class="bi bi-person"></i> Customer Profile
-                </a>
-                {% endif %}
+                <button class="btn btn-md btn-outline-primary" id="btn-edit" onclick="toggleEditMode()">
+                    <i class="bi bi-pencil"></i> Edit</button>
+                <button class="btn btn-md btn-outline-success" id="btn-save" style="display:none;" onclick="saveSale()">
+                    <i class="bi bi-check-lg"></i> Save</button>
+                <button class="btn btn-md btn-outline-secondary" id="btn-cancel" style="display:none;" onclick="cancelEdit()">
+                    <i class="bi bi-x-lg"></i> Cancel</button>
             </div>
         </div>
     </div>
@@ -76,51 +74,45 @@
                 <!-- Card 1: Sale Details -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
-                        <h3><i class="bi bi-receipt"></i> Sale Details</h3>
+                        <h3>Sale Details</h3>
                         <div class="header-actions">
                             <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
                                 {{ sale.status|default:"Unknown" }}
                             </span>
-                            <button class="btn btn-sm btn-outline-primary" id="btn-edit" onclick="toggleEditMode()">
-                                <i class="bi bi-pencil"></i> Edit</button>
-                            <button class="btn btn-sm btn-outline-success" id="btn-save" style="display:none;" onclick="saveSale()">
-                                <i class="bi bi-check-lg"></i> Save</button>
-                            <button class="btn btn-sm btn-outline-secondary" id="btn-cancel" style="display:none;" onclick="cancelEdit()">
-                                <i class="bi bi-x-lg"></i> Cancel</button>
                         </div>
                     </div>
                     <div class="card-body padded">
                         <div id="save-notification" class="save-notification" style="display:none;"></div>
                         <div class="info-display">
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Contract Number</div>
                                 <div class="field-value field-value-large view-val">{{ sale.contract_number|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="contract_number" value="{{ sale.contract_number|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Activity ID</div>
                                 <div class="field-value">{{ sale.anthill_activity_id }}</div>
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Date</div>
                                 <div class="field-value">{{ sale.activity_date|date:"d M Y H:i"|default:"-" }}</div>
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Location</div>
                                 <div class="field-value view-val">{{ sale.location|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="location" value="{{ sale.location|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Assigned To</div>
                                 <div class="field-value view-val">{{ sale.assigned_to_name|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="assigned_to_name" value="{{ sale.assigned_to_name|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Source</div>
                                 <div class="field-value view-val">{{ sale.source|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="source" value="{{ sale.source|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Status</div>
                                 <div class="field-value view-val">{{ sale.status|default:"-" }}</div>
                                 <select class="customer-edit-input edit-val" data-field="status" style="display:none;">
@@ -137,7 +129,7 @@
                 <!-- Card 2: Financial -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-customer">
-                        <h3><i class="bi bi-currency-pound"></i> Financial</h3>
+                        <h3>Financial</h3>
                     </div>
                     <div class="financial-card-body">
                         <div class="financial-cards-vertical">
@@ -207,31 +199,31 @@
                 <!-- Card 3: Product Info -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-job">
-                        <h3><i class="bi bi-box-seam"></i> Product Info</h3>
+                        <h3>Product Info</h3>
                     </div>
                     <div class="card-body padded">
                         <div class="info-display">
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Range</div>
                                 <div class="field-value view-val">{{ sale.range_name|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="range_name" value="{{ sale.range_name|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Door Type</div>
                                 <div class="field-value view-val">{{ sale.door_type|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="door_type" value="{{ sale.door_type|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Products Included</div>
                                 <div class="field-value view-val">{{ sale.products_included|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="products_included" value="{{ sale.products_included|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Fit From Date</div>
                                 <div class="field-value view-val">{{ sale.fit_from_date|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="fit_from_date" value="{{ sale.fit_from_date|default:'' }}" style="display:none;">
                             </div>
-                            <div>
+                            <div class="field-row-sb">
                                 <div class="field-label">Goods Due In</div>
                                 <div class="field-value view-val">{{ sale.goods_due_in|default:"-" }}</div>
                                 <input class="customer-edit-input edit-val" data-field="goods_due_in" value="{{ sale.goods_due_in|default:'' }}" style="display:none;">
@@ -985,6 +977,7 @@
 
             // ── Edit / Save / Cancel ─────────────────────────────────────────
             const SALE_SAVE_URL = "{% url 'sale_save' sale.pk %}";
+            const INVOICE_DETAIL_URL = "{% url 'invoices_list' %}";
 
             function toggleEditMode() {
                 document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
@@ -1088,6 +1081,111 @@
             }
             </script>
 
+            <!-- Invoices Card -->
+            {% if sale_invoices %}
+            <div class="card" id="invoices-section">
+                <div class="card-header">
+                    <h3><i class="bi bi-receipt"></i> Invoices</h3>
+                    <span class="tab-count">{{ sale_invoices|length }}</span>
+                </div>
+                {% for inv in sale_invoices %}
+                <div class="sale-invoice-item {% if not forloop.last %}sale-invoice-border{% endif %}">
+                    <div class="sale-invoice-header" onclick="toggleInvoiceDetail({{ inv.id }})">
+                        <div class="sale-invoice-header-left">
+                            <span class="sale-invoice-number">{{ inv.invoice_number }}</span>
+                            <span class="inv-status {{ inv.status|lower }}">{{ inv.status }}</span>
+                            {% if inv.payment_status == 'paid' %}
+                            <span class="inv-payment paid">Paid</span>
+                            {% elif inv.payment_status == 'partial' %}
+                            <span class="inv-payment partial">Partial</span>
+                            {% elif inv.is_overdue %}
+                            <span class="inv-payment overdue">Overdue</span>
+                            {% else %}
+                            <span class="inv-payment unpaid">Unpaid</span>
+                            {% endif %}
+                        </div>
+                        <div class="sale-invoice-header-right">
+                            <span class="sale-invoice-amount">£{{ inv.total|floatformat:2|intcomma }}</span>
+                            <span class="sale-invoice-date">{{ inv.date|date:"d M Y"|default:"No date" }}</span>
+                            <i class="bi bi-chevron-down sale-invoice-chevron" id="chevron-{{ inv.id }}"></i>
+                        </div>
+                    </div>
+                    <div class="sale-invoice-detail" id="invoice-detail-{{ inv.id }}" style="display:none;">
+                        <div class="sale-invoice-meta">
+                            {% if inv.payment_type %}<span><strong>Type:</strong> {{ inv.payment_type }}</span>{% endif %}
+                            {% if inv.payment_method %}<span><strong>Method:</strong> {{ inv.payment_method }}</span>{% endif %}
+                            {% if inv.showroom %}<span><strong>Showroom:</strong> {{ inv.showroom }}</span>{% endif %}
+                            {% if inv.description %}<span><strong>Description:</strong> {{ inv.description }}</span>{% endif %}
+                            {% if inv.due_date %}<span><strong>Due:</strong> {{ inv.due_date|date:"d M Y" }}</span>{% endif %}
+                        </div>
+
+                        {% if inv.line_items.all %}
+                        <table class="table orders-table sale-invoice-table">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Description</th>
+                                    <th style="text-align:right;">Rate</th>
+                                    <th style="text-align:right;">Qty</th>
+                                    <th style="text-align:right;">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in inv.line_items.all %}
+                                <tr>
+                                    <td>{{ item.name|default:"—" }}</td>
+                                    <td class="text-muted">{{ item.description|default:"" }}</td>
+                                    <td class="number-cell">£{{ item.rate|floatformat:2|intcomma }}</td>
+                                    <td class="number-cell">{{ item.quantity|floatformat:0 }}</td>
+                                    <td class="number-cell">£{{ item.line_total|floatformat:2|intcomma }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% endif %}
+
+                        <div class="sale-invoice-summary">
+                            <div class="sale-invoice-summary-row">
+                                <span>Subtotal</span>
+                                <span>£{{ inv.subtotal|floatformat:2|intcomma }}</span>
+                            </div>
+                            {% if inv.total_tax %}
+                            <div class="sale-invoice-summary-row">
+                                <span>Tax</span>
+                                <span>£{{ inv.total_tax|floatformat:2|intcomma }}</span>
+                            </div>
+                            {% endif %}
+                            <div class="sale-invoice-summary-row sale-invoice-summary-total">
+                                <span>Total</span>
+                                <span>£{{ inv.total|floatformat:2|intcomma }}</span>
+                            </div>
+                            {% if inv.amount_paid > 0 %}
+                            <div class="sale-invoice-summary-row sale-invoice-summary-paid">
+                                <span>Paid</span>
+                                <span>£{{ inv.amount_paid|floatformat:2|intcomma }}</span>
+                            </div>
+                            {% endif %}
+                            {% if inv.amount_outstanding > 0 %}
+                            <div class="sale-invoice-summary-row sale-invoice-summary-outstanding">
+                                <span>Outstanding</span>
+                                <span>£{{ inv.amount_outstanding|floatformat:2|intcomma }}</span>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        {% if inv.xero_id %}
+                        <div class="sale-invoice-actions">
+                            <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ inv.xero_id }}" target="_blank" class="btn btn-sm btn-outline-success">
+                                <i class="bi bi-box-arrow-up-right"></i> View in Xero
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
             <!-- Related Sales Card -->
             {% if related_sales %}
             <div class="card">
@@ -1146,15 +1244,15 @@
             <!-- Quick Links Card -->
             <div class="card sale-sidebar-card">
                 <div class="card-header">
-                    <h3><i class="bi bi-link-45deg"></i> Quick Links</h3>
+                    <h3>Quick Links</h3>
                 </div>
                 <div class="card-body padded sale-sidebar-links">
                     <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
-                        <i class="bi bi-box-arrow-up-right"></i> Open Sale in Anthill
+                        <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
                     </a>
                     {% if sale.anthill_customer_id %}
                     <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
-                        <i class="bi bi-box-arrow-up-right"></i> Open Customer in Anthill
+                        <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
                     </a>
                     {% endif %}
                     {% if sale.customer %}
@@ -1291,32 +1389,7 @@
             </script>
             {% endif %}
 
-            <!-- System Info Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h3><i class="bi bi-info-circle"></i> System Info</h3>
-                </div>
-                <div class="card-body padded">
-                    <div class="info-display">
-                        <div>
-                            <div class="field-label">Activity ID</div>
-                            <div class="field-value">{{ sale.anthill_activity_id }}</div>
-                        </div>
-                        <div>
-                            <div class="field-label">Anthill Customer ID</div>
-                            <div class="field-value">{{ sale.anthill_customer_id|default:"-" }}</div>
-                        </div>
-                        <div>
-                            <div class="field-label">Created</div>
-                            <div class="field-value">{{ sale.created_at|date:"d M Y H:i" }}</div>
-                        </div>
-                        <div>
-                            <div class="field-label">Last Updated</div>
-                            <div class="field-value">{{ sale.updated_at|date:"d M Y H:i" }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+
 
         </div>
     </div>
@@ -1415,5 +1488,20 @@ document.addEventListener('click', function(e) {
         results.style.display = 'none';
     }
 });
+
+// ── Invoice detail toggle ────────────────────────────────────────
+function toggleInvoiceDetail(invoiceId) {
+    const detail = document.getElementById('invoice-detail-' + invoiceId);
+    const chevron = document.getElementById('chevron-' + invoiceId);
+    if (detail.style.display === 'none') {
+        detail.style.display = 'block';
+        chevron.classList.remove('bi-chevron-down');
+        chevron.classList.add('bi-chevron-up');
+    } else {
+        detail.style.display = 'none';
+        chevron.classList.remove('bi-chevron-up');
+        chevron.classList.add('bi-chevron-down');
+    }
+}
 </script>
 {% endblock %}

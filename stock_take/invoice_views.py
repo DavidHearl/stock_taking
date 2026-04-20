@@ -19,7 +19,7 @@ from django.http import StreamingHttpResponse, JsonResponse
 from django.utils import timezone
 
 
-from .models import Invoice, PurchaseOrder, PurchaseOrderProduct
+from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +62,10 @@ def invoices_list(request):
             | Q(description__icontains=search_query)
         )
 
-    invoices = qs.select_related('customer', 'order').order_by('-date')
+    invoices = list(qs.select_related('customer', 'order').order_by('-date'))
 
     # Summary stats (over filtered set)
-    total_invoices = invoices.count()
+    total_invoices = len(invoices)
     total_value = sum(inv.total for inv in invoices)
     total_outstanding = sum(inv.amount_outstanding for inv in invoices)
     total_paid = sum(inv.amount_paid for inv in invoices)
@@ -76,6 +76,40 @@ def invoices_list(request):
 
     # Last sync timestamp
     last_sync = Invoice.objects.order_by('-synced_at').values_list('synced_at', flat=True).first()
+
+    # Map contract numbers to AnthillSale PKs and customer PKs for linking
+    contract_numbers = set(inv.contract_number for inv in invoices if inv.contract_number)
+    sale_map = {}
+    sale_customer_map = {}
+    if contract_numbers:
+        for cn, pk, cust_pk in (
+            AnthillSale.objects.filter(contract_number__in=contract_numbers)
+            .values_list('contract_number', 'pk', 'customer_id')
+        ):
+            sale_map[cn] = pk
+            if cust_pk:
+                sale_customer_map[cn] = cust_pk
+
+    # Build a name→PK map for invoices still missing a customer link
+    unlinked_names = set()
+    for inv in invoices:
+        if not inv.customer_id and inv.contract_number not in sale_customer_map and inv.client_name:
+            unlinked_names.add(inv.client_name)
+    name_customer_map = {}
+    if unlinked_names:
+        name_customer_map = dict(
+            Customer.objects.filter(name__in=unlinked_names)
+            .values_list('name', 'pk')
+        )
+
+    for inv in invoices:
+        inv.sale_pk = sale_map.get(inv.contract_number)
+        # If invoice has no customer FK, try sale's customer, then name match
+        if not inv.customer_id:
+            inv.sale_customer_pk = (
+                sale_customer_map.get(inv.contract_number)
+                or name_customer_map.get(inv.client_name)
+            )
 
     context = {
         'invoices': invoices,

@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, PriceHistory, log_activity
+from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, PriceHistory, ProductLink, log_activity
 import json
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -172,6 +172,11 @@ def product_detail(request, item_id):
         stock_item=product
     ).select_related('created_by').order_by('-created_at')[:50]
     
+    # Linked products
+    linked_products = ProductLink.objects.filter(
+        product=product
+    ).select_related('linked_product', 'linked_product__supplier')
+    
     return render(request, 'stock_take/product_detail.html', {
         'product': product,
         'categories': json.dumps(categories),
@@ -187,6 +192,7 @@ def product_detail(request, item_id):
         'stock_changes': stock_changes,
         'substitutions': substitutions,
         'price_history': price_history,
+        'linked_products': linked_products,
     })
 
 
@@ -441,3 +447,77 @@ def delete_product(request, item_id):
     from django.contrib import messages
     messages.success(request, f'Product {sku} deleted.')
     return redirect('stock_list')
+
+
+@login_required
+@require_POST
+def product_add_link(request, item_id):
+    """Add a linked product via AJAX."""
+    product = get_object_or_404(StockItem, id=item_id)
+    linked_id = request.POST.get('linked_product_id')
+    quantity_ratio = request.POST.get('quantity_ratio', '1')
+    notes = request.POST.get('notes', '').strip()
+
+    if not linked_id:
+        return JsonResponse({'success': False, 'error': 'Linked product is required.'}, status=400)
+
+    try:
+        linked_id = int(linked_id)
+    except (ValueError, TypeError):
+        return JsonResponse({'success': False, 'error': 'Invalid product ID.'}, status=400)
+
+    if linked_id == item_id:
+        return JsonResponse({'success': False, 'error': 'Cannot link a product to itself.'}, status=400)
+
+    linked_product = get_object_or_404(StockItem, id=linked_id)
+
+    try:
+        quantity_ratio = Decimal(quantity_ratio)
+        if quantity_ratio <= 0:
+            raise ValueError
+    except (Exception,):
+        return JsonResponse({'success': False, 'error': 'Quantity ratio must be a positive number.'}, status=400)
+
+    link, created = ProductLink.objects.get_or_create(
+        product=product,
+        linked_product=linked_product,
+        defaults={'quantity_ratio': quantity_ratio, 'notes': notes},
+    )
+    if not created:
+        return JsonResponse({'success': False, 'error': 'This link already exists.'}, status=400)
+
+    log_activity(
+        user=request.user,
+        event_type='update',
+        description=f'{request.user.get_full_name() or request.user.username} linked {product.sku} → {linked_product.sku} (×{quantity_ratio}).',
+    )
+
+    return JsonResponse({
+        'success': True,
+        'link': {
+            'id': link.id,
+            'linked_sku': linked_product.sku,
+            'linked_name': linked_product.name,
+            'linked_id': linked_product.id,
+            'quantity_ratio': str(link.quantity_ratio),
+            'notes': link.notes,
+        },
+    })
+
+
+@login_required
+@require_POST
+def product_delete_link(request, item_id, link_id):
+    """Delete a product link via AJAX."""
+    product = get_object_or_404(StockItem, id=item_id)
+    link = get_object_or_404(ProductLink, id=link_id, product=product)
+    linked_sku = link.linked_product.sku
+    link.delete()
+
+    log_activity(
+        user=request.user,
+        event_type='update',
+        description=f'{request.user.get_full_name() or request.user.username} removed link {product.sku} → {linked_sku}.',
+    )
+
+    return JsonResponse({'success': True})

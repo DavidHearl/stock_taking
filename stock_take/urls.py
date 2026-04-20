@@ -4,7 +4,7 @@ from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_monthly_stock_history, dashboard_outstanding_report, dashboard_outstanding_pdf, dashboard_outstanding_xero_check, dashboard_outstanding_xero_check_single, dashboard_week_report, dashboard_week_pdf, dashboard_monthly_report, dashboard_monthly_pdf, dashboard_avg_report, dashboard_avg_pdf, dashboard_save_layout
-from .product_view import product_detail, add_product, upload_product_image, delete_product, product_add_substitution
+from .product_view import product_detail, add_product, upload_product_image, delete_product, product_add_substitution, product_add_link, product_delete_link
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items, purchase_order_push_to_xero, purchase_order_remove_xero_sync, purchase_order_split, po_add_timesheet, po_delete_timesheet, po_link_timesheet, po_unlink_timesheet, po_update_timesheet, po_add_expense, po_delete_expense, po_save_freight
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, sale_save, sale_link_order, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage, bulk_delete_payments, xero_search_invoices, xero_link_invoice, customer_xero_search, customer_xero_link, customer_anthill_scrape, customer_distribute_payments
 from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log, resolve_error_log, error_log_history, admin_design_rules
@@ -223,6 +223,7 @@ urlpatterns = [
     
     # Ordering page
     path('ordering/', views.ordering, name='ordering'),
+    path('active/', views.active_projects, name='active_projects'),
     path('ordering/load-order-details/<str:sale_number>/', views.load_order_details_ajax, name='load_order_details_ajax'),
     path('ordering/load-indicators/', views.load_order_indicators_ajax, name='load_order_indicators_ajax'),
     path('ordering/scrape-anthill-orders/', views.scrape_anthill_orders_to_place, name='scrape_anthill_orders_to_place'),
@@ -401,6 +402,8 @@ urlpatterns = [
     path('product/<int:item_id>/upload-image/', upload_product_image, name='upload_product_image'),
     path('product/<int:item_id>/delete/', delete_product, name='delete_product'),
     path('product/<int:item_id>/add-substitution/', product_add_substitution, name='product_add_substitution'),
+    path('product/<int:item_id>/add-link/', product_add_link, name='product_add_link'),
+    path('product/<int:item_id>/delete-link/<int:link_id>/', product_delete_link, name='product_delete_link'),
 
     # Admin pages
     path('admin-panel/users/', admin_users, name='admin_users'),

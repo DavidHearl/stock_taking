@@ -829,6 +829,15 @@ def sale_detail(request, pk):
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
 
+    # Get invoices matching this sale's contract number
+    sale_invoices = []
+    if sale.contract_number:
+        sale_invoices = list(
+            Invoice.objects.filter(contract_number=sale.contract_number)
+            .prefetch_related('line_items', 'payments', 'purchase_orders')
+            .order_by('-date')
+        )
+
     # Get payment history for this sale, split by source
     all_payments = list(sale.payments.all().order_by('date'))
     xero_payments = [p for p in all_payments if p.source != 'manual']
@@ -844,9 +853,17 @@ def sale_detail(request, pk):
     total_paid, discount = _match_credits_to_payments(active_payments)
     sale_value = sale.sale_value or Decimal('0')
     effective_value = sale_value - discount
-    outstanding = max(effective_value - total_paid, Decimal('0'))
-    overpayment = max(total_paid - effective_value, Decimal('0'))
-    payment_pct = int(min(total_paid / effective_value * 100, 100)) if effective_value > 0 else 0
+
+    # Cancelled / dead sales owe nothing
+    is_cancelled = sale.status in ('dead', 'cancelled')
+    if is_cancelled:
+        outstanding = Decimal('0')
+        overpayment = max(total_paid - effective_value, Decimal('0'))
+        payment_pct = 100 if effective_value > 0 else 0
+    else:
+        outstanding = max(effective_value - total_paid, Decimal('0'))
+        overpayment = max(total_paid - effective_value, Decimal('0'))
+        payment_pct = int(min(total_paid / effective_value * 100, 100)) if effective_value > 0 else 0
     overpayment_pct = int(overpayment / effective_value * 100) if effective_value > 0 and overpayment > 0 else 0
     adjusted_profit = (sale.profit or Decimal('0')) - discount if sale.profit else None
 
@@ -867,6 +884,8 @@ def sale_detail(request, pk):
         'overpayment_pct': overpayment_pct,
         'adjusted_profit': adjusted_profit,
         'gallery_images': gallery_images,
+        'is_cancelled': is_cancelled,
+        'sale_invoices': sale_invoices,
     }
 
     return render(request, 'stock_take/sale_detail.html', context)

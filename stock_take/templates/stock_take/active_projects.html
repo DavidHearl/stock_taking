@@ -1,0 +1,494 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_filters %}
+{% load humanize %}
+
+{% block title %}Active Projects{% endblock %}
+
+{% block nav_active_projects_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/fit_board.css' %}" rel="stylesheet">
+<link href="{% static 'css/gantt.css' %}" rel="stylesheet">
+<link href="{% static 'css/active_projects.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+
+<!-- Toolbar -->
+<div class="cal-toolbar">
+    <div class="view-toggle">
+        <a href="{% url 'active_projects' %}" class="view-toggle-btn {% if tab == 'overview' %}active{% endif %}">Overview</a>
+        <a href="{% url 'active_projects' %}?tab=timeline" class="view-toggle-btn {% if tab == 'timeline' %}active{% endif %}">Timeline</a>
+    </div>
+    <div class="cal-toolbar-right">
+        {% if last_synced %}
+        <span class="active-last-sync">Last synced {{ last_synced|timesince }} ago</span>
+        {% endif %}
+        <button type="button" class="btn btn-success" onclick="syncAllAnthill()" id="btnSyncAll" title="Sync workflow stages from Anthill for all {{ all_sync_order_ids|length }} open orders">
+            <i class="bi bi-arrow-repeat"></i> Sync from Anthill ({{ all_sync_order_ids|length }})
+        </button>
+    </div>
+</div>
+
+{% if tab == 'overview' %}
+<!-- ══════════════════════════════════════════════════════════
+     OVERVIEW — stages with their orders (top to bottom)
+     ══════════════════════════════════════════════════════════ -->
+
+<div class="active-overview">
+    {% for group in stage_groups %}
+    <div class="active-stage-section">
+        <div class="active-stage-header" style="border-left: 4px solid {{ group.colour }};">
+            <div class="active-stage-header-left">
+                <span class="active-stage-name">{{ group.stage.name }}</span>
+                <span class="active-stage-count" style="background: {{ group.colour }};">{{ group.count }}</span>
+            </div>
+            <button type="button" class="active-stage-sync" onclick="event.stopPropagation(); syncStageAnthill([{% for item in group.orders %}{{ item.order.id }}{% if not forloop.last %},{% endif %}{% endfor %}], '{{ group.stage.name }}')" title="Sync {{ group.stage.name }} orders from Anthill">
+                <i class="bi bi-arrow-repeat"></i>
+            </button>
+        </div>
+        <div class="active-stage-body">
+            <table class="active-stage-table">
+                <thead>
+                    <tr>
+                        <th class="col-sale">Sale</th>
+                        <th class="col-name">Customer</th>
+                        <th class="col-value">Paid / Value</th>
+                        <th class="col-date">Fit Date</th>
+                        <th class="col-links"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in group.orders %}
+                    <tr onclick="window.location='{% url 'order_details' item.order.id %}'" class="active-order-row">
+                        <td class="col-sale">{{ item.order.sale_number }}</td>
+                        <td class="col-name">{{ item.display_name }}</td>
+                        <td class="col-value">
+                            {% if item.sale_value %}
+                            <span class="active-value-pair">
+                                <span class="active-paid {% if item.total_paid >= item.sale_value %}paid-full{% endif %}">£{{ item.total_paid|floatformat:0|intcomma }}</span>
+                                <span class="active-sep">/</span>
+                                <span class="active-total">£{{ item.sale_value|floatformat:0|intcomma }}</span>
+                            </span>
+                            {% else %}
+                            <span class="active-no-value">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-date">{% if item.order.fit_date %}{{ item.order.fit_date|date:"d M" }}{% endif %}</td>
+                        <td class="col-links" onclick="event.stopPropagation()">
+                            {% if item.anthill_customer_id %}
+                            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ item.anthill_customer_id }}" target="_blank" class="active-anthill-link" title="Customer in Anthill">
+                                <i class="bi bi-person"></i>
+                            </a>
+                            {% endif %}
+                            {% if item.order.sale_number %}
+                            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ item.order.sale_number }}" target="_blank" class="active-anthill-link" title="Sale in Anthill">
+                                <i class="bi bi-box-arrow-up-right"></i>
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if hidden_stages %}
+<div class="active-hidden-menu">
+    <button type="button" class="active-hidden-btn" onclick="this.parentElement.classList.toggle('open')" title="Show empty stages">
+        <i class="bi bi-three-dots-vertical"></i>
+        <span>{{ hidden_stages|length }} empty stage{{ hidden_stages|length|pluralize }}</span>
+    </button>
+    <div class="active-hidden-dropdown">
+        {% for group in hidden_stages %}
+        <div class="active-hidden-item">
+            <span class="active-hidden-swatch" style="background: {{ group.colour }};"></span>
+            <span>{{ group.stage.name }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if not stage_groups %}
+<div class="gantt-empty">
+    <p>No active orders at any workflow stage.</p>
+</div>
+{% endif %}
+
+{% else %}
+<!-- ══════════════════════════════════════════════════════════
+     TIMELINE — date-based Gantt
+     ══════════════════════════════════════════════════════════ -->
+
+<!-- Legend -->
+<div class="gantt-legend">
+    {% for role, colour in role_colours.items %}
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch" style="background: {{ colour }};"></span>
+        <span class="gantt-legend-label">{{ role }}</span>
+    </div>
+    {% endfor %}
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch gantt-legend-marker-goods"></span>
+        <span class="gantt-legend-label">Goods Due</span>
+    </div>
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch gantt-legend-marker-fit"></span>
+        <span class="gantt-legend-label">Fit Date</span>
+    </div>
+    <div class="gantt-legend-item">
+        <span class="gantt-legend-swatch gantt-legend-marker-stage"></span>
+        <span class="gantt-legend-label">Stage Completed</span>
+    </div>
+</div>
+
+<!-- Timeline Gantt -->
+<div class="gantt-wrapper">
+    <div class="gantt-tl-outer" style="--total-days: {{ total_days }};">
+        <div class="gantt-tl-inner">
+
+            <!-- Header row: label + month headers -->
+            <div class="gantt-tl-header-row">
+                <div class="gantt-tl-label-cell gantt-tl-corner">Order</div>
+                <div class="gantt-tl-header-track">
+                    {% for mh in month_headers %}
+                    <div class="gantt-month-cell" style="width: calc({{ mh.span }} * var(--day-width));">
+                        {{ mh.label }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Day header row -->
+            <div class="gantt-tl-header-row gantt-tl-day-header">
+                <div class="gantt-tl-label-cell gantt-tl-corner"></div>
+                <div class="gantt-tl-header-track">
+                    {% for d in day_columns %}
+                    <div class="gantt-day-cell {% if d == today %}gantt-day-today{% endif %} {% if d.weekday == 5 or d.weekday == 6 %}gantt-day-weekend{% endif %}">
+                        <span class="gantt-day-name">{{ d|date:"D" }}</span>
+                        <span class="gantt-day-num">{{ d.day }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Today line -->
+            {% if today_offset >= 0 and today_offset < total_days %}
+            <div class="gantt-today-line" style="left: calc(var(--gantt-label-width) + {{ today_offset }} * var(--day-width) + var(--day-width) / 2);"></div>
+            {% endif %}
+
+            <!-- Order rows -->
+            {% for row in timeline_rows %}
+            <div class="gantt-tl-row">
+                <div class="gantt-tl-label-cell">
+                    <a href="{% url 'order_details' row.order.id %}" class="gantt-label-link" title="{{ row.display_name }}">
+                        <span class="gantt-label-sale">{{ row.order.sale_number }}</span>
+                        <span class="gantt-label-name">{{ row.display_name }}</span>
+                    </a>
+                    {% if row.order.sale_number %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ row.order.sale_number }}" target="_blank" class="gantt-anthill-link" title="Open in Anthill">
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="gantt-tl-bar-track">
+                    {% for d in day_columns %}
+                    <div class="gantt-grid-cell {% if d.weekday == 5 or d.weekday == 6 %}gantt-grid-weekend{% endif %}"></div>
+                    {% endfor %}
+
+                    {% if row.stage_segments %}
+                    {% for seg in row.stage_segments %}
+                    <div class="gantt-bar gantt-bar-segment"
+                         style="left: calc({{ seg.offset }} * var(--day-width));
+                                width: calc({{ seg.width }} * var(--day-width));
+                                background: {{ seg.colour }};"
+                         data-tip-title="{{ seg.name }}"
+                         data-tip-detail="{{ seg.width }} day{{ seg.width|pluralize }}"
+                         data-tip-sub="{{ row.order.sale_number }} — {{ row.display_name }}">
+                        <span class="gantt-bar-text">{{ seg.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div class="gantt-bar gantt-bar-segment"
+                         style="left: calc({{ row.offset }} * var(--day-width));
+                                width: calc({{ row.width }} * var(--day-width));
+                                background: {{ row.stage_colour }};"
+                         data-tip-title="{% if row.stage_name %}{{ row.stage_name }}{% else %}{{ row.order.sale_number }}{% endif %}"
+                         data-tip-detail="{% if row.time_allowance %}{{ row.time_allowance }} day{{ row.time_allowance|pluralize }} allowance{% endif %}"
+                         data-tip-sub="{{ row.order.sale_number }} — {{ row.display_name }}">
+                        <span class="gantt-bar-text">
+                            {% if row.stage_name %}{{ row.stage_name }}{% else %}{{ row.order.sale_number }}{% endif %}
+                        </span>
+                    </div>
+                    {% endif %}
+
+                    {% if row.goods_due_offset is not None %}
+                    <div class="gantt-marker gantt-marker-goods"
+                         style="left: calc({{ row.goods_due_offset }} * var(--day-width) + var(--day-width) / 2);"
+                         title="Goods Due: {{ row.goods_due_in|date:'d/m/Y' }}">
+                        <i class="bi bi-truck"></i>
+                    </div>
+                    {% endif %}
+
+                    {% if row.fit_offset is not None %}
+                    <div class="gantt-marker gantt-marker-fit"
+                         style="left: calc({{ row.fit_offset }} * var(--day-width) + var(--day-width) / 2);"
+                         title="Fit Date: {{ row.order.fit_date|date:'d/m/Y' }}">
+                        <i class="bi bi-wrench"></i>
+                    </div>
+                    {% endif %}
+
+                    {% for sm in row.stage_markers %}
+                    <div class="gantt-marker gantt-marker-stage"
+                         style="left: calc({{ sm.offset }} * var(--day-width) + var(--day-width) / 2); color: {{ sm.colour }};"
+                         title="{{ sm.name }}: {{ sm.date|date:'d/m/Y' }}">
+                        <i class="bi bi-diamond-fill"></i>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+        </div>
+    </div>
+</div>
+
+{% if not timeline_rows %}
+<div class="gantt-empty">
+    <p>No active projects with dates found in this range.</p>
+</div>
+{% endif %}
+
+<!-- Floating tooltip -->
+<div class="gantt-bar-tooltip-float" id="ganttTooltip"></div>
+<script>
+(function() {
+    const tip = document.getElementById('ganttTooltip');
+    if (!tip) return;
+    document.addEventListener('mouseover', function(e) {
+        const bar = e.target.closest('[data-tip-title]');
+        if (!bar) { tip.classList.remove('visible'); return; }
+        const title = bar.dataset.tipTitle || '';
+        const detail = bar.dataset.tipDetail || '';
+        const sub = bar.dataset.tipSub || '';
+        let html = '<div class="gantt-bar-tooltip-title">' + title + '</div>';
+        if (detail) html += '<div class="gantt-bar-tooltip-detail">' + detail + '</div>';
+        if (sub) html += '<div class="gantt-bar-tooltip-detail">' + sub + '</div>';
+        tip.innerHTML = html;
+        tip.classList.add('visible');
+        const rect = bar.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - tip.offsetWidth / 2;
+        let top = rect.top - tip.offsetHeight - 6;
+        if (top < 4) top = rect.bottom + 6;
+        if (left < 4) left = 4;
+        if (left + tip.offsetWidth > window.innerWidth - 4) left = window.innerWidth - tip.offsetWidth - 4;
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+    });
+    document.addEventListener('mouseout', function(e) {
+        const bar = e.target.closest('[data-tip-title]');
+        if (bar && !bar.contains(e.relatedTarget)) tip.classList.remove('visible');
+    });
+})();
+</script>
+
+{% endif %}
+
+<!-- Sync Log Modal -->
+<div class="modal-overlay" id="syncModal" onclick="if(event.target===this)closeSyncModal()">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3 id="syncModalTitle"><i class="bi bi-arrow-repeat"></i> Syncing from Anthill</h3>
+            <button type="button" class="modal-close" onclick="closeSyncModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="sync-progress-bar"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
+            <div class="sync-status" id="syncStatus">Preparing...</div>
+            <div class="sync-log" id="syncLog"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="syncCloseBtn" onclick="closeSyncModal()" disabled>Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const ORDER_IDS = [{% for oid in all_sync_order_ids %}{{ oid }}{% if not forloop.last %},{% endif %}{% endfor %}];
+const ORDER_NAMES = { {% for oid, sn in all_sync_order_names.items %}{{ oid }}:'{{ sn }}',{% endfor %} };
+
+function openSyncModal() {
+    document.getElementById('syncLog').innerHTML = '';
+    document.getElementById('syncProgressFill').style.width = '0%';
+    document.getElementById('syncStatus').textContent = 'Preparing...';
+    document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Syncing from Anthill';
+    document.getElementById('syncCloseBtn').disabled = true;
+    document.getElementById('syncModal').classList.add('active');
+}
+
+function closeSyncModal() {
+    document.getElementById('syncModal').classList.remove('active');
+}
+
+function syncLog(html, cls) {
+    const log = document.getElementById('syncLog');
+    const entry = document.createElement('div');
+    entry.className = 'sync-log-entry' + (cls ? ' ' + cls : '');
+    entry.innerHTML = html;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+function syncStageAnthill(stageOrderIds, stageName) {
+    openSyncModal();
+    let completed = 0;
+    let updated = 0;
+    let errorCount = 0;
+    syncLog('<i class="bi bi-info-circle"></i> Syncing <strong>' + stageName + '</strong> — ' + stageOrderIds.length + ' order(s)', 'sync-info');
+    function syncNext(idx) {
+        if (idx >= stageOrderIds.length) {
+            document.getElementById('syncProgressFill').style.width = '100%';
+            syncLog('<hr>');
+            if (updated > 0) {
+                syncLog('<i class="bi bi-check-circle"></i> <strong>' + updated + '</strong> updated — reloading', 'sync-success');
+                document.getElementById('syncStatus').textContent = updated + ' updated — reloading...';
+                document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+                document.getElementById('syncCloseBtn').disabled = false;
+                setTimeout(() => location.reload(), 2500);
+            } else {
+                syncLog('<i class="bi bi-check-circle"></i> All up to date', 'sync-success');
+                document.getElementById('syncStatus').textContent = 'All up to date';
+                document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+                document.getElementById('syncCloseBtn').disabled = false;
+            }
+            return;
+        }
+        const oid = stageOrderIds[idx];
+        const saleName = ORDER_NAMES[oid] || oid;
+        const pct = Math.round((idx / stageOrderIds.length) * 100);
+        document.getElementById('syncProgressFill').style.width = pct + '%';
+        document.getElementById('syncStatus').textContent = 'Syncing ' + (idx + 1) + ' of ' + stageOrderIds.length + ' (' + saleName + ')';
+        fetch(`{% url 'sync_anthill_workflow' order_id=0 %}`.replace('/0/', '/' + oid + '/'), {
+            method: 'POST',
+            headers: {'X-CSRFToken': '{{ csrf_token }}'},
+        })
+        .then(r => r.json())
+        .then(data => {
+            completed++;
+            if (data.success) {
+                if (data.updated) {
+                    updated++;
+                    let detail = data.current_stage || 'synced';
+                    if (data.dates_saved) detail += ' (' + data.dates_saved + ' date' + (data.dates_saved > 1 ? 's' : '') + ' saved)';
+                    syncLog('<i class="bi bi-arrow-right-circle"></i> <strong>' + saleName + '</strong> → ' + detail, 'sync-updated');
+                } else {
+                    syncLog('<i class="bi bi-dash-circle"></i> ' + saleName + ' — no change', 'sync-skip');
+                }
+            } else {
+                errorCount++;
+                syncLog('<i class="bi bi-x-circle"></i> ' + saleName + ' — ' + (data.error || 'unknown error'), 'sync-error');
+            }
+            syncNext(idx + 1);
+        })
+        .catch(err => {
+            completed++;
+            errorCount++;
+            syncLog('<i class="bi bi-x-circle"></i> ' + saleName + ' — ' + err.message, 'sync-error');
+            syncNext(idx + 1);
+        });
+    }
+    syncNext(0);
+}
+
+function syncAllAnthill() {
+    const btn = document.getElementById('btnSyncAll');
+    btn.disabled = true;
+    openSyncModal();
+
+    let completed = 0;
+    let updated = 0;
+    let errorCount = 0;
+
+    syncLog('<i class="bi bi-info-circle"></i> Starting sync for <strong>' + ORDER_IDS.length + '</strong> orders...', 'sync-info');
+
+    function syncNext(idx) {
+        if (idx >= ORDER_IDS.length) {
+            const pct = 100;
+            document.getElementById('syncProgressFill').style.width = pct + '%';
+            syncLog('<hr>');
+            if (errorCount > 0) {
+                syncLog('<i class="bi bi-exclamation-triangle"></i> Completed with <strong>' + errorCount + '</strong> error(s)', 'sync-warn');
+            }
+            if (updated > 0) {
+                syncLog('<i class="bi bi-check-circle"></i> <strong>' + updated + '</strong> order(s) updated — page will reload', 'sync-success');
+                document.getElementById('syncStatus').textContent = updated + ' updated — reloading...';
+                document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+                document.getElementById('syncCloseBtn').disabled = false;
+                setTimeout(() => location.reload(), 2500);
+            } else {
+                syncLog('<i class="bi bi-check-circle"></i> All orders are already up to date', 'sync-success');
+                document.getElementById('syncStatus').textContent = 'All up to date';
+                document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+                document.getElementById('syncCloseBtn').disabled = false;
+                btn.disabled = false;
+            }
+            return;
+        }
+
+        const oid = ORDER_IDS[idx];
+        const saleName = ORDER_NAMES[oid] || oid;
+        const pct = Math.round((idx / ORDER_IDS.length) * 100);
+        document.getElementById('syncProgressFill').style.width = pct + '%';
+        document.getElementById('syncStatus').textContent = 'Syncing ' + (idx + 1) + ' of ' + ORDER_IDS.length + ' (' + saleName + ')';
+
+        fetch(`{% url 'sync_anthill_workflow' order_id=0 %}`.replace('/0/', '/' + oid + '/'), {
+            method: 'POST',
+            headers: {'X-CSRFToken': '{{ csrf_token }}'},
+        })
+        .then(r => r.json())
+        .then(data => {
+            completed++;
+            if (data.success) {
+                if (data.updated) {
+                    updated++;
+                    let detail = data.current_stage || 'synced';
+                    if (data.dates_saved) detail += ' (' + data.dates_saved + ' date' + (data.dates_saved > 1 ? 's' : '') + ' saved)';
+                    syncLog('<i class="bi bi-arrow-right-circle"></i> <strong>' + saleName + '</strong> → ' + detail, 'sync-updated');
+                } else {
+                    syncLog('<i class="bi bi-dash-circle"></i> ' + saleName + ' — no change', 'sync-skip');
+                }
+            } else {
+                errorCount++;
+                syncLog('<i class="bi bi-x-circle"></i> ' + saleName + ' — ' + (data.error || 'unknown error'), 'sync-error');
+            }
+            syncNext(idx + 1);
+        })
+        .catch(err => {
+            completed++;
+            errorCount++;
+            syncLog('<i class="bi bi-x-circle"></i> ' + saleName + ' — ' + err.message, 'sync-error');
+            syncNext(idx + 1);
+        });
+    }
+
+    if (ORDER_IDS.length === 0) {
+        syncLog('<i class="bi bi-info-circle"></i> No orders to sync', 'sync-info');
+        document.getElementById('syncStatus').textContent = 'Nothing to do';
+        document.getElementById('syncModalTitle').innerHTML = '<i class="bi bi-check-circle"></i> Sync Complete';
+        document.getElementById('syncCloseBtn').disabled = false;
+        btn.disabled = false;
+        return;
+    }
+    syncNext(0);
+}
+</script>
+<style>
+.spin { animation: spinAnim 1s linear infinite; display: inline-block; }
+@keyframes spinAnim { to { transform: rotate(360deg); } }
+</style>
+
+{% endblock %}

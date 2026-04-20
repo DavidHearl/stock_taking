@@ -48,6 +48,12 @@
                 <option value="{{ category.name }}">{{ category.name }}</option>
             {% endfor %}
         </select>
+        <select id="supplier-filter" class="stock-dropdown-filter" onchange="applyFilters()">
+            <option value="">All Suppliers</option>
+            {% for supplier in suppliers %}
+                <option value="{{ supplier.name|lower }}">{{ supplier.name }}</option>
+            {% endfor %}
+        </select>
         <span class="stock-value-display">
             <span class="stock-value-label">Value</span>
             <span class="stock-value-amount" id="total-value">£{{ total_value|floatformat:2 }}</span>
@@ -106,7 +112,7 @@
             </thead>
             <tbody>
                 {% for item in all_stock_items %}
-                <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="{{ item.stock_status }}">
+                <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="{{ item.stock_status }}" data-supplier="{{ item.supplier.name|default:''|lower }}">
                     <td class="text-center cb-col"><input type="checkbox" class="row-cb" value="{{ item.id }}" onclick="updateSelection()"></td>
                     <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in missing_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: #e74c3c;" title="Being replaced"></i>{% endif %}{% if item.sku in replacement_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: #27ae60;" title="Replaces another product"></i>{% endif %}</td>
                     <td>{{ item.name }}</td>
@@ -349,6 +355,7 @@ function applyFilters() {
     const query = document.getElementById('stock-search').value.toLowerCase().trim();
     const categoryFilter = document.getElementById('category-filter').value.toLowerCase();
     const stockTypeFilter = document.getElementById('stock-type-filter').value;
+    const supplierFilter = document.getElementById('supplier-filter').value.toLowerCase();
     
     const table = document.querySelector('.stock-table tbody');
     if (!table) return;
@@ -362,6 +369,7 @@ function applyFilters() {
         const serial = row.dataset.serial || '';
         const category = row.dataset.category || '';
         const status = row.dataset.status || '';
+        const supplier = row.dataset.supplier || '';
         
         let show = true;
         
@@ -372,6 +380,11 @@ function applyFilters() {
         
         // Category filter
         if (categoryFilter && category !== categoryFilter) {
+            show = false;
+        }
+        
+        // Supplier filter
+        if (supplierFilter && supplier !== supplierFilter) {
             show = false;
         }
         
@@ -387,7 +400,7 @@ function applyFilters() {
     // Update filter count
     const countEl = document.getElementById('filter-count');
     if (countEl) {
-        if (query || categoryFilter || stockTypeFilter) {
+        if (query || categoryFilter || stockTypeFilter || supplierFilter) {
             countEl.textContent = visibleCount + ' of ' + rows.length + ' shown';
         } else {
             countEl.textContent = '';

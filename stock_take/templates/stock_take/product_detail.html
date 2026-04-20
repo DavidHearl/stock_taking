@@ -32,23 +32,23 @@
             </div>
         </div>
         <div class="product-actions">
-            <button class="btn btn-sm btn-warning" onclick="openAdjustStockModal()">
+            <button class="btn btn-warning" onclick="openAdjustStockModal()">
                 <i class="bi bi-plus-slash-minus"></i> Adjust Stock
             </button>
-            <button class="btn btn-sm btn-primary" id="editProductBtn" onclick="toggleEditMode()">
+            <button class="btn btn-primary" id="editProductBtn" onclick="toggleEditMode()">
                 <i class="bi bi-pencil"></i> Edit Product
             </button>
-            <button class="btn btn-sm btn-success" id="saveProductBtn" onclick="saveProduct()" style="display: none;">
+            <button class="btn btn-success" id="saveProductBtn" onclick="saveProduct()" style="display: none;">
                 <i class="bi bi-save"></i> Save Changes
             </button>
-            <button class="btn btn-sm btn-secondary" id="cancelEditBtn" onclick="cancelEdit()" style="display: none;">
+            <button class="btn btn-secondary" id="cancelEditBtn" onclick="cancelEdit()" style="display: none;">
                 <i class="bi bi-x-circle"></i> Cancel
             </button>
-            <a href="{% url 'add_product' %}?copy_from={{ product.id }}" class="btn btn-sm btn-outline-secondary">
+            <a href="{% url 'add_product' %}?copy_from={{ product.id }}" class="btn btn-outline-secondary">
                 <i class="bi bi-files"></i> Copy Product
             </a>
             <div class="product-more-menu">
-                <button class="btn btn-sm btn-secondary product-more-btn" onclick="toggleProductMoreMenu(event)" title="More actions">
+                <button class="btn btn-secondary product-more-btn" onclick="toggleProductMoreMenu(event)" title="More actions">
                     <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <div class="product-more-dropdown" id="product-more-dropdown">
@@ -70,6 +70,7 @@
         <button class="tab-btn" data-tab="purchase-orders">Purchase Orders <span class="tab-count">({{ po_lines|length }})</span></button>
         <button class="tab-btn" data-tab="projects">Projects <span class="tab-count">({{ order_accessories|length }})</span></button>
         <button class="tab-btn" data-tab="substitutions">Substitutions <span class="tab-count">({{ substitutions|length }})</span></button>
+        <button class="tab-btn" data-tab="linked-products">Linked Products <span class="tab-count" id="linked-count">({{ linked_products|length }})</span></button>
     </div>
 
     <!-- Overview Tab Content -->
@@ -254,7 +255,7 @@
         <div class="info-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <h3 style="margin: 0;">Notes</h3>
-                <button class="btn btn-sm btn-primary" onclick="openAddNoteModal()">
+                <button class="btn btn-primary" onclick="openAddNoteModal()">
                     <i class="bi bi-plus-circle"></i> Add Note
                 </button>
             </div>
@@ -451,7 +452,7 @@
     <!-- Substitutions Tab -->
     <div class="tab-content" id="substitutions" style="display: none;">
         <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-            <button class="btn btn-sm btn-success" onclick="openAddSubstitutionModal()">
+            <button class="btn btn-success" onclick="openAddSubstitutionModal()">
                 <i class="bi bi-plus-lg"></i> Add Substitution
             </button>
         </div>
@@ -496,6 +497,76 @@
         {% else %}
         <p class="text-muted" id="no-substitutions-msg" style="padding: 16px 0;">No substitutions involve this product.</p>
         {% endif %}
+    </div>
+
+    <!-- Linked Products Tab -->
+    <div class="tab-content" id="linked-products" style="display: none;">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+            <button class="btn btn-success" onclick="openAddLinkModal()">
+                <i class="bi bi-plus-lg"></i> Add Link
+            </button>
+        </div>
+        <div class="table-container">
+            <table class="table" id="linked-products-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Product Name</th>
+                        <th>Qty Ratio</th>
+                        <th>Notes</th>
+                        <th style="text-align:center;width:80px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="linked-products-body">
+                    {% for link in linked_products %}
+                    <tr data-link-id="{{ link.id }}">
+                        <td><a href="{% url 'product_detail' link.linked_product.id %}">{{ link.linked_product.sku }}</a></td>
+                        <td>{{ link.linked_product.name }}</td>
+                        <td>×{{ link.quantity_ratio }}</td>
+                        <td>{{ link.notes }}</td>
+                        <td style="text-align:center;">
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteProductLink({{ link.id }})" title="Remove link"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="no-links-row"><td colspan="5" class="text-muted">No linked products.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Product Link Modal -->
+<div class="modal" id="addLinkModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5>Link a Product</h5>
+                <button type="button" class="btn-close" onclick="closeLinkModal()"></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom:12px;position:relative;">
+                    <label>Search Product</label>
+                    <input type="text" class="form-control" id="linkProductSearch" placeholder="Type SKU or name..." autocomplete="off">
+                    <input type="hidden" id="linkProductId">
+                    <div id="linkSearchResults" style="position:absolute;left:0;right:0;top:100%;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto;z-index:200;display:none;"></div>
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label>Quantity Ratio</label>
+                    <input type="number" class="form-control" id="linkQtyRatio" value="1" min="0.01" step="0.01">
+                    <small class="text-muted">How many of the linked product per 1 of this product</small>
+                </div>
+                <div class="form-group">
+                    <label>Notes (optional)</label>
+                    <input type="text" class="form-control" id="linkNotes" placeholder="e.g. Always required together" maxlength="255">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeLinkModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveLinkBtn" onclick="saveProductLink()">Save Link</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1536,6 +1607,142 @@ function showProductImage(url, name) {
     document.getElementById('lb-img').src = url;
     document.getElementById('lb-img').alt = name;
     lb.style.display = 'flex';
+}
+
+/* ── Linked Products ────────────────────────────── */
+let linkSearchTimeout;
+function openAddLinkModal() {
+    document.getElementById('linkProductSearch').value = '';
+    document.getElementById('linkProductId').value = '';
+    document.getElementById('linkQtyRatio').value = '1';
+    document.getElementById('linkNotes').value = '';
+    document.getElementById('linkSearchResults').style.display = 'none';
+    document.getElementById('addLinkModal').classList.add('show');
+    setTimeout(() => document.getElementById('linkProductSearch').focus(), 100);
+}
+function closeLinkModal() {
+    document.getElementById('addLinkModal').classList.remove('show');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('linkProductSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(linkSearchTimeout);
+            const q = this.value.trim();
+            if (q.length < 2) {
+                document.getElementById('linkSearchResults').style.display = 'none';
+                return;
+            }
+            linkSearchTimeout = setTimeout(() => {
+                fetch(`/api/product-search/?q=${encodeURIComponent(q)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        const container = document.getElementById('linkSearchResults');
+                        const currentId = {{ product.id }};
+                        const filtered = data.results.filter(r => r.id !== currentId);
+                        if (!filtered.length) {
+                            container.innerHTML = '<div style="padding:8px 12px;color:var(--text-secondary);font-size:0.85rem;">No results</div>';
+                        } else {
+                            container.innerHTML = filtered.map(r =>
+                                `<div class="link-search-item" style="padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid var(--border-color);" data-id="${r.id}" data-sku="${r.sku}" data-name="${r.name}">
+                                    <strong>${r.sku}</strong> — ${r.name}
+                                </div>`
+                            ).join('');
+                            container.querySelectorAll('.link-search-item').forEach(el => {
+                                el.addEventListener('click', function() {
+                                    document.getElementById('linkProductId').value = this.dataset.id;
+                                    document.getElementById('linkProductSearch').value = this.dataset.sku + ' — ' + this.dataset.name;
+                                    container.style.display = 'none';
+                                });
+                                el.addEventListener('mouseenter', function() { this.style.background = 'var(--bg-hover)'; });
+                                el.addEventListener('mouseleave', function() { this.style.background = ''; });
+                            });
+                        }
+                        container.style.display = 'block';
+                    });
+            }, 200);
+        });
+    }
+});
+
+function saveProductLink() {
+    const linkedId = document.getElementById('linkProductId').value;
+    const qtyRatio = document.getElementById('linkQtyRatio').value;
+    const notes = document.getElementById('linkNotes').value;
+
+    if (!linkedId) {
+        alert('Please select a product to link.');
+        return;
+    }
+
+    const btn = document.getElementById('saveLinkBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    const fd = new FormData();
+    fd.append('linked_product_id', linkedId);
+    fd.append('quantity_ratio', qtyRatio);
+    fd.append('notes', notes);
+    fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+    fetch('{% url "product_add_link" product.id %}', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = 'Save Link';
+            if (data.success) {
+                closeLinkModal();
+                const noRow = document.getElementById('no-links-row');
+                if (noRow) noRow.remove();
+                const tbody = document.getElementById('linked-products-body');
+                const L = data.link;
+                const tr = document.createElement('tr');
+                tr.dataset.linkId = L.id;
+                tr.innerHTML = `<td><a href="/product/${L.linked_id}/">${L.linked_sku}</a></td>
+                    <td>${L.linked_name}</td>
+                    <td>×${L.quantity_ratio}</td>
+                    <td>${L.notes}</td>
+                    <td style="text-align:center;"><button class="btn btn-sm btn-outline-danger" onclick="deleteProductLink(${L.id})" title="Remove link"><i class="bi bi-trash"></i></button></td>`;
+                tbody.appendChild(tr);
+                updateLinkedCount(1);
+            } else {
+                alert(data.error || 'Failed to save link.');
+            }
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.textContent = 'Save Link';
+            alert('Network error.');
+        });
+}
+
+function deleteProductLink(linkId) {
+    if (!confirm('Remove this product link?')) return;
+    const fd = new FormData();
+    fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+    fetch(`/product/{{ product.id }}/delete-link/${linkId}/`, { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const row = document.querySelector(`tr[data-link-id="${linkId}"]`);
+                if (row) row.remove();
+                updateLinkedCount(-1);
+                if (!document.querySelectorAll('#linked-products-body tr').length) {
+                    document.getElementById('linked-products-body').innerHTML = '<tr id="no-links-row"><td colspan="5" class="text-muted" style="padding:16px 0;">No linked products.</td></tr>';
+                }
+            } else {
+                alert(data.error || 'Failed to delete link.');
+            }
+        });
+}
+
+function updateLinkedCount(delta) {
+    const el = document.getElementById('linked-count');
+    if (el) {
+        const current = parseInt(el.textContent.replace(/[()]/g, '')) || 0;
+        el.textContent = '(' + (current + delta) + ')';
+    }
 }
 </script>
 {% endblock %}
