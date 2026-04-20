@@ -73,7 +73,6 @@ URL_TO_PAGE = {
     'raumplus_storage': 'raumplus_storage',
 
     # Products & Stock
-    'stock_items_manager': 'products',
     'update_stock_items_batch': 'products',
     'add_product': 'products',
     'product_detail': 'product_details',

@@ -1392,10 +1392,15 @@ class CSVSkipItem(models.Model):
 class FitAppointment(models.Model):
     """Track fit appointments and completion status"""
     FITTER_CHOICES = [
-        ('R', 'Ross'),
-        ('G', 'Gavin'),
-        ('S', 'Stuart'),
+        ('R', 'Ross Middleton'),
+        ('G', 'Gavin Reynolds'),
+        ('S', 'Stuart Stevenson'),
         ('P', 'Paddy'),
+        ('M', 'Mo Hassan'),
+        ('J', 'Jamie McPhail'),
+        ('T', 'Gary Tumelty'),
+        ('E', 'External Delivery'),
+        ('X', 'Ripout Team'),
     ]
     
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)

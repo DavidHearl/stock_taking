@@ -40,20 +40,60 @@ def get_item(dictionary, key):
 
 @register.filter
 def calculate_remaining(accessory):
-    """Calculate remaining stock: Stock - QTY - Allocated + Incoming
-    If this accessory is already allocated (stock deducted), don't subtract its qty again.
-    Incoming = quantities on Approved POs not yet received.
+    """Waterfall stock allocation: available stock (on-hand + incoming) is
+    allocated to orders with the earliest fit_date first.  Only orders that
+    cannot be fully covered after higher-priority orders are served will
+    show a shortage.
+
+    If this accessory is already allocated (stock deducted), fall back to
+    the simple formula so we don't double-count.
     """
     if not accessory.stock_item:
         return 0
-    stock = accessory.available_quantity
-    allocated = accessory.allocated_quantity
-    incoming = accessory.incoming_quantity
+
+    stock = float(accessory.stock_item.quantity)
+    incoming = float(accessory.incoming_quantity)
+
     if accessory.is_allocated:
-        # Stock already deducted for this item, don't double-count
+        allocated = float(accessory.allocated_quantity)
         return stock - allocated + incoming
-    qty = accessory.quantity
-    return stock - qty - allocated + incoming
+
+    from django.db.models import Sum, Q
+    from stock_take.models import Accessory
+
+    total_available = stock + incoming
+
+    this_fit_date = accessory.order.fit_date
+    this_sale_number = accessory.order.sale_number
+
+    # Base filter: same SKU, active orders, not yet allocated, not missing,
+    # excluding the current order.
+    base = Q(
+        sku=accessory.sku,
+        order__job_finished=False,
+        is_allocated=False,
+        missing=False,
+    ) & ~Q(order=accessory.order)
+
+    if this_fit_date is not None:
+        # Higher priority = earlier fit_date; same date → lower sale_number
+        prior = base & (
+            Q(order__fit_date__lt=this_fit_date)
+            | Q(order__fit_date=this_fit_date,
+                order__sale_number__lt=this_sale_number)
+        )
+    else:
+        # No fit_date = lowest priority; every dated order ranks above us
+        prior = base & Q(order__fit_date__isnull=False)
+
+    prior_demand = float(
+        Accessory.objects.filter(prior).aggregate(
+            total=Sum('quantity'))['total'] or 0
+    )
+
+    available_for_this = max(0.0, total_available - prior_demand)
+    qty = float(accessory.quantity)
+    return available_for_this - qty
 
 @register.filter
 def split_options(value, delimiter=','):

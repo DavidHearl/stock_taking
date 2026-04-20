@@ -303,6 +303,10 @@ def add_product(request):
             
             product.save()
             
+            # Invalidate stock list cache so the new product appears immediately
+            from django.core.cache import cache
+            cache.clear()
+            
             log_activity(
                 request.user,
                 'product_created',
@@ -423,6 +427,10 @@ def delete_product(request, item_id):
         product.image.delete(save=False)
 
     product.delete()
+
+    # Invalidate stock list cache
+    from django.core.cache import cache
+    cache.clear()
 
     log_activity(
         user=request.user,

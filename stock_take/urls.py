@@ -322,8 +322,7 @@ urlpatterns = [
     path('remedial-report/', views.remedial_report, name='remedial_report'),
     path('remedial/<int:pk>/', views.remedial_detail, name='remedial_detail'),
     
-    # Stock items manager
-    path('stock-items-manager/', views.stock_items_manager, name='stock_items_manager'),
+    # Stock items batch update
     path('stock-items/update-batch/', views.update_stock_items_batch, name='update_stock_items_batch'),
     
     # Calendar (renamed from Fit Board)

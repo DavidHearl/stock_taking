@@ -8494,47 +8494,6 @@ def os_doors_summary(request):
     })
 
 @login_required
-def stock_items_manager(request):
-    """Manage stock items - view and edit multiple items at once"""
-    # Get filter parameters
-    search = request.GET.get('search', '')
-    category_id = request.GET.get('category', '')
-    tracking_type = request.GET.get('tracking_type', '')
-    
-    # Build query
-    items = StockItem.objects.select_related('category', 'stock_take_group').all()
-    
-    if search:
-        items = items.filter(
-            Q(sku__icontains=search) | 
-            Q(name__icontains=search) |
-            Q(location__icontains=search)
-        )
-    
-    if category_id:
-        items = items.filter(category_id=category_id)
-    
-    if tracking_type:
-        items = items.filter(tracking_type=tracking_type)
-    
-    # Order by SKU
-    items = items.order_by('sku')
-    
-    # Get categories for filter dropdown
-    categories = Category.objects.all().order_by('name')
-    stock_take_groups = StockTakeGroup.objects.all().order_by('name')
-    
-    return render(request, 'stock_take/stock_items_manager.html', {
-        'items': items,
-        'categories': categories,
-        'stock_take_groups': stock_take_groups,
-        'search': search,
-        'selected_category': category_id,
-        'selected_tracking_type': tracking_type,
-        'tracking_choices': StockItem.TRACKING_CHOICES,
-    })
-
-@login_required
 def update_stock_items_batch(request):
     """Update multiple stock items at once via AJAX"""
     if request.method == 'POST':
@@ -9149,9 +9108,11 @@ def calendar_weekly(request):
             appt.grid_col_end = col + 2
             fitter_appts.setdefault(fitter, []).append(appt)
 
-    # Build fitter swim-lane data (all fitters, so any can receive drag & drop)
+    # Build fitter swim-lane data — only include fitters who have appointments this week
     fitter_lanes = []
     for code in fitter_codes:
+        if code not in fitter_appts:
+            continue
         lane_days = []
         for d in week_day_list:
             lane_days.append({
@@ -9886,6 +9847,21 @@ def refresh_anthill_fit_dates(request):
     )
     sales_to_check.extend(unlinked_sales)
 
+    # Also include ALL unfinished orders' sales so we discover newly-scheduled
+    # fits that Anthill knows about but our DB doesn't yet.
+    already_checked_pks = {s.pk for s in sales_to_check}
+    newly_scheduled_sales = list(
+        AnthillSale.objects
+        .filter(
+            order__isnull=False,
+            category='3',
+            order__job_finished=False,
+        )
+        .exclude(pk__in=already_checked_pks)
+        .select_related('order')
+    )
+    sales_to_check.extend(newly_scheduled_sales)
+
     if not sales_to_check:
         return JsonResponse({'success': True, 'checked': 0, 'updated': 0, 'created': 0, 'errors': 0})
 
@@ -10016,6 +9992,9 @@ def refresh_anthill_fit_dates(request):
         'gavin.reynolds': 'G',
         'stuart.stevenson': 'S',
         'paddy': 'P',
+        'mo.hassan': 'M',
+        'jamie.mcphail': 'J',
+        'gary.tumelty': 'T',
     }
 
     # ── Authenticate with Anthill web UI ─────────────────────────────────
