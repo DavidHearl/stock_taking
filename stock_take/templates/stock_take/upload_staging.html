@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}Upload Staging{% endblock %}
+{% block nav_upload_staging_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/upload_staging.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="upload-staging-wrap">
+    <div class="upload-staging-head">
+        <h1>Upload Staging</h1>
+        <span class="upload-staging-count">{{ pending_submissions|length }} pending</span>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="upload-staging-alert {% if message.tags == 'success' %}is-success{% elif message.tags == 'error' %}is-error{% else %}is-info{% endif %}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    {% if pending_submissions %}
+        {% for sub in pending_submissions %}
+        <div class="upload-staging-card">
+            <div class="upload-staging-meta">
+                <div><strong>Submitted:</strong> {{ sub.created_at|date:'d M Y H:i' }}</div>
+                <div><strong>Customer name:</strong> {{ sub.customer_name }}</div>
+                <div><strong>Sale number:</strong> {{ sub.sale_number|default:'-' }}</div>
+                <div><strong>Photos:</strong> {{ sub.photos.all|length }}</div>
+            </div>
+
+            <div class="upload-staging-photos">
+                {% for photo in sub.photos.all %}
+                <a href="{{ photo.image.url }}" target="_blank" rel="noopener" class="upload-staging-photo">
+                    <img src="{% if photo.thumbnail %}{{ photo.thumbnail.url }}{% else %}{{ photo.image.url }}{% endif %}" alt="Staged photo {{ forloop.counter }}">
+                </a>
+                {% endfor %}
+            </div>
+
+            <form method="post" action="{% url 'upload_staging_publish' sub.id %}" class="upload-staging-form">
+                {% csrf_token %}
+                <div class="upload-staging-fields">
+                    <div class="upload-staging-field">
+                        <label>Customer</label>
+                        <select name="customer_id" required>
+                            <option value="">Select customer</option>
+                            {% for c in sub.customer_matches %}
+                            <option value="{{ c.id }}" {% if sub.order_match and sub.order_match.customer_id == c.id %}selected{% endif %}>
+                                {{ c.name|default:c.last_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="upload-staging-field">
+                        <label>Sale Number</label>
+                        <input type="text" name="sale_number" value="{% if sub.order_match %}{{ sub.order_match.sale_number }}{% else %}{{ sub.sale_number }}{% endif %}" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="upload-staging-actions">
+                    <button type="submit" class="btn btn-primary">Publish To Gallery</button>
+                </div>
+            </form>
+
+            <form method="post" action="{% url 'upload_staging_reject' sub.id %}" class="upload-staging-reject">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">Reject</button>
+            </form>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="upload-staging-empty">No pending uploads.</div>
+    {% endif %}
+</div>
+{% endblock %}

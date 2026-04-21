@@ -2169,6 +2169,53 @@ class GalleryImage(models.Model):
         return f"Gallery image #{self.pk}"
 
 
+class FitterUploadSubmission(models.Model):
+    """Public fitter photo upload awaiting authenticated review."""
+
+    STATUS_PENDING = 'pending'
+    STATUS_PUBLISHED = 'published'
+    STATUS_REJECTED = 'rejected'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending Review'),
+        (STATUS_PUBLISHED, 'Published'),
+        (STATUS_REJECTED, 'Rejected'),
+    ]
+
+    customer_name = models.CharField(max_length=255)
+    sale_number = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    submitted_ip = models.GenericIPAddressField(null=True, blank=True)
+    submitted_user_agent = models.CharField(max_length=500, blank=True)
+    linked_order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='fitter_upload_submissions')
+    linked_customer = models.ForeignKey('Customer', on_delete=models.SET_NULL, null=True, blank=True, related_name='fitter_upload_submissions')
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_fitter_uploads')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Fitter upload #{self.pk} - {self.customer_name}"
+
+
+class FitterUploadPhoto(models.Model):
+    """Photos attached to a fitter upload submission."""
+
+    submission = models.ForeignKey(FitterUploadSubmission, on_delete=models.CASCADE, related_name='photos')
+    image = models.ImageField(upload_to='gallery/staging/')
+    thumbnail = models.ImageField(upload_to='gallery/staging/thumbs/', blank=True)
+    original_name = models.CharField(max_length=255, blank=True)
+    gallery_image = models.ForeignKey('GalleryImage', on_delete=models.SET_NULL, null=True, blank=True, related_name='staged_sources')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f"Submission {self.submission_id} photo #{self.pk}"
+
+
 class UserProfile(models.Model):
     """User profile to store user preferences and role assignment"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')

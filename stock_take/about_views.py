@@ -1,5 +1,6 @@
 import os
 import re
+import subprocess
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
@@ -166,6 +167,108 @@ def _get_media_stats():
         return {"total_files": 0, "total_size": "0 B", "folders": []}
 
 
+def _get_commit_line_stats():
+    """Return commit index with per-commit additions/removals from git history."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _get_commit_web_base():
+        try:
+            remote = subprocess.check_output(
+                ["git", "remote", "get-url", "origin"],
+                cwd=base_dir,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            return ""
+
+        if remote.startswith("git@") and ":" in remote:
+            host_part = remote.split("@", 1)[1]
+            host, path = host_part.split(":", 1)
+            remote = f"https://{host}/{path}"
+        elif remote.startswith("ssh://git@"):
+            remote = remote.replace("ssh://git@", "https://", 1)
+            if ":" in remote.rsplit("/", 1)[-1]:
+                remote = remote.replace(":", "/", 1)
+
+        if remote.endswith(".git"):
+            remote = remote[:-4]
+
+        if not remote.startswith("http://") and not remote.startswith("https://"):
+            return ""
+
+        if "bitbucket.org" in remote:
+            return remote.rstrip("/") + "/commits/"
+        return remote.rstrip("/") + "/commit/"
+
+    commit_web_base = _get_commit_web_base()
+
+    try:
+        # --numstat outputs per-file added/removed counts per commit.
+        output = subprocess.check_output(
+            ["git", "log", "--pretty=tformat:COMMIT\t%H\t%h", "--numstat"],
+            cwd=base_dir,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    commits = []
+    current_added = 0
+    current_removed = 0
+    current_hash = ""
+    current_short_hash = ""
+    seen_commit_marker = False
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("COMMIT\t"):
+            if seen_commit_marker:
+                commits.append({
+                    "number": len(commits) + 1,
+                    "hash": current_hash,
+                    "short_hash": current_short_hash,
+                    "url": f"{commit_web_base}{current_hash}" if commit_web_base and current_hash else "",
+                    "added": current_added,
+                    "removed": current_removed,
+                    "net": current_added - current_removed,
+                })
+
+            marker_parts = line.split("\t")
+            current_hash = marker_parts[1] if len(marker_parts) > 1 else ""
+            current_short_hash = marker_parts[2] if len(marker_parts) > 2 else current_hash[:8]
+            seen_commit_marker = True
+            current_added = 0
+            current_removed = 0
+            continue
+
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        add_str, rem_str = parts[0], parts[1]
+        if add_str.isdigit():
+            current_added += int(add_str)
+        if rem_str.isdigit():
+            current_removed += int(rem_str)
+
+    if seen_commit_marker:
+        commits.append({
+            "number": len(commits) + 1,
+            "hash": current_hash,
+            "short_hash": current_short_hash,
+            "url": f"{commit_web_base}{current_hash}" if commit_web_base and current_hash else "",
+            "added": current_added,
+            "removed": current_removed,
+            "net": current_added - current_removed,
+        })
+
+    return commits
+
+
 @login_required
 def about_page(request):
     total_lines, total_files, by_type = _count_lines_of_code()
@@ -179,6 +282,7 @@ def about_page(request):
 
     db_stats = _get_db_stats()
     media_stats = _get_media_stats()
+    commit_stats = _get_commit_line_stats()
 
     context = {
         "total_lines": total_lines,
@@ -193,5 +297,7 @@ def about_page(request):
         "js_pct": pct(js_lines),
         "db": db_stats,
         "media": media_stats,
+        "commit_stats": commit_stats,
+        "can_view_commit_links": bool(request.user.is_staff or request.user.is_superuser),
     }
     return render(request, "stock_take/about.html", context)

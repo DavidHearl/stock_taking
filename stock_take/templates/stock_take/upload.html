@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Upload{% endblock %}
+{% block nav_upload_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/upload.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="upload-public-wrap">
+    <div class="upload-public-card">
+        <h1>Upload</h1>
+        <p class="upload-public-sub">Upload completed job photos. Pick images first, then complete the details.</p>
+
+        {% if messages %}
+            {% for message in messages %}
+            <div class="upload-alert {% if message.tags == 'success' %}is-success{% else %}is-error{% endif %}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post" enctype="multipart/form-data" id="publicUploadForm">
+            {% csrf_token %}
+            <input type="text" name="website" class="upload-honeypot" tabindex="-1" autocomplete="off">
+
+            <input type="file" id="uploadImagesInput" name="images" accept="image/*" multiple required hidden>
+            <label class="upload-plus" for="uploadImagesInput" title="Select photos">
+                <i class="bi bi-plus-lg"></i>
+            </label>
+
+            <div class="upload-selected" id="uploadSelectedCount">No photos selected</div>
+
+            <div class="upload-fields" id="uploadFields" hidden>
+                <div class="upload-field">
+                    <label for="customerName">Customer Name <span class="required">*</span></label>
+                    <input type="text" id="customerName" name="customer_name" required placeholder="Customer full name">
+                </div>
+                <div class="upload-field">
+                    <label for="saleNumber">Sale Number</label>
+                    <input type="text" id="saleNumber" name="sale_number" placeholder="Optional">
+                </div>
+                <button type="submit" class="upload-submit">Submit Photos</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function() {
+    const input = document.getElementById('uploadImagesInput');
+    const fields = document.getElementById('uploadFields');
+    const count = document.getElementById('uploadSelectedCount');
+
+    input.addEventListener('change', function() {
+        const total = input.files ? input.files.length : 0;
+        if (total > 0) {
+            fields.hidden = false;
+            count.textContent = total + ' photo' + (total > 1 ? 's' : '') + ' selected';
+        } else {
+            fields.hidden = true;
+            count.textContent = 'No photos selected';
+        }
+    });
+})();
+</script>
+{% endblock %}
