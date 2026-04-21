@@ -506,12 +506,24 @@ function executeMerge() {
         },
         body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
     })
-    .then(res => res.json())
+    .then(async res => {
+        const text = await res.text();
+        let data = null;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error(text || ('HTTP ' + res.status));
+        }
+        if (!res.ok) {
+            throw new Error(data.error || data.message || ('HTTP ' + res.status));
+        }
+        return data;
+    })
     .then(data => {
         if (data.success) {
             clearSelectionAndReload();
         } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
+            alert('Error: ' + (data.error || data.message || 'Unknown error'));
         }
     })
     .catch(err => alert('Network error: ' + err.message));

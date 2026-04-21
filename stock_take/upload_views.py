@@ -1,9 +1,11 @@
 import os
+import logging
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.files.base import ContentFile
+from django.db import DatabaseError, ProgrammingError
 from django.db.models import Q
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
@@ -18,6 +20,7 @@ from .models import Customer, FitterUploadPhoto, FitterUploadSubmission, Gallery
 MAX_UPLOAD_FILES = 20
 MAX_IMAGE_MB = 15
 RATE_LIMIT_PER_HOUR = 30
+logger = logging.getLogger(__name__)
 
 
 def _get_client_ip(request):
@@ -35,11 +38,16 @@ def _rate_limit_key(request):
 
 def _is_rate_limited(request):
     key = _rate_limit_key(request)
-    count = cache.get(key, 0)
-    if count >= RATE_LIMIT_PER_HOUR:
-        return True
-    cache.set(key, count + 1, timeout=60 * 60)
-    return False
+    try:
+        count = cache.get(key, 0)
+        if count >= RATE_LIMIT_PER_HOUR:
+            return True
+        cache.set(key, count + 1, timeout=60 * 60)
+        return False
+    except Exception:
+        # Fail-open if cache backend is unavailable.
+        logger.exception('Upload rate-limit cache error')
+        return False
 
 
 def _validate_image(file_obj):
@@ -103,22 +111,48 @@ def fitter_upload(request):
             messages.error(request, err)
             return redirect('fitter_upload')
 
-    submission = FitterUploadSubmission.objects.create(
-        customer_name=customer_name,
-        sale_number=sale_number,
-        submitted_ip=_get_client_ip(request),
-        submitted_user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
-    )
-
-    for f in files:
-        thumb = make_thumbnail(f)
-        f.seek(0)
-        FitterUploadPhoto.objects.create(
-            submission=submission,
-            image=f,
-            thumbnail=thumb,
-            original_name=(f.name or '')[:255],
+    try:
+        submission = FitterUploadSubmission.objects.create(
+            customer_name=customer_name,
+            sale_number=sale_number,
+            submitted_ip=_get_client_ip(request),
+            submitted_user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
         )
+    except (ProgrammingError, DatabaseError):
+        logger.exception('Upload staging table unavailable during fitter upload')
+        messages.error(request, 'Upload service is temporarily unavailable. Please contact the office.')
+        return redirect('fitter_upload')
+    except Exception:
+        logger.exception('Unexpected error creating fitter upload submission')
+        messages.error(request, 'Upload failed due to a server error. Please try again.')
+        return redirect('fitter_upload')
+
+    created = 0
+    try:
+        for f in files:
+            try:
+                thumb = make_thumbnail(f)
+            except Exception:
+                logger.exception('Thumbnail generation failed for %s', f.name)
+                messages.error(request, 'One image could not be processed. Please re-save it as JPG/PNG and try again.')
+                raise
+
+            f.seek(0)
+            FitterUploadPhoto.objects.create(
+                submission=submission,
+                image=f,
+                thumbnail=thumb,
+                original_name=(f.name or '')[:255],
+            )
+            created += 1
+    except Exception:
+        # Keep DB tidy if photo creation fails mid-request.
+        submission.delete()
+        return redirect('fitter_upload')
+
+    if created == 0:
+        messages.error(request, 'No images were uploaded. Please try again.')
+        return redirect('fitter_upload')
 
     messages.success(request, 'Thanks, photos uploaded successfully.')
     return redirect('fitter_upload')

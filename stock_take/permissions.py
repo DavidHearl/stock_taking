@@ -50,6 +50,7 @@ URL_TO_PAGE = {
     'customer_save': 'customer_details',
     'customer_delete': 'customer_details',
     'customers_bulk_delete': 'customers',
+    'customer_merge': 'customers',
 
     # Projects - Remedials
     'remedials': 'remedials',

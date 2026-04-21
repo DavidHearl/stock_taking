@@ -2,6 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
+from django.db import ProgrammingError, DatabaseError
 from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead
 import logging
 import json
@@ -396,75 +397,82 @@ def customer_merge(request):
     except Customer.DoesNotExist:
         return JsonResponse({'error': 'Customer not found'}, status=404)
 
-    # Identify sales linked to both customers
-    sales_keep = set(AnthillSale.objects.filter(customer=keep_customer).values_list('anthill_activity_id', flat=True))
-    sales_remove = set(AnthillSale.objects.filter(customer=remove_customer).values_list('anthill_activity_id', flat=True))
-    conflicting_sales = sales_keep.intersection(sales_remove)
-
-    # If conflicts exist and not resolved, return them for user decision
-    if conflicting_sales and not resolve_conflicts:
-        conflicts = list(AnthillSale.objects.filter(anthill_activity_id__in=conflicting_sales))
-        return JsonResponse({
-            'success': False,
-            'conflicts': [
-                {
-                    'id': sale.pk,
-                    'anthill_activity_id': sale.anthill_activity_id,
-                    'activity_type': sale.activity_type,
-                    'status': sale.status,
-                    'customer_name': sale.customer_name,
-                    'keep_customer_id': keep_customer.pk,
-                    'remove_customer_id': remove_customer.pk,
-                }
-                for sale in conflicts
-            ],
-            'message': 'Sales conflict detected. Please resolve before merging.'
-        })
-
-    # Transfer sales from remove to keep (if not conflicting or resolved)
-    for sale_id in sales_remove:
-        if sale_id not in conflicting_sales or (resolve_conflicts and resolve_conflicts.get(str(sale_id)) == 'keep'):
-            AnthillSale.objects.filter(anthill_activity_id=sale_id, customer=remove_customer).update(customer=keep_customer)
-        elif resolve_conflicts and resolve_conflicts.get(str(sale_id)) == 'remove':
-            AnthillSale.objects.filter(anthill_activity_id=sale_id, customer=remove_customer).delete()
-
-    # Transfer orders from remove to keep
-    orders_moved = Order.objects.filter(customer=remove_customer).update(customer=keep_customer)
-
-    # Transfer purchase orders if the model has a customer FK
     try:
-        pos_moved = PurchaseOrder.objects.filter(customer=remove_customer).update(customer=keep_customer)
+        # Identify sales linked to both customers
+        sales_keep = set(AnthillSale.objects.filter(customer=keep_customer).values_list('anthill_activity_id', flat=True))
+        sales_remove = set(AnthillSale.objects.filter(customer=remove_customer).values_list('anthill_activity_id', flat=True))
+        conflicting_sales = sales_keep.intersection(sales_remove)
+
+        # If conflicts exist and not resolved, return them for user decision
+        if conflicting_sales and not resolve_conflicts:
+            conflicts = list(AnthillSale.objects.filter(anthill_activity_id__in=conflicting_sales))
+            return JsonResponse({
+                'success': False,
+                'conflicts': [
+                    {
+                        'id': sale.pk,
+                        'anthill_activity_id': sale.anthill_activity_id,
+                        'activity_type': sale.activity_type,
+                        'status': sale.status,
+                        'customer_name': sale.customer_name,
+                        'keep_customer_id': keep_customer.pk,
+                        'remove_customer_id': remove_customer.pk,
+                    }
+                    for sale in conflicts
+                ],
+                'message': 'Sales conflict detected. Please resolve before merging.'
+            })
+
+        # Transfer sales from remove to keep (if not conflicting or resolved)
+        for sale_id in sales_remove:
+            if sale_id not in conflicting_sales or (resolve_conflicts and resolve_conflicts.get(str(sale_id)) == 'keep'):
+                AnthillSale.objects.filter(anthill_activity_id=sale_id, customer=remove_customer).update(customer=keep_customer)
+            elif resolve_conflicts and resolve_conflicts.get(str(sale_id)) == 'remove':
+                AnthillSale.objects.filter(anthill_activity_id=sale_id, customer=remove_customer).delete()
+
+        # Transfer orders from remove to keep
+        orders_moved = Order.objects.filter(customer=remove_customer).update(customer=keep_customer)
+
+        # Transfer purchase orders if the model has a customer FK
+        try:
+            pos_moved = PurchaseOrder.objects.filter(customer=remove_customer).update(customer=keep_customer)
+        except Exception:
+            pos_moved = 0
+
+        # Fill in any blank fields on keep_customer from remove_customer
+        fill_fields = [
+            'email', 'phone', 'fax', 'website', 'abn',
+            'address_1', 'address_2', 'city', 'state', 'suburb', 'postcode', 'country',
+            'code', 'currency', 'credit_days', 'credit_terms_type', 'price_tier',
+            'workguru_id', 'anthill_customer_id',
+        ]
+        updated_fields = []
+        for field in fill_fields:
+            keep_val = getattr(keep_customer, field)
+            remove_val = getattr(remove_customer, field)
+            if not keep_val and remove_val:
+                setattr(keep_customer, field, remove_val)
+                updated_fields.append(field)
+
+        if updated_fields:
+            keep_customer.save(update_fields=updated_fields)
+
+        # Delete the merged-away customer
+        remove_name = str(remove_customer)
+        remove_customer.delete()
+
+        return JsonResponse({
+            'success': True,
+            'orders_moved': orders_moved,
+            'fields_filled': len(updated_fields),
+            'removed': remove_name,
+        })
+    except (ProgrammingError, DatabaseError):
+        logger.exception('Database error during customer merge')
+        return JsonResponse({'error': 'Database schema is out of sync. Please run migrations and try again.'}, status=500)
     except Exception:
-        pos_moved = 0
-
-    # Fill in any blank fields on keep_customer from remove_customer
-    fill_fields = [
-        'email', 'phone', 'fax', 'website', 'abn',
-        'address_1', 'address_2', 'city', 'state', 'suburb', 'postcode', 'country',
-        'code', 'currency', 'credit_days', 'credit_terms_type', 'price_tier',
-        'workguru_id', 'anthill_customer_id',
-    ]
-    updated_fields = []
-    for field in fill_fields:
-        keep_val = getattr(keep_customer, field)
-        remove_val = getattr(remove_customer, field)
-        if not keep_val and remove_val:
-            setattr(keep_customer, field, remove_val)
-            updated_fields.append(field)
-
-    if updated_fields:
-        keep_customer.save(update_fields=updated_fields)
-
-    # Delete the merged-away customer
-    remove_name = str(remove_customer)
-    remove_customer.delete()
-
-    return JsonResponse({
-        'success': True,
-        'orders_moved': orders_moved,
-        'fields_filled': len(updated_fields),
-        'removed': remove_name,
-    })
+        logger.exception('Unexpected error during customer merge')
+        return JsonResponse({'error': 'Unexpected server error while merging customers.'}, status=500)
 
 
 @login_required
