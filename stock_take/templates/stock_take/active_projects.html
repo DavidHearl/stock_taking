@@ -25,6 +25,25 @@
         {% if last_synced %}
         <span class="active-last-sync">Last synced {{ last_synced|timesince }} ago</span>
         {% endif %}
+        {% if tab == 'overview' and stage_groups or tab == 'overview' and hidden_stages %}
+        <div class="active-stages-filter" id="stagesFilter">
+            <button type="button" class="active-stages-btn" id="stagesFilterBtn" title="Show/hide stages">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="active-stages-dropdown" id="stagesDropdown">
+                <div class="active-stages-header">Stages</div>
+                {% for entry in all_stage_entries %}
+                <label class="active-stages-item {% if entry.is_empty %}active-stages-item-empty{% endif %}">
+                        <span class="active-stages-item-left">
+                            <input type="checkbox" class="stage-toggle-cb" data-stage-id="{{ entry.stage.id }}" data-is-empty="{{ entry.is_empty|yesno:'1,0' }}" onchange="toggleStage(this)" {% if not entry.is_empty %}checked{% endif %}>
+                            <span class="active-stages-item-name">{{ entry.stage.name }}</span>
+                        </span>
+                    <span class="active-stages-item-count {% if not entry.is_empty %}active-stages-item-count-has{% endif %}">{{ entry.count }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
         <button type="button" class="btn btn-success" onclick="syncAllAnthill()" id="btnSyncAll" title="Sync workflow stages from Anthill for all {{ all_sync_order_ids|length }} open orders">
             <i class="bi bi-arrow-repeat"></i> Sync from Anthill ({{ all_sync_order_ids|length }})
         </button>
@@ -36,9 +55,18 @@
      OVERVIEW — stages with their orders (top to bottom)
      ══════════════════════════════════════════════════════════ -->
 
+<div class="active-overview-legend">
+    {% for role, colour in role_colours.items %}
+    <div class="active-overview-legend-item">
+        <span class="active-overview-legend-swatch" style="background: {{ colour }};"></span>
+        <span class="active-overview-legend-label">{{ role|title }}</span>
+    </div>
+    {% endfor %}
+</div>
+
 <div class="active-overview">
     {% for group in stage_groups %}
-    <div class="active-stage-section">
+    <div class="active-stage-section" id="stage-{{ group.stage.id }}">
         <div class="active-stage-header" style="border-left: 4px solid {{ group.colour }};">
             <div class="active-stage-header-left">
                 <span class="active-stage-name">{{ group.stage.name }}</span>
@@ -55,6 +83,12 @@
                         <th class="col-sale">Sale</th>
                         <th class="col-name">Customer</th>
                         <th class="col-value">Paid / Value</th>
+                        <th class="col-cost">Materials</th>
+                        {% if group.show_install_mfg %}
+                        <th class="col-cost">Install</th>
+                        <th class="col-cost">Mfg</th>
+                        {% endif %}
+                        <th class="col-profit-h">Profit</th>
                         <th class="col-date">Fit Date</th>
                         <th class="col-links"></th>
                     </tr>
@@ -75,6 +109,12 @@
                             <span class="active-no-value">&mdash;</span>
                             {% endif %}
                         </td>
+                        <td class="col-cost">{% if item.order.materials_cost %}£{{ item.order.materials_cost|floatformat:0|intcomma }}{% else %}&mdash;{% endif %}</td>
+                        {% if group.show_install_mfg %}
+                        <td class="col-cost">{% if item.order.installation_cost %}£{{ item.order.installation_cost|floatformat:0|intcomma }}{% else %}&mdash;{% endif %}</td>
+                        <td class="col-cost">{% if item.order.manufacturing_cost %}£{{ item.order.manufacturing_cost|floatformat:0|intcomma }}{% else %}&mdash;{% endif %}</td>
+                        {% endif %}
+                        <td class="col-profit-h {% if item.order.profit > 0 %}profit-positive{% elif item.order.profit < 0 %}profit-negative{% endif %}">{% if item.order.profit %}£{{ item.order.profit|floatformat:0|intcomma }}{% else %}&mdash;{% endif %}</td>
                         <td class="col-date">{% if item.order.fit_date %}{{ item.order.fit_date|date:"d M" }}{% endif %}</td>
                         <td class="col-links" onclick="event.stopPropagation()">
                             {% if item.anthill_customer_id %}
@@ -95,26 +135,22 @@
         </div>
     </div>
     {% endfor %}
-</div>
-
-{% if hidden_stages %}
-<div class="active-hidden-menu">
-    <button type="button" class="active-hidden-btn" onclick="this.parentElement.classList.toggle('open')" title="Show empty stages">
-        <i class="bi bi-three-dots-vertical"></i>
-        <span>{{ hidden_stages|length }} empty stage{{ hidden_stages|length|pluralize }}</span>
-    </button>
-    <div class="active-hidden-dropdown">
-        {% for group in hidden_stages %}
-        <div class="active-hidden-item">
-            <span class="active-hidden-swatch" style="background: {{ group.colour }};"></span>
-            <span>{{ group.stage.name }}</span>
+    {% for group in hidden_stages %}
+    <div class="active-stage-section stage-hidden" id="stage-{{ group.stage.id }}">
+        <div class="active-stage-header" style="border-left: 4px solid {{ group.colour }};">
+            <div class="active-stage-header-left">
+                <span class="active-stage-name">{{ group.stage.name }}</span>
+                <span class="active-stage-count" style="background: {{ group.colour }};">0</span>
+            </div>
         </div>
-        {% endfor %}
+        <div class="active-stage-body">
+            <div class="active-stage-empty">No orders at this stage</div>
+        </div>
     </div>
+    {% endfor %}
 </div>
-{% endif %}
 
-{% if not stage_groups %}
+{% if not stage_groups and not hidden_stages %}
 <div class="gantt-empty">
     <p>No active orders at any workflow stage.</p>
 </div>
@@ -485,6 +521,73 @@ function syncAllAnthill() {
     }
     syncNext(0);
 }
+</script>
+<script>
+(function() {
+    const HIDDEN_KEY = 'activeHiddenStageIds';
+    const SHOWN_KEY  = 'activeShownStageIds';
+
+    function getHidden() { try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')); } catch(e) { return new Set(); } }
+    function getShown()  { try { return new Set(JSON.parse(localStorage.getItem(SHOWN_KEY)  || '[]')); } catch(e) { return new Set(); } }
+    function saveHidden(s) { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...s])); }
+    function saveShown(s)  { localStorage.setItem(SHOWN_KEY,  JSON.stringify([...s])); }
+
+    window.toggleStage = function(cb) {
+        const stageId = cb.dataset.stageId;
+        const isEmpty = cb.dataset.isEmpty === '1';
+        const label = cb.closest('.active-stages-item');
+        const section = document.getElementById('stage-' + stageId);
+        if (section) {
+            if (cb.checked) section.classList.remove('stage-hidden');
+            else section.classList.add('stage-hidden');
+        }
+        if (label) {
+            if (cb.checked) label.classList.add('active-stages-item-checked');
+            else label.classList.remove('active-stages-item-checked');
+        }
+        if (isEmpty) {
+            const s = getShown(); cb.checked ? s.add(stageId) : s.delete(stageId); saveShown(s);
+        } else {
+            const s = getHidden(); cb.checked ? s.delete(stageId) : s.add(stageId); saveHidden(s);
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const hidden = getHidden();
+        const shown  = getShown();
+        document.querySelectorAll('.stage-toggle-cb').forEach(function(cb) {
+            const stageId = cb.dataset.stageId;
+            const isEmpty = cb.dataset.isEmpty === '1';
+            const label = cb.closest('.active-stages-item');
+            const section = document.getElementById('stage-' + stageId);
+            if (isEmpty) {
+                const visible = shown.has(stageId);
+                cb.checked = visible;
+                if (visible && section) section.classList.remove('stage-hidden');
+            } else {
+                const isHidden = hidden.has(stageId);
+                cb.checked = !isHidden;
+                if (isHidden && section) section.classList.add('stage-hidden');
+            }
+            if (label) {
+                if (cb.checked) label.classList.add('active-stages-item-checked');
+                else label.classList.remove('active-stages-item-checked');
+            }
+        });
+        const filterBtn = document.getElementById('stagesFilterBtn');
+        if (filterBtn) {
+            filterBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                document.getElementById('stagesDropdown').classList.toggle('open');
+            });
+        }
+        document.addEventListener('click', function(e) {
+            const dd = document.getElementById('stagesDropdown');
+            const filter = document.getElementById('stagesFilter');
+            if (dd && filter && !filter.contains(e.target)) dd.classList.remove('open');
+        });
+    });
+})();
 </script>
 <style>
 .spin { animation: spinAnim 1s linear infinite; display: inline-block; }

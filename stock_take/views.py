@@ -12474,13 +12474,22 @@ def active_projects(request):
 
     stage_groups = []
     hidden_stages = []
+    all_stage_entries = []  # all stages in workflow order for the dropdown
+    NO_INSTALL_MFG_STAGES = {
+        'Place Order or Allocate from Stock',
+        'Arrange Install Date & Take Stock Payment',
+        'Pre-Fit Call to Customer',
+    }
     for stage in all_stages:
         entry = {
             'stage': stage,
             'colour': role_colours.get(stage.role, '#94a3b8'),
             'orders': stage_orders_map[stage.id],
             'count': len(stage_orders_map[stage.id]),
+            'show_install_mfg': stage.name not in NO_INSTALL_MFG_STAGES,
+            'is_empty': not bool(stage_orders_map[stage.id]),
         }
+        all_stage_entries.append(entry)
         if stage_orders_map[stage.id]:
             stage_groups.append(entry)
         else:
@@ -12716,6 +12725,7 @@ def active_projects(request):
         'tab': tab,
         'stage_groups': stage_groups,
         'hidden_stages': hidden_stages,
+        'all_stage_entries': all_stage_entries,
         'all_overview_order_ids': all_overview_order_ids,
         'all_sync_order_ids': all_sync_order_ids,
         'all_sync_order_names': all_sync_order_names,
