@@ -12,6 +12,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -22,6 +23,107 @@ from django.utils import timezone
 from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_activity_suffix(value: str) -> str:
+    cleaned = re.sub(r'[^A-Za-z0-9-]+', '-', (value or '').strip().upper())
+    cleaned = cleaned.strip('-')
+    return cleaned or 'UNKNOWN'
+
+
+def _build_placeholder_activity_id(contract_number: str) -> str:
+    """
+    Create a stable placeholder activity ID for scraped invoice payments.
+
+    Preference order:
+      1) trailing 6-digit sale number from contract (e.g. BFS-SD-425035 -> 425035)
+      2) sanitized contract fallback
+    """
+    contract = (contract_number or '').strip().upper()
+    six_digit = ''
+    m = re.search(r'(\d{6})$', contract)
+    if m:
+        six_digit = m.group(1)
+
+    base = six_digit or _sanitize_activity_suffix(contract)
+
+    if not AnthillSale.objects.filter(anthill_activity_id=base).exists():
+        return base
+
+    for idx in range(2, 1000):
+        candidate = f'{str(base)[:25]}-{idx}'
+        if not AnthillSale.objects.filter(anthill_activity_id=candidate).exists():
+            return candidate
+
+    # Extremely defensive fallback; keeps field within max_length=30.
+    return f'{str(base)[:20]}-{int(timezone.now().timestamp()) % 1000000000}'
+
+
+@transaction.atomic
+def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom: str):
+    """
+    Ensure Atlas has both Customer and AnthillSale records for a payment contract.
+
+    Returns:
+        (sale, customer)
+    """
+    contract = (contract_number or '').strip()
+    if not contract:
+        return None, None
+
+    name = (customer_name or '').strip()
+    location = (showroom or '').strip()
+
+    sale = (
+        AnthillSale.objects
+        .select_related('customer')
+        .filter(contract_number=contract)
+        .order_by('-activity_date', '-pk')
+        .first()
+    )
+
+    customer = None
+    if sale and sale.customer_id:
+        customer = sale.customer
+    elif name:
+        customer = Customer.objects.filter(name=name).first()
+    elif sale and sale.customer_name:
+        customer = Customer.objects.filter(name=sale.customer_name).first()
+
+    if not customer and (name or sale):
+        customer = Customer.objects.create(
+            name=name or (sale.customer_name if sale else ''),
+            location=location or (sale.location if sale else ''),
+        )
+
+    if sale:
+        update_fields = []
+        if customer and sale.customer_id != customer.pk:
+            sale.customer = customer
+            update_fields.append('customer')
+        if not sale.customer_name and name:
+            sale.customer_name = name
+            update_fields.append('customer_name')
+        if not sale.location and location:
+            sale.location = location
+            update_fields.append('location')
+        if update_fields:
+            sale.save(update_fields=update_fields)
+        return sale, customer
+
+    sale = AnthillSale.objects.create(
+        anthill_activity_id=_build_placeholder_activity_id(contract),
+        contract_number=contract,
+        customer=customer,
+        customer_name=name,
+        location=location,
+        category='3',
+        activity_type='Room Sale',
+        status='open',
+        anthill_customer_id=(customer.anthill_customer_id if customer else ''),
+        activity_date=timezone.now(),
+    )
+    return sale, customer
 
 
 # ── Invoice list ──────────────────────────────────────────────────
@@ -64,6 +166,18 @@ def invoices_list(request):
 
     invoices = list(qs.select_related('customer', 'order').order_by('-date'))
 
+    # Backfill link integrity for legacy scraped rows: every payment invoice should
+    # have a customer and a matching sale in Atlas.
+    for inv in invoices:
+        if not inv.contract_number:
+            continue
+        sale, customer = _ensure_sale_and_customer(inv.contract_number, inv.client_name, inv.showroom)
+        if customer and not inv.customer_id:
+            inv.customer = customer
+            inv.save(update_fields=['customer'])
+            inv.customer_id = customer.pk
+        inv.sale_pk = sale.pk if sale else None
+
     # Summary stats (over filtered set)
     total_invoices = len(invoices)
     total_value = sum(inv.total for inv in invoices)
@@ -103,7 +217,7 @@ def invoices_list(request):
         )
 
     for inv in invoices:
-        inv.sale_pk = sale_map.get(inv.contract_number)
+        inv.sale_pk = getattr(inv, 'sale_pk', None) or sale_map.get(inv.contract_number)
         # If invoice has no customer FK, try sale's customer, then name match
         if not inv.customer_id:
             inv.sale_customer_pk = (
@@ -174,16 +288,68 @@ def push_invoice_to_xero(request, invoice_id):
 
     from .services import xero_api
 
-    # Look up or create the contact in Xero
+    # Look up contact in Xero; if missing, auto-create from local customer/invoice data.
     contact_id = ''
     if invoice.client_name:
         contact_id = xero_api.find_contact_by_name(invoice.client_name)
 
     if not contact_id:
-        return JsonResponse({
-            'ok': False,
-            'error': f'Contact "{invoice.client_name}" not found in Xero. Create the contact first.',
-        })
+        local_customer = invoice.customer
+        if not local_customer and invoice.client_name:
+            local_customer = Customer.objects.filter(name=invoice.client_name).first()
+
+        first_name = ''
+        last_name = ''
+        email = ''
+        phone = ''
+        address_1 = ''
+        address_2 = ''
+        city = ''
+        region = ''
+        postcode = ''
+        country = ''
+
+        if local_customer:
+            first_name = (local_customer.first_name or '').strip()
+            last_name = (local_customer.last_name or '').strip()
+            email = (local_customer.email or '').strip()
+            phone = (local_customer.phone or '').strip()
+            address_1 = (local_customer.address_1 or local_customer.address or '').strip()
+            address_2 = (local_customer.address_2 or '').strip()
+            city = (local_customer.city or local_customer.suburb or '').strip()
+            region = (local_customer.state or '').strip()
+            postcode = (local_customer.postcode or '').strip()
+            country = (local_customer.country or '').strip()
+
+        create_res = xero_api.create_contact(
+            name=invoice.client_name,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+            address_line1=address_1,
+            address_line2=address_2,
+            city=city,
+            region=region,
+            postal_code=postcode,
+            country=country,
+        )
+
+        contacts = (create_res or {}).get('Contacts', []) if isinstance(create_res, dict) else []
+        if contacts:
+            contact_id = contacts[0].get('ContactID', '')
+
+        # Fallback lookup in case Xero accepted but response shape differs.
+        if not contact_id and invoice.client_name:
+            contact_id = xero_api.find_contact_by_name(invoice.client_name)
+
+        if not contact_id:
+            err = xero_api.get_last_api_error() or f'Contact "{invoice.client_name}" not found in Xero and auto-create failed.'
+            return JsonResponse({'ok': False, 'error': err})
+
+        if local_customer and not local_customer.xero_id:
+            local_customer.xero_id = contact_id
+            local_customer.save(update_fields=['xero_id'])
 
     # Build line items — single line with the invoice total
     line_items = [{
@@ -424,10 +590,13 @@ def _create_invoice_from_payment(pay, now):
     received_date = _parse_date(pay['payment_received'])
     contract = pay['contract_number'].strip()
 
+    sale, customer = _ensure_sale_and_customer(contract, pay.get('customer', ''), pay.get('showroom', ''))
+
     Invoice.objects.create(
         invoice_number=contract,
         contract_number=contract,
         client_name=pay['customer'],
+        customer=customer,
         showroom=pay['showroom'],
         payment_type=pay['payment_type'],
         total=amount,

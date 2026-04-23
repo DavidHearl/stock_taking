@@ -161,6 +161,7 @@
                         <thead>
                             <tr>
                                 <th>Contract</th>
+                                <th>Activity ID</th>
                                 <th>Type</th>
                                 <th>Date</th>
                                 <th class="text-right">Value</th>
@@ -179,6 +180,24 @@
                                     <a href="{% url 'sale_detail' sale.pk %}" class="cd-contract-link">
                                         {{ sale.contract_number|default:sale.anthill_activity_id }}
                                     </a>
+                                </td>
+                                <td>
+                                    <div style="display:flex; gap:6px; align-items:center;">
+                                        <input
+                                            id="sale-activity-input-{{ sale.pk }}"
+                                            class="customer-edit-input"
+                                            value="{{ sale.anthill_activity_id|default:'' }}"
+                                            style="min-width:96px; max-width:130px; padding:4px 8px; font-size:0.78rem;"
+                                        >
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-primary"
+                                            onclick="saveSaleActivityId({{ sale.pk }})"
+                                            id="sale-activity-btn-{{ sale.pk }}"
+                                            style="padding:4px 8px; font-size:0.72rem;"
+                                        >Save</button>
+                                    </div>
+                                    <div id="sale-activity-msg-{{ sale.pk }}" style="font-size:0.72rem; margin-top:4px;"></div>
                                 </td>
                                 <td class="cd-type-cell">{{ sale.activity_type|default:"-" }}</td>
                                 <td class="cd-date-cell">{{ sale.activity_date|date:"d M Y"|default:"-" }}</td>
@@ -478,6 +497,53 @@ function exportToXero() {
         resultDiv.style.display = 'block';
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
+    });
+}
+
+function saveSaleActivityId(salePk) {
+    const input = document.getElementById('sale-activity-input-' + salePk);
+    const btn = document.getElementById('sale-activity-btn-' + salePk);
+    const msg = document.getElementById('sale-activity-msg-' + salePk);
+    if (!input || !btn || !msg) return;
+
+    const newActivityId = (input.value || '').trim();
+    if (!newActivityId) {
+        msg.style.color = 'var(--danger-color)';
+        msg.textContent = 'Activity ID cannot be blank';
+        return;
+    }
+
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Saving...';
+    msg.textContent = '';
+
+    fetch('/sale/' + salePk + '/save/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ anthill_activity_id: newActivityId })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            msg.style.color = 'var(--success-color)';
+            msg.textContent = 'Saved';
+            setTimeout(() => location.reload(), 500);
+        } else {
+            msg.style.color = 'var(--danger-color)';
+            msg.textContent = result.error || 'Failed to save';
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    })
+    .catch(() => {
+        msg.style.color = 'var(--danger-color)';
+        msg.textContent = 'Network error';
+        btn.disabled = false;
+        btn.textContent = originalText;
     });
 }
 </script>

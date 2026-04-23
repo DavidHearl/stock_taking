@@ -91,7 +91,8 @@
                             </div>
                             <div class="field-row-sb">
                                 <div class="field-label">Activity ID</div>
-                                <div class="field-value">{{ sale.anthill_activity_id }}</div>
+                                <div class="field-value view-val">{{ sale.anthill_activity_id }}</div>
+                                <input class="customer-edit-input edit-val" data-field="anthill_activity_id" value="{{ sale.anthill_activity_id|default:'' }}" style="display:none;">
                             </div>
                             <div class="field-row-sb">
                                 <div class="field-label">Date</div>
@@ -519,9 +520,37 @@
             const SCRAPE_ANTHILL_URL = "{% url 'scrape_anthill_payments' sale.pk %}";
             const XERO_SEARCH_URL = "{% url 'xero_search_invoices' sale.pk %}";
             const XERO_LINK_URL = "{% url 'xero_link_invoice' sale.pk %}";
+            const SALE_MERGE_URL = "{% url 'sale_merge' sale.pk %}";
             const DELETE_MANUAL_BASE = "/sale/{{ sale.pk }}/payments/";
             const CSRF_TOKEN = '{{ csrf_token }}';
             const SALE_OUTSTANDING = {{ outstanding|default:"0" }};
+
+            function mergeRelatedSale(sourceSalePk) {
+                if (!sourceSalePk) return;
+                const ok = confirm('Merge this sale into the current sale? This will move payments and delete the other sale.');
+                if (!ok) return;
+
+                fetch(SALE_MERGE_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': CSRF_TOKEN,
+                    },
+                    body: JSON.stringify({ source_sale_id: sourceSalePk }),
+                })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        alert('Sales merged successfully.');
+                        location.reload();
+                    } else {
+                        alert(result.error || 'Failed to merge sales.');
+                    }
+                })
+                .catch(() => {
+                    alert('Network error while merging sales.');
+                });
+            }
 
             // ── Combined Search Payments modal ─────────────────────────────
             function openSearchPaymentsModal() {
@@ -1202,6 +1231,7 @@
                             <th>Status</th>
                             <th>Date</th>
                             <th>Linked Order</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1228,6 +1258,11 @@
                                 {% else %}
                                 <span class="text-muted">-</span>
                                 {% endif %}
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-outline-warning" onclick="mergeRelatedSale({{ related.pk }})">
+                                    <i class="bi bi-intersect"></i> Merge
+                                </button>
                             </td>
                         </tr>
                         {% endfor %}

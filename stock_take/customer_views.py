@@ -2,7 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, StreamingHttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
-from django.db import ProgrammingError, DatabaseError
+from django.db import ProgrammingError, DatabaseError, transaction
 from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead
 import logging
 import json
@@ -312,6 +312,7 @@ def customer_save(request, pk):
         'billing_client',
     ]
 
+    old_activity_id = sale.anthill_activity_id
     update_fields = []
     for field in editable_fields:
         if field in data:
@@ -752,7 +753,7 @@ def sale_save(request, pk):
     editable_fields = [
         'contract_number', 'location', 'assigned_to_name', 'source',
         'status', 'range_name', 'door_type', 'products_included',
-        'fit_from_date', 'goods_due_in',
+        'fit_from_date', 'goods_due_in', 'anthill_activity_id',
     ]
     decimal_fields = ['sale_value', 'profit', 'deposit_required', 'balance_payable']
 
@@ -760,6 +761,15 @@ def sale_save(request, pk):
     for field in editable_fields:
         if field in data:
             val = data[field] or ''
+
+            if field == 'anthill_activity_id':
+                val = str(val).strip()
+                if not val:
+                    return JsonResponse({'success': False, 'error': 'Activity ID cannot be blank.'}, status=400)
+                exists = AnthillSale.objects.exclude(pk=sale.pk).filter(anthill_activity_id=val).exists()
+                if exists:
+                    return JsonResponse({'success': False, 'error': f'Activity ID "{val}" already exists.'}, status=400)
+
             setattr(sale, field, val)
             update_fields.append(field)
 
@@ -776,7 +786,110 @@ def sale_save(request, pk):
     if update_fields:
         sale.save(update_fields=update_fields)
 
+        # Keep linked order.sale_number aligned when the activity ID changes.
+        if 'anthill_activity_id' in update_fields and sale.order:
+            if sale.order.sale_number == old_activity_id or not sale.order.sale_number:
+                sale.order.sale_number = sale.anthill_activity_id
+                sale.order.save(update_fields=['sale_number'])
+
     return JsonResponse({'success': True})
+
+
+@login_required
+def sale_merge(request, pk):
+    """Merge another sale into this sale (pk), then delete the source sale."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    keep_sale = get_object_or_404(AnthillSale, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    source_pk = data.get('source_sale_id')
+    if not source_pk:
+        return JsonResponse({'success': False, 'error': 'source_sale_id is required'}, status=400)
+
+    try:
+        source_sale = AnthillSale.objects.select_related('customer', 'order').get(pk=source_pk)
+    except AnthillSale.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Source sale not found'}, status=404)
+
+    if source_sale.pk == keep_sale.pk:
+        return JsonResponse({'success': False, 'error': 'Cannot merge a sale into itself.'}, status=400)
+
+    # Safety: only allow merge within the same customer context.
+    if keep_sale.customer_id != source_sale.customer_id:
+        return JsonResponse({'success': False, 'error': 'Sales belong to different customers.'}, status=400)
+
+    # If both sales are linked to different orders, avoid destructive ambiguity.
+    if keep_sale.order_id and source_sale.order_id and keep_sale.order_id != source_sale.order_id:
+        return JsonResponse({
+            'success': False,
+            'error': 'Both sales are linked to different orders. Unlink one order first, then merge.'
+        }, status=400)
+
+    try:
+        with transaction.atomic():
+            # Move all payments from source to keep.
+            moved_payments = AnthillPayment.objects.filter(sale=source_sale).update(sale=keep_sale)
+
+            updated_fields = []
+
+            # Preserve order link if keep sale has none.
+            if not keep_sale.order_id and source_sale.order_id:
+                keep_sale.order = source_sale.order
+                updated_fields.append('order')
+
+            # Fill key empty fields on keep sale from source sale.
+            fill_fields = [
+                'contract_number', 'anthill_customer_id', 'customer_name', 'location',
+                'assigned_to_id', 'assigned_to_name', 'activity_type', 'category', 'status',
+                'source', 'sale_type_id', 'range_name', 'door_type', 'products_included',
+                'fit_from_date', 'goods_due_in',
+            ]
+            for field in fill_fields:
+                keep_val = getattr(keep_sale, field)
+                source_val = getattr(source_sale, field)
+                if (keep_val is None or keep_val == '') and source_val not in (None, ''):
+                    setattr(keep_sale, field, source_val)
+                    updated_fields.append(field)
+
+            # Fill empty numeric/date fields from source.
+            copy_if_empty = [
+                'sale_value', 'profit', 'deposit_required', 'balance_payable',
+                'discount', 'activity_date', 'fit_date',
+            ]
+            for field in copy_if_empty:
+                keep_val = getattr(keep_sale, field)
+                source_val = getattr(source_sale, field)
+                if keep_val in (None, '') and source_val not in (None, ''):
+                    setattr(keep_sale, field, source_val)
+                    updated_fields.append(field)
+
+            if updated_fields:
+                keep_sale.save(update_fields=list(dict.fromkeys(updated_fields)))
+
+            # Keep linked order's sale number aligned.
+            if keep_sale.order and keep_sale.anthill_activity_id:
+                if keep_sale.order.sale_number != keep_sale.anthill_activity_id:
+                    keep_sale.order.sale_number = keep_sale.anthill_activity_id
+                    keep_sale.order.save(update_fields=['sale_number'])
+
+            removed_sale_pk = source_sale.pk
+            source_sale.delete()
+
+        return JsonResponse({
+            'success': True,
+            'merged_into': keep_sale.pk,
+            'removed_sale': removed_sale_pk,
+            'moved_payments': moved_payments,
+        })
+    except Exception:
+        logger.exception('Unexpected error during sale merge')
+        return JsonResponse({'success': False, 'error': 'Unexpected server error while merging sales.'}, status=500)
 
 
 @login_required
