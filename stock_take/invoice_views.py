@@ -20,7 +20,7 @@ from django.http import StreamingHttpResponse, JsonResponse
 from django.utils import timezone
 
 
-from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer
+from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer, Order
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ def _build_placeholder_activity_id(contract_number: str) -> str:
 def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom: str):
     """
     Ensure Atlas has both Customer and AnthillSale records for a payment contract.
+    Also links the AnthillSale to a matching Order if one exists (by sale_number).
 
     Returns:
         (sale, customer)
@@ -76,7 +77,7 @@ def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom
 
     sale = (
         AnthillSale.objects
-        .select_related('customer')
+        .select_related('customer', 'order')
         .filter(contract_number=contract)
         .order_by('-activity_date', '-pk')
         .first()
@@ -107,12 +108,24 @@ def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom
         if not sale.location and location:
             sale.location = location
             update_fields.append('location')
+        
+        # Link to Order if not already linked
+        if not sale.order_id:
+            matching_order = Order.objects.filter(sale_number=sale.anthill_activity_id).first()
+            if matching_order:
+                sale.order = matching_order
+                update_fields.append('order')
+        
         if update_fields:
             sale.save(update_fields=update_fields)
         return sale, customer
 
+    # When creating new sale, calculate activity_id and try to link to matching Order
+    activity_id = _build_placeholder_activity_id(contract)
+    matching_order = Order.objects.filter(sale_number=activity_id).first()
+    
     sale = AnthillSale.objects.create(
-        anthill_activity_id=_build_placeholder_activity_id(contract),
+        anthill_activity_id=activity_id,
         contract_number=contract,
         customer=customer,
         customer_name=name,
@@ -122,6 +135,7 @@ def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom
         status='open',
         anthill_customer_id=(customer.anthill_customer_id if customer else ''),
         activity_date=timezone.now(),
+        order=matching_order,  # Link to matching Order if it exists
     )
     return sale, customer
 

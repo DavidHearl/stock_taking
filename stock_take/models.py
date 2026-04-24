@@ -216,6 +216,83 @@ class AnthillSale(models.Model):
         verbose_name_plural = 'Anthill Sales'
 
 
+class SaleCoverSheet(models.Model):
+    """Digital coversheet linked 1:1 with an Anthill sale."""
+
+    sale = models.OneToOneField(
+        AnthillSale,
+        on_delete=models.CASCADE,
+        related_name='cover_sheet',
+        help_text='Sale this coversheet belongs to',
+    )
+
+    prepared_by = models.CharField(max_length=120, blank=True)
+    customer_on_site_name = models.CharField(max_length=255, blank=True)
+    customer_on_site_phone = models.CharField(max_length=100, blank=True)
+    installation_address = models.TextField(blank=True)
+
+    survey_date = models.DateField(null=True, blank=True)
+    fit_date = models.DateField(null=True, blank=True)
+
+    products_scope = models.TextField(blank=True, help_text='Short scope of works / products included')
+    measurements_notes = models.TextField(blank=True)
+    access_notes = models.TextField(blank=True)
+    health_safety_notes = models.TextField(blank=True)
+    special_instructions = models.TextField(blank=True)
+
+    two_man_lift_required = models.BooleanField(default=False)
+    access_check_required = models.BooleanField(default=False)
+    rip_out_required = models.BooleanField(default=False)
+    remeasure_required = models.BooleanField(default=False)
+    new_build_property = models.BooleanField(default=False)
+    parking_situation = models.CharField(max_length=40, blank=True)
+
+    design_check_passed_date = models.DateField(null=True, blank=True)
+    pfp_passed_date = models.DateField(null=True, blank=True)
+    ordering_passed_date = models.DateField(null=True, blank=True)
+    goods_due_in_date = models.DateField(null=True, blank=True)
+    fit_days = models.DecimalField(max_digits=3, decimal_places=1, null=True, blank=True)
+
+    door_type = models.CharField(max_length=30, blank=True)
+    door_details = models.TextField(blank=True)
+    track_type = models.CharField(max_length=20, blank=True)
+    track_colour = models.CharField(max_length=100, blank=True)
+    handle_details = models.TextField(blank=True)
+    lighting_details = models.TextField(blank=True)
+
+    installation_products_included = models.CharField(max_length=100, blank=True)
+    installation_design_type = models.CharField(max_length=100, blank=True)
+    measured_on = models.CharField(max_length=30, blank=True)
+    fit_on = models.CharField(max_length=30, blank=True)
+    electrics_utilities_required = models.BooleanField(default=False)
+    electrics_utilities_notes = models.TextField(blank=True)
+    underfloor_heating = models.BooleanField(default=False)
+
+    board_colour_exterior = models.CharField(max_length=120, blank=True)
+    board_colour_interior = models.CharField(max_length=120, blank=True)
+    board_colour_backs = models.CharField(max_length=120, blank=True)
+    board_colour_fronts = models.CharField(max_length=120, blank=True)
+
+    is_final = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='updated_sale_coversheets',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'Coversheet for Sale {self.sale.anthill_activity_id}'
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = 'Sale Coversheet'
+        verbose_name_plural = 'Sale Coversheets'
+
+
 class AnthillPayment(models.Model):
     """
     A payment record linked to an Anthill CRM sale.

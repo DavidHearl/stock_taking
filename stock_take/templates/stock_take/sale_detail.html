@@ -373,6 +373,134 @@
 
             </div>
 
+            <!-- Coversheet Modal -->
+            <dialog id="coversheetModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-file-earmark-text sale-modal-icon-blue"></i>
+                        <span>Contract Cover Page</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeCoversheetModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <form method="POST" action="{% url 'sale_coversheet_save' sale.pk %}" class="sale-coversheet-form cs-sheet">
+                        {% csrf_token %}
+                        <div class="cs-brand">
+                            <div class="cs-brand-top">IT HAS TO BE</div>
+                            <div class="cs-brand-main">SLIDEROBES</div>
+                            <div class="cs-brand-sub">CONTRACT COVER PAGE</div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">CONTRACT DETAILS</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-blue">Customer</div><div class="cs-value"><input id="id_customer_on_site_name" name="customer_on_site_name" class="form-input" value="{{ coversheet.customer_on_site_name|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Contract No.</div><div class="cs-value"><input class="form-input" value="{{ sale.contract_number|default:sale.anthill_activity_id }}" readonly></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Designer</div><div class="cs-value"><select id="id_prepared_by" name="prepared_by" class="form-input"><option value="">Select designer...</option>{% for designer in designers %}<option value="{{ designer.name }}" {% if coversheet.prepared_by == designer.name %}selected{% endif %}>{{ designer.name }}</option>{% endfor %}</select></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Date Sold</div><div class="cs-value"><input class="form-input" value="{{ sale.activity_date|date:'d/m/Y'|default:'-' }}" readonly></div></div>
+                            </div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">PROPERTY</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-blue">Installation Address</div><div class="cs-value"><textarea id="id_installation_address" name="installation_address" rows="2" class="form-input">{{ coversheet.installation_address|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Products Included</div><div class="cs-value"><textarea id="id_products_scope" name="products_scope" rows="2" class="form-input">{{ coversheet.products_scope|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Access Notes</div><div class="cs-value"><textarea id="id_access_notes" name="access_notes" rows="2" class="form-input">{{ coversheet.access_notes|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">On Site Phone</div><div class="cs-value"><input id="id_customer_on_site_phone" name="customer_on_site_phone" class="form-input" value="{{ coversheet.customer_on_site_phone|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Property Flags</div><div class="cs-value"><div class="cs-switch-grid"><label class="cs-switch"><input type="checkbox" name="two_man_lift_required" {% if coversheet.two_man_lift_required %}checked{% endif %}><span>2 Man Lift</span></label><label class="cs-switch"><input type="checkbox" name="access_check_required" {% if coversheet.access_check_required %}checked{% endif %}><span>Access Check Required</span></label><label class="cs-switch"><input type="checkbox" name="rip_out_required" {% if coversheet.rip_out_required %}checked{% endif %}><span>Rip Out Required</span></label><label class="cs-switch"><input type="checkbox" name="remeasure_required" {% if coversheet.remeasure_required %}checked{% endif %}><span>Remeasure Required</span></label><label class="cs-switch"><input type="checkbox" name="new_build_property" {% if coversheet.new_build_property %}checked{% endif %}><span>New Build Property</span></label></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Parking</div><div class="cs-value"><select id="id_parking_situation" name="parking_situation" class="form-input"><option value="" {% if not coversheet.parking_situation %}selected{% endif %}>Select parking...</option><option value="good" {% if coversheet.parking_situation == 'good' %}selected{% endif %}>Good</option><option value="restricted" {% if coversheet.parking_situation == 'restricted' %}selected{% endif %}>Restricted</option><option value="permit" {% if coversheet.parking_situation == 'permit' %}selected{% endif %}>Permit Required</option><option value="paid" {% if coversheet.parking_situation == 'paid' %}selected{% endif %}>Paid Parking</option><option value="no_parking" {% if coversheet.parking_situation == 'no_parking' %}selected{% endif %}>No Parking</option><option value="other" {% if coversheet.parking_situation == 'other' %}selected{% endif %}>Other</option></select></div></div>
+                            </div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">ORDER CONFIRMATION</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-yellow">Survey Date</div><div class="cs-value"><input id="id_survey_date" name="survey_date" type="date" class="form-input" value="{{ coversheet.survey_date|date:'Y-m-d'|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Fit Date</div><div class="cs-value"><input id="id_fit_date" name="fit_date" type="date" class="form-input" value="{{ coversheet.fit_date|date:'Y-m-d'|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Passed Design Check</div><div class="cs-value"><input id="id_design_check_passed_date" name="design_check_passed_date" type="date" class="form-input" value="{{ coversheet.design_check_passed_date|date:'Y-m-d'|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Passed PFP</div><div class="cs-value cs-inline-actions"><input id="id_pfp_passed_date" name="pfp_passed_date" type="date" class="form-input" value="{{ coversheet.pfp_passed_date|date:'Y-m-d'|default:'' }}"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="setPfpFromDesignDate()">Same as Design Check</button></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Passed Ordering</div><div class="cs-value"><input id="id_ordering_passed_date" name="ordering_passed_date" type="date" class="form-input" value="{{ coversheet.ordering_passed_date|date:'Y-m-d'|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Goods Due In</div><div class="cs-value"><input id="id_goods_due_in_date" name="goods_due_in_date" type="date" class="form-input" value="{{ coversheet.goods_due_in_date|date:'Y-m-d'|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Fit Days</div><div class="cs-value"><div class="cs-fit-days-wrap"><input id="id_fit_days" name="fit_days" type="range" min="0.5" max="5" step="0.5" value="{{ coversheet.fit_days|default:'1' }}" oninput="updateFitDaysValue()"><div class="cs-fit-days-scale"><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3</span><span>3.5</span><span>4</span><span>4.5</span><span>5</span></div><div class="cs-fit-days-value">Selected: <strong id="fitDaysValue">{{ coversheet.fit_days|default:'1' }}</strong> day(s)</div></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Measurements</div><div class="cs-value"><textarea id="id_measurements_notes" name="measurements_notes" rows="2" class="form-input">{{ coversheet.measurements_notes|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Health &amp; Safety</div><div class="cs-value"><textarea id="id_health_safety_notes" name="health_safety_notes" rows="2" class="form-input">{{ coversheet.health_safety_notes|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Final</div><div class="cs-value"><label class="sale-coversheet-checkbox"><input type="checkbox" name="is_final" {% if coversheet.is_final %}checked{% endif %}> Mark as Final Version</label></div></div>
+                            </div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">DESIGN</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-blue">Door Type</div><div class="cs-value"><select id="id_door_type" name="door_type" class="form-input"><option value="" {% if not coversheet.door_type %}selected{% endif %}>Select door type...</option><option value="sliding" {% if coversheet.door_type == 'sliding' %}selected{% endif %}>Sliding</option><option value="hinge" {% if coversheet.door_type == 'hinge' %}selected{% endif %}>Hinge</option><option value="bi-fold" {% if coversheet.door_type == 'bi-fold' %}selected{% endif %}>Bi-Fold</option><option value="slideline" {% if coversheet.door_type == 'slideline' %}selected{% endif %}>Slideline</option><option value="none" {% if coversheet.door_type == 'none' %}selected{% endif %}>None</option></select></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Door Details</div><div class="cs-value"><textarea id="id_door_details" name="door_details" rows="2" class="form-input" placeholder="Stiles, colours, finish...">{{ coversheet.door_details|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Tracks</div><div class="cs-value"><select id="id_track_type" name="track_type" class="form-input"><option value="" {% if not coversheet.track_type %}selected{% endif %}>Select track type...</option><option value="single" {% if coversheet.track_type == 'single' %}selected{% endif %}>Single</option><option value="double" {% if coversheet.track_type == 'double' %}selected{% endif %}>Double</option><option value="triple" {% if coversheet.track_type == 'triple' %}selected{% endif %}>Tripple</option></select></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Track Colour</div><div class="cs-value"><input id="id_track_colour" name="track_colour" class="form-input" value="{{ coversheet.track_colour|default:'' }}"></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Handles</div><div class="cs-value"><textarea id="id_handle_details" name="handle_details" rows="2" class="form-input" placeholder="Design, size, colour...">{{ coversheet.handle_details|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Lighting Details</div><div class="cs-value"><textarea id="id_lighting_details" name="lighting_details" rows="2" class="form-input">{{ coversheet.lighting_details|default:'' }}</textarea></div></div>
+                            </div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">INSTALLATION</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-blue">Products Included</div><div class="cs-value"><select id="id_installation_products_included" name="installation_products_included" class="form-input"><option value="" {% if not coversheet.installation_products_included %}selected{% endif %}>Select...</option><option value="interior" {% if coversheet.installation_products_included == 'interior' %}selected{% endif %}>Interior</option><option value="sliding" {% if coversheet.installation_products_included == 'sliding' %}selected{% endif %}>Sliding</option><option value="hinge" {% if coversheet.installation_products_included == 'hinge' %}selected{% endif %}>Hinge</option><option value="office" {% if coversheet.installation_products_included == 'office' %}selected{% endif %}>Office</option><option value="fsf" {% if coversheet.installation_products_included == 'fsf' %}selected{% endif %}>FSF</option></select></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Design Type</div><div class="cs-value"><select id="id_installation_design_type" name="installation_design_type" class="form-input"><option value="" {% if not coversheet.installation_design_type %}selected{% endif %}>Select...</option><option value="standard" {% if coversheet.installation_design_type == 'standard' %}selected{% endif %}>Standard</option><option value="angled" {% if coversheet.installation_design_type == 'angled' %}selected{% endif %}>Angled</option><option value="dressing_room" {% if coversheet.installation_design_type == 'dressing_room' %}selected{% endif %}>Dressing Room</option><option value="office" {% if coversheet.installation_design_type == 'office' %}selected{% endif %}>Office</option></select></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Measured On</div><div class="cs-value"><div class="cs-choice-group"><label class="cs-choice"><input type="radio" name="measured_on" value="carpet" {% if coversheet.measured_on == 'carpet' %}checked{% endif %}><span>Carpet</span></label><label class="cs-choice"><input type="radio" name="measured_on" value="hard_floor" {% if coversheet.measured_on == 'hard_floor' %}checked{% endif %}><span>Hard Floor</span></label></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Fit On</div><div class="cs-value"><div class="cs-choice-group"><label class="cs-choice"><input type="radio" name="fit_on" value="carpet" {% if coversheet.fit_on == 'carpet' %}checked{% endif %}><span>Carpet</span></label><label class="cs-choice"><input type="radio" name="fit_on" value="hard_floor" {% if coversheet.fit_on == 'hard_floor' %}checked{% endif %}><span>Hard Floor</span></label></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Electrics / Utilities</div><div class="cs-value"><label class="cs-switch"><input type="checkbox" id="id_electrics_utilities_required" name="electrics_utilities_required" {% if coversheet.electrics_utilities_required %}checked{% endif %} onchange="toggleElectricsNotes()"><span>Yes (Provide Notes Below) / No</span></label></div></div>
+                                <div class="cs-row" id="electricsNotesRow" {% if not coversheet.electrics_utilities_required %}style="display:none;"{% endif %}><div class="cs-label cs-blue">Electrics Notes</div><div class="cs-value"><textarea id="id_electrics_utilities_notes" name="electrics_utilities_notes" rows="2" class="form-input" placeholder="Add notes when electrics/utilities is Yes...">{{ coversheet.electrics_utilities_notes|default:'' }}</textarea></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Under Floor Heating</div><div class="cs-value"><label class="cs-switch"><input type="checkbox" name="underfloor_heating" {% if coversheet.underfloor_heating %}checked{% endif %}><span>Yes / No</span></label></div></div>
+                            </div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">BOARD COLOURS</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-blue">Exterior</div><div class="cs-value"><div class="cs-board-picker-row"><input id="id_board_colour_exterior" name="board_colour_exterior" class="form-input" value="{{ coversheet.board_colour_exterior|default:'' }}" placeholder="e.g. Alpine White"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openCoversheetEggerModal('id_board_colour_exterior')"><i class="bi bi-palette"></i> Egger</button></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Interior</div><div class="cs-value"><div class="cs-board-picker-row"><input id="id_board_colour_interior" name="board_colour_interior" class="form-input" value="{{ coversheet.board_colour_interior|default:'' }}"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openCoversheetEggerModal('id_board_colour_interior')"><i class="bi bi-palette"></i> Egger</button></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Backs</div><div class="cs-value"><div class="cs-board-picker-row"><input id="id_board_colour_backs" name="board_colour_backs" class="form-input" value="{{ coversheet.board_colour_backs|default:'' }}"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openCoversheetEggerModal('id_board_colour_backs')"><i class="bi bi-palette"></i> Egger</button></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Fronts (Drawers / Hinges)</div><div class="cs-value"><div class="cs-board-picker-row"><input id="id_board_colour_fronts" name="board_colour_fronts" class="form-input" value="{{ coversheet.board_colour_fronts|default:'' }}"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openCoversheetEggerModal('id_board_colour_fronts')"><i class="bi bi-palette"></i> Egger</button></div></div></div>
+                                <div class="cs-board-actions">
+                                    <span id="applyEggerAllPreview" class="cs-board-preview" style="display:none;"></span>
+                                    <button type="button" id="applyEggerAllBtn" class="btn btn-sm btn-outline-primary" style="display:none;" onclick="applyEggerToAllBoardColours()">
+                                        <i class="bi bi-stars"></i> Apply Selected Colour to All
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="cs-panel">
+                            <div class="cs-panel-side">NOTES</div>
+                            <div class="cs-panel-body">
+                                <div class="cs-row"><div class="cs-label cs-blue">Special Instructions</div><div class="cs-value"><textarea id="id_special_instructions" name="special_instructions" rows="6" class="form-input">{{ coversheet.special_instructions|default:'' }}</textarea></div></div>
+                            </div>
+                        </div>
+
+                        <div class="sale-coversheet-footer">
+                            <small class="text-muted">PDF is generated from these saved values, so it always matches this digital copy.</small>
+                            <button type="submit" class="btn btn-sm btn-success">
+                                <i class="bi bi-save"></i> Save Coversheet
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </dialog>
+
+            <!-- Coversheet Egger Colour Picker -->
+            <dialog id="coversheetEggerModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-grid sale-modal-icon-blue"></i>
+                        <span>Choose Egger Colour</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeCoversheetEggerModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div id="coversheetEggerGrid" class="cs-egger-grid"></div>
+                </div>
+            </dialog>
+
             <!-- Add Manual Payment Modal -->
             <dialog id="addManualPaymentModal">
                 <div class="manual-modal-header">
@@ -741,6 +869,128 @@
             });
             // ── End combined search modal ────────────────────────────────────
 
+            function openCoversheetModal() {
+                document.getElementById('coversheetModal').showModal();
+                updateFitDaysValue();
+                toggleElectricsNotes();
+            }
+
+            function closeCoversheetModal() {
+                document.getElementById('coversheetModal').close();
+            }
+
+            document.getElementById('coversheetModal').addEventListener('click', function(e) {
+                if (e.target === this) closeCoversheetModal();
+            });
+
+            function setPfpFromDesignDate() {
+                const designInput = document.getElementById('id_design_check_passed_date');
+                const pfpInput = document.getElementById('id_pfp_passed_date');
+                if (designInput && pfpInput && designInput.value) {
+                    pfpInput.value = designInput.value;
+                }
+            }
+
+            function updateFitDaysValue() {
+                const slider = document.getElementById('id_fit_days');
+                const output = document.getElementById('fitDaysValue');
+                if (slider && output) {
+                    output.textContent = slider.value;
+                }
+            }
+
+            function toggleElectricsNotes() {
+                const check = document.getElementById('id_electrics_utilities_required');
+                const row = document.getElementById('electricsNotesRow');
+                if (!check || !row) return;
+                row.style.display = check.checked ? '' : 'none';
+            }
+
+            let coversheetEggerTargetInputId = null;
+            let coversheetLastEggerValue = '';
+
+            function openCoversheetEggerModal(targetInputId) {
+                coversheetEggerTargetInputId = targetInputId;
+                const modal = document.getElementById('coversheetEggerModal');
+                const grid = document.getElementById('coversheetEggerGrid');
+                grid.innerHTML = '<div class="cs-egger-empty">Loading colours...</div>';
+                modal.showModal();
+
+                fetch("{% url 'egger_colours' %}", {
+                    headers: {'X-Requested-With': 'XMLHttpRequest'}
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.colours || data.colours.length === 0) {
+                        grid.innerHTML = '<div class="cs-egger-empty">No Egger colours with images found</div>';
+                        return;
+                    }
+                    grid.innerHTML = data.colours.map(c => {
+                        const cleanName = String(c.name || c.code || '').replace(/\s*Board\s*-\s*\d+mm\s*$/i, '').trim() || c.code;
+                        const value = `${cleanName} (${c.code})`;
+                        return `
+                            <button type="button" class="cs-egger-tile" onclick="selectCoversheetEggerColour('${escHtml(value)}')">
+                                <img src="${escHtml(c.image_url)}" alt="${escHtml(c.code)}" loading="lazy">
+                                <div class="cs-egger-code">${escHtml(c.code)}</div>
+                                <div class="cs-egger-name">${escHtml(cleanName)}</div>
+                            </button>
+                        `;
+                    }).join('');
+                })
+                .catch(() => {
+                    grid.innerHTML = '<div class="cs-egger-empty">Failed to load colours</div>';
+                });
+            }
+
+            function selectCoversheetEggerColour(value) {
+                if (!coversheetEggerTargetInputId) return;
+                const input = document.getElementById(coversheetEggerTargetInputId);
+                if (input) input.value = value;
+                coversheetLastEggerValue = value;
+                refreshApplyEggerAllButton();
+                closeCoversheetEggerModal();
+            }
+
+            function refreshApplyEggerAllButton() {
+                const btn = document.getElementById('applyEggerAllBtn');
+                const preview = document.getElementById('applyEggerAllPreview');
+                if (!btn) return;
+                if (coversheetLastEggerValue) {
+                    btn.style.display = '';
+                    btn.title = coversheetLastEggerValue;
+                    if (preview) {
+                        preview.style.display = '';
+                        preview.textContent = `Selected: ${coversheetLastEggerValue}`;
+                        preview.title = coversheetLastEggerValue;
+                    }
+                } else {
+                    btn.style.display = 'none';
+                    if (preview) preview.style.display = 'none';
+                }
+            }
+
+            function applyEggerToAllBoardColours() {
+                if (!coversheetLastEggerValue) return;
+                const ids = [
+                    'id_board_colour_exterior',
+                    'id_board_colour_interior',
+                    'id_board_colour_backs',
+                    'id_board_colour_fronts'
+                ];
+                ids.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = coversheetLastEggerValue;
+                });
+            }
+
+            function closeCoversheetEggerModal() {
+                document.getElementById('coversheetEggerModal').close();
+            }
+
+            document.getElementById('coversheetEggerModal').addEventListener('click', function(e) {
+                if (e.target === this) closeCoversheetEggerModal();
+            });
+
             function openAddManualModal() {
                 const modal = document.getElementById('addManualPaymentModal');
                 if (document.getElementById('manualEntryBody').children.length === 0) {
@@ -777,7 +1027,7 @@
             }
 
             function escHtml(str) {
-                return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;');
             }
 
             function clearManualRows() {
@@ -1352,6 +1602,54 @@
                         </div>
                     </div>
                     {% endif %}
+                </div>
+            </div>
+
+            <!-- Documents Card -->
+            <div class="card sale-sidebar-card">
+                <div class="card-header">
+                    <h3><i class="bi bi-files"></i> Documents</h3>
+                </div>
+                <div class="card-body padded sale-docs-card-body">
+                    <div class="sale-docs-section">
+                        <div class="sale-docs-section-head">Coversheet</div>
+                        <div class="sale-docs-coversheet-meta">
+                            <div><strong>Prepared By:</strong> {{ coversheet.prepared_by|default:'-' }}</div>
+                            <div><strong>Final:</strong> {% if coversheet.is_final %}Yes{% else %}No{% endif %}</div>
+                            <div><strong>Updated:</strong> {{ coversheet.updated_at|date:'d M Y H:i' }}</div>
+                        </div>
+                        <div class="sale-docs-actions">
+                            <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
+                                <i class="bi bi-file-earmark-pdf"></i> Coversheet PDF
+                            </a>
+                            <button type="button" class="btn btn-sm btn-outline-success sale-sidebar-btn" onclick="openCoversheetModal()">
+                                <i class="bi bi-window"></i> Open Coversheet
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="sale-docs-section">
+                        <div class="sale-docs-section-head">Claim Service Documents</div>
+                        {% for item in important_documents %}
+                        <div class="sale-doc-row">
+                            <div class="sale-doc-label">{{ item.doc_type }}</div>
+                            <div class="sale-doc-current">
+                                {% if item.doc %}
+                                <a href="{{ item.doc.file.url }}" target="_blank" class="sale-doc-link">View</a>
+                                <span class="sale-doc-date">{{ item.doc.uploaded_at|date:'d M Y' }}</span>
+                                {% else %}
+                                <span class="text-muted">Not uploaded</span>
+                                {% endif %}
+                            </div>
+                            <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="sale-doc-upload-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
+                                <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" required class="sale-doc-file-input">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
 

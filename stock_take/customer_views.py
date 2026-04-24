@@ -1,12 +1,17 @@
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse, StreamingHttpResponse
+from django.shortcuts import render, get_object_or_404, redirect
+from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
 from django.db import ProgrammingError, DatabaseError, transaction
-from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead
+from django.contrib import messages
+from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead, SaleCoverSheet, ClaimDocument, Designer
 import logging
 import json
 import time
+import os
+import re
+from datetime import date
+from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
 
@@ -936,10 +941,239 @@ def sale_link_order(request, pk):
     return JsonResponse({'success': True, 'linked': True, 'sale_number': order.sale_number})
 
 
+def _build_default_installation_address(sale):
+    if not sale.customer:
+        return ''
+
+    parts = [
+        sale.customer.address_1,
+        sale.customer.address_2,
+        sale.customer.city,
+        sale.customer.postcode,
+    ]
+    cleaned = [p.strip() for p in parts if p and str(p).strip()]
+    return ', '.join(cleaned)
+
+
+def _designer_initials(name):
+    parts = [p for p in re.split(r'\s+', (name or '').strip()) if p]
+    return ''.join(p[0].upper() for p in parts if p)
+
+
+def _extract_contract_initials(contract_number):
+    contract = (contract_number or '').strip().upper()
+    if not contract:
+        return ''
+
+    # Handles patterns like BFS-SD-420522 or NTG-KW-420968.
+    m = re.match(r'^[A-Z]{2,4}-([A-Z]{2,4})-\d+', contract)
+    if m:
+        return m.group(1)
+
+    tokens = re.findall(r'[A-Z]+', contract)
+    if len(tokens) >= 2 and 2 <= len(tokens[1]) <= 4:
+        return tokens[1]
+    return ''
+
+
+def _infer_designer_name_from_contract(sale):
+    initials = _extract_contract_initials(sale.contract_number)
+    if not initials:
+        return ''
+
+    for designer in Designer.objects.only('name').order_by('name'):
+        if _designer_initials(designer.name) == initials:
+            return designer.name
+    return ''
+
+
+def _get_or_create_sale_coversheet(sale, user=None):
+    inferred_designer = _infer_designer_name_from_contract(sale)
+    user_default = (user.get_full_name() or user.username) if user and user.is_authenticated else ''
+
+    defaults = {
+        'prepared_by': inferred_designer or user_default,
+        'customer_on_site_name': (sale.customer.name if sale.customer else sale.customer_name) or '',
+        'customer_on_site_phone': (sale.customer.phone if sale.customer and sale.customer.phone else ''),
+        'installation_address': _build_default_installation_address(sale),
+        'fit_date': sale.fit_date or (sale.order.fit_date if sale.order and sale.order.fit_date else None),
+    }
+    coversheet, created = SaleCoverSheet.objects.get_or_create(sale=sale, defaults=defaults)
+
+    # If an older coversheet still has the user-default value, replace with the contract-inferred designer.
+    if not created and inferred_designer and coversheet.prepared_by in ('', user_default):
+        coversheet.prepared_by = inferred_designer
+        coversheet.save(update_fields=['prepared_by'])
+
+    return coversheet
+
+
+def _sale_claim_group_key(sale):
+    job = (sale.order.sale_number if sale.order and sale.order.sale_number else sale.anthill_activity_id or '').strip()
+    customer = (sale.customer_name or (sale.customer.name if sale.customer else '') or 'customer').strip()
+    customer_token = re.sub(r'[^A-Za-z0-9]+', '', customer)[:24] or 'customer'
+    sale_token = re.sub(r'[^A-Za-z0-9]+', '', (sale.anthill_activity_id or 'sale'))[:24] or 'sale'
+    return f'{job}_{customer_token}_{sale_token}'
+
+
+def _claim_doc_type_from_filename(filename):
+    base = os.path.splitext(os.path.basename(filename or ''))[0]
+    parts = base.rsplit('_', 1)
+    return parts[-1] if len(parts) > 1 else ''
+
+
+def _important_claim_doc_types(limit=3):
+    defaults = ['ProductionDrawings', 'Survey', 'Checklist']
+    docs = ClaimDocument.objects.only('file').order_by('-uploaded_at')[:500]
+    counts = {}
+    for d in docs:
+        dt = _claim_doc_type_from_filename(d.file.name)
+        if not dt:
+            continue
+        counts[dt] = counts.get(dt, 0) + 1
+
+    ranked = [k for k, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+    combined = ranked + [d for d in defaults if d not in ranked]
+    return combined[:limit]
+
+
+@login_required
+def sale_coversheet_save(request, pk):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+    coversheet = _get_or_create_sale_coversheet(sale, request.user)
+
+    def parse_date(val):
+        val = (val or '').strip()
+        if not val:
+            return None
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            return None
+
+    def parse_fit_days(val):
+        val = (val or '').strip()
+        if not val:
+            return None
+        try:
+            parsed = Decimal(val)
+        except (InvalidOperation, TypeError):
+            return None
+        if parsed < Decimal('0.5') or parsed > Decimal('5.0'):
+            return None
+        return parsed.quantize(Decimal('0.1'))
+
+    coversheet.prepared_by = (request.POST.get('prepared_by') or '').strip()
+    coversheet.customer_on_site_name = (request.POST.get('customer_on_site_name') or '').strip()
+    coversheet.customer_on_site_phone = (request.POST.get('customer_on_site_phone') or '').strip()
+    coversheet.installation_address = (request.POST.get('installation_address') or '').strip()
+    coversheet.survey_date = parse_date(request.POST.get('survey_date'))
+    coversheet.fit_date = parse_date(request.POST.get('fit_date'))
+    coversheet.products_scope = (request.POST.get('products_scope') or '').strip()
+    coversheet.measurements_notes = (request.POST.get('measurements_notes') or '').strip()
+    coversheet.access_notes = (request.POST.get('access_notes') or '').strip()
+    coversheet.health_safety_notes = (request.POST.get('health_safety_notes') or '').strip()
+    coversheet.special_instructions = (request.POST.get('special_instructions') or '').strip()
+    coversheet.two_man_lift_required = request.POST.get('two_man_lift_required') == 'on'
+    coversheet.access_check_required = request.POST.get('access_check_required') == 'on'
+    coversheet.rip_out_required = request.POST.get('rip_out_required') == 'on'
+    coversheet.remeasure_required = request.POST.get('remeasure_required') == 'on'
+    coversheet.new_build_property = request.POST.get('new_build_property') == 'on'
+    coversheet.parking_situation = (request.POST.get('parking_situation') or '').strip()
+    coversheet.design_check_passed_date = parse_date(request.POST.get('design_check_passed_date'))
+    coversheet.pfp_passed_date = parse_date(request.POST.get('pfp_passed_date'))
+    coversheet.ordering_passed_date = parse_date(request.POST.get('ordering_passed_date'))
+    coversheet.goods_due_in_date = parse_date(request.POST.get('goods_due_in_date'))
+    coversheet.fit_days = parse_fit_days(request.POST.get('fit_days'))
+    coversheet.door_type = (request.POST.get('door_type') or '').strip()
+    coversheet.door_details = (request.POST.get('door_details') or '').strip()
+    coversheet.track_type = (request.POST.get('track_type') or '').strip()
+    coversheet.track_colour = (request.POST.get('track_colour') or '').strip()
+    coversheet.handle_details = (request.POST.get('handle_details') or '').strip()
+    coversheet.lighting_details = (request.POST.get('lighting_details') or '').strip()
+    coversheet.installation_products_included = (request.POST.get('installation_products_included') or '').strip()
+    coversheet.installation_design_type = (request.POST.get('installation_design_type') or '').strip()
+    coversheet.measured_on = (request.POST.get('measured_on') or '').strip()
+    coversheet.fit_on = (request.POST.get('fit_on') or '').strip()
+    coversheet.electrics_utilities_required = request.POST.get('electrics_utilities_required') == 'on'
+    coversheet.electrics_utilities_notes = (request.POST.get('electrics_utilities_notes') or '').strip()
+    coversheet.underfloor_heating = request.POST.get('underfloor_heating') == 'on'
+    coversheet.board_colour_exterior = (request.POST.get('board_colour_exterior') or '').strip()
+    coversheet.board_colour_interior = (request.POST.get('board_colour_interior') or '').strip()
+    coversheet.board_colour_backs = (request.POST.get('board_colour_backs') or '').strip()
+    coversheet.board_colour_fronts = (request.POST.get('board_colour_fronts') or '').strip()
+    coversheet.is_final = request.POST.get('is_final') == 'on'
+    coversheet.updated_by = request.user
+    coversheet.save()
+
+    messages.success(request, 'Coversheet saved successfully.')
+    return redirect('sale_detail', pk=pk)
+
+
+@login_required
+def sale_coversheet_pdf(request, pk):
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+    coversheet = _get_or_create_sale_coversheet(sale, request.user)
+
+    from .sale_coversheet_pdf_generator import generate_sale_coversheet_pdf
+    buffer = generate_sale_coversheet_pdf(sale, coversheet)
+
+    filename = f'Sale_Coversheet_{sale.anthill_activity_id}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response
+
+
+@login_required
+def sale_claim_document_upload(request, pk):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+    uploaded = request.FILES.get('file')
+    doc_type = (request.POST.get('doc_type') or '').strip()
+
+    if not uploaded:
+        messages.error(request, 'Please choose a file to upload.')
+        return redirect('sale_detail', pk=pk)
+    if not doc_type:
+        messages.error(request, 'Document type is required.')
+        return redirect('sale_detail', pk=pk)
+
+    group_key = _sale_claim_group_key(sale)
+    ext = os.path.splitext(uploaded.name)[1] or '.pdf'
+    clean_type = re.sub(r'[^A-Za-z0-9]+', '', doc_type) or 'Document'
+    uploaded.name = f'{group_key}_{clean_type}{ext}'
+
+    ClaimDocument.objects.create(
+        title=f'{clean_type} - {(sale.contract_number or sale.anthill_activity_id)}',
+        file=uploaded,
+        customer_name=(sale.customer_name or (sale.customer.name if sale.customer else '')),
+        group_key=group_key,
+        uploaded_by=request.user,
+    )
+
+    messages.success(request, f'{clean_type} uploaded.')
+    return redirect('sale_detail', pk=pk)
+
+
 @login_required
 def sale_detail(request, pk):
     """Display detailed view of a single Anthill event."""
     sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+    coversheet = _get_or_create_sale_coversheet(sale, request.user)
+    claim_group_key = _sale_claim_group_key(sale)
+    claim_docs = list(ClaimDocument.objects.filter(group_key=claim_group_key).order_by('-uploaded_at'))
+    docs_by_type = {}
+    for d in claim_docs:
+        dt = _claim_doc_type_from_filename(d.file.name)
+        if dt and dt not in docs_by_type:
+            docs_by_type[dt] = d
+    important_doc_types = _important_claim_doc_types(limit=3)
+    important_documents = [{'doc_type': dt, 'doc': docs_by_type.get(dt)} for dt in important_doc_types]
 
     # Get gallery images for this sale's order
     gallery_images = []
@@ -990,6 +1224,10 @@ def sale_detail(request, pk):
 
     context = {
         'sale': sale,
+        'coversheet': coversheet,
+        'designers': Designer.objects.order_by('name'),
+        'claim_group_key': claim_group_key,
+        'important_documents': important_documents,
         'related_sales': related_sales,
         'payments': all_payments,
         'xero_payments': xero_payments,

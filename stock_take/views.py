@@ -166,6 +166,19 @@ def ordering(request):
             'outstanding': sv - pt,
         }
 
+    # Build local sale map: order.sale_number -> AnthillSale.pk (latest first)
+    sale_pk_map = {}
+    sale_pk_rows = (
+        AnthillSale.objects
+        .filter(anthill_activity_id__in=all_sale_numbers)
+        .order_by('-activity_date', '-pk')
+        .values('anthill_activity_id', 'pk')
+    )
+    for row in sale_pk_rows:
+        sale_number = row['anthill_activity_id']
+        if sale_number not in sale_pk_map:
+            sale_pk_map[sale_number] = row['pk']
+
     # Build remedials map: original_order_id -> remedial.pk (only non-completed)
     remedials_map = {
         r['original_order_id']: r['id']
@@ -199,6 +212,7 @@ def ordering(request):
         'completed_orders': completed_orders,
         'wip_orders': wip_orders,
         'financial_map': financial_map,
+        'sale_pk_map': sale_pk_map,
         'remedials_map': remedials_map,
         'anthill_orders_to_place_count': anthill_orders_to_place_count,
         'all_existing_sale_numbers': all_existing_sale_numbers,
@@ -4978,8 +4992,8 @@ def order_details(request, order_id):
         total=Sum('line_total')
     )['total'] or Decimal('0.00')
 
-    # Linked Anthill sales for this order
-    anthill_sales = order.anthill_sale.all().order_by('-activity_date') if hasattr(order, 'anthill_sale') else []
+    # Linked Anthill sales for this order (with customer prefetched for template rendering)
+    anthill_sales = order.anthill_sale.select_related('customer').order_by('-activity_date')
 
     # Distinct material names for board add dropdown
     distinct_materials = list(
