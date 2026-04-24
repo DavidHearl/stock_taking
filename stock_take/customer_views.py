@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
 from django.db import ProgrammingError, DatabaseError, transaction
 from django.contrib import messages
-from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead, SaleCoverSheet, ClaimDocument, Designer
+from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead, SaleCoverSheet, SaleCoverSheetHistory, ClaimDocument, Designer
 import logging
 import json
 import time
@@ -1066,7 +1066,34 @@ def sale_coversheet_save(request, pk):
             return None
         return parsed.quantize(Decimal('0.1'))
 
+    def norm_for_compare(val):
+        if val is None:
+            return ''
+        if isinstance(val, Decimal):
+            return str(val)
+        if hasattr(val, 'isoformat'):
+            return val.isoformat()
+        if isinstance(val, bool):
+            return val
+        return str(val).strip()
+
+    tracked_fields = [
+        'prepared_by', 'cad_number', 'customer_on_site_name', 'customer_on_site_phone',
+        'installation_address', 'survey_date', 'fit_date', 'products_scope',
+        'measurements_notes', 'access_notes', 'health_safety_notes', 'special_instructions',
+        'two_man_lift_required', 'access_check_required', 'rip_out_required',
+        'remeasure_required', 'remeasure_date', 'new_build_property', 'parking_situation',
+        'design_check_passed_date', 'pfp_passed_date', 'ordering_passed_date',
+        'goods_due_in_date', 'fit_days', 'fit_days_decided_by', 'door_type', 'door_details', 'track_type',
+        'track_colour', 'handle_details', 'lighting_details', 'installation_products_included',
+        'installation_design_type', 'measured_on', 'fit_on', 'electrics_utilities_required',
+        'electrics_utilities_notes', 'underfloor_heating', 'board_colour_exterior',
+        'board_colour_interior', 'board_colour_backs', 'board_colour_fronts', 'is_final',
+    ]
+    old_values = {f: getattr(coversheet, f) for f in tracked_fields}
+
     coversheet.prepared_by = (request.POST.get('prepared_by') or '').strip()
+    coversheet.cad_number = (request.POST.get('cad_number') or '').strip()
     coversheet.customer_on_site_name = (request.POST.get('customer_on_site_name') or '').strip()
     coversheet.customer_on_site_phone = (request.POST.get('customer_on_site_phone') or '').strip()
     coversheet.installation_address = (request.POST.get('installation_address') or '').strip()
@@ -1081,6 +1108,7 @@ def sale_coversheet_save(request, pk):
     coversheet.access_check_required = request.POST.get('access_check_required') == 'on'
     coversheet.rip_out_required = request.POST.get('rip_out_required') == 'on'
     coversheet.remeasure_required = request.POST.get('remeasure_required') == 'on'
+    coversheet.remeasure_date = parse_date(request.POST.get('remeasure_date')) if coversheet.remeasure_required else None
     coversheet.new_build_property = request.POST.get('new_build_property') == 'on'
     coversheet.parking_situation = (request.POST.get('parking_situation') or '').strip()
     coversheet.design_check_passed_date = parse_date(request.POST.get('design_check_passed_date'))
@@ -1088,6 +1116,7 @@ def sale_coversheet_save(request, pk):
     coversheet.ordering_passed_date = parse_date(request.POST.get('ordering_passed_date'))
     coversheet.goods_due_in_date = parse_date(request.POST.get('goods_due_in_date'))
     coversheet.fit_days = parse_fit_days(request.POST.get('fit_days'))
+    coversheet.fit_days_decided_by = (request.POST.get('fit_days_decided_by') or '').strip()
     coversheet.door_type = (request.POST.get('door_type') or '').strip()
     coversheet.door_details = (request.POST.get('door_details') or '').strip()
     coversheet.track_type = (request.POST.get('track_type') or '').strip()
@@ -1106,8 +1135,24 @@ def sale_coversheet_save(request, pk):
     coversheet.board_colour_backs = (request.POST.get('board_colour_backs') or '').strip()
     coversheet.board_colour_fronts = (request.POST.get('board_colour_fronts') or '').strip()
     coversheet.is_final = request.POST.get('is_final') == 'on'
-    coversheet.updated_by = request.user
-    coversheet.save()
+
+    changes = {}
+    for field in tracked_fields:
+        old_v = norm_for_compare(old_values[field])
+        new_v = norm_for_compare(getattr(coversheet, field))
+        if old_v != new_v:
+            changes[field] = {'from': old_v, 'to': new_v}
+
+    if changes:
+        coversheet.revision_number = (coversheet.revision_number or 1) + 1
+        coversheet.updated_by = request.user
+        coversheet.save()
+        SaleCoverSheetHistory.objects.create(
+            coversheet=coversheet,
+            revision_number=coversheet.revision_number,
+            changed_by=request.user,
+            changes=changes,
+        )
 
     messages.success(request, 'Coversheet saved successfully.')
     return redirect('sale_detail', pk=pk)
@@ -1174,6 +1219,17 @@ def sale_detail(request, pk):
             docs_by_type[dt] = d
     important_doc_types = _important_claim_doc_types(limit=3)
     important_documents = [{'doc_type': dt, 'doc': docs_by_type.get(dt)} for dt in important_doc_types]
+    coversheet_history = list(coversheet.history_entries.select_related('changed_by').all()[:25])
+
+    cad = (coversheet.cad_number or '').strip().lower()
+    cad_matches_claim_docs = False
+    if cad:
+        for d in claim_docs:
+            haystack = f"{d.title or ''} {os.path.basename(d.file.name or '')}".lower()
+            if cad in haystack:
+                cad_matches_claim_docs = True
+                break
+    cad_mismatch = bool(cad) and not cad_matches_claim_docs
 
     # Get gallery images for this sale's order
     gallery_images = []
@@ -1226,6 +1282,8 @@ def sale_detail(request, pk):
         'sale': sale,
         'coversheet': coversheet,
         'designers': Designer.objects.order_by('name'),
+        'coversheet_history': coversheet_history,
+        'cad_mismatch': cad_mismatch,
         'claim_group_key': claim_group_key,
         'important_documents': important_documents,
         'related_sales': related_sales,

@@ -86,6 +86,9 @@
                 <button class="dots-menu-item" onclick="openEggerModal(); closeDotsMenu()">
                     <i class="bi bi-palette"></i> Egger Colours
                 </button>
+                <button class="dots-menu-item" onclick="openRaumplusModal(); closeDotsMenu()">
+                    <i class="bi bi-grid-3x3-gap"></i> Raumplus Styles &amp; Colours
+                </button>
             </div>
         </div>
     </div>
@@ -292,6 +295,78 @@
                 <div id="eggerColoursGrid" class="egger-grid">
                     <div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Raumplus Styles & Colours Modal -->
+<div class="modal" id="raumplusOptionsModal">
+    <div class="modal-overlay" onclick="closeModal('raumplusOptionsModal')"></div>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-grid-3x3-gap"></i> Raumplus Styles &amp; Colours</h3>
+                <button type="button" class="modal-close" onclick="closeModal('raumplusOptionsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="raumplusModalMessage" class="raumplus-modal-message" style="display:none;"></div>
+                <div class="raumplus-library-stack">
+                    <section class="raumplus-library-section">
+                        <div class="raumplus-library-head">
+                            <div>
+                                <h4>Style</h4>
+                                <p>Saved Raumplus door or frame styles.</p>
+                            </div>
+                            <span class="raumplus-count" id="raumplusStylesCount">0</span>
+                        </div>
+                        <div id="raumplusStylesList" class="egger-grid raumplus-card-grid">
+                            <div class="raumplus-empty">Loading styles...</div>
+                        </div>
+                    </section>
+                    <section class="raumplus-library-section">
+                        <div class="raumplus-library-head">
+                            <div>
+                                <h4>Colour</h4>
+                                <p>Saved Raumplus finishes and colours.</p>
+                            </div>
+                            <span class="raumplus-count" id="raumplusColoursCount">0</span>
+                        </div>
+                        <div id="raumplusColoursList" class="egger-grid raumplus-card-grid">
+                            <div class="raumplus-empty">Loading colours...</div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Raumplus Add Option Modal -->
+<div class="modal" id="raumplusAddModal">
+    <div class="modal-overlay" onclick="closeModal('raumplusAddModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="raumplusAddModalTitle"><i class="bi bi-plus-square"></i> Add Raumplus Option</h3>
+                <button type="button" class="modal-close" onclick="closeModal('raumplusAddModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="raumplusAddType" value="">
+                <div class="form-group">
+                    <label for="raumplusAddNameInput" id="raumplusAddNameLabel">Name</label>
+                    <input type="text" id="raumplusAddNameInput" class="form-control" placeholder="Enter name..." onkeydown="handleRaumplusInputKey(event)">
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="raumplusAddImageInput">Image</label>
+                    <input type="file" id="raumplusAddImageInput" class="form-control" accept="image/*">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('raumplusAddModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" id="raumplusAddSaveBtn" onclick="createRaumplusOptionFromModal()">
+                    <i class="bi bi-plus-lg"></i> Add
+                </button>
             </div>
         </div>
     </div>
@@ -859,6 +934,212 @@ function openEggerLightbox(url) {
 
 function closeEggerLightbox() {
     document.getElementById('eggerLightbox').style.display = 'none';
+}
+
+let raumplusOptionsState = {
+    styles: [],
+    colours: [],
+};
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function parseJsonResponse(response) {
+    return response.text().then(text => {
+        let data;
+        try {
+            data = JSON.parse(text || '{}');
+        } catch (err) {
+            if (text && text.trim().startsWith('<')) {
+                throw new Error('Server returned HTML instead of JSON. Run migrations and refresh the page.');
+            }
+            throw new Error(text || 'Invalid server response.');
+        }
+        if (!response.ok) {
+            throw new Error(data.error || 'Request failed.');
+        }
+        return data;
+    });
+}
+
+function setRaumplusMessage(text, kind = '') {
+    const el = document.getElementById('raumplusModalMessage');
+    if (!el) return;
+    if (!text) {
+        el.style.display = 'none';
+        el.className = 'raumplus-modal-message';
+        el.textContent = '';
+        return;
+    }
+    el.textContent = text;
+    el.className = `raumplus-modal-message ${kind}`.trim();
+    el.style.display = 'block';
+}
+
+function renderRaumplusOptions() {
+    const stylesList = document.getElementById('raumplusStylesList');
+    const coloursList = document.getElementById('raumplusColoursList');
+    const stylesCount = document.getElementById('raumplusStylesCount');
+    const coloursCount = document.getElementById('raumplusColoursCount');
+    if (!stylesList || !coloursList || !stylesCount || !coloursCount) return;
+
+    stylesCount.textContent = raumplusOptionsState.styles.length;
+    coloursCount.textContent = raumplusOptionsState.colours.length;
+
+    stylesList.innerHTML = raumplusOptionsState.styles.length
+        ? raumplusOptionsState.styles.map(option => `
+            <button type="button" class="egger-tile raumplus-tile" title="${escapeHtml(option.name)}" data-image-url="${encodeURIComponent(option.image_url || '')}" onclick="openEggerLightbox(decodeURIComponent(this.dataset.imageUrl))">
+                <img src="${escapeHtml(option.image_url)}" alt="${escapeHtml(option.name)}" loading="lazy">
+                <div class="egger-tile-code">${escapeHtml(option.name)}</div>
+            </button>
+        `).join('') + `
+            <button type="button" class="egger-tile raumplus-add-tile" onclick="openRaumplusAddModal('style')" title="Add style">
+                <div class="raumplus-add-icon"><i class="bi bi-plus-lg"></i></div>
+                <div class="egger-tile-code">Add Style</div>
+            </button>
+        `
+        : '<div class="raumplus-empty">No styles added yet.</div>';
+
+    coloursList.innerHTML = raumplusOptionsState.colours.length
+        ? raumplusOptionsState.colours.map(option => `
+            <button type="button" class="egger-tile raumplus-tile" title="${escapeHtml(option.name)}" data-image-url="${encodeURIComponent(option.image_url || '')}" onclick="openEggerLightbox(decodeURIComponent(this.dataset.imageUrl))">
+                <img src="${escapeHtml(option.image_url)}" alt="${escapeHtml(option.name)}" loading="lazy">
+                <div class="egger-tile-code">${escapeHtml(option.name)}</div>
+            </button>
+        `).join('') + `
+            <button type="button" class="egger-tile raumplus-add-tile" onclick="openRaumplusAddModal('colour')" title="Add colour">
+                <div class="raumplus-add-icon"><i class="bi bi-plus-lg"></i></div>
+                <div class="egger-tile-code">Add Colour</div>
+            </button>
+        `
+        : '<div class="raumplus-empty">No colours added yet.</div>';
+
+    if (!raumplusOptionsState.styles.length) {
+        stylesList.innerHTML += '<button type="button" class="egger-tile raumplus-add-tile" onclick="openRaumplusAddModal(\'style\')" title="Add style"><div class="raumplus-add-icon"><i class="bi bi-plus-lg"></i></div><div class="egger-tile-code">Add Style</div></button>';
+    }
+    if (!raumplusOptionsState.colours.length) {
+        coloursList.innerHTML += '<button type="button" class="egger-tile raumplus-add-tile" onclick="openRaumplusAddModal(\'colour\')" title="Add colour"><div class="raumplus-add-icon"><i class="bi bi-plus-lg"></i></div><div class="egger-tile-code">Add Colour</div></button>';
+    }
+}
+
+function loadRaumplusOptions() {
+    const stylesList = document.getElementById('raumplusStylesList');
+    const coloursList = document.getElementById('raumplusColoursList');
+    if (stylesList) stylesList.innerHTML = '<div class="raumplus-empty">Loading styles...</div>';
+    if (coloursList) coloursList.innerHTML = '<div class="raumplus-empty">Loading colours...</div>';
+
+    fetch('{% url "raumplus_options" %}', {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(parseJsonResponse)
+    .then(data => {
+        raumplusOptionsState = {
+            styles: Array.isArray(data.styles) ? data.styles : [],
+            colours: Array.isArray(data.colours) ? data.colours : [],
+        };
+        renderRaumplusOptions();
+    })
+    .catch((err) => {
+        setRaumplusMessage(err.message || 'Failed to load Raumplus options.', 'error');
+        if (stylesList) stylesList.innerHTML = '<div class="raumplus-empty">Failed to load styles.</div>';
+        if (coloursList) coloursList.innerHTML = '<div class="raumplus-empty">Failed to load colours.</div>';
+    });
+}
+
+function openRaumplusModal() {
+    openModal('raumplusOptionsModal');
+    setRaumplusMessage('');
+    loadRaumplusOptions();
+}
+
+function openRaumplusAddModal(optionType) {
+    const typeInput = document.getElementById('raumplusAddType');
+    const nameInput = document.getElementById('raumplusAddNameInput');
+    const imageInput = document.getElementById('raumplusAddImageInput');
+    const titleEl = document.getElementById('raumplusAddModalTitle');
+    const labelEl = document.getElementById('raumplusAddNameLabel');
+    if (!typeInput || !nameInput || !imageInput || !titleEl || !labelEl) return;
+
+    const isStyle = optionType === 'style';
+    typeInput.value = optionType;
+    nameInput.value = '';
+    imageInput.value = '';
+    titleEl.innerHTML = isStyle
+        ? '<i class="bi bi-plus-square"></i> Add Raumplus Style'
+        : '<i class="bi bi-plus-square"></i> Add Raumplus Colour';
+    labelEl.textContent = isStyle ? 'Style Name' : 'Colour Name';
+    openModal('raumplusAddModal');
+    nameInput.focus();
+}
+
+function handleRaumplusInputKey(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        createRaumplusOptionFromModal();
+    }
+}
+
+function createRaumplusOptionFromModal() {
+    const optionType = (document.getElementById('raumplusAddType')?.value || '').trim();
+    if (!optionType) return;
+    const isStyle = optionType === 'style';
+    const input = document.getElementById('raumplusAddNameInput');
+    const imageInput = document.getElementById('raumplusAddImageInput');
+    const button = document.getElementById('raumplusAddSaveBtn');
+    if (!input || !imageInput || !button) return;
+
+    const name = input.value.trim();
+    if (!name) {
+        setRaumplusMessage(`Enter a ${optionType} name first.`, 'error');
+        input.focus();
+        return;
+    }
+
+    const imageFile = imageInput.files && imageInput.files[0];
+    if (!imageFile) {
+        setRaumplusMessage(`Upload an image for this ${optionType}.`, 'error');
+        imageInput.focus();
+        return;
+    }
+
+    button.disabled = true;
+    setRaumplusMessage('');
+
+    const formData = new FormData();
+    formData.append('option_type', optionType);
+    formData.append('name', name);
+    formData.append('image', imageFile);
+
+    fetch('{% url "raumplus_option_create" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+        },
+        body: formData
+    })
+    .then(parseJsonResponse)
+    .then(data => {
+        const key = isStyle ? 'styles' : 'colours';
+        raumplusOptionsState[key].push(data.option);
+        raumplusOptionsState[key].sort((a, b) => a.name.localeCompare(b.name));
+        renderRaumplusOptions();
+        input.value = '';
+        imageInput.value = '';
+        setRaumplusMessage(`${data.option.name} added.`, 'success');
+        closeModal('raumplusAddModal');
+    })
+    .catch(err => {
+        setRaumplusMessage(err.message || 'Unable to save Raumplus option.', 'error');
+    })
+    .finally(() => {
+        button.disabled = false;
+    });
 }
 </script>
 {% endblock %}

@@ -70,12 +70,15 @@ def generate_sale_coversheet_pdf(sale, coversheet):
 
     summary_rows = [
         ["Prepared By", _safe(coversheet.prepared_by), "Final", "Yes" if coversheet.is_final else "No"],
+        ["CAD Number", _safe(coversheet.cad_number), "Revision", _safe(coversheet.revision_number)],
         ["Customer On Site", _safe(coversheet.customer_on_site_name), "Phone", _safe(coversheet.customer_on_site_phone)],
         ["Survey Date", _fmt_date(coversheet.survey_date), "Fit Date", _fmt_date(coversheet.fit_date)],
         ["Contract", _safe(sale.contract_number), "Activity ID", _safe(sale.anthill_activity_id)],
         ["Design Check", _fmt_date(coversheet.design_check_passed_date), "PFP", _fmt_date(coversheet.pfp_passed_date)],
         ["Ordering Passed", _fmt_date(coversheet.ordering_passed_date), "Goods Due In", _fmt_date(coversheet.goods_due_in_date)],
-        ["Fit Days", _safe(coversheet.fit_days), "Parking", _safe(coversheet.parking_situation)],
+        ["Fit Days Decided By", _safe(coversheet.fit_days_decided_by), "", ""],
+        ["Remeasure Date", _fmt_date(coversheet.remeasure_date), "Parking", _safe(coversheet.parking_situation)],
+        ["Fit Days", _safe(coversheet.fit_days), "Remeasure Required", _yes_no(coversheet.remeasure_required)],
         ["Door Type", _safe(coversheet.door_type), "Tracks", _safe(coversheet.track_type)],
         ["Track Colour", _safe(coversheet.track_colour), "Handles", _safe(coversheet.handle_details)],
         ["Products Included", _safe(coversheet.installation_products_included), "Design Type", _safe(coversheet.installation_design_type)],

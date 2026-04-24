@@ -227,6 +227,8 @@ class SaleCoverSheet(models.Model):
     )
 
     prepared_by = models.CharField(max_length=120, blank=True)
+    cad_number = models.CharField(max_length=120, blank=True)
+    revision_number = models.PositiveIntegerField(default=1)
     customer_on_site_name = models.CharField(max_length=255, blank=True)
     customer_on_site_phone = models.CharField(max_length=100, blank=True)
     installation_address = models.TextField(blank=True)
@@ -244,6 +246,7 @@ class SaleCoverSheet(models.Model):
     access_check_required = models.BooleanField(default=False)
     rip_out_required = models.BooleanField(default=False)
     remeasure_required = models.BooleanField(default=False)
+    remeasure_date = models.DateField(null=True, blank=True)
     new_build_property = models.BooleanField(default=False)
     parking_situation = models.CharField(max_length=40, blank=True)
 
@@ -252,6 +255,7 @@ class SaleCoverSheet(models.Model):
     ordering_passed_date = models.DateField(null=True, blank=True)
     goods_due_in_date = models.DateField(null=True, blank=True)
     fit_days = models.DecimalField(max_digits=3, decimal_places=1, null=True, blank=True)
+    fit_days_decided_by = models.CharField(max_length=120, blank=True)
 
     door_type = models.CharField(max_length=30, blank=True)
     door_details = models.TextField(blank=True)
@@ -291,6 +295,34 @@ class SaleCoverSheet(models.Model):
         ordering = ['-updated_at']
         verbose_name = 'Sale Coversheet'
         verbose_name_plural = 'Sale Coversheets'
+
+
+class SaleCoverSheetHistory(models.Model):
+    """Revision history entries for a SaleCoverSheet."""
+
+    coversheet = models.ForeignKey(
+        SaleCoverSheet,
+        on_delete=models.CASCADE,
+        related_name='history_entries',
+    )
+    revision_number = models.PositiveIntegerField()
+    changed_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='sale_coversheet_history_entries',
+    )
+    changes = models.JSONField(default=dict, blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'Coversheet rev {self.revision_number} for {self.coversheet.sale.anthill_activity_id}'
+
+    class Meta:
+        ordering = ['-changed_at']
+        verbose_name = 'Sale Coversheet History'
+        verbose_name_plural = 'Sale Coversheet History'
 
 
 class AnthillPayment(models.Model):
@@ -2583,3 +2615,29 @@ class RaumplusDraftOrder(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.updated_at.strftime('%d/%m/%Y')})"
+
+
+class RaumplusOption(models.Model):
+    OPTION_STYLE = 'style'
+    OPTION_COLOUR = 'colour'
+    OPTION_TYPE_CHOICES = [
+        (OPTION_STYLE, 'Style'),
+        (OPTION_COLOUR, 'Colour'),
+    ]
+
+    option_type = models.CharField(max_length=20, choices=OPTION_TYPE_CHOICES, db_index=True)
+    name = models.CharField(max_length=120)
+    image = models.ImageField(upload_to='raumplus_options/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['option_type', 'name']
+        unique_together = [('option_type', 'name')]
+
+    def save(self, *args, **kwargs):
+        self.name = (self.name or '').strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_option_type_display()}: {self.name}"

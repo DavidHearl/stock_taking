@@ -377,10 +377,15 @@
             <dialog id="coversheetModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
-                        <i class="bi bi-file-earmark-text sale-modal-icon-blue"></i>
                         <span>Contract Cover Page</span>
                     </div>
-                    <button class="manual-modal-close" onclick="closeCoversheetModal()"><i class="bi bi-x-lg"></i></button>
+                    <div class="cs-header-right">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openCoversheetHistoryModal()">
+                            <i class="bi bi-clock-history"></i> View Change History
+                        </button>
+                        <span class="cs-header-revision">Revision {{ coversheet.revision_number }}</span>
+                        <button class="manual-modal-close" onclick="closeCoversheetModal()"><i class="bi bi-x-lg"></i></button>
+                    </div>
                 </div>
                 <div class="manual-modal-body">
                     <form method="POST" action="{% url 'sale_coversheet_save' sale.pk %}" class="sale-coversheet-form cs-sheet">
@@ -396,6 +401,7 @@
                             <div class="cs-panel-body">
                                 <div class="cs-row"><div class="cs-label cs-blue">Customer</div><div class="cs-value"><input id="id_customer_on_site_name" name="customer_on_site_name" class="form-input" value="{{ coversheet.customer_on_site_name|default:'' }}"></div></div>
                                 <div class="cs-row"><div class="cs-label cs-blue">Contract No.</div><div class="cs-value"><input class="form-input" value="{{ sale.contract_number|default:sale.anthill_activity_id }}" readonly></div></div>
+                                <div class="cs-row{% if cad_mismatch %} cs-row-alert{% endif %}"><div class="cs-label cs-blue">CAD Number</div><div class="cs-value"><input id="id_cad_number" name="cad_number" class="form-input{% if cad_mismatch %} cs-input-alert{% endif %}" value="{{ coversheet.cad_number|default:'' }}" placeholder="CAD reference number">{% if cad_mismatch %}<div class="cs-alert-msg">CAD number does not match claim service documents.</div>{% endif %}</div></div>
                                 <div class="cs-row"><div class="cs-label cs-blue">Designer</div><div class="cs-value"><select id="id_prepared_by" name="prepared_by" class="form-input"><option value="">Select designer...</option>{% for designer in designers %}<option value="{{ designer.name }}" {% if coversheet.prepared_by == designer.name %}selected{% endif %}>{{ designer.name }}</option>{% endfor %}</select></div></div>
                                 <div class="cs-row"><div class="cs-label cs-blue">Date Sold</div><div class="cs-value"><input class="form-input" value="{{ sale.activity_date|date:'d/m/Y'|default:'-' }}" readonly></div></div>
                             </div>
@@ -408,7 +414,8 @@
                                 <div class="cs-row"><div class="cs-label cs-blue">Products Included</div><div class="cs-value"><textarea id="id_products_scope" name="products_scope" rows="2" class="form-input">{{ coversheet.products_scope|default:'' }}</textarea></div></div>
                                 <div class="cs-row"><div class="cs-label cs-blue">Access Notes</div><div class="cs-value"><textarea id="id_access_notes" name="access_notes" rows="2" class="form-input">{{ coversheet.access_notes|default:'' }}</textarea></div></div>
                                 <div class="cs-row"><div class="cs-label cs-blue">On Site Phone</div><div class="cs-value"><input id="id_customer_on_site_phone" name="customer_on_site_phone" class="form-input" value="{{ coversheet.customer_on_site_phone|default:'' }}"></div></div>
-                                <div class="cs-row"><div class="cs-label cs-blue">Property Flags</div><div class="cs-value"><div class="cs-switch-grid"><label class="cs-switch"><input type="checkbox" name="two_man_lift_required" {% if coversheet.two_man_lift_required %}checked{% endif %}><span>2 Man Lift</span></label><label class="cs-switch"><input type="checkbox" name="access_check_required" {% if coversheet.access_check_required %}checked{% endif %}><span>Access Check Required</span></label><label class="cs-switch"><input type="checkbox" name="rip_out_required" {% if coversheet.rip_out_required %}checked{% endif %}><span>Rip Out Required</span></label><label class="cs-switch"><input type="checkbox" name="remeasure_required" {% if coversheet.remeasure_required %}checked{% endif %}><span>Remeasure Required</span></label><label class="cs-switch"><input type="checkbox" name="new_build_property" {% if coversheet.new_build_property %}checked{% endif %}><span>New Build Property</span></label></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-blue">Property Flags</div><div class="cs-value"><div class="cs-switch-grid"><label class="cs-switch"><input type="checkbox" name="two_man_lift_required" {% if coversheet.two_man_lift_required %}checked{% endif %}><span>2 Man Lift</span></label><label class="cs-switch"><input type="checkbox" name="access_check_required" {% if coversheet.access_check_required %}checked{% endif %}><span>Access Check Required</span></label><label class="cs-switch"><input type="checkbox" name="rip_out_required" {% if coversheet.rip_out_required %}checked{% endif %}><span>Rip Out Required</span></label><label class="cs-switch"><input type="checkbox" name="new_build_property" {% if coversheet.new_build_property %}checked{% endif %}><span>New Build Property</span></label><label class="cs-switch"><input type="checkbox" id="id_remeasure_required" name="remeasure_required" onchange="toggleRemeasureDate()" {% if coversheet.remeasure_required %}checked{% endif %}><span>Remeasure Required</span></label></div></div></div>
+                                <div id="remeasureDateRow" class="cs-row" {% if not coversheet.remeasure_required %}style="display:none;"{% endif %}><div class="cs-label cs-blue">Remeasure Date</div><div class="cs-value"><input id="id_remeasure_date" name="remeasure_date" type="date" class="form-input" value="{{ coversheet.remeasure_date|date:'Y-m-d'|default:'' }}" {% if not coversheet.remeasure_required %}disabled{% endif %}></div></div>
                                 <div class="cs-row"><div class="cs-label cs-blue">Parking</div><div class="cs-value"><select id="id_parking_situation" name="parking_situation" class="form-input"><option value="" {% if not coversheet.parking_situation %}selected{% endif %}>Select parking...</option><option value="good" {% if coversheet.parking_situation == 'good' %}selected{% endif %}>Good</option><option value="restricted" {% if coversheet.parking_situation == 'restricted' %}selected{% endif %}>Restricted</option><option value="permit" {% if coversheet.parking_situation == 'permit' %}selected{% endif %}>Permit Required</option><option value="paid" {% if coversheet.parking_situation == 'paid' %}selected{% endif %}>Paid Parking</option><option value="no_parking" {% if coversheet.parking_situation == 'no_parking' %}selected{% endif %}>No Parking</option><option value="other" {% if coversheet.parking_situation == 'other' %}selected{% endif %}>Other</option></select></div></div>
                             </div>
                         </div>
@@ -422,7 +429,8 @@
                                 <div class="cs-row"><div class="cs-label cs-yellow">Passed PFP</div><div class="cs-value cs-inline-actions"><input id="id_pfp_passed_date" name="pfp_passed_date" type="date" class="form-input" value="{{ coversheet.pfp_passed_date|date:'Y-m-d'|default:'' }}"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="setPfpFromDesignDate()">Same as Design Check</button></div></div>
                                 <div class="cs-row"><div class="cs-label cs-yellow">Passed Ordering</div><div class="cs-value"><input id="id_ordering_passed_date" name="ordering_passed_date" type="date" class="form-input" value="{{ coversheet.ordering_passed_date|date:'Y-m-d'|default:'' }}"></div></div>
                                 <div class="cs-row"><div class="cs-label cs-yellow">Goods Due In</div><div class="cs-value"><input id="id_goods_due_in_date" name="goods_due_in_date" type="date" class="form-input" value="{{ coversheet.goods_due_in_date|date:'Y-m-d'|default:'' }}"></div></div>
-                                <div class="cs-row"><div class="cs-label cs-yellow">Fit Days</div><div class="cs-value"><div class="cs-fit-days-wrap"><input id="id_fit_days" name="fit_days" type="range" min="0.5" max="5" step="0.5" value="{{ coversheet.fit_days|default:'1' }}" oninput="updateFitDaysValue()"><div class="cs-fit-days-scale"><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3</span><span>3.5</span><span>4</span><span>4.5</span><span>5</span></div><div class="cs-fit-days-value">Selected: <strong id="fitDaysValue">{{ coversheet.fit_days|default:'1' }}</strong> day(s)</div></div></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Fit Days Decided By</div><div class="cs-value"><select id="id_fit_days_decided_by" name="fit_days_decided_by" class="form-input"><option value="">Select person...</option>{% for designer in designers %}<option value="{{ designer.name }}" {% if coversheet.fit_days_decided_by == designer.name %}selected{% endif %}>{{ designer.name }}</option>{% endfor %}</select></div></div>
+                                <div class="cs-row"><div class="cs-label cs-yellow">Fit Days</div><div class="cs-value"><div class="cs-fit-days-wrap"><input id="id_fit_days" name="fit_days" type="range" min="0.5" max="5" step="0.5" value="{{ coversheet.fit_days|default:'1' }}" oninput="updateFitDaysValue()"><div class="cs-fit-days-scale"><span style="--i:0;">0.5</span><span style="--i:1;">1</span><span style="--i:2;">1.5</span><span style="--i:3;">2</span><span style="--i:4;">2.5</span><span style="--i:5;">3</span><span style="--i:6;">3.5</span><span style="--i:7;">4</span><span style="--i:8;">4.5</span><span style="--i:9;">5</span></div><div class="cs-fit-days-value">Selected: <strong id="fitDaysValue">{{ coversheet.fit_days|default:'1' }}</strong> day(s)</div></div></div></div>
                                 <div class="cs-row"><div class="cs-label cs-yellow">Measurements</div><div class="cs-value"><textarea id="id_measurements_notes" name="measurements_notes" rows="2" class="form-input">{{ coversheet.measurements_notes|default:'' }}</textarea></div></div>
                                 <div class="cs-row"><div class="cs-label cs-yellow">Health &amp; Safety</div><div class="cs-value"><textarea id="id_health_safety_notes" name="health_safety_notes" rows="2" class="form-input">{{ coversheet.health_safety_notes|default:'' }}</textarea></div></div>
                                 <div class="cs-row"><div class="cs-label cs-yellow">Final</div><div class="cs-value"><label class="sale-coversheet-checkbox"><input type="checkbox" name="is_final" {% if coversheet.is_final %}checked{% endif %}> Mark as Final Version</label></div></div>
@@ -484,6 +492,34 @@
                             </button>
                         </div>
                     </form>
+                </div>
+            </dialog>
+
+            <dialog id="coversheetHistoryModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-clock-history sale-modal-icon-blue"></i>
+                        <span>Coversheet Change History</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeCoversheetHistoryModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div class="cs-history-wrap">
+                        {% if coversheet_history %}
+                            {% for entry in coversheet_history %}
+                                <div class="cs-history-entry">
+                                    <div class="cs-history-head">Rev {{ entry.revision_number }} - {{ entry.changed_at|date:'d M Y H:i' }}{% if entry.changed_by %} by {{ entry.changed_by.get_full_name|default:entry.changed_by.username }}{% endif %}</div>
+                                    <ul class="cs-history-list">
+                                        {% for key, change in entry.changes.items %}
+                                            <li><strong>{{ key|title }}</strong>: "{{ change.from|default:'-' }}" -> "{{ change.to|default:'-' }}"</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="cs-history-empty">No changes recorded yet.</div>
+                        {% endif %}
+                    </div>
                 </div>
             </dialog>
 
@@ -873,14 +909,27 @@
                 document.getElementById('coversheetModal').showModal();
                 updateFitDaysValue();
                 toggleElectricsNotes();
+                toggleRemeasureDate();
             }
 
             function closeCoversheetModal() {
                 document.getElementById('coversheetModal').close();
             }
 
+            function openCoversheetHistoryModal() {
+                document.getElementById('coversheetHistoryModal').showModal();
+            }
+
+            function closeCoversheetHistoryModal() {
+                document.getElementById('coversheetHistoryModal').close();
+            }
+
             document.getElementById('coversheetModal').addEventListener('click', function(e) {
                 if (e.target === this) closeCoversheetModal();
+            });
+
+            document.getElementById('coversheetHistoryModal').addEventListener('click', function(e) {
+                if (e.target === this) closeCoversheetHistoryModal();
             });
 
             function setPfpFromDesignDate() {
@@ -904,6 +953,17 @@
                 const row = document.getElementById('electricsNotesRow');
                 if (!check || !row) return;
                 row.style.display = check.checked ? '' : 'none';
+            }
+
+            function toggleRemeasureDate() {
+                const check = document.getElementById('id_remeasure_required');
+                const row = document.getElementById('remeasureDateRow');
+                const dateInput = document.getElementById('id_remeasure_date');
+                if (!check || !dateInput) return;
+                if (row) {
+                    row.style.display = check.checked ? '' : 'none';
+                }
+                dateInput.disabled = !check.checked;
             }
 
             let coversheetEggerTargetInputId = null;

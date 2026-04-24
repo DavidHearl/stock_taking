@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, SyncLog, log_activity, Fitter, FactoryWorker
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, SyncLog, log_activity, Fitter, FactoryWorker
 
 import copy
 import csv
@@ -6060,6 +6060,70 @@ def egger_colours(request):
     
     colours = sorted(seen_codes.values(), key=lambda x: x['code'])
     return JsonResponse({'colours': colours})
+
+
+@login_required
+def raumplus_options(request):
+    """Return saved Raumplus styles and colours for the products page."""
+    options = RaumplusOption.objects.order_by('option_type', 'name')
+    grouped = {
+        'styles': [],
+        'colours': [],
+    }
+    for option in options:
+        payload = {
+            'id': option.id,
+            'name': option.name,
+            'image_url': option.image.url if option.image else '',
+        }
+        if option.option_type == RaumplusOption.OPTION_STYLE:
+            grouped['styles'].append(payload)
+        elif option.option_type == RaumplusOption.OPTION_COLOUR:
+            grouped['colours'].append(payload)
+    return JsonResponse(grouped)
+
+
+@login_required
+@require_POST
+def raumplus_option_create(request):
+    """Create a Raumplus style or colour from the products page."""
+    is_multipart = bool(request.content_type and 'multipart' in request.content_type)
+    if is_multipart:
+        data = request.POST
+        image_file = request.FILES.get('image')
+    else:
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+        image_file = None
+
+    option_type = (data.get('option_type') or '').strip().lower()
+    name = (data.get('name') or '').strip()
+
+    if option_type not in {RaumplusOption.OPTION_STYLE, RaumplusOption.OPTION_COLOUR}:
+        return JsonResponse({'success': False, 'error': 'Invalid Raumplus option type.'}, status=400)
+
+    if not name:
+        return JsonResponse({'success': False, 'error': 'Name is required.'}, status=400)
+
+    if not image_file:
+        return JsonResponse({'success': False, 'error': 'Image is required.'}, status=400)
+
+    existing = RaumplusOption.objects.filter(option_type=option_type, name__iexact=name).first()
+    if existing:
+        return JsonResponse({'success': False, 'error': f'{existing.name} already exists.'}, status=400)
+
+    option = RaumplusOption.objects.create(option_type=option_type, name=name, image=image_file)
+    return JsonResponse({
+        'success': True,
+        'option': {
+            'id': option.id,
+            'name': option.name,
+            'option_type': option.option_type,
+            'image_url': option.image.url if option.image else '',
+        }
+    })
 
 
 def update_item(request, item_id):

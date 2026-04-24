@@ -60,6 +60,8 @@ urlpatterns = [
     path('update-product-quantity/', views.update_product_quantity, name='update_product_quantity'),
     path('bulk-update-products/', views.bulk_update_products, name='bulk_update_products'),
     path('egger-colours/', views.egger_colours, name='egger_colours'),
+    path('raumplus-options/', views.raumplus_options, name='raumplus_options'),
+    path('raumplus-options/create/', views.raumplus_option_create, name='raumplus_option_create'),
     
     # Purchase Invoices (inbound / supplier invoices)
     path('purchase-invoices/', purchase_invoices_list, name='purchase_invoices_list'),
