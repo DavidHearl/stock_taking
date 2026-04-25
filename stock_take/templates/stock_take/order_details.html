@@ -2613,6 +2613,28 @@
     </div>
 </div>
 
+<!-- Create PO Confirmation Modal -->
+<div class="modal" id="createPOConfirmModal">
+    <div class="modal-overlay" onclick="closeModal('createPOConfirmModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Purchase Order</h3>
+                <button type="button" class="modal-close" onclick="closeModal('createPOConfirmModal')">&#10005;</button>
+            </div>
+            <div class="modal-body">
+                <p id="create-po-confirm-message" class="text-muted"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('createPOConfirmModal')">Cancel</button>
+                <button type="button" class="btn btn-create-po" id="confirm-create-po">
+                    <i class="bi bi-file-earmark-plus"></i> Create PO
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Workflow Modal -->
 <div class="modal" id="workflowModal">
     <div class="modal-overlay" onclick="closeModal('workflowModal')"></div>
@@ -3864,8 +3886,16 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     window.createPOFromSelected = function(type) {
-        if (!confirm(`Create a new Purchase Order from the selected ${type} items?`)) return;
-        sendItemsToPO(type, null);
+        const msg = document.getElementById('create-po-confirm-message');
+        if (msg) msg.textContent = `Create a new Purchase Order from the selected ${type} items?`;
+        const btn = document.getElementById('confirm-create-po');
+        if (btn) {
+            btn.onclick = function() {
+                closeModal('createPOConfirmModal');
+                sendItemsToPO(type, null);
+            };
+        }
+        openModal('createPOConfirmModal');
     }
 
     function sendItemsToPO(type, poId) {

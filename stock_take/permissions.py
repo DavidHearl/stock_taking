@@ -55,6 +55,9 @@ URL_TO_PAGE = {
     # Projects - Remedials
     'remedials': 'remedials',
 
+    # Website Enquiries
+    'website_enquiries_list': 'website_enquiries',
+
     # Accounting
     'invoices_list': 'invoices',
     'invoice_detail': 'invoices',

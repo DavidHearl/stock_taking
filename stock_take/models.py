@@ -2120,6 +2120,45 @@ class PurchaseInvoiceLineItem(models.Model):
         super().save(*args, **kwargs)
 
 
+class WebsiteEnquiry(models.Model):
+    """Enquiry received from the WordPress website contact form."""
+
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('contacted', 'Contacted'),
+        ('converted', 'Converted'),
+        ('closed', 'Closed'),
+    ]
+
+    # Contact details
+    name = models.CharField(max_length=255, blank=True)
+    email = models.EmailField(max_length=254, blank=True, null=True)
+    phone = models.CharField(max_length=100, blank=True, null=True)
+
+    # Enquiry content
+    message = models.TextField(blank=True)
+    subject = models.CharField(max_length=500, blank=True)
+    source = models.CharField(max_length=255, blank=True, help_text='Form name or page URL')
+
+    # Status & staff notes
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', db_index=True)
+    notes = models.TextField(blank=True)
+
+    # Metadata
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    raw_data = models.JSONField(null=True, blank=True, help_text='Full raw payload from WordPress')
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name or 'Unknown'} <{self.email or '-'}> ({self.received_at.strftime('%d/%m/%Y')})"
+
+    class Meta:
+        ordering = ['-received_at']
+        verbose_name = 'Website Enquiry'
+        verbose_name_plural = 'Website Enquiries'
+
+
 # =============================================
 # Role-Based Access Control
 # =============================================
@@ -2135,6 +2174,7 @@ PAGE_SECTIONS = [
         ('customers', 'Customers'),
         ('customer_details', 'Customer Details'),
         ('remedials', 'Remedials'),
+        ('website_enquiries', 'Website Enquiries'),
     ]),
     ('Accounting', [
         ('invoices', 'Invoices'),

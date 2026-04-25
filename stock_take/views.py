@@ -3640,7 +3640,7 @@ def add_accessories_to_po(request):
                 supplier_name=acc_supplier.name if acc_supplier else None,
                 po_type='supplier',
                 status='Draft',
-                currency='GBP',
+                currency=(acc_supplier.currency.strip().upper() if acc_supplier and acc_supplier.currency else 'GBP'),
                 creator_name=request.user.get_full_name() or request.user.username,
             )
         

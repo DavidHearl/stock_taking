@@ -18,6 +18,7 @@ from .cad_views import cad_db_upload, cad_db_download, cad_db_status
 from .profile_views import user_profile, user_profile_save, user_change_password
 from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact
 from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
+from .enquiry_views import website_enquiries_list, website_enquiry_receive, website_enquiry_update, website_enquiry_delete
 from .purchase_invoice_views import (
     purchase_invoices_list, purchase_invoice_detail, create_purchase_invoice,
     update_purchase_invoice, delete_purchase_invoice, add_purchase_invoice_line,
@@ -200,6 +201,12 @@ urlpatterns = [
     path('contact/<int:pk>/convert/', lead_convert, name='lead_convert'),
     path('contacts/bulk-delete/', leads_bulk_delete, name='leads_bulk_delete'),
     path('contacts/merge/', lead_merge, name='lead_merge'),
+
+    # Website Enquiries
+    path('website-enquiries/', website_enquiries_list, name='website_enquiries_list'),
+    path('website-enquiries/<int:enquiry_id>/update/', website_enquiry_update, name='website_enquiry_update'),
+    path('website-enquiries/<int:enquiry_id>/delete/', website_enquiry_delete, name='website_enquiry_delete'),
+    path('api/website-enquiry/', website_enquiry_receive, name='website_enquiry_receive'),
     
     # Import management
     path('import-history/', views.import_history, name='import_history'),

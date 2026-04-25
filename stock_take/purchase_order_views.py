@@ -1301,7 +1301,7 @@ def purchase_order_create(request):
         supplier_name=supplier.name if supplier else fitter.name,
         fitter=fitter,
         status='Draft',
-        currency='GBP',
+        currency=(supplier.currency.strip().upper() if supplier and supplier.currency else 'GBP'),
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
@@ -3380,7 +3380,7 @@ def create_raumplus_po(request):
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
         po_type='supplier',
         status='Draft',
-        currency='GBP',
+        currency=(supplier.currency.strip().upper() if supplier and supplier.currency else 'GBP'),
         creator_name=request.user.get_full_name() or request.user.username,
     )
 
@@ -3488,7 +3488,11 @@ def create_stock_shortage_po(request):
         delivery_address_1='61 Boucher Crescent, BT126HU, Belfast',
         po_type='supplier',
         status='Draft',
-        currency='GBP',
+        currency=(
+            stock_item_with_supplier.supplier.currency.strip().upper()
+            if item_skus and stock_item_with_supplier and stock_item_with_supplier.supplier and stock_item_with_supplier.supplier.currency
+            else 'GBP'
+        ),
         creator_name=request.user.get_full_name() or request.user.username,
     )
 

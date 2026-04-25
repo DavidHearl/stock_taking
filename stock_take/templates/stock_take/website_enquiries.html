@@ -1,0 +1,330 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Website Enquiries{% endblock %}
+
+{% block nav_enquiries_active %}active{% endblock %}
+
+{% block page_title %}Website Enquiries{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/website_enquiries.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="enq-toolbar">
+    <div class="enq-search-wrap">
+        <i class="bi bi-search"></i>
+        <input type="text" id="enq-search" placeholder="Search by name, email, subject…" value="{{ search_query }}" autocomplete="off">
+    </div>
+
+    <div class="enq-tabs">
+        <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'all' %}active{% endif %}">
+            All <span class="enq-count">{{ counts.all }}</span>
+        </a>
+        <a href="?status=new{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'new' %}active{% endif %}">
+            New <span class="enq-count">{{ counts.new }}</span>
+        </a>
+        <a href="?status=contacted{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'contacted' %}active{% endif %}">
+            Contacted <span class="enq-count">{{ counts.contacted }}</span>
+        </a>
+        <a href="?status=converted{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'converted' %}active{% endif %}">
+            Converted <span class="enq-count">{{ counts.converted }}</span>
+        </a>
+        <a href="?status=closed{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'closed' %}active{% endif %}">
+            Closed <span class="enq-count">{{ counts.closed }}</span>
+        </a>
+    </div>
+</div>
+
+<div class="enq-table-wrap">
+    {% if enquiries %}
+    <table class="enq-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Contact</th>
+                <th>Subject / Message</th>
+                <th>Source</th>
+                <th>Received</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for enq in enquiries %}
+            <tr data-id="{{ enq.pk }}"
+                data-name="{{ enq.name|escapejs }}"
+                data-email="{{ enq.email|default:''|escapejs }}"
+                data-phone="{{ enq.phone|default:''|escapejs }}"
+                data-subject="{{ enq.subject|escapejs }}"
+                data-message="{{ enq.message|escapejs }}"
+                data-source="{{ enq.source|escapejs }}"
+                data-status="{{ enq.status }}"
+                data-notes="{{ enq.notes|escapejs }}"
+                data-received="{{ enq.received_at|date:'d/m/Y H:i' }}">
+                <td>
+                    <div class="enq-name">{{ enq.name|default:"—" }}</div>
+                </td>
+                <td>
+                    <div class="enq-contact">
+                        {% if enq.email %}<a href="mailto:{{ enq.email }}">{{ enq.email }}</a>{% else %}<span class="enq-contact-phone">—</span>{% endif %}
+                        {% if enq.phone %}<div class="enq-contact-phone">{{ enq.phone }}</div>{% endif %}
+                    </div>
+                </td>
+                <td>
+                    {% if enq.subject %}<div class="enq-subject">{{ enq.subject }}</div>{% endif %}
+                    {% if enq.message %}<div class="enq-message-preview">{{ enq.message|truncatechars:100 }}</div>{% endif %}
+                </td>
+                <td><span class="enq-source">{{ enq.source|default:"—" }}</span></td>
+                <td><span class="enq-date">{{ enq.received_at|date:"d/m/Y H:i" }}</span></td>
+                <td>
+                    <button class="enq-status {{ enq.status }}" onclick="cycleStatus(event, {{ enq.pk }}, '{{ enq.status }}')">
+                        {{ enq.get_status_display }}
+                    </button>
+                </td>
+                <td>
+                    <div class="enq-actions">
+                        <button class="enq-btn-icon" title="View details" onclick="openDrawer(this.closest('tr'))">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button class="enq-btn-icon danger" title="Delete" onclick="deleteEnquiry({{ enq.pk }}, '{{ enq.name|escapejs }}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="enq-empty">
+        <i class="bi bi-inbox"></i>
+        <p>No enquiries found{% if search_query %} matching "{{ search_query }}"{% endif %}.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Detail drawer -->
+<div class="enq-drawer-backdrop" id="enq-drawer-backdrop" onclick="closeDrawer(event)">
+    <div class="enq-drawer" id="enq-drawer" onclick="event.stopPropagation()">
+        <div class="enq-drawer-header">
+            <h3 id="drawer-title">Enquiry</h3>
+            <button class="enq-drawer-close" onclick="closeDrawerDirect()">&times;</button>
+        </div>
+        <div class="enq-drawer-body">
+            <div class="enq-drawer-field">
+                <div class="enq-drawer-label">Name</div>
+                <div class="enq-drawer-value" id="drawer-name"></div>
+            </div>
+            <div class="enq-drawer-field">
+                <div class="enq-drawer-label">Email</div>
+                <div class="enq-drawer-value" id="drawer-email"></div>
+            </div>
+            <div class="enq-drawer-field" id="drawer-phone-field">
+                <div class="enq-drawer-label">Phone</div>
+                <div class="enq-drawer-value" id="drawer-phone"></div>
+            </div>
+            <div class="enq-drawer-field" id="drawer-subject-field">
+                <div class="enq-drawer-label">Subject</div>
+                <div class="enq-drawer-value" id="drawer-subject"></div>
+            </div>
+            <div class="enq-drawer-field" id="drawer-message-field">
+                <div class="enq-drawer-label">Message</div>
+                <div class="enq-drawer-value" id="drawer-message"></div>
+            </div>
+            <div class="enq-drawer-field" id="drawer-source-field">
+                <div class="enq-drawer-label">Source</div>
+                <div class="enq-drawer-value" id="drawer-source"></div>
+            </div>
+            <div class="enq-drawer-field">
+                <div class="enq-drawer-label">Received</div>
+                <div class="enq-drawer-value" id="drawer-received"></div>
+            </div>
+        </div>
+        <div class="enq-drawer-footer">
+            <div class="enq-drawer-field">
+                <div class="enq-drawer-label">Internal Notes</div>
+                <textarea class="enq-notes-textarea" id="drawer-notes" placeholder="Add notes…"></textarea>
+            </div>
+            <div class="enq-drawer-actions">
+                <select class="enq-status-select" id="drawer-status-select">
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="converted">Converted</option>
+                    <option value="closed">Closed</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="saveDrawer()">
+                    <i class="bi bi-floppy"></i> Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const CSRF_TOKEN = '{{ csrf_token }}';
+let currentEnquiryId = null;
+
+// ── Search ─────────────────────────────────────────────────────────────────
+document.getElementById('enq-search').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+        const q = this.value.trim();
+        const url = new URL(window.location.href);
+        if (q) {
+            url.searchParams.set('q', q);
+        } else {
+            url.searchParams.delete('q');
+        }
+        window.location.href = url.toString();
+    }
+});
+
+// ── Status cycle ──────────────────────────────────────────────────────────
+const STATUS_CYCLE = ['new', 'contacted', 'converted', 'closed'];
+const STATUS_LABELS = { new: 'New', contacted: 'Contacted', converted: 'Converted', closed: 'Closed' };
+
+function cycleStatus(event, id, currentStatus) {
+    event.stopPropagation();
+    const idx = STATUS_CYCLE.indexOf(currentStatus);
+    const nextStatus = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
+    updateEnquiry(id, { status: nextStatus }, function(data) {
+        const btn = event.target.closest('.enq-status');
+        btn.className = 'enq-status ' + data.status;
+        btn.textContent = STATUS_LABELS[data.status];
+        btn.closest('tr').dataset.status = data.status;
+        btn.setAttribute('onclick', `cycleStatus(event, ${id}, '${data.status}')`);
+    });
+}
+
+// ── Drawer ────────────────────────────────────────────────────────────────
+function openDrawer(row) {
+    currentEnquiryId = parseInt(row.dataset.id);
+    document.getElementById('drawer-title').textContent = row.dataset.name || 'Enquiry';
+    document.getElementById('drawer-name').textContent = row.dataset.name || '—';
+
+    const emailVal = row.dataset.email;
+    const emailEl = document.getElementById('drawer-email');
+    if (emailVal) {
+        emailEl.innerHTML = `<a href="mailto:${emailVal}" style="color:var(--primary-color)">${emailVal}</a>`;
+    } else {
+        emailEl.textContent = '—';
+    }
+
+    const phoneField = document.getElementById('drawer-phone-field');
+    const phoneEl = document.getElementById('drawer-phone');
+    if (row.dataset.phone) {
+        phoneEl.textContent = row.dataset.phone;
+        phoneField.style.display = '';
+    } else {
+        phoneField.style.display = 'none';
+    }
+
+    const subjectField = document.getElementById('drawer-subject-field');
+    const subjectEl = document.getElementById('drawer-subject');
+    if (row.dataset.subject) {
+        subjectEl.textContent = row.dataset.subject;
+        subjectField.style.display = '';
+    } else {
+        subjectField.style.display = 'none';
+    }
+
+    const messageField = document.getElementById('drawer-message-field');
+    const messageEl = document.getElementById('drawer-message');
+    if (row.dataset.message) {
+        messageEl.textContent = row.dataset.message;
+        messageField.style.display = '';
+    } else {
+        messageField.style.display = 'none';
+    }
+
+    const sourceField = document.getElementById('drawer-source-field');
+    const sourceEl = document.getElementById('drawer-source');
+    if (row.dataset.source) {
+        sourceEl.textContent = row.dataset.source;
+        sourceField.style.display = '';
+    } else {
+        sourceField.style.display = 'none';
+    }
+
+    document.getElementById('drawer-received').textContent = row.dataset.received;
+    document.getElementById('drawer-notes').value = row.dataset.notes || '';
+    document.getElementById('drawer-status-select').value = row.dataset.status;
+
+    document.getElementById('enq-drawer-backdrop').classList.add('open');
+}
+
+function closeDrawer(event) {
+    if (event.target === document.getElementById('enq-drawer-backdrop')) {
+        closeDrawerDirect();
+    }
+}
+
+function closeDrawerDirect() {
+    document.getElementById('enq-drawer-backdrop').classList.remove('open');
+    currentEnquiryId = null;
+}
+
+function saveDrawer() {
+    if (!currentEnquiryId) return;
+    const status = document.getElementById('drawer-status-select').value;
+    const notes = document.getElementById('drawer-notes').value;
+    updateEnquiry(currentEnquiryId, { status, notes }, function(data) {
+        // Update table row
+        const row = document.querySelector(`tr[data-id="${currentEnquiryId}"]`);
+        if (row) {
+            row.dataset.status = data.status;
+            row.dataset.notes = data.notes;
+            const statusBtn = row.querySelector('.enq-status');
+            statusBtn.className = 'enq-status ' + data.status;
+            statusBtn.textContent = STATUS_LABELS[data.status];
+            statusBtn.setAttribute('onclick', `cycleStatus(event, ${currentEnquiryId}, '${data.status}')`);
+        }
+        closeDrawerDirect();
+    });
+}
+
+// ── AJAX helpers ──────────────────────────────────────────────────────────
+function updateEnquiry(id, payload, onSuccess) {
+    fetch(`/website-enquiries/${id}/update/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF_TOKEN,
+        },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            if (onSuccess) onSuccess(data);
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => alert('Network error — please try again.'));
+}
+
+function deleteEnquiry(id, name) {
+    if (!confirm(`Delete enquiry from "${name}"? This cannot be undone.`)) return;
+    fetch(`/website-enquiries/${id}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            if (row) row.remove();
+            if (currentEnquiryId === id) closeDrawerDirect();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => alert('Network error — please try again.'));
+}
+</script>
+{% endblock %}
