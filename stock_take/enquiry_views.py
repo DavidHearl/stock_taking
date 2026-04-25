@@ -13,6 +13,24 @@ from .permissions import page_permission_required
 logger = logging.getLogger(__name__)
 
 
+def _extract_payload_value(data, *keys):
+    """Return first non-empty value from top-level keys or nested `data` dict keys."""
+    nested = data.get('data') if isinstance(data.get('data'), dict) else {}
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ''):
+            return value
+    for key in keys:
+        value = nested.get(key)
+        if value not in (None, ''):
+            return value
+        # Gravity labels often come in mixed case; try lowercase match too
+        value = nested.get(str(key).lower())
+        if value not in (None, ''):
+            return value
+    return ''
+
+
 # ─── Public API: receive enquiry from WordPress ───────────────────────────────
 
 @csrf_exempt
@@ -38,7 +56,10 @@ def website_enquiry_receive(request):
     # Authenticate
     api_key = request.headers.get('X-API-Key', '')
     expected_key = getattr(settings, 'WEBSITE_ENQUIRY_API_KEY', '')
-    if not expected_key or api_key != expected_key:
+    if not expected_key:
+        logger.error('WEBSITE_ENQUIRY_API_KEY is not configured in Django settings/environment')
+        return JsonResponse({'error': 'Server API key is not configured'}, status=500)
+    if api_key != expected_key:
         return JsonResponse({'error': 'Invalid API key'}, status=403)
 
     try:
@@ -46,12 +67,19 @@ def website_enquiry_receive(request):
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    name = str(data.get('name', '')).strip()[:255]
-    email = str(data.get('email', '')).strip()[:254] or None
-    phone = str(data.get('phone', '')).strip()[:100] or None
-    subject = str(data.get('subject', '')).strip()[:500]
-    message = str(data.get('message', '')).strip()
-    source = str(data.get('source', '')).strip()[:255]
+    first_name = str(_extract_payload_value(data, 'first_name', 'first name')).strip()
+    last_name = str(_extract_payload_value(data, 'last_name', 'last name')).strip()
+    full_name = f"{first_name} {last_name}".strip()
+
+    name = str(_extract_payload_value(data, 'name')).strip()[:255]
+    if not name:
+        name = full_name[:255]
+
+    email = str(_extract_payload_value(data, 'email', 'email address')).strip()[:254] or None
+    phone = str(_extract_payload_value(data, 'phone', 'telephone', 'mobile')).strip()[:100] or None
+    subject = str(_extract_payload_value(data, 'subject')).strip()[:500]
+    message = str(_extract_payload_value(data, 'message', 'comments', 'enquiry')).strip()
+    source = str(_extract_payload_value(data, 'source', 'form_title', 'form name')).strip()[:255]
 
     # Require at least a name or email
     if not name and not email:
