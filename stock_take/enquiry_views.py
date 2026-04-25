@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 def _extract_payload_value(data, *keys):
     """Return first non-empty value from top-level keys or nested `data` dict keys."""
     nested = data.get('data') if isinstance(data.get('data'), dict) else {}
+    normalized_nested = {str(key).strip().lower(): value for key, value in nested.items()}
     for key in keys:
         value = data.get(key)
         if value not in (None, ''):
@@ -24,8 +25,7 @@ def _extract_payload_value(data, *keys):
         value = nested.get(key)
         if value not in (None, ''):
             return value
-        # Gravity labels often come in mixed case; try lowercase match too
-        value = nested.get(str(key).lower())
+        value = normalized_nested.get(str(key).strip().lower())
         if value not in (None, ''):
             return value
     return ''
