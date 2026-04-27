@@ -227,6 +227,24 @@ def website_enquiries_list(request):
     })
 
 
+@page_permission_required('website_enquiries')
+def website_enquiry_detail(request, enquiry_id):
+    """Return full enquiry details including raw JSON payload."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET required'}, status=405)
+
+    try:
+        enquiry = WebsiteEnquiry.objects.get(pk=enquiry_id)
+    except WebsiteEnquiry.DoesNotExist:
+        return JsonResponse({'error': 'Not found'}, status=404)
+
+    return JsonResponse({
+        'success': True,
+        'id': enquiry.pk,
+        'raw_data': enquiry.raw_data or {},
+    })
+
+
 @login_required
 def website_enquiry_update(request, enquiry_id):
     """Update status and/or notes on an enquiry (AJAX POST)."""

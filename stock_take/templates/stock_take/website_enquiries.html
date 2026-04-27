@@ -167,6 +167,13 @@
                 <div class="enq-drawer-label">Source</div>
                 <div class="enq-drawer-value" id="drawer-source"></div>
             </div>
+            <div class="enq-drawer-field" id="drawer-raw-json-field">
+                <div class="enq-drawer-label">Raw JSON Payload</div>
+                <pre class="enq-raw-json" id="drawer-raw-json">Loading...</pre>
+                <button class="enq-btn-icon" type="button" id="drawer-copy-json-btn" title="Copy JSON" onclick="copyRawJson()">
+                    <i class="bi bi-clipboard"></i>
+                </button>
+            </div>
             <div class="enq-drawer-field">
                 <div class="enq-drawer-label">Received</div>
                 <div class="enq-drawer-value" id="drawer-received"></div>
@@ -198,6 +205,54 @@
 <script>
 const CSRF_TOKEN = '{{ csrf_token }}';
 let currentEnquiryId = null;
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function renderRawJsonPayload(payload) {
+    const el = document.getElementById('drawer-raw-json');
+    let text;
+    try {
+        text = JSON.stringify(payload || {}, null, 2);
+    } catch (e) {
+        text = String(payload || '');
+    }
+    el.innerHTML = escapeHtml(text);
+}
+
+function copyRawJson() {
+    const rawText = document.getElementById('drawer-raw-json').textContent || '';
+    if (!rawText) return;
+    navigator.clipboard.writeText(rawText).then(() => {
+        const btn = document.getElementById('drawer-copy-json-btn');
+        const old = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check2"></i>';
+        setTimeout(() => { btn.innerHTML = old; }, 1000);
+    });
+}
+
+function loadRawJsonForDrawer(id) {
+    const rawEl = document.getElementById('drawer-raw-json');
+    rawEl.textContent = 'Loading...';
+    fetch(`/website-enquiries/${id}/detail/`)
+        .then(r => r.json())
+        .then(data => {
+            if (data && data.success) {
+                renderRawJsonPayload(data.raw_data || {});
+            } else {
+                rawEl.textContent = 'Unable to load payload.';
+            }
+        })
+        .catch(() => {
+            rawEl.textContent = 'Unable to load payload.';
+        });
+}
 
 // ── Search ─────────────────────────────────────────────────────────────────
 document.getElementById('enq-search').addEventListener('keydown', function(e) {
@@ -343,6 +398,8 @@ function openDrawer(row) {
     document.getElementById('drawer-received').textContent = row.dataset.received;
     document.getElementById('drawer-notes').value = row.dataset.notes || '';
     document.getElementById('drawer-status-select').value = row.dataset.status;
+
+    loadRawJsonForDrawer(currentEnquiryId);
 
     document.getElementById('enq-drawer-backdrop').classList.add('open');
 }
