@@ -2132,8 +2132,14 @@ class WebsiteEnquiry(models.Model):
 
     # Contact details
     name = models.CharField(max_length=255, blank=True)
+    first_name = models.CharField(max_length=120, blank=True)
+    last_name = models.CharField(max_length=120, blank=True)
     email = models.EmailField(max_length=254, blank=True, null=True)
     phone = models.CharField(max_length=100, blank=True, null=True)
+    region = models.CharField(max_length=30, blank=True, help_text='Region selection such as UK or ROI')
+    address = models.TextField(blank=True)
+    newsletter_signup = models.BooleanField(null=True, blank=True)
+    contact_for_design_appointment = models.BooleanField(null=True, blank=True)
 
     # Enquiry content
     message = models.TextField(blank=True)

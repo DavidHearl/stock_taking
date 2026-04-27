@@ -31,6 +31,19 @@ def _extract_payload_value(data, *keys):
     return ''
 
 
+def _extract_bool_value(data, *keys):
+    """Return boolean value parsed from top-level or nested payload fields."""
+    raw = _extract_payload_value(data, *keys)
+    if raw in (None, ''):
+        return None
+    value = str(raw).strip().lower()
+    if value in {'1', 'true', 'yes', 'y', 'on', 'checked'}:
+        return True
+    if value in {'0', 'false', 'no', 'n', 'off', 'unchecked'}:
+        return False
+    return None
+
+
 # ─── Public API: receive enquiry from WordPress ───────────────────────────────
 
 @csrf_exempt
@@ -67,8 +80,8 @@ def website_enquiry_receive(request):
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    first_name = str(_extract_payload_value(data, 'first_name', 'first name')).strip()
-    last_name = str(_extract_payload_value(data, 'last_name', 'last name')).strip()
+    first_name = str(_extract_payload_value(data, 'first_name', 'first name', 'firstname')).strip()
+    last_name = str(_extract_payload_value(data, 'last_name', 'last name', 'lastname')).strip()
     full_name = f"{first_name} {last_name}".strip()
 
     name = str(_extract_payload_value(data, 'name')).strip()[:255]
@@ -77,6 +90,21 @@ def website_enquiry_receive(request):
 
     email = str(_extract_payload_value(data, 'email', 'email address')).strip()[:254] or None
     phone = str(_extract_payload_value(data, 'phone', 'telephone', 'mobile')).strip()[:100] or None
+    region = str(_extract_payload_value(data, 'uk_or_roi', 'uk or roi', 'region', 'country')).strip()[:30]
+    address = str(_extract_payload_value(data, 'address', 'address line 1', 'full address')).strip()
+    newsletter_signup = _extract_bool_value(
+        data,
+        'newsletter_signup',
+        'newsletter signup',
+        'sign up to our newsletter',
+        'newsletter',
+    )
+    contact_for_design_appointment = _extract_bool_value(
+        data,
+        'contact_for_design_appointment',
+        'contact me for a design appointment',
+        'contact me for design appointment',
+    )
     subject = str(_extract_payload_value(data, 'subject')).strip()[:500]
     message = str(_extract_payload_value(data, 'message', 'comments', 'enquiry')).strip()
     source = str(_extract_payload_value(data, 'source', 'form_title', 'form name')).strip()[:255]
@@ -91,8 +119,14 @@ def website_enquiry_receive(request):
 
     enquiry = WebsiteEnquiry.objects.create(
         name=name,
+        first_name=first_name[:120],
+        last_name=last_name[:120],
         email=email,
         phone=phone,
+        region=region,
+        address=address,
+        newsletter_signup=newsletter_signup,
+        contact_for_design_appointment=contact_for_design_appointment,
         subject=subject,
         message=message,
         source=source,
@@ -126,8 +160,12 @@ def website_enquiries_list(request):
         from django.db.models import Q
         enquiries = enquiries.filter(
             Q(name__icontains=search_query) |
+            Q(first_name__icontains=search_query) |
+            Q(last_name__icontains=search_query) |
             Q(email__icontains=search_query) |
             Q(phone__icontains=search_query) |
+            Q(region__icontains=search_query) |
+            Q(address__icontains=search_query) |
             Q(subject__icontains=search_query) |
             Q(message__icontains=search_query)
         )
