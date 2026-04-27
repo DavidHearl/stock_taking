@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import ast
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -17,6 +18,55 @@ logger = logging.getLogger(__name__)
 def _normalize_key(key):
     """Normalize payload keys so First Name / first_name / first-name all match."""
     return re.sub(r'[^a-z0-9]+', '', str(key).strip().lower())
+
+
+def _coerce_payload_value(raw_value):
+    """Parse object-like string payload fragments into Python values when possible."""
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if text and text[0] in '[{':
+            try:
+                return json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    return ast.literal_eval(text)
+                except (ValueError, SyntaxError):
+                    return raw_value
+    return raw_value
+
+
+def _extract_scalar_payload_value(raw_value, *keys):
+    """Extract a human-usable scalar from payload fragments that may be nested dicts/lists."""
+    value = _coerce_payload_value(raw_value)
+
+    if isinstance(value, dict):
+        candidate_keys = set()
+        for key in keys:
+            raw_key = str(key).strip().lower()
+            candidate_keys.add(_normalize_key(raw_key))
+            candidate_keys.update(part for part in re.split(r'[^a-z0-9]+', raw_key) if part)
+
+        normalized_items = { _normalize_key(k): v for k, v in value.items() }
+        for candidate in candidate_keys:
+            if candidate in normalized_items:
+                nested = _extract_scalar_payload_value(normalized_items[candidate], *keys)
+                if nested not in (None, ''):
+                    return nested
+
+        for nested_value in value.values():
+            nested = _extract_scalar_payload_value(nested_value, *keys)
+            if nested not in (None, ''):
+                return nested
+        return ''
+
+    if isinstance(value, list):
+        for item in value:
+            nested = _extract_scalar_payload_value(item, *keys)
+            if nested not in (None, ''):
+                return nested
+        return ''
+
+    return value
 
 
 def _collect_payload_values(data):
@@ -60,7 +110,7 @@ def _extract_payload_value(data, *keys):
     for key in keys:
         value = values.get(_normalize_key(key))
         if value not in (None, ''):
-            return value
+            return _extract_scalar_payload_value(value, *keys)
     return ''
 
 
