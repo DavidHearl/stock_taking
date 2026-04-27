@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -13,19 +14,51 @@ from .permissions import page_permission_required
 logger = logging.getLogger(__name__)
 
 
+def _normalize_key(key):
+    """Normalize payload keys so First Name / first_name / first-name all match."""
+    return re.sub(r'[^a-z0-9]+', '', str(key).strip().lower())
+
+
+def _collect_payload_values(data):
+    """Flatten top-level and nested payload key/value pairs into a normalized dict."""
+    values = {}
+
+    def add_pair(raw_key, raw_value):
+        if raw_key in (None, '') or raw_value in (None, ''):
+            return
+        values.setdefault(_normalize_key(raw_key), raw_value)
+
+    if isinstance(data, dict):
+        for k, v in data.items():
+            add_pair(k, v)
+
+    nested = data.get('data') if isinstance(data, dict) else None
+    if isinstance(nested, str):
+        try:
+            nested = json.loads(nested)
+        except (json.JSONDecodeError, TypeError):
+            nested = None
+
+    if isinstance(nested, dict):
+        for k, v in nested.items():
+            add_pair(k, v)
+    elif isinstance(nested, list):
+        # Common JSON dump shape: [{'name':'First Name','value':'Jane'}, ...]
+        for item in nested:
+            if not isinstance(item, dict):
+                continue
+            key = item.get('name') or item.get('label') or item.get('key')
+            val = item.get('value') or item.get('val') or item.get('answer')
+            add_pair(key, val)
+
+    return values
+
+
 def _extract_payload_value(data, *keys):
-    """Return first non-empty value from top-level keys or nested `data` dict keys."""
-    nested = data.get('data') if isinstance(data.get('data'), dict) else {}
-    normalized_nested = {str(key).strip().lower(): value for key, value in nested.items()}
+    """Return first non-empty value from normalized key matches in payload dumps."""
+    values = _collect_payload_values(data)
     for key in keys:
-        value = data.get(key)
-        if value not in (None, ''):
-            return value
-    for key in keys:
-        value = nested.get(key)
-        if value not in (None, ''):
-            return value
-        value = normalized_nested.get(str(key).strip().lower())
+        value = values.get(_normalize_key(key))
         if value not in (None, ''):
             return value
     return ''
@@ -80,13 +113,21 @@ def website_enquiry_receive(request):
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    first_name = str(_extract_payload_value(data, 'first_name', 'first name', 'firstname')).strip()
-    last_name = str(_extract_payload_value(data, 'last_name', 'last name', 'lastname')).strip()
+    first_name = str(_extract_payload_value(data, 'first_name', 'first name', 'firstname', 'first-name', 'first')).strip()
+    last_name = str(_extract_payload_value(data, 'last_name', 'last name', 'lastname', 'last-name', 'last')).strip()
     full_name = f"{first_name} {last_name}".strip()
 
-    name = str(_extract_payload_value(data, 'name')).strip()[:255]
+    name = str(_extract_payload_value(data, 'name', 'full name', 'your name', 'contact name')).strip()[:255]
     if not name:
         name = full_name[:255]
+
+    # If a form only sends full name, split it into first/last for structured fields.
+    if name and (not first_name or not last_name):
+        name_parts = [p for p in name.split() if p]
+        if name_parts and not first_name:
+            first_name = name_parts[0]
+        if len(name_parts) > 1 and not last_name:
+            last_name = ' '.join(name_parts[1:])
 
     email = str(_extract_payload_value(data, 'email', 'email address')).strip()[:254] or None
     phone = str(_extract_payload_value(data, 'phone', 'telephone', 'mobile')).strip()[:100] or None

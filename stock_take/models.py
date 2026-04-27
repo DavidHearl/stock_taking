@@ -815,12 +815,13 @@ class Accessory(models.Model):
     @property
     def incoming_quantity(self):
         """Get quantity on order (Approved POs not yet received) for this SKU"""
-        from django.db.models import Sum
+        from django.db.models import Sum, F, Value
+        from django.db.models.functions import Coalesce
         incoming = PurchaseOrderProduct.objects.filter(
             sku=self.sku,
             purchase_order__status='Approved'
         ).aggregate(
-            total=Sum('order_quantity')
+            total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), Value(1)))
         )['total'] or 0
         return incoming
 
@@ -897,11 +898,15 @@ class StockItem(models.Model):
         ('non-stock', 'Non-Stock'),
         ('not-classified', 'Not-Classified'),
     ]
+    ORDER_SOURCE_CHOICES = [
+        ('item', 'Item Order'),
+        ('website', 'Website Order'),
+    ]
 
     sku = models.CharField(max_length=100, db_index=True)
     name = models.CharField(max_length=200, db_index=True)
     description = models.TextField(blank=True, default='')
-    cost = models.DecimalField(max_digits=10, decimal_places=2)
+    cost = models.DecimalField(max_digits=10, decimal_places=3)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     stock_take_group = models.ForeignKey(StockTakeGroup, on_delete=models.SET_NULL, 
                                        null=True, blank=True, related_name='stock_items')
@@ -914,6 +919,7 @@ class StockItem(models.Model):
     serial_or_batch = models.CharField(max_length=100, blank=True, null=True)
     last_checked = models.DateTimeField(null=True, blank=True)
     tracking_type = models.CharField(max_length=30, choices=TRACKING_CHOICES, default='not-classified', db_index=True)
+    order_source = models.CharField(max_length=20, choices=ORDER_SOURCE_CHOICES, default='item', db_index=True)
     min_order_qty = models.IntegerField(blank=True, null=True)
     par_level = models.IntegerField(default=0, help_text='Minimum stock level - alerts when stock falls below this')
     image = models.ImageField(upload_to='product_images/', blank=True, null=True)
@@ -929,8 +935,10 @@ class StockItem(models.Model):
     box_width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Box width in mm')
     box_height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Box height in mm')
     box_quantity = models.IntegerField(null=True, blank=True, help_text='Number of items per box')
+    pack_size = models.PositiveIntegerField(default=1, help_text='Number of individual units per supplier pack — PO quantities must be a multiple of this')
     
     # Pricing
+    pack_cost_price = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True, help_text='Supplier pack price. Unit cost is derived from pack_cost_price / pack_size')
     average_landed_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Average cost per item across POs')
     product_url = models.URLField(max_length=500, blank=True, default='', help_text='Link to supplier product page')
     
@@ -948,6 +956,22 @@ class StockItem(models.Model):
     def sell_price(self):
         """Sell price = (cost + 10) * 1.1"""
         return (self.cost + Decimal('10')) * Decimal('1.1')
+
+    def sync_pack_pricing(self):
+        """Keep unit cost and pack cost in sync using pack_size."""
+        pack_size = int(self.pack_size or 1)
+        if pack_size < 1:
+            pack_size = 1
+        self.pack_size = pack_size
+
+        if self.pack_cost_price is not None:
+            pack_cost = Decimal(str(self.pack_cost_price)).quantize(Decimal('0.001'))
+            self.pack_cost_price = pack_cost
+            self.cost = (pack_cost / Decimal(pack_size)).quantize(Decimal('0.001'))
+        else:
+            unit_cost = Decimal(str(self.cost or 0)).quantize(Decimal('0.001'))
+            self.cost = unit_cost
+            self.pack_cost_price = (unit_cost * Decimal(pack_size)).quantize(Decimal('0.001'))
     
     @property
     def needs_stock_take(self):
@@ -958,6 +982,10 @@ class StockItem(models.Model):
     
     def __str__(self):
         return f"{self.sku} - {self.name}"
+
+    def save(self, *args, **kwargs):
+        self.sync_pack_pricing()
+        super().save(*args, **kwargs)
 
 
 class ProductLink(models.Model):
@@ -1006,8 +1034,8 @@ class StockHistory(models.Model):
 class PriceHistory(models.Model):
     """Track cost price changes for a product over time"""
     stock_item = models.ForeignKey(StockItem, on_delete=models.CASCADE, related_name='price_history')
-    old_price = models.DecimalField(max_digits=10, decimal_places=2)
-    new_price = models.DecimalField(max_digits=10, decimal_places=2)
+    old_price = models.DecimalField(max_digits=10, decimal_places=3)
+    new_price = models.DecimalField(max_digits=10, decimal_places=3)
     change_source = models.CharField(max_length=50, choices=[
         ('invoice', 'Invoice Price Update'),
         ('manual', 'Manual Edit'),

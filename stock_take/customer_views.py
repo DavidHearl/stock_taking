@@ -2031,11 +2031,64 @@ def customer_manage_payments(request, pk):
     sales = list(
         customer.anthill_sales
         .select_related('order')
-        .prefetch_related('payments')
         .exclude(activity_type__icontains='lead')
         .exclude(activity_type__icontains='enquir')
         .order_by('-activity_date')
     )
+
+    all_customer_payments = list(
+        AnthillPayment.objects
+        .filter(sale__customer=customer)
+        .order_by('date', 'id')
+    )
+
+    def _payment_split_group_key(payment):
+        # Group split/distributed payments so UI can show they belong together.
+        if (payment.payment_type or '').strip() == 'Xero Distribution' or (payment.location or '').strip().lower() == 'distribute':
+            ts = payment.created_at.strftime('%Y%m%d%H%M%S') if payment.created_at else ''
+            return f'distribute:{ts}:{payment.source}:{payment.date}'
+
+        # For split payments: extract base ID (strip any _split/_copy suffix)
+        anthill_pid = (payment.anthill_payment_id or '').strip()
+        if not anthill_pid:
+            return None
+        
+        # Extract base UUID (everything before first _split or _copy)
+        base_id = anthill_pid.split('_split')[0].split('_copy')[0]
+        if base_id != anthill_pid:
+            # This payment has a suffix, so it's definitely a split/copy
+            return f'split:{base_id}'
+        
+        # Check if there are other payments with this base_id + suffix
+        if any(p.anthill_payment_id and (p.anthill_payment_id.startswith(base_id + '_split') or p.anthill_payment_id.startswith(base_id + '_copy')) for p in all_customer_payments if p.pk != payment.pk):
+            return f'split:{base_id}'
+        
+        return None
+
+    payments_by_sale = {}
+    for payment in all_customer_payments:
+        payments_by_sale.setdefault(payment.sale_id, []).append(payment)
+
+    split_groups = {}
+    for payment in all_customer_payments:
+        group_key = _payment_split_group_key(payment)
+        if not group_key:
+            continue
+        split_groups.setdefault(group_key, []).append(payment.pk)
+
+    # Only mark a group as truly split if payments are on different sales
+    split_group_meta = {}
+    for group_key, payment_ids in split_groups.items():
+        if len(payment_ids) < 2:
+            continue
+        # Get the sales for these payments
+        payment_objs = [p for p in all_customer_payments if p.pk in payment_ids]
+        sales_in_group = set(p.sale_id for p in payment_objs)
+        # Only mark as split if payments span multiple sales
+        if len(sales_in_group) >= 2:
+            label = 'Distributed' if group_key.startswith('distribute:') else 'Split'
+            for pid in payment_ids:
+                split_group_meta[pid] = {'label': label, 'count': len(payment_ids)}
 
     sales_data = []
     grand_total_value = Decimal('0')
@@ -2043,7 +2096,11 @@ def customer_manage_payments(request, pk):
     grand_total_outstanding = Decimal('0')
 
     for sale in sales:
-        all_payments = list(sale.payments.all().order_by('date'))
+        all_payments = list(payments_by_sale.get(sale.pk, []))
+        for payment in all_payments:
+            meta = split_group_meta.get(payment.pk)
+            payment.split_group_label = meta['label'] if meta else ''
+            payment.split_group_count = meta['count'] if meta else 0
         active_payments = [p for p in all_payments if not p.ignored]
         total_paid, discount = _match_credits_to_payments(active_payments)
         sale_value = sale.sale_value or Decimal('0')
@@ -2829,4 +2886,149 @@ def bulk_delete_payments(request, pk):
 
     _refresh_xero_cache_linked_sales(customer)
     return JsonResponse({'success': True, 'deleted': deleted_count})
+
+
+@login_required
+def bulk_copy_payments(request, pk):
+    """Copy selected payments from manage-payments page (POST).
+
+    Expects JSON body:
+        {"payment_pks": [int, ...]}
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    customer = get_object_or_404(Customer, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    pks = data.get('payment_pks', [])
+    if not pks:
+        return JsonResponse({'success': False, 'error': 'No payments specified'}, status=400)
+
+    payments = list(
+        AnthillPayment.objects
+        .filter(pk__in=pks, sale__customer=customer)
+        .select_related('sale')
+    )
+
+    if not payments:
+        return JsonResponse({'success': False, 'error': 'No valid payments found'}, status=400)
+
+    created = 0
+    affected_sale_ids = set()
+
+    with transaction.atomic():
+        for payment in payments:
+            copy_pid = f"{payment.anthill_payment_id}_copy" if payment.anthill_payment_id else ''
+            AnthillPayment.objects.create(
+                sale=payment.sale,
+                source=payment.source,
+                xero_invoice_id=payment.xero_invoice_id,
+                xero_invoice_number=payment.xero_invoice_number,
+                invoice_total=payment.invoice_total,
+                invoice_amount_due=payment.invoice_amount_due,
+                invoice_status=payment.invoice_status,
+                anthill_payment_id=copy_pid,
+                payment_type=payment.payment_type,
+                date=payment.date,
+                location=payment.location,
+                user_name=payment.user_name,
+                amount=payment.amount,
+                status=payment.status,
+                ignored=payment.ignored,
+            )
+            created += 1
+            affected_sale_ids.add(payment.sale_id)
+
+    for sale in AnthillSale.objects.filter(pk__in=affected_sale_ids):
+        _recalculate_sale_financials(sale)
+
+    _refresh_xero_cache_linked_sales(customer)
+    return JsonResponse({'success': True, 'created': created})
+
+
+@login_required
+def edit_payment_from_manage(request, pk, payment_pk):
+    """Edit payment fields from manage-payments page (POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    customer = get_object_or_404(Customer, pk=pk)
+    payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__customer=customer)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    update_fields = []
+
+    if 'payment_type' in data:
+        payment.payment_type = str(data.get('payment_type', '')).strip()[:100]
+        update_fields.append('payment_type')
+
+    if 'location' in data:
+        payment.location = str(data.get('location', '')).strip()[:100]
+        update_fields.append('location')
+
+    if 'user_name' in data:
+        payment.user_name = str(data.get('user_name', '')).strip()[:150]
+        update_fields.append('user_name')
+
+    if 'status' in data:
+        payment.status = str(data.get('status', '')).strip()[:50]
+        update_fields.append('status')
+
+    if 'amount' in data:
+        try:
+            payment.amount = Decimal(str(data.get('amount', '0')))
+        except (InvalidOperation, ValueError):
+            return JsonResponse({'success': False, 'error': 'Invalid amount'}, status=400)
+        update_fields.append('amount')
+
+    if 'date' in data:
+        raw_date = str(data.get('date', '')).strip()
+        if raw_date:
+            from datetime import datetime as _dt
+            try:
+                payment.date = _dt.fromisoformat(raw_date)
+            except ValueError:
+                try:
+                    payment.date = _dt.strptime(raw_date, '%Y-%m-%d')
+                except ValueError:
+                    return JsonResponse({'success': False, 'error': 'Invalid date format'}, status=400)
+        else:
+            payment.date = None
+        update_fields.append('date')
+
+    if 'ignored' in data:
+        payment.ignored = bool(data.get('ignored'))
+        update_fields.append('ignored')
+
+    if not update_fields:
+        return JsonResponse({'success': False, 'error': 'No fields provided'}, status=400)
+
+    update_fields.append('updated_at')
+    payment.save(update_fields=update_fields)
+
+    _recalculate_sale_financials(payment.sale)
+    _refresh_xero_cache_linked_sales(customer)
+
+    return JsonResponse({
+        'success': True,
+        'payment': {
+            'pk': payment.pk,
+            'payment_type': payment.payment_type,
+            'amount': str(payment.amount) if payment.amount is not None else '',
+            'date': payment.date.date().isoformat() if payment.date else '',
+            'status': payment.status,
+            'location': payment.location,
+            'user_name': payment.user_name,
+            'ignored': payment.ignored,
+        }
+    })
 

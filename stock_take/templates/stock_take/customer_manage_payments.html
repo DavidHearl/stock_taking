@@ -118,6 +118,9 @@
             {% if entry.payments %}
             <div class="pm-bulk-bar" id="bulkBar-{{ sale.pk }}" style="display:none;">
                 <span class="pm-bulk-summary" id="bulkSummary-{{ sale.pk }}"></span>
+                <button class="btn btn-sm btn-outline-primary" onclick="bulkCopyPayments({{ sale.pk }})">
+                    <i class="bi bi-copy"></i> Copy Selected
+                </button>
                 <button class="btn btn-sm btn-outline-danger" onclick="bulkDeletePayments({{ sale.pk }})">
                     <i class="bi bi-trash"></i> Delete Selected
                 </button>
@@ -129,6 +132,7 @@
                         <th class="pm-col-grip"></th>
                         <th>Source</th>
                         <th>Type / Reference</th>
+                        <th>Split</th>
                         <th>Date</th>
                         <th>Amount</th>
                         <th>Status</th>
@@ -142,6 +146,12 @@
                         data-payment-pk="{{ p.pk }}"
                         data-sale-pk="{{ sale.pk }}"
                         data-amount="{{ p.amount|default:0 }}"
+                        data-payment-type="{{ p.payment_type|default:''|escapejs }}"
+                        data-payment-date="{% if p.date %}{{ p.date|date:'Y-m-d' }}{% endif %}"
+                        data-payment-status="{{ p.status|default:''|escapejs }}"
+                        data-payment-location="{{ p.location|default:''|escapejs }}"
+                        data-payment-user-name="{{ p.user_name|default:''|escapejs }}"
+                        data-payment-ignored="{{ p.ignored|yesno:'true,false' }}"
                         ondragstart="handleDragStart(event, this)"
                         ondragend="handleDragEnd(this)">
                         <td class="pm-col-check"><input type="checkbox" class="pm-payment-check" data-payment-pk="{{ p.pk }}" data-sale-pk="{{ sale.pk }}"></td>
@@ -164,6 +174,15 @@
                                 {% endif %}
                             {% endif %}
                         </td>
+                        <td>
+                            {% if p.split_group_count %}
+                            <span class="pm-split-badge" title="This payment is {{ p.split_group_label|lower }} across {{ p.split_group_count }} sales.">
+                                {{ p.split_group_label }} x{{ p.split_group_count }}
+                            </span>
+                            {% else %}
+                            <span style="color:var(--text-muted);">-</span>
+                            {% endif %}
+                        </td>
                         <td>{{ p.date|date:"d/m/Y"|default:"-" }}</td>
                         <td class="pm-amount-cell {% if p.amount < 0 %}pm-amount-negative{% endif %}">
                             {% if p.amount %}£{{ p.amount|floatformat:2|intcomma }}{% else %}-{% endif %}
@@ -178,13 +197,16 @@
                             {% endif %}
                         </td>
                         <td class="pm-col-actions">
-                            <button class="pm-action-btn move" onclick="event.stopPropagation(); openMoveModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Move to another sale">
+                            <button class="pm-action-btn edit" onclick="event.stopPropagation(); openEditModal({{ p.pk }})" title="Edit payment" aria-label="Edit payment">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="pm-action-btn move" onclick="event.stopPropagation(); openMoveModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Move to another sale" aria-label="Move to another sale">
                                 <i class="bi bi-arrow-right-circle"></i>
                             </button>
-                            <button class="pm-action-btn split" onclick="event.stopPropagation(); openSplitModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Split between sales">
+                            <button class="pm-action-btn split" onclick="event.stopPropagation(); openSplitModal({{ p.pk }}, {{ sale.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Split between sales" aria-label="Split between sales">
                                 <i class="bi bi-scissors"></i>
                             </button>
-                            <button class="pm-action-btn delete" onclick="event.stopPropagation(); deletePayment({{ p.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Delete payment">
+                            <button class="pm-action-btn delete" onclick="event.stopPropagation(); deletePayment({{ p.pk }}, '{{ p.payment_type|default:"Payment" }}', {{ p.amount|default:0 }})" title="Delete payment" aria-label="Delete payment">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
@@ -274,6 +296,52 @@
     </div>
 </dialog>
 
+<!-- Edit Payment Modal -->
+<dialog id="editPaymentModal">
+    <div class="pm-modal-header">
+        <div class="pm-modal-title">
+            <i class="bi bi-pencil" style="color:var(--primary-color);"></i>
+            <span>Edit Payment</span>
+        </div>
+        <button class="pm-modal-close" onclick="document.getElementById('editPaymentModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pm-modal-body">
+        <div class="pm-modal-info">Editing payment <strong id="editPaymentPkLabel"></strong></div>
+        <div>
+            <label>Type / Reference</label>
+            <input type="text" id="editPaymentType" maxlength="100">
+        </div>
+        <div>
+            <label>Date</label>
+            <input type="date" id="editPaymentDate">
+        </div>
+        <div>
+            <label>Amount (£)</label>
+            <input type="number" id="editPaymentAmount" step="0.01">
+        </div>
+        <div>
+            <label>Status</label>
+            <input type="text" id="editPaymentStatus" maxlength="50">
+        </div>
+        <div>
+            <label>Location</label>
+            <input type="text" id="editPaymentLocation" maxlength="100">
+        </div>
+        <div>
+            <label>User</label>
+            <input type="text" id="editPaymentUser" maxlength="150">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:normal;">
+            <input type="checkbox" id="editPaymentIgnored"> Ignored
+        </label>
+        <div class="pm-modal-footer">
+            <button type="button" class="btn btn-md btn-outline-secondary" onclick="document.getElementById('editPaymentModal').close()">Cancel</button>
+            <button type="button" class="btn btn-md btn-primary" onclick="confirmEditPayment()"><i class="bi bi-floppy"></i> Save</button>
+            <span id="editMsg" class="pm-modal-msg"></span>
+        </div>
+    </div>
+</dialog>
+
 <!-- Split Payment Modal -->
 <dialog id="splitPaymentModal">
     <div class="pm-modal-header">
@@ -313,6 +381,27 @@
                 Cancel
             </button>
             <span id="splitMsg" class="pm-modal-msg"></span>
+        </div>
+    </div>
+</dialog>
+
+<!-- Copy Payments Modal -->
+<dialog id="copyPaymentsModal">
+    <div class="pm-modal-header">
+        <div class="pm-modal-title">
+            <i class="bi bi-copy" style="color:var(--info-color);"></i>
+            <span>Copy Payments</span>
+        </div>
+        <button class="pm-modal-close" onclick="document.getElementById('copyPaymentsModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pm-modal-body">
+        <div class="pm-modal-info" id="copyPaymentsInfo"></div>
+        <div class="pm-modal-footer">
+            <button type="button" class="btn btn-md btn-outline-secondary" onclick="document.getElementById('copyPaymentsModal').close()">Cancel</button>
+            <button type="button" class="btn btn-md btn-primary" onclick="confirmCopyPayments()">
+                <i class="bi bi-copy"></i> Copy Payments
+            </button>
+            <span id="copyPaymentsMsg" class="pm-modal-msg"></span>
         </div>
     </div>
 </dialog>
@@ -386,6 +475,7 @@ const CSRF_TOKEN = '{{ csrf_token }}';
 const MOVE_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/move/';
 const SPLIT_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/split/';
 const DELETE_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/delete/';
+const EDIT_URL_TPL = '/customer/' + CUSTOMER_PK + '/manage-payments/{paymentPk}/edit/';
 const XERO_SEARCH_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/xero-search/';
 const XERO_LINK_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/xero-link/';
 const ANTHILL_SCRAPE_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/anthill-scrape/';
@@ -616,6 +706,7 @@ function deletePayment(paymentPk, label, amount) {
 
 // ── Bulk Delete ──────────────────────────────────────────────────────────────
 const BULK_DELETE_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/bulk-delete/';
+const BULK_COPY_URL = '/customer/' + CUSTOMER_PK + '/manage-payments/bulk-copy/';
 
 document.addEventListener('change', function(e) {
     if (e.target.classList.contains('pm-check-all')) {
@@ -663,6 +754,110 @@ function bulkDeletePayments(salePk) {
         }
     })
     .catch(() => alert('Network error'));
+}
+
+let copySalePk = null;
+let copyPaymentPks = [];
+
+function bulkCopyPayments(salePk) {
+    const checks = document.querySelectorAll('.pm-payment-check[data-sale-pk="' + salePk + '"]:checked');
+    if (!checks.length) return;
+
+    copySalePk = salePk;
+    copyPaymentPks = Array.from(checks).map(cb => parseInt(cb.dataset.paymentPk));
+    const count = copyPaymentPks.length;
+
+    document.getElementById('copyPaymentsInfo').textContent =
+        'Copy ' + count + ' selected payment' + (count > 1 ? 's' : '') + '?';
+    document.getElementById('copyPaymentsMsg').textContent = '';
+    document.getElementById('copyPaymentsModal').showModal();
+}
+
+function confirmCopyPayments() {
+    if (!copyPaymentPks.length) return;
+
+    const msg = document.getElementById('copyPaymentsMsg');
+    msg.textContent = 'Copying...';
+    msg.style.color = 'var(--text-secondary)';
+
+    fetch(BULK_COPY_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify({payment_pks: copyPaymentPks}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('copyPaymentsModal').close();
+            location.reload();
+        } else {
+            msg.textContent = data.error || 'Failed to copy payments';
+            msg.style.color = 'var(--danger-color)';
+        }
+    })
+    .catch(() => {
+        msg.textContent = 'Network error';
+        msg.style.color = 'var(--danger-color)';
+    });
+}
+
+// ── Edit Payment ─────────────────────────────────────────────────────────────
+let editPaymentPk = null;
+
+function openEditModal(paymentPk) {
+    const row = document.getElementById('pm-payment-' + paymentPk);
+    if (!row) return;
+
+    editPaymentPk = paymentPk;
+    document.getElementById('editPaymentPkLabel').textContent = '#' + paymentPk;
+    document.getElementById('editPaymentType').value = row.dataset.paymentType || '';
+    document.getElementById('editPaymentDate').value = row.dataset.paymentDate || '';
+    document.getElementById('editPaymentAmount').value = row.dataset.amount || '';
+    document.getElementById('editPaymentStatus').value = row.dataset.paymentStatus || '';
+    document.getElementById('editPaymentLocation').value = row.dataset.paymentLocation || '';
+    document.getElementById('editPaymentUser').value = row.dataset.paymentUserName || '';
+    document.getElementById('editPaymentIgnored').checked = row.dataset.paymentIgnored === 'true';
+    document.getElementById('editMsg').textContent = '';
+    document.getElementById('editPaymentModal').showModal();
+}
+
+function confirmEditPayment() {
+    if (!editPaymentPk) return;
+
+    const payload = {
+        payment_type: document.getElementById('editPaymentType').value.trim(),
+        date: document.getElementById('editPaymentDate').value,
+        amount: document.getElementById('editPaymentAmount').value,
+        status: document.getElementById('editPaymentStatus').value.trim(),
+        location: document.getElementById('editPaymentLocation').value.trim(),
+        user_name: document.getElementById('editPaymentUser').value.trim(),
+        ignored: document.getElementById('editPaymentIgnored').checked,
+    };
+
+    const msg = document.getElementById('editMsg');
+    msg.textContent = 'Saving...';
+    msg.style.color = 'var(--text-secondary)';
+
+    const url = EDIT_URL_TPL.replace('{paymentPk}', editPaymentPk);
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('editPaymentModal').close();
+            location.reload();
+        } else {
+            msg.textContent = data.error || 'Failed';
+            msg.style.color = 'var(--danger-color)';
+        }
+    })
+    .catch(() => {
+        msg.textContent = 'Network error';
+        msg.style.color = 'var(--danger-color)';
+    });
 }
 
 // ── Search Payments Modal ────────────────────────────────────────────────────

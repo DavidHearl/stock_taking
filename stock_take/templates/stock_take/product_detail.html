@@ -96,11 +96,17 @@
                 <td class="info-label">SKU</td>
                 <td class="info-value" data-field="sku" data-value="{{ product.sku }}">{{ product.sku }}</td>
                 <td class="info-label">Cost Price</td>
-                <td class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:2 }}</td>
+                <td class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:3 }}</td>
             </tr>
             <tr>
                 <td class="info-label">Name</td>
                 <td class="info-value" data-field="name" data-value="{{ product.name }}">{{ product.name }}</td>
+                <td class="info-label">Pack Cost Price</td>
+                <td class="info-value" data-field="pack_cost_price" data-value="{{ product.pack_cost_price|default:'' }}">{% if product.pack_cost_price is not None %}£{{ product.pack_cost_price|floatformat:3 }}{% else %}-{% endif %}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Order Source</td>
+                <td class="info-value" data-field="order_source" data-value="{{ product.order_source }}">{{ product.get_order_source_display }}</td>
                 <td class="info-label">Average Landed Cost</td>
                 <td class="info-value">£{{ product.average_landed_price|default:product.cost|floatformat:2 }}</td>
             </tr>
@@ -150,6 +156,12 @@
                 <td class="info-value" style="{% if remaining < product.par_level %}color: #dc3545;{% else %}color: #28a745;{% endif %}">{{ remaining }}{% if incoming %} <span style="color: #0d6efd; font-size: 0.85rem;">(+{{ incoming }} incoming)</span>{% endif %}</td>
                 <td class="info-label">Min Order Qty</td>
                 <td class="info-value" data-field="min_order_qty" data-value="{{ product.min_order_qty }}">{{ product.min_order_qty|default:"-" }}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Pack Size</td>
+                <td class="info-value" data-field="pack_size" data-value="{{ product.pack_size }}">{{ product.pack_size }}</td>
+                <td class="info-label"></td>
+                <td class="info-value">-</td>
             </tr>
 
             <!-- Supplier Information -->
@@ -676,6 +688,7 @@ const originalValues = {};
 const categoriesData = {{ categories|safe }};
 const stockTakeGroupsData = {{ stock_take_groups|safe }};
 const trackingChoices = {{ tracking_choices|safe }};
+const orderSourceChoices = {{ order_source_choices|safe }};
 const suppliersData = {{ suppliers|safe }};
 
 // Tab switching
@@ -962,8 +975,8 @@ function toggleEditMode() {
     if (overlay) overlay.style.display = 'flex';
     
     // Numeric fields that use step 0.01
-    const decimalFields = ['cost', 'length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'];
-    const integerFields = ['quantity', 'min_order_qty', 'par_level', 'box_quantity'];
+    const decimalFields = ['cost', 'pack_cost_price', 'length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'];
+    const integerFields = ['quantity', 'min_order_qty', 'par_level', 'box_quantity', 'pack_size'];
     
     // Make all fields editable
     document.querySelectorAll('.info-value[data-field]').forEach(field => {
@@ -996,6 +1009,13 @@ function toggleEditMode() {
                 const selected = value == choice[0] ? 'selected' : '';
                 input.innerHTML += `<option value="${choice[0]}" ${selected}>${choice[1]}</option>`;
             });
+        } else if (fieldName === 'order_source') {
+            input = document.createElement('select');
+            input.className = 'form-select';
+            orderSourceChoices.forEach(choice => {
+                const selected = value == choice[0] ? 'selected' : '';
+                input.innerHTML += `<option value="${choice[0]}" ${selected}>${choice[1]}</option>`;
+            });
         } else if (fieldName === 'description') {
             input = document.createElement('textarea');
             input.value = value;
@@ -1003,7 +1023,7 @@ function toggleEditMode() {
         } else if (decimalFields.includes(fieldName)) {
             input = document.createElement('input');
             input.type = 'number';
-            input.step = '0.01';
+            input.step = fieldName === 'cost' ? '0.001' : '0.01';
             input.value = value.replace('£', '').replace('-', '');
         } else if (integerFields.includes(fieldName)) {
             input = document.createElement('input');
@@ -1037,7 +1057,9 @@ function cancelEdit() {
         let displayValue = originalValues[fieldName];
         
         if (fieldName === 'cost') {
-            displayValue = '£' + parseFloat(displayValue).toFixed(2);
+            displayValue = '£' + parseFloat(displayValue).toFixed(3);
+        } else if (fieldName === 'pack_cost_price') {
+            displayValue = displayValue ? ('£' + parseFloat(displayValue).toFixed(3)) : '-';
         } else if (fieldName === 'category_id') {
             const cat = categoriesData.find(c => c.id == displayValue);
             displayValue = cat ? cat.name : 'Not Set';
@@ -1047,6 +1069,9 @@ function cancelEdit() {
         } else if (fieldName === 'tracking_type') {
             const choice = trackingChoices.find(c => c[0] == displayValue);
             displayValue = choice ? choice[1] : displayValue;
+        } else if (fieldName === 'order_source') {
+            const choice = orderSourceChoices.find(c => c[0] == displayValue);
+            displayValue = choice ? choice[1] : displayValue;
         }
         
         field.textContent = displayValue || '-';
@@ -1055,9 +1080,9 @@ function cancelEdit() {
 
 async function saveProduct() {
     const fieldLabels = {
-        sku: 'SKU', name: 'Name', description: 'Description', cost: 'Cost Price',
-        category_id: 'Category', tracking_type: 'Tracking Type', location: 'Location',
-        min_order_qty: 'Min Order Qty', par_level: 'Par Level',
+        sku: 'SKU', name: 'Name', description: 'Description', cost: 'Cost Price', pack_cost_price: 'Pack Cost Price',
+        category_id: 'Category', tracking_type: 'Tracking Type', order_source: 'Order Source', location: 'Location',
+        min_order_qty: 'Min Order Qty', par_level: 'Par Level', pack_size: 'Pack Size',
         supplier_id: 'Supplier', supplier_sku: 'Supplier SKU', product_url: 'Product URL',
         length: 'Length', width: 'Width', height: 'Height', weight: 'Weight',
         box_length: 'Box Length', box_width: 'Box Width', box_height: 'Box Height',
@@ -1082,8 +1107,11 @@ async function saveProduct() {
                 let newDisplay = newVal || '-';
 
                 if (fieldName === 'cost') {
-                    oldDisplay = '£' + parseFloat(oldVal || 0).toFixed(2);
-                    newDisplay = '£' + parseFloat(newVal || 0).toFixed(2);
+                    oldDisplay = '£' + parseFloat(oldVal || 0).toFixed(3);
+                    newDisplay = '£' + parseFloat(newVal || 0).toFixed(3);
+                } else if (fieldName === 'pack_cost_price') {
+                    oldDisplay = oldVal ? ('£' + parseFloat(oldVal || 0).toFixed(3)) : '-';
+                    newDisplay = newVal ? ('£' + parseFloat(newVal || 0).toFixed(3)) : '-';
                 } else if (fieldName === 'category_id') {
                     const oldCat = categoriesData.find(c => c.id == oldVal);
                     const newCat = categoriesData.find(c => c.id == newVal);
@@ -1097,6 +1125,11 @@ async function saveProduct() {
                 } else if (fieldName === 'tracking_type') {
                     const oldC = trackingChoices.find(c => c[0] == oldVal);
                     const newC = trackingChoices.find(c => c[0] == newVal);
+                    oldDisplay = oldC ? oldC[1] : oldVal;
+                    newDisplay = newC ? newC[1] : newVal;
+                } else if (fieldName === 'order_source') {
+                    const oldC = orderSourceChoices.find(c => c[0] == oldVal);
+                    const newC = orderSourceChoices.find(c => c[0] == newVal);
                     oldDisplay = oldC ? oldC[1] : oldVal;
                     newDisplay = newC ? newC[1] : newVal;
                 }

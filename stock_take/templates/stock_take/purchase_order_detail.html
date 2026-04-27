@@ -355,6 +355,7 @@
                         <th class="text-left">Name</th>
                         <th class="text-center">Order Price</th>
                         <th class="text-center">Order Qty</th>
+                        <th class="text-center">Pack Size</th>
                         <th class="text-center">Rec'd Qty</th>
                         <th class="text-center">Invoice Price</th>
                         <th class="text-right">Line Total</th>
@@ -375,7 +376,10 @@
                         <input type="hidden" id="new-name">
                         <input type="hidden" id="new-description">
                         <td><input type="number" class="po-inline-input text-right" id="new-order-price" placeholder="0.00" step="0.01" min="0" onchange="calcNewLineTotal()"></td>
-                        <td><input type="number" class="po-inline-input text-right" id="new-order-qty" placeholder="0" step="1" min="0" onchange="calcNewLineTotal()"></td>
+                        <td>
+                            <input type="number" class="po-inline-input text-right" id="new-order-qty" placeholder="0" step="1" min="1" onchange="calcNewLineTotal()">
+                        </td>
+                        <td class="text-center"><span id="new-pack-hint">-</span></td>
                         <td class="text-right">-</td>
                         <td class="text-right">-</td>
                         <td class="text-right" id="new-line-total">£0.00</td>
@@ -385,7 +389,7 @@
                         </td>
                     </tr>
                     {% for product in products %}
-                    <tr data-product-id="{{ product.id }}" data-order-qty="{{ product.order_quantity }}" data-received-qty="{{ product.received_quantity }}" data-sku="{{ product.sku|default:'' }}" data-name="{{ product.name|default:'' }}" {% if product.order_quantity > 0 and product.received_quantity >= product.order_quantity %}class="product-line-received"{% endif %}>
+                    <tr data-product-id="{{ product.id }}" data-pack-size="{{ product.stock_item.pack_size|default:1 }}" data-order-qty="{{ product.order_quantity }}" data-received-qty="{{ product.received_quantity }}" data-sku="{{ product.sku|default:'' }}" data-name="{{ product.name|default:'' }}" {% if product.order_quantity > 0 and product.received_quantity >= product.order_quantity %}class="product-line-received"{% endif %}>
                         <td>
                             <span class="po-product-sku po-view-val">{% if product.stock_item %}<a href="{% url 'product_detail' product.stock_item.id %}" class="po-sku-link">{{ product.sku|default:"-" }}</a>{% else %}{{ product.sku|default:"-" }}{% endif %}</span>
                             <input class="po-edit-input po-edit-val po-edit-narrow" data-field="sku" value="{{ product.sku|default:'' }}" style="display:none;">
@@ -409,7 +413,10 @@
                             <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price|floatformat:2 }}" oninput="recalcRowLineTotal(this)">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="1" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this)">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="{{ product.stock_item.pack_size|default:1 }}" min="{{ product.stock_item.pack_size|default:1 }}" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this)">
+                        </td>
+                        <td class="text-center">
+                            {% if product.stock_item and product.stock_item.pack_size > 1 %}<span class="po-pack-badge">Pack: {{ product.stock_item.pack_size }}</span>{% else %}-{% endif %}
                         </td>
                         <td class="text-right">
                             <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="1" value="{{ product.received_quantity|floatformat:0 }}">
@@ -436,7 +443,7 @@
                             </div>
                         </td>
                         <td class="text-right"><span class="alloc-sub-qty">{{ alloc.quantity|floatformat:0 }}</span></td>
-                        <td colspan="3"></td>
+                        <td colspan="4"></td>
                         <td class="text-center">
                             <button class="alloc-sub-remove" onclick="removeAllocation({{ purchase_order.workguru_id }}, {{ product.id }}, {{ alloc.id }}, this)" title="Remove allocation"><i class="bi bi-x-lg"></i></button>
                         </td>
@@ -458,7 +465,7 @@
                         <td class="text-right">
                             <input type="number" class="alloc-qty-input" id="alloc-qty-{{ product.id }}" value="1" min="1" step="1" placeholder="Qty">
                         </td>
-                        <td colspan="3"></td>
+                        <td colspan="4"></td>
                         <td class="text-center">
                             <button class="alloc-save-btn" onclick="saveAllocation({{ purchase_order.workguru_id }}, {{ product.id }})" title="Add"><i class="bi bi-check-lg"></i></button>
                             <button class="alloc-sub-remove" onclick="toggleAllocRow({{ product.id }})" title="Cancel"><i class="bi bi-x-lg"></i></button>
@@ -477,6 +484,7 @@
                         </td>
                         <td class="text-right">£{{ bp.order_price|floatformat:2 }}</td>
                         <td class="text-right">{{ bp.order_quantity|floatformat:0 }}</td>
+                        <td class="text-center">-</td>
                         <td class="text-right">{{ bp.received_quantity|floatformat:0 }}</td>
                         <td class="text-right">-</td>
                         <td class="text-right">£{{ bp.line_total|floatformat:2 }}</td>
@@ -489,12 +497,12 @@
                     <tr class="board-product-totals-row">
                         <td colspan="3" class="text-right"><strong>Total</strong></td>
                         <td class="text-right"><strong>{{ total_board_qty|floatformat:0 }}</strong></td>
-                        <td colspan="4"></td>
+                        <td colspan="5"></td>
                     </tr>
                     {% endif %}
                     {% if not products and not board_product_rows %}
                     <tr id="no-products-row">
-                        <td colspan="8" class="text-center" style="padding: 24px; color: var(--text-secondary);">
+                        <td colspan="9" class="text-center" style="padding: 24px; color: var(--text-secondary);">
                             <i class="bi bi-inbox" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
                             No products yet. Click <strong>Add Product</strong> above to get started.
                         </td>
@@ -2102,6 +2110,13 @@ function toggleAddProductRow() {
         ['new-order-price','new-order-qty'].forEach(id => {
             document.getElementById(id).value = '';
         });
+        const qtyReset = document.getElementById('new-order-qty');
+        qtyReset.step = 1; qtyReset.min = 1;
+        const packHintReset = document.getElementById('new-pack-hint');
+        if (packHintReset) {
+            packHintReset.textContent = '-';
+            packHintReset.className = '';
+        }
         document.getElementById('new-line-total').textContent = '£0.00';
         document.getElementById('product-search-results').style.display = 'none';
     }
@@ -2158,9 +2173,12 @@ function searchProducts(query) {
                     const safeSku = (item.sku || '').replace(/'/g, "\\'");
                     const safeName = (item.name || '').replace(/'/g, "\\'");
                     const safeDesc = (item.description || '').replace(/'/g, "\\'").replace(/\n/g, ' ');
-                    return `<div class="product-search-item" onclick="selectProduct(${item.id}, '${safeSku}', '${safeName}', '${item.cost}', '${safeDesc}')">
+                    const packSize = item.pack_size || 1;
+                    const packBadge = packSize > 1 ? `<span class="po-pack-badge">Pack: ${packSize}</span>` : '';
+                    return `<div class="product-search-item" onclick="selectProduct(${item.id}, '${safeSku}', '${safeName}', '${item.cost}', '${safeDesc}', ${packSize})">
                         <span class="product-search-sku">${item.sku}</span>
                         <span class="product-search-name">${item.name}</span>
+                        ${packBadge}
                         <span class="product-search-cost">£${parseFloat(item.cost).toFixed(2)}</span>
                     </div>`;
                 }).join('');
@@ -2173,7 +2191,8 @@ function searchProducts(query) {
     }, 250);
 }
 
-function selectProduct(id, sku, name, cost, description) {
+function selectProduct(id, sku, name, cost, description, packSize) {
+    packSize = packSize || 1;
     // Hide search, show selected product in correct columns
     document.getElementById('search-cell').style.display = 'none';
     document.getElementById('selected-sku').style.display = '';
@@ -2187,7 +2206,20 @@ function selectProduct(id, sku, name, cost, description) {
     document.getElementById('new-description').value = description;
     document.getElementById('new-order-price').value = parseFloat(cost).toFixed(2);
     document.getElementById('product-search-results').style.display = 'none';
-    document.getElementById('new-order-qty').focus();
+
+    const qtyInput = document.getElementById('new-order-qty');
+    qtyInput.step = packSize;
+    qtyInput.min = packSize;
+    qtyInput.value = packSize;
+    const packHint = document.getElementById('new-pack-hint');
+    if (packSize > 1) {
+        packHint.textContent = 'Pack: ' + packSize;
+        packHint.className = 'po-pack-badge';
+    } else {
+        packHint.textContent = '-';
+        packHint.className = '';
+    }
+    qtyInput.focus();
     calcNewLineTotal();
 }
 

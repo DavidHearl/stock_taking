@@ -82,9 +82,15 @@
             <div class="info-group">
                 <h3>Pricing</h3>
                 <div class="info-row">
-                    <div class="info-label">Cost Price</div>
+                    <div class="info-label">Pack Cost Price</div>
                     <div class="info-value">
-                        <input type="number" id="field-cost" step="0.01" min="0" value="0.00" placeholder="0.00">
+                        <input type="number" id="field-pack_cost_price" step="0.001" min="0" value="0.000" placeholder="0.000">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Cost Price (Per Item)</div>
+                    <div class="info-value">
+                        <input type="number" id="field-cost" step="0.001" min="0" value="0.000" placeholder="0.000" readonly>
                     </div>
                 </div>
             </div>
@@ -98,6 +104,12 @@
                         <select id="field-category_id">
                             <option value="">Not Set</option>
                         </select>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Order Source</div>
+                    <div class="info-value">
+                        <select id="field-order_source"></select>
                     </div>
                 </div>
             </div>
@@ -180,6 +192,12 @@
                         <input type="number" id="field-min_order_qty" step="1" min="0" placeholder="Optional">
                     </div>
                 </div>
+                <div class="info-row">
+                    <div class="info-label">Pack Size</div>
+                    <div class="info-value">
+                        <input type="number" id="field-pack_size" step="1" min="1" value="1">
+                    </div>
+                </div>
             </div>
 
             <!-- Product Dimensions Section -->
@@ -248,8 +266,18 @@
 const categoriesData = {{ categories|safe }};
 const stockTakeGroupsData = {{ stock_take_groups|safe }};
 const trackingChoices = {{ tracking_choices|safe }};
+const orderSourceChoices = {{ order_source_choices|safe }};
 const suppliersData = {{ suppliers|safe }};
 const prefillData = {{ prefill|safe }};
+
+function updateDerivedUnitCost() {
+    const packCost = parseFloat(document.getElementById('field-pack_cost_price').value || '0');
+    const packSize = parseInt(document.getElementById('field-pack_size').value || '1', 10);
+    const safePackSize = packSize > 0 ? packSize : 1;
+    document.getElementById('field-pack_size').value = safePackSize;
+    const unitCost = packCost / safePackSize;
+    document.getElementById('field-cost').value = Number.isFinite(unitCost) ? unitCost.toFixed(3) : '0.000';
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     // Populate categories
@@ -280,6 +308,16 @@ document.addEventListener('DOMContentLoaded', function() {
         trackingSelect.appendChild(option);
     });
 
+    // Populate order source
+    const orderSourceSelect = document.getElementById('field-order_source');
+    orderSourceChoices.forEach(choice => {
+        const option = document.createElement('option');
+        option.value = choice[0];
+        option.textContent = choice[1];
+        if (choice[0] === 'item') option.selected = true;
+        orderSourceSelect.appendChild(option);
+    });
+
     // Populate suppliers
     const supplierSelect = document.getElementById('field-supplier_id');
     suppliersData.forEach(sup => {
@@ -298,13 +336,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const el = document.getElementById('field-' + f);
             if (el && prefillData[f] !== undefined) el.value = prefillData[f];
         });
-        const numFields = ['cost', 'par_level', 'min_order_qty', 'box_quantity'];
+        const numFields = ['cost', 'pack_cost_price', 'pack_size', 'par_level', 'min_order_qty', 'box_quantity'];
         numFields.forEach(f => {
             const el = document.getElementById('field-' + f);
             if (el && prefillData[f]) el.value = prefillData[f];
         });
         // Selects
-        ['category_id', 'stock_take_group_id', 'supplier_id', 'tracking_type'].forEach(f => {
+        ['category_id', 'stock_take_group_id', 'supplier_id', 'tracking_type', 'order_source'].forEach(f => {
             const el = document.getElementById('field-' + f);
             if (el && prefillData[f]) el.value = prefillData[f];
         });
@@ -317,6 +355,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // Focus SKU field normally
         document.getElementById('field-sku').focus();
     }
+
+    document.getElementById('field-pack_cost_price').addEventListener('input', updateDerivedUnitCost);
+    document.getElementById('field-pack_size').addEventListener('input', updateDerivedUnitCost);
+    updateDerivedUnitCost();
 });
 
 async function saveNewProduct() {
@@ -339,12 +381,15 @@ async function saveNewProduct() {
     formData.append('name', name);
     formData.append('description', document.getElementById('field-description').value.trim());
     formData.append('cost', document.getElementById('field-cost').value || '0');
+    formData.append('pack_cost_price', document.getElementById('field-pack_cost_price').value || '');
     formData.append('quantity', document.getElementById('field-quantity').value || '0');
     formData.append('par_level', document.getElementById('field-par_level').value || '0');
     formData.append('location', document.getElementById('field-location').value.trim());
     formData.append('serial_or_batch', document.getElementById('field-serial_or_batch').value.trim());
     formData.append('tracking_type', document.getElementById('field-tracking_type').value);
+    formData.append('order_source', document.getElementById('field-order_source').value || 'item');
     formData.append('min_order_qty', document.getElementById('field-min_order_qty').value || '');
+    formData.append('pack_size', document.getElementById('field-pack_size').value || '1');
     formData.append('category_id', document.getElementById('field-category_id').value || '');
     formData.append('stock_take_group_id', document.getElementById('field-stock_take_group_id').value || '');
     formData.append('supplier_id', document.getElementById('field-supplier_id').value || '');

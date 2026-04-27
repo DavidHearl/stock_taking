@@ -15,7 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db.models import Sum, F, Count, Q, Prefetch
-from django.db.models.functions import Greatest
+from django.db.models.functions import Greatest, Coalesce
 from django.db import models
 from django.views.decorators.http import require_http_methods, require_POST
 from .models import StockItem, StockHistory, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
@@ -404,7 +404,7 @@ def load_order_indicators_ajax(request):
         incoming_rows = (
             PurchaseOrderProduct.objects
             .filter(sku__in=unique_skus, purchase_order__status='Approved')
-            .values('sku').annotate(total=Sum('order_quantity'))
+            .values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
         )
         incoming_qtys = {r['sku']: float(r['total'] or 0) for r in incoming_rows}
 
@@ -1212,7 +1212,7 @@ def shortages(request):
         rau_incoming_data = PurchaseOrderProduct.objects.filter(
             sku__in=rau_incoming_skus,
             purchase_order__status='Approved'
-        ).values('sku').annotate(total=RauSum('order_quantity'))
+        ).values('sku').annotate(total=RauSum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
         rau_incoming_map = {item['sku']: float(item['total'] or 0) for item in rau_incoming_data}
         
         for key, data in upcoming_requirements.items():
@@ -1298,7 +1298,7 @@ def shortages(request):
         predicted_incoming_data = PurchaseOrderProduct.objects.filter(
             sku__in=predicted_skus,
             purchase_order__status='Approved'
-        ).values('sku').annotate(total=Sum('order_quantity'))
+        ).values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
         predicted_incoming_map = {item['sku']: float(item['total'] or 0) for item in predicted_incoming_data}
         for key, data in historical_usage.items():
             data['incoming_qty'] = predicted_incoming_map.get(key, 0)
@@ -1694,7 +1694,7 @@ def shortages(request):
         incoming_data = PurchaseOrderProduct.objects.filter(
             sku__in=incoming_skus,
             purchase_order__status='Approved'
-        ).values('sku').annotate(total=Sum('order_quantity'))
+        ).values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
         incoming_map = {item['sku']: float(item['total'] or 0) for item in incoming_data}
         
         for key, data in upcoming_requirements.items():
@@ -1773,7 +1773,7 @@ def shortages(request):
         stock_predicted_incoming_data = PurchaseOrderProduct.objects.filter(
             sku__in=stock_predicted_skus,
             purchase_order__status='Approved'
-        ).values('sku').annotate(total=Sum('order_quantity'))
+        ).values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
         stock_predicted_incoming_map = {row['sku']: float(row['total'] or 0) for row in stock_predicted_incoming_data}
         for key, data in historical_usage.items():
             data['incoming_qty'] = stock_predicted_incoming_map.get(key, 0)
@@ -8587,6 +8587,7 @@ def update_stock_items_batch(request):
                 try:
                     item_id = item_data.get('id')
                     item = StockItem.objects.get(id=item_id)
+                    old_cost = item.cost
                     
                     # Update fields
                     if 'sku' in item_data:
@@ -8594,20 +8595,10 @@ def update_stock_items_batch(request):
                     if 'name' in item_data:
                         item.name = item_data['name']
                     if 'cost' in item_data:
-                        old_cost = item.cost
-                        new_cost = Decimal(str(item_data['cost']))
-                        if new_cost != old_cost:
-                            from .models import PriceHistory
-                            PriceHistory.objects.create(
-                                stock_item=item,
-                                old_price=old_cost,
-                                new_price=new_cost,
-                                change_source='manual',
-                                reference='Product detail edit',
-                                notes=f'Cost changed from £{old_cost} to £{new_cost} via product detail',
-                                created_by=request.user if request.user.is_authenticated else None,
-                            )
-                        item.cost = new_cost
+                        item.cost = Decimal(str(item_data['cost']))
+                    if 'pack_cost_price' in item_data:
+                        value = item_data['pack_cost_price']
+                        item.pack_cost_price = Decimal(str(value)) if value else None
                     if 'location' in item_data:
                         item.location = item_data['location']
                     if 'quantity' in item_data:
@@ -8629,6 +8620,8 @@ def update_stock_items_batch(request):
                             item.quantity = new_quantity
                     if 'tracking_type' in item_data:
                         item.tracking_type = item_data['tracking_type']
+                    if 'order_source' in item_data:
+                        item.order_source = item_data['order_source'] or 'item'
                     if 'min_order_qty' in item_data:
                         value = item_data['min_order_qty']
                         item.min_order_qty = int(value) if value else None
@@ -8658,8 +8651,26 @@ def update_stock_items_batch(request):
                     if 'box_quantity' in item_data:
                         value = item_data['box_quantity']
                         item.box_quantity = int(value) if value else None
+                    if 'pack_size' in item_data:
+                        value = item_data['pack_size']
+                        item.pack_size = int(value) if value else 1
                     if 'product_url' in item_data:
                         item.product_url = item_data['product_url']
+
+                    # Keep unit cost synchronized with pack cost and pack size.
+                    item.sync_pack_pricing()
+
+                    if item.cost != old_cost:
+                        from .models import PriceHistory
+                        PriceHistory.objects.create(
+                            stock_item=item,
+                            old_price=old_cost,
+                            new_price=item.cost,
+                            change_source='manual',
+                            reference='Product detail edit',
+                            notes=f'Cost changed from £{old_cost} to £{item.cost} via product detail',
+                            created_by=request.user if request.user.is_authenticated else None,
+                        )
                     
                     item.save()
                     updated_count += 1
@@ -12644,8 +12655,19 @@ def active_projects(request):
     range_end = today
 
     if tab == 'timeline':
-        range_start = today - timedelta(weeks=weeks_back)
+        default_start = today - timedelta(weeks=weeks_back)
         range_end = today + timedelta(weeks=weeks_ahead)
+
+        # Timeline should always be scrollable back to the oldest active project date.
+        oldest_active_start = (
+            Order.objects
+            .filter(job_finished=False)
+            .filter(models.Q(order_date__isnull=False) | models.Q(fit_date__isnull=False))
+            .annotate(start_date=models.functions.Coalesce('order_date', 'fit_date'))
+            .aggregate(min_start=models.Min('start_date'))
+            .get('min_start')
+        )
+        range_start = oldest_active_start if oldest_active_start else default_start
 
         orders = (
             Order.objects

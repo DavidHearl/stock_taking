@@ -93,7 +93,7 @@ def product_detail(request, item_id):
         purchase_order__expected_date__isnull=True
     ).exclude(
         purchase_order__expected_date=''
-    ).select_related('purchase_order')
+    ).select_related('purchase_order', 'stock_item')
     
     for po_line in incoming_po_lines:
         try:
@@ -105,7 +105,8 @@ def product_detail(request, item_id):
                 expected = datetime.strptime(exp_str[:10], '%Y-%m-%d').date()
             
             if expected >= today:
-                incoming_qty = int(po_line.order_quantity) - int(po_line.received_quantity)
+                pack_size = int(getattr(po_line.stock_item, 'pack_size', 1) or 1)
+                incoming_qty = int((po_line.order_quantity - po_line.received_quantity) * pack_size)
                 if incoming_qty > 0:
                     date_key = expected.isoformat()
                     future_events[date_key] = future_events.get(date_key, 0) + incoming_qty
@@ -183,6 +184,7 @@ def product_detail(request, item_id):
         'stock_take_groups': json.dumps(stock_take_groups),
         'suppliers': json.dumps(suppliers),
         'tracking_choices': json.dumps(list(StockItem.TRACKING_CHOICES)),
+        'order_source_choices': json.dumps(list(StockItem.ORDER_SOURCE_CHOICES)),
         'stock_history': json.dumps(history_data),
         'allocated': allocated,
         'incoming': total_incoming,
@@ -261,9 +263,11 @@ def add_product(request):
                 name=name,
                 description=data.get('description', ''),
                 cost=Decimal(str(data.get('cost', '0') or '0')),
+                pack_cost_price=Decimal(str(data.get('pack_cost_price'))) if data.get('pack_cost_price') else None,
                 location=data.get('location', ''),
                 quantity=int(data.get('quantity', 0) or 0),
                 tracking_type=data.get('tracking_type', 'not-classified'),
+                order_source=data.get('order_source', 'item'),
                 min_order_qty=int(data['min_order_qty']) if data.get('min_order_qty') else None,
                 par_level=int(data.get('par_level', 0) or 0),
                 serial_or_batch=data.get('serial_or_batch', ''),
@@ -302,6 +306,10 @@ def add_product(request):
             box_qty = data.get('box_quantity')
             if box_qty:
                 product.box_quantity = int(box_qty)
+
+            pack_sz = data.get('pack_size')
+            if pack_sz:
+                product.pack_size = int(pack_sz)
             
             # Image
             if image_file:
@@ -355,6 +363,9 @@ def add_product(request):
                 'name': f'Copy of {source.name}',
                 'description': source.description or '',
                 'cost': str(source.cost or '0'),
+                'pack_cost_price': str(source.pack_cost_price) if source.pack_cost_price is not None else '',
+                'pack_size': str(source.pack_size or 1),
+                'order_source': source.order_source or 'item',
                 'location': source.location or '',
                 'tracking_type': source.tracking_type or '',
                 'par_level': str(source.par_level or '0'),
@@ -382,6 +393,7 @@ def add_product(request):
         'stock_take_groups': json.dumps(stock_take_groups),
         'suppliers': json.dumps(suppliers),
         'tracking_choices': json.dumps(list(StockItem.TRACKING_CHOICES)),
+        'order_source_choices': json.dumps(list(StockItem.ORDER_SOURCE_CHOICES)),
         'prefill': json.dumps(prefill),
     })
 

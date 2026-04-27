@@ -1828,6 +1828,7 @@ def product_search(request):
             'cost': str(item.cost),
             'description': item.description or '',
             'quantity': item.quantity,
+            'pack_size': item.pack_size,
         })
 
     return JsonResponse({'results': results})

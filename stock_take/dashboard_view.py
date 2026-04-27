@@ -319,7 +319,7 @@ def dashboard(request):
         PurchaseOrderProduct.objects
         .filter(sku__in=shortage_skus, purchase_order__status='Approved')
         .values('sku')
-        .annotate(total=Sum('order_quantity'))
+        .annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), Value(1))))
     )
     incoming_map = {item['sku']: float(item['total'] or 0) for item in incoming_data}
 
@@ -346,12 +346,13 @@ def dashboard(request):
         )
         .exclude(purchase_order__supplier_name__icontains='carnehill')
         .exclude(purchase_order__supplier_name__icontains='os doors')
-        .select_related('purchase_order')
+        .select_related('purchase_order', 'stock_item')
     )
     # Build a dict keyed by SKU to aggregate same items
     incoming_by_sku = {}
     for p in incoming_products:
-        outstanding = float((p.order_quantity or 0) - (p.received_quantity or 0))
+        pack_size = int(getattr(p.stock_item, 'pack_size', 1) or 1)
+        outstanding = float(((p.order_quantity or 0) - (p.received_quantity or 0)) * pack_size)
         if outstanding <= 0:
             continue
         sku_key = p.sku or p.name or str(p.id)
