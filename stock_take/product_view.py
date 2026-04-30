@@ -6,7 +6,7 @@ import json
 from decimal import Decimal
 from datetime import datetime, timedelta
 from django.utils import timezone
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum
 
 
@@ -533,3 +533,39 @@ def product_delete_link(request, item_id, link_id):
     )
 
     return JsonResponse({'success': True})
+
+
+@login_required
+@require_POST
+def product_delete_price_history(request, item_id, history_id):
+    """Delete the latest price history entry and revert product cost to previous value."""
+    product = get_object_or_404(StockItem, id=item_id)
+    entry = get_object_or_404(PriceHistory, id=history_id, stock_item=product)
+
+    latest = PriceHistory.objects.filter(stock_item=product).order_by('-created_at', '-id').first()
+    if not latest or latest.id != entry.id:
+        return JsonResponse({
+            'success': False,
+            'error': 'Only the latest price change can be deleted.'
+        }, status=400)
+
+    with transaction.atomic():
+        reverted_cost = Decimal(str(entry.old_price or 0)).quantize(Decimal('0.001'))
+        product.cost = reverted_cost
+        pack_size = int(product.pack_size or 1)
+        if pack_size < 1:
+            pack_size = 1
+        product.pack_cost_price = (reverted_cost * Decimal(pack_size)).quantize(Decimal('0.001'))
+        product.save(update_fields=['cost', 'pack_cost_price'])
+        entry.delete()
+
+    log_activity(
+        user=request.user,
+        event_type='update',
+        description=(
+            f"{request.user.get_full_name() or request.user.username} deleted latest price change "
+            f"for {product.sku} and reverted cost to £{reverted_cost}."
+        ),
+    )
+
+    return JsonResponse({'success': True, 'new_cost': str(reverted_cost)})

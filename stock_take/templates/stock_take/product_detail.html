@@ -233,6 +233,7 @@
                     <th>Source</th>
                     <th>Reference</th>
                     <th>By</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -253,6 +254,15 @@
                     <td>{{ entry.get_change_source_display }}</td>
                     <td>{{ entry.reference|default:"-" }}</td>
                     <td>{{ entry.created_by.get_full_name|default:entry.created_by.username|default:"-" }}</td>
+                    <td class="text-center">
+                        {% if forloop.first %}
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteLatestPriceChange({{ entry.id }})" title="Delete latest change and revert price">
+                            <i class="bi bi-arrow-counterclockwise"></i>
+                        </button>
+                        {% else %}
+                        <span style="opacity:.45;">-</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -680,9 +690,33 @@
     </div>
 </div>
 
+<!-- Delete Latest Price Change Modal -->
+<div class="modal" id="deletePriceChangeModal">
+    <div class="modal-dialog" style="max-width: 480px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5><i class="bi bi-exclamation-triangle"></i> Revert Latest Price Change</h5>
+                <button type="button" class="btn-close" onclick="closeDeletePriceChangeModal()"></button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0; color:var(--text-secondary);">
+                    Delete the latest price change and revert this product cost to the previous value?
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeDeletePriceChangeModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeletePriceChangeBtn" onclick="confirmDeleteLatestPriceChange()">
+                    <i class="bi bi-arrow-counterclockwise"></i> Revert Price
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let isEditMode = false;
 const originalValues = {};
+let pendingPriceHistoryDeleteId = null;
 
 // Categories and groups data
 const categoriesData = {{ categories|safe }};
@@ -1768,6 +1802,56 @@ function deleteProductLink(linkId) {
                 alert(data.error || 'Failed to delete link.');
             }
         });
+}
+
+function deleteLatestPriceChange(historyId) {
+    pendingPriceHistoryDeleteId = historyId;
+    const modal = document.getElementById('deletePriceChangeModal');
+    if (modal) modal.classList.add('show');
+}
+
+function closeDeletePriceChangeModal() {
+    pendingPriceHistoryDeleteId = null;
+    const modal = document.getElementById('deletePriceChangeModal');
+    if (modal) modal.classList.remove('show');
+}
+
+function confirmDeleteLatestPriceChange() {
+    if (!pendingPriceHistoryDeleteId) {
+        closeDeletePriceChangeModal();
+        return;
+    }
+
+    const btn = document.getElementById('confirmDeletePriceChangeBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Reverting...';
+    }
+
+    fetch(`/product/{{ product.id }}/price-history/${pendingPriceHistoryDeleteId}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(response => response.json().then(data => ({ ok: response.ok, data })))
+    .then(({ ok, data }) => {
+        if (!ok || !data.success) {
+            alert(data.error || 'Failed to delete price change');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Revert Price';
+            }
+            return;
+        }
+        closeDeletePriceChangeModal();
+        location.reload();
+    })
+    .catch(err => {
+        alert('Error deleting price change: ' + err);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Revert Price';
+        }
+    });
 }
 
 function updateLinkedCount(delta) {

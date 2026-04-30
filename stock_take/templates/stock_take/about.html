@@ -278,34 +278,14 @@
         <p class="about-stats-subtitle">Historical commit totals by position in repository history.</p>
         <div class="about-system-panel about-commit-panel">
             {% if commit_stats %}
-            <table class="about-media-table about-commit-table">
-                <thead>
-                    <tr>
-                        <th>Commit</th>
-                        <th>+ Lines</th>
-                        <th>- Lines</th>
-                        <th>Net</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for commit in commit_stats %}
-                    <tr>
-                        <td>
-                            {% if can_view_commit_links and commit.url %}
-                            <a href="{{ commit.url }}" target="_blank" rel="noopener" class="about-commit-link">{{ commit.short_hash }}</a>
-                            {% else %}
-                            {{ commit.short_hash|default:commit.number }}
-                            {% endif %}
-                        </td>
-                        <td class="about-commit-added">{{ commit.added|intcomma }}</td>
-                        <td class="about-commit-removed">{{ commit.removed|intcomma }}</td>
-                        <td class="{% if commit.net < 0 %}about-commit-removed{% else %}about-commit-added{% endif %}">
-                            {% if commit.net > 0 %}+{% endif %}{{ commit.net|intcomma }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="about-commit-chart-meta">
+                <span class="about-commit-pill about-commit-pill-added">Additions</span>
+                <span class="about-commit-pill about-commit-pill-removed">Removals</span>
+                <span class="about-commit-cap-note">Values capped at +/-10,000 for readability.</span>
+            </div>
+            <div class="about-commit-chart-wrap">
+                <canvas id="commitLineChart"></canvas>
+            </div>
             {% else %}
             <p class="about-stats-subtitle">No git commit stats available.</p>
             {% endif %}
@@ -367,6 +347,124 @@
             }
         }
     });
+
+    const commitCanvas = document.getElementById('commitLineChart');
+    if (commitCanvas) {
+        const commitCap = 10000;
+        const commitLabels = [{% for commit in commit_stats %}'{{ commit.period|default:"Unknown Period"|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+        const commitUrls = [{% for commit in commit_stats %}'{% if can_view_commit_links and commit.url %}{{ commit.url|escapejs }}{% endif %}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+        const additionsRaw = [{% for commit in commit_stats %}{{ commit.added|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}];
+        const removalsRaw = [{% for commit in commit_stats %}{{ commit.removed|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}];
+
+        const chronological = commitLabels.map(function(label, index) {
+            return {
+                label: label,
+                url: commitUrls[index],
+                added: additionsRaw[index],
+                removed: removalsRaw[index]
+            };
+        }).reverse();
+
+        const chartLabels = chronological.map(function(p) { return p.label; });
+        const chartUrls = chronological.map(function(p) { return p.url; });
+        const chartAdditionsRaw = chronological.map(function(p) { return p.added; });
+        const chartRemovalsRaw = chronological.map(function(p) { return p.removed; });
+
+        const additionsCapped = chartAdditionsRaw.map(function(v) { return Math.min(v, commitCap); });
+        const removalsCapped = chartRemovalsRaw.map(function(v) { return -Math.min(v, commitCap); });
+
+        function formatSigned(value) {
+            const abs = Math.abs(value);
+            return value < 0 ? '-' + abs.toLocaleString() : abs.toLocaleString();
+        }
+
+        new Chart(commitCanvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [
+                    {
+                        label: 'Additions',
+                        data: additionsCapped,
+                        borderColor: '#16a34a',
+                        backgroundColor: 'rgba(22, 163, 74, 0.28)',
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        borderWidth: 3,
+                        fill: 'origin',
+                        tension: 0.22
+                    },
+                    {
+                        label: 'Removals',
+                        data: removalsCapped,
+                        borderColor: '#dc2626',
+                        backgroundColor: 'rgba(220, 38, 38, 0.26)',
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        borderWidth: 3,
+                        fill: 'origin',
+                        tension: 0.22
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) {
+                                return 'Period ' + (items[0] ? items[0].label : '');
+                            },
+                            label: function(context) {
+                                const idx = context.dataIndex;
+                                const isAdd = context.dataset.label === 'Additions';
+                                const real = isAdd ? chartAdditionsRaw[idx] : chartRemovalsRaw[idx];
+                                const capNote = real > commitCap ? ' (shown as 10,000+)' : '';
+                                const signed = isAdd ? '+' + real.toLocaleString() : '-' + real.toLocaleString();
+                                return context.dataset.label + ': ' + signed + capNote;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            color: labelCol,
+                            maxTicksLimit: 10,
+                            autoSkip: true
+                        }
+                    },
+                    y: {
+                        min: -commitCap,
+                        max: commitCap,
+                        grid: { color: gridCol },
+                        ticks: {
+                            color: labelCol,
+                            callback: function(value) {
+                                if (value === commitCap) return '10,000+';
+                                if (value === -commitCap) return '-10,000+';
+                                return formatSigned(value);
+                            }
+                        }
+                    }
+                },
+                onClick: function(evt, elements) {
+                    if (!elements.length) {
+                        return;
+                    }
+                    const index = elements[0].index;
+                    const url = chartUrls[index];
+                    if (url) {
+                        window.open(url, '_blank', 'noopener');
+                    }
+                }
+            }
+        });
+    }
 })();
 </script>
 {% endblock %}

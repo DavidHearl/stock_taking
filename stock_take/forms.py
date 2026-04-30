@@ -1,5 +1,6 @@
 from django import forms
-from .models import Order, BoardsPO, OSDoor, Accessory, Substitution, CSVSkipItem
+from django.db.models import Q
+from .models import Order, BoardsPO, OSDoor, Accessory, Substitution, CSVSkipItem, RaumplusOrderingRule, StockItem
 
 class BoardsPOForm(forms.ModelForm):
     class Meta:
@@ -115,3 +116,60 @@ class CSVSkipItemForm(forms.ModelForm):
             'sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'SKU to skip'}),
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Item name'}),
         }
+
+
+class RaumplusOrderingRuleForm(forms.ModelForm):
+    description = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'rows': 5,
+            'style': 'font-family: inherit; font-size: 14px; line-height: 1.45;'
+        }),
+        help_text='Description used in the rule modal.',
+    )
+
+    applicable_products = forms.ModelMultipleChoiceField(
+        queryset=StockItem.objects.none(),
+        required=False,
+        widget=forms.SelectMultiple(attrs={'class': 'form-control'}),
+        help_text='Optional: choose products this rule applies to. Leave blank to apply globally.',
+    )
+
+    class Meta:
+        model = RaumplusOrderingRule
+        fields = [
+            'label',
+            'default_value',
+            'enabled_default',
+            'description',
+            'applicable_products',
+            'is_active',
+        ]
+        widgets = {
+            'label': forms.TextInput(attrs={'class': 'form-control'}),
+            'default_value': forms.TextInput(attrs={'class': 'form-control'}),
+            'enabled_default': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['applicable_products'].queryset = StockItem.objects.filter(
+            Q(category__name__iexact='Sliding Gear') | Q(category_name__iexact='Sliding Gear')
+        ).order_by('sku', 'name')
+
+        if self.instance and self.instance.pk:
+            self.fields['description'].initial = (self.instance.help_text or self.instance.default_help_text or '-').strip()
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        description = (self.cleaned_data.get('description') or '').strip() or '-'
+        instance.help_text = description
+        instance.default_help_text = description
+
+        if commit:
+            instance.save()
+            self.save_m2m()
+
+        return instance

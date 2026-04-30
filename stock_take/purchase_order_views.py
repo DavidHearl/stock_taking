@@ -1040,7 +1040,9 @@ def purchase_order_save(request, po_id):
                         # Update linked stock item cost if invoice price changed and is non-zero
                         if new_invoice_price > 0 and new_invoice_price != old_invoice_price and product.stock_item:
                             old_cost = product.stock_item.cost
-                            new_cost = Decimal(str(new_invoice_price))
+                            qty_basis = float(product.received_quantity or 0) or float(product.order_quantity or 0) or 1.0
+                            # Invoice entry is a line total; convert to unit cost before storing.
+                            new_cost = (Decimal(str(new_invoice_price)) / Decimal(str(qty_basis))).quantize(Decimal('0.00001'))
                             if new_cost != old_cost:
                                 product.stock_item.cost = new_cost
                                 # Recalculate average landed price from all PO lines for this item
@@ -1055,12 +1057,19 @@ def purchase_order_save(request, po_id):
                                 total_qty = Decimal('0')
                                 for line in po_lines:
                                     # Use invoice_price if set, otherwise order_price
-                                    price = line.invoice_price if line.id == product.id else line.invoice_price
-                                    if not price or float(price) == 0:
-                                        price = line.order_price
-                                    qty = line.order_quantity
-                                    total_cost += Decimal(str(float(price))) * Decimal(str(float(qty)))
-                                    total_qty += Decimal(str(float(qty)))
+                                    line_qty_value = float(line.received_quantity or 0) or float(line.order_quantity or 0)
+                                    if line_qty_value <= 0:
+                                        continue
+                                    line_qty = Decimal(str(line_qty_value))
+
+                                    invoice_total = line.invoice_price
+                                    if invoice_total and float(invoice_total) > 0:
+                                        unit_price = Decimal(str(float(invoice_total))) / line_qty
+                                    else:
+                                        unit_price = Decimal(str(float(line.order_price or 0)))
+
+                                    total_cost += unit_price * line_qty
+                                    total_qty += line_qty
                                 if total_qty > 0:
                                     product.stock_item.average_landed_price = (total_cost / total_qty).quantize(Decimal('0.01'))
                                 product.stock_item.save(update_fields=['cost', 'average_landed_price'])

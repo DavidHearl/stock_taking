@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block title %}Edit Rule{% endblock %}
+{% block page_title %}Rule Details{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:980px;margin:24px auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+        <div>
+            <p style="margin:6px 0 0;color:var(--text-secondary);">
+                <strong>{{ rule.label }}</strong> (<code>{{ rule.name }}</code>)
+            </p>
+        </div>
+        <a class="btn btn-outline-secondary" href="{% url 'shortages' %}?tab=raumplus" target="_blank" rel="noopener noreferrer">
+            <i class="bi bi-box-arrow-up-right"></i> Open Shortages
+        </a>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                {% endif %}
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div>
+                        <label for="id_label">Label</label>
+                        {{ form.label }}
+                        {{ form.label.errors }}
+                    </div>
+                    <div>
+                        <label for="id_default_value">Default Value</label>
+                        {{ form.default_value }}
+                        {{ form.default_value.errors }}
+                    </div>
+
+                    <div style="display:flex;align-items:flex-end;gap:8px;">
+                        {{ form.enabled_default }}
+                        <label for="id_enabled_default" style="margin:0;">Enabled by default</label>
+                        {{ form.enabled_default.errors }}
+                    </div>
+                    <div style="display:flex;align-items:flex-end;gap:8px;">
+                        {{ form.is_active }}
+                        <label for="id_is_active" style="margin:0;">Rule is active</label>
+                        {{ form.is_active.errors }}
+                    </div>
+
+                    <div style="grid-column:span 2;">
+                        <label for="id_description">Description</label>
+                        {{ form.description }}
+                        <small style="color:var(--text-secondary);display:block;margin-top:6px;">{{ form.description.help_text }}</small>
+                        {{ form.description.errors }}
+                    </div>
+
+                    <div style="grid-column:span 2;">
+                        <label for="id_applicable_products">Applicable Products (optional)</label>
+                        <small style="color:var(--text-secondary);display:block;margin:0 0 8px 0;">Only products in category Sliding Gear are listed.</small>
+                        <input type="search" id="applicable-products-search" class="form-control" placeholder="Search by SKU or product name..." style="margin-bottom:10px;">
+                        <div style="max-height:420px;overflow:auto;border:1px solid var(--border-color);border-radius:8px;">
+                            <table class="table" style="margin:0;">
+                                <thead>
+                                    <tr>
+                                        <th style="width:42px;"><input type="checkbox" id="select-all-products"></th>
+                                        <th>SKU</th>
+                                        <th>Name</th>
+                                        <th class="text-right">Stock</th>
+                                        <th class="text-right">Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for product in applicable_products %}
+                                    <tr class="applicable-product-row" data-search="{{ product.sku|lower }} {{ product.name|lower }}">
+                                        <td><input class="product-checkbox" type="checkbox" name="applicable_products" value="{{ product.id }}" {% if product.id|stringformat:"s" in selected_product_ids %}checked{% endif %}></td>
+                                        <td><code>{{ product.sku }}</code></td>
+                                        <td>{{ product.name }}</td>
+                                        <td class="text-right">{{ product.quantity|floatformat:0 }}</td>
+                                        <td class="text-right">£{{ product.cost|floatformat:2 }}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="5" style="text-align:center;color:var(--text-secondary);padding:16px;">No Sliding Gear products found.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <small style="color:var(--text-secondary);display:block;margin-top:6px;">{{ form.applicable_products.help_text }}</small>
+                        {{ form.applicable_products.errors }}
+                    </div>
+                </div>
+
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+                    <button class="btn btn-primary" type="submit">Save Rule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const selectAll = document.getElementById('select-all-products');
+        const search = document.getElementById('applicable-products-search');
+        if (!selectAll) return;
+
+        function getBoxes() {
+            return Array.from(document.querySelectorAll('.applicable-product-row:not([style*="display: none"]) .product-checkbox'));
+        }
+
+        selectAll.addEventListener('change', function () {
+            getBoxes().forEach(function (box) {
+                box.checked = selectAll.checked;
+            });
+        });
+
+        if (search) {
+            search.addEventListener('input', function () {
+                const term = (search.value || '').trim().toLowerCase();
+                const rows = Array.from(document.querySelectorAll('.applicable-product-row'));
+
+                rows.forEach(function (row) {
+                    const haystack = row.getAttribute('data-search') || '';
+                    row.style.display = haystack.includes(term) ? '' : 'none';
+                });
+
+                const visibleBoxes = getBoxes();
+                const checkedVisible = visibleBoxes.length && visibleBoxes.every(b => b.checked);
+                selectAll.checked = !!checkedVisible;
+            });
+        }
+
+        const boxes = Array.from(document.querySelectorAll('.product-checkbox'));
+        if (boxes.length && boxes.every(function (b) { return b.checked; })) {
+            selectAll.checked = true;
+        }
+    })();
+</script>
+{% endblock %}

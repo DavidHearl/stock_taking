@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+from datetime import datetime
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
@@ -206,7 +207,7 @@ def _get_commit_line_stats():
     try:
         # --numstat outputs per-file added/removed counts per commit.
         output = subprocess.check_output(
-            ["git", "log", "--pretty=tformat:COMMIT\t%H\t%h", "--numstat"],
+            ["git", "log", "--date=format:%Y-%m", "--pretty=tformat:COMMIT\t%H\t%h\t%ad", "--numstat"],
             cwd=base_dir,
             text=True,
             stderr=subprocess.DEVNULL,
@@ -219,6 +220,7 @@ def _get_commit_line_stats():
     current_removed = 0
     current_hash = ""
     current_short_hash = ""
+    current_period = ""
     seen_commit_marker = False
 
     for raw_line in output.splitlines():
@@ -232,6 +234,7 @@ def _get_commit_line_stats():
                     "number": len(commits) + 1,
                     "hash": current_hash,
                     "short_hash": current_short_hash,
+                    "period": current_period,
                     "url": f"{commit_web_base}{current_hash}" if commit_web_base and current_hash else "",
                     "added": current_added,
                     "removed": current_removed,
@@ -241,6 +244,11 @@ def _get_commit_line_stats():
             marker_parts = line.split("\t")
             current_hash = marker_parts[1] if len(marker_parts) > 1 else ""
             current_short_hash = marker_parts[2] if len(marker_parts) > 2 else current_hash[:8]
+            raw_period = marker_parts[3] if len(marker_parts) > 3 else ""
+            try:
+                current_period = datetime.strptime(raw_period, "%Y-%m").strftime("%b %Y")
+            except Exception:
+                current_period = raw_period or "Unknown Period"
             seen_commit_marker = True
             current_added = 0
             current_removed = 0
@@ -260,6 +268,7 @@ def _get_commit_line_stats():
             "number": len(commits) + 1,
             "hash": current_hash,
             "short_hash": current_short_hash,
+            "period": current_period,
             "url": f"{commit_web_base}{current_hash}" if commit_web_base and current_hash else "",
             "added": current_added,
             "removed": current_removed,

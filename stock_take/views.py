@@ -1,11 +1,12 @@
-from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, SyncLog, log_activity, Fitter, FactoryWorker
+from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm, RaumplusOrderingRuleForm
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, SyncLog, RaumplusOrderingRule, log_activity, Fitter, FactoryWorker
 
 import copy
 import csv
 import io
 import os
 import json
+import re
 import logging
 from decimal import Decimal, InvalidOperation
 from django.conf import settings
@@ -1168,11 +1169,352 @@ def shortages(request):
         from datetime import timedelta
         from django.utils import timezone
         from collections import defaultdict
+        import math
+        import re
         
         today = timezone.now().date()
-        MIN_ORDER_VALUE = Decimal('5000.00')
-        MIN_LINE_COST = Decimal('100.00')
-        VAT_RATE = Decimal('1.19')
+        def _parse_bool(name, default):
+            raw = request.GET.get(name)
+            if raw is None:
+                return default
+            return str(raw).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+        def _parse_decimal(name, default, min_value=None, max_value=None):
+            raw = request.GET.get(name)
+            if raw in (None, ''):
+                value = Decimal(str(default))
+            else:
+                try:
+                    value = Decimal(str(raw))
+                except (InvalidOperation, TypeError, ValueError):
+                    value = Decimal(str(default))
+            if min_value is not None:
+                value = max(Decimal(str(min_value)), value)
+            if max_value is not None:
+                value = min(Decimal(str(max_value)), value)
+            return value
+
+        def _parse_int(name, default, min_value=None, max_value=None):
+            raw = request.GET.get(name)
+            try:
+                value = int(raw) if raw not in (None, '') else int(default)
+            except (TypeError, ValueError):
+                value = int(default)
+            if min_value is not None:
+                value = max(min_value, value)
+            if max_value is not None:
+                value = min(max_value, value)
+            return value
+
+        rule_records = list(
+            RaumplusOrderingRule.objects.filter(is_active=True)
+            .prefetch_related('applicable_products')
+            .order_by('sort_order', 'label')
+        )
+        rules_by_name = {rule.name: rule for rule in rule_records}
+
+        style_buffer_scope_skus = set()
+        style_buffer_rule = rules_by_name.get('rule_style_buffer')
+        if style_buffer_rule:
+            style_buffer_scope_skus = set(
+                style_buffer_rule.applicable_products.values_list('sku', flat=True)
+            )
+
+        def _style_buffer_applies(sku):
+            if not style_buffer_scope_skus:
+                return True
+            return sku in style_buffer_scope_skus
+
+        def _rule_default(name, fallback=''):
+            rule = rules_by_name.get(name)
+            if rule and rule.default_value not in (None, ''):
+                return rule.default_value
+            return fallback
+
+        def _rule_enabled_default(name, fallback=True):
+            rule = rules_by_name.get(name)
+            if rule is None:
+                return fallback
+            return bool(rule.enabled_default)
+
+        def _rule_bool_default(name, fallback=True):
+            raw_default = _rule_default(name, '1' if fallback else '0')
+            return str(raw_default).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+        def _row_enabled(rule_name, fallback=True, legacy_name=None):
+            raw = request.GET.get(f'rule_enable_{rule_name}')
+            if raw is not None:
+                return str(raw).strip().lower() in {'1', 'true', 'yes', 'on'}
+            if legacy_name:
+                return _parse_bool(legacy_name, fallback)
+            return fallback
+
+        if _parse_bool('reset_rule_help', False):
+            for rule in rule_records:
+                rule.help_text = rule.default_help_text or '-'
+            if rule_records:
+                RaumplusOrderingRule.objects.bulk_update(rule_records, ['help_text'])
+
+        if request.GET:
+            for rule in rule_records:
+                override = request.GET.get(f"rule_help_{rule.name}")
+                if override is None:
+                    continue
+                cleaned = override.strip() or '-'
+                if cleaned != rule.help_text:
+                    rule.help_text = cleaned
+            if rule_records:
+                RaumplusOrderingRule.objects.bulk_update(rule_records, ['help_text'])
+
+        MIN_ORDER_VALUE = _parse_decimal('rule_min_order_value', _rule_default('rule_min_order_value', '5000.00'), min_value='0')
+        MIN_LINE_COST = _parse_decimal('rule_min_line_cost', _rule_default('rule_min_line_cost', '100.00'), min_value='0')
+        vat_percent = _parse_decimal('rule_vat_percent', _rule_default('rule_vat_percent', '19.0'), min_value='0', max_value='100')
+
+        APPLY_STYLE_BUFFER = _parse_bool('rule_apply_style_buffer', _rule_bool_default('rule_apply_style_buffer', True))
+        MIN_STYLE_BUFFER = _parse_int('rule_style_buffer', _rule_default('rule_style_buffer', 8), min_value=0, max_value=1000)
+        ENFORCE_MIN_LINE_COST = _parse_bool('rule_enforce_min_line_cost', _rule_bool_default('rule_enforce_min_line_cost', True))
+        APPLY_PRIORITY_WEIGHTING = _parse_bool('rule_apply_priority_weighting', _rule_bool_default('rule_apply_priority_weighting', True))
+        TOP_ROLLER_PRIORITY = _parse_decimal('rule_top_roller_priority', _rule_default('rule_top_roller_priority', '3.0'), min_value='0', max_value='20')
+        BOTTOM_ROLLER_PRIORITY = _parse_decimal('rule_bottom_roller_priority', _rule_default('rule_bottom_roller_priority', '2.5'), min_value='0', max_value='20')
+        FRAME_SCREW_PRIORITY = _parse_decimal('rule_frame_screw_priority', _rule_default('rule_frame_screw_priority', '2.5'), min_value='0', max_value='20')
+        GASKET_4MM_PRIORITY = _parse_decimal('rule_gasket_4mm_priority', _rule_default('rule_gasket_4mm_priority', '2.0'), min_value='0', max_value='20')
+        GASKET_6MM_PRIORITY = _parse_decimal('rule_gasket_6mm_priority', _rule_default('rule_gasket_6mm_priority', '0.5'), min_value='0', max_value='20')
+        GASKET_8MM_PRIORITY = _parse_decimal('rule_gasket_8mm_priority', _rule_default('rule_gasket_8mm_priority', '0.5'), min_value='0', max_value='20')
+        APPLY_EXCLUDED_ITEMS = _parse_bool('rule_apply_exclusions', _rule_bool_default('rule_apply_exclusions', True))
+        APPLY_WEIGHTED_AVERAGE = _parse_bool('rule_apply_weighted_average', _rule_bool_default('rule_apply_weighted_average', True))
+        prediction_buffer_percent = _parse_decimal('rule_prediction_buffer_percent', _rule_default('rule_prediction_buffer_percent', '20.0'), min_value='0', max_value='200')
+        recent_weight_percent = _parse_decimal('rule_recent_weight_percent', _rule_default('rule_recent_weight_percent', '70.0'), min_value='0', max_value='100')
+        recent_weight = recent_weight_percent / Decimal('100')
+        historical_weight = Decimal('1.0') - recent_weight
+
+        APPLY_GASKET_TARGET = _parse_bool('rule_apply_gasket_target', _rule_bool_default('rule_apply_gasket_target', True))
+        gasket_target_stock = _parse_int('rule_gasket_target_stock', _rule_default('rule_gasket_target_stock', 800), min_value=0, max_value=100000)
+
+        APPLY_SPECIAL_TRACK_RULES = _parse_bool('rule_apply_track_rules', _rule_bool_default('rule_apply_track_rules', True))
+        APPLY_DIVIDING_RAIL_EXTRA_PACK = _parse_bool('rule_apply_dividing_rail_pack', _rule_bool_default('rule_apply_dividing_rail_pack', True))
+        DIVIDING_RAIL_THRESHOLD = _parse_int('rule_dividing_rail_threshold', _rule_default('rule_dividing_rail_threshold', 8), min_value=0, max_value=100000)
+        DOUBLE_TRACK_DIVISOR = _parse_int(
+            'rule_double_track_divisor',
+            _rule_default('rule_double_track_divisor', _rule_default('rule_bottom_track_divisor', 4)),
+            min_value=1,
+            max_value=100,
+        )
+        SINGLE_TRACK_DIVISOR = _parse_int(
+            'rule_single_track_divisor',
+            _rule_default('rule_single_track_divisor', _rule_default('rule_top_track_divisor', 8)),
+            min_value=1,
+            max_value=100,
+        )
+        TRIPLE_TRACK_DIVISOR = _parse_int(
+            'rule_triple_track_divisor',
+            _rule_default('rule_triple_track_divisor', _rule_default('rule_top_track_divisor', 8)),
+            min_value=1,
+            max_value=100,
+        )
+        TRACK_BUFFER = _parse_int(
+            'rule_track_buffer',
+            _rule_default('rule_track_buffer', 0),
+            min_value=0,
+            max_value=1000,
+        )
+        RAIL_BUFFER = _parse_int(
+            'rule_rail_buffer',
+            _rule_default('rule_rail_buffer', 0),
+            min_value=0,
+            max_value=1000,
+        )
+        PAIR_BALANCE_PACKS = _parse_int(
+            'rule_pair_balance_packs',
+            _rule_default('rule_pair_balance_packs', 1),
+            min_value=0,
+            max_value=10,
+        )
+        BOTTOM_RAIL_DIVISOR = _parse_int(
+            'rule_bottom_rail_divisor',
+            _rule_default('rule_bottom_rail_divisor', DOUBLE_TRACK_DIVISOR),
+            min_value=1,
+            max_value=100,
+        )
+        TOP_RAIL_DIVISOR = _parse_int(
+            'rule_top_rail_divisor',
+            _rule_default('rule_top_rail_divisor', SINGLE_TRACK_DIVISOR),
+            min_value=1,
+            max_value=100,
+        )
+
+        # Explicit row-level checkbox variables for rule rows.
+        ENABLE_MIN_ORDER_VALUE = _row_enabled('rule_min_order_value', _rule_enabled_default('rule_min_order_value', True), 'rule_enable_min_order_value')
+        ENABLE_VAT_PERCENT = _row_enabled('rule_vat_percent', _rule_enabled_default('rule_vat_percent', True), 'rule_enable_vat_percent')
+        ENABLE_STYLE_BUFFER = _row_enabled('rule_style_buffer', APPLY_STYLE_BUFFER, 'rule_apply_style_buffer')
+        ENABLE_MIN_LINE_COST = _row_enabled('rule_min_line_cost', ENFORCE_MIN_LINE_COST, 'rule_enforce_min_line_cost')
+        ENABLE_RECENT_WEIGHT_PERCENT = _row_enabled('rule_recent_weight_percent', APPLY_WEIGHTED_AVERAGE, 'rule_apply_weighted_average')
+        ENABLE_PREDICTION_BUFFER_PERCENT = _row_enabled('rule_prediction_buffer_percent', APPLY_WEIGHTED_AVERAGE, 'rule_apply_weighted_average')
+        ENABLE_GASKET_TARGET_STOCK = _row_enabled('rule_gasket_target_stock', APPLY_GASKET_TARGET, 'rule_apply_gasket_target')
+        ENABLE_SINGLE_TRACK_DIVISOR = _row_enabled('rule_single_track_divisor', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_DOUBLE_TRACK_DIVISOR = _row_enabled('rule_double_track_divisor', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_TRIPLE_TRACK_DIVISOR = _row_enabled('rule_triple_track_divisor', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_BOTTOM_RAIL_DIVISOR = _row_enabled('rule_bottom_rail_divisor', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_TOP_RAIL_DIVISOR = _row_enabled('rule_top_rail_divisor', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_TRACK_BUFFER = _row_enabled('rule_track_buffer', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_RAIL_BUFFER = _row_enabled('rule_rail_buffer', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_PAIR_BALANCE_PACKS = _row_enabled('rule_pair_balance_packs', APPLY_SPECIAL_TRACK_RULES, 'rule_apply_track_rules')
+        ENABLE_DIVIDING_RAIL_THRESHOLD = _row_enabled('rule_dividing_rail_threshold', APPLY_DIVIDING_RAIL_EXTRA_PACK, 'rule_apply_dividing_rail_pack')
+        ENABLE_TOP_ROLLER_PRIORITY = _row_enabled('rule_top_roller_priority', APPLY_PRIORITY_WEIGHTING, 'rule_apply_priority_weighting')
+        ENABLE_BOTTOM_ROLLER_PRIORITY = _row_enabled('rule_bottom_roller_priority', APPLY_PRIORITY_WEIGHTING, 'rule_apply_priority_weighting')
+        ENABLE_FRAME_SCREW_PRIORITY = _row_enabled('rule_frame_screw_priority', APPLY_PRIORITY_WEIGHTING, 'rule_apply_priority_weighting')
+        ENABLE_GASKET_4MM_PRIORITY = _row_enabled('rule_gasket_4mm_priority', APPLY_PRIORITY_WEIGHTING, 'rule_apply_priority_weighting')
+        ENABLE_GASKET_6MM_PRIORITY = _row_enabled('rule_gasket_6mm_priority', APPLY_PRIORITY_WEIGHTING, 'rule_apply_priority_weighting')
+        ENABLE_GASKET_8MM_PRIORITY = _row_enabled('rule_gasket_8mm_priority', APPLY_PRIORITY_WEIGHTING, 'rule_apply_priority_weighting')
+
+        if not ENABLE_MIN_ORDER_VALUE:
+            MIN_ORDER_VALUE = Decimal('0')
+        if not ENABLE_VAT_PERCENT:
+            vat_percent = Decimal('0')
+        if not ENABLE_STYLE_BUFFER:
+            APPLY_STYLE_BUFFER = False
+        if not ENABLE_MIN_LINE_COST:
+            ENFORCE_MIN_LINE_COST = False
+        if not ENABLE_PREDICTION_BUFFER_PERCENT:
+            prediction_buffer_percent = Decimal('0')
+        if not ENABLE_GASKET_TARGET_STOCK:
+            APPLY_GASKET_TARGET = False
+        if not ENABLE_SINGLE_TRACK_DIVISOR:
+            SINGLE_TRACK_DIVISOR = 1
+        if not ENABLE_DOUBLE_TRACK_DIVISOR:
+            DOUBLE_TRACK_DIVISOR = 1
+        if not ENABLE_TRIPLE_TRACK_DIVISOR:
+            TRIPLE_TRACK_DIVISOR = 1
+        if not ENABLE_BOTTOM_RAIL_DIVISOR:
+            BOTTOM_RAIL_DIVISOR = 1
+        if not ENABLE_TOP_RAIL_DIVISOR:
+            TOP_RAIL_DIVISOR = 1
+        if not ENABLE_TRACK_BUFFER:
+            TRACK_BUFFER = 0
+        if not ENABLE_RAIL_BUFFER:
+            RAIL_BUFFER = 0
+        if not ENABLE_PAIR_BALANCE_PACKS:
+            PAIR_BALANCE_PACKS = 0
+        if not ENABLE_DIVIDING_RAIL_THRESHOLD:
+            APPLY_DIVIDING_RAIL_EXTRA_PACK = False
+        if not ENABLE_TOP_ROLLER_PRIORITY:
+            TOP_ROLLER_PRIORITY = Decimal('1.0')
+        if not ENABLE_BOTTOM_ROLLER_PRIORITY:
+            BOTTOM_ROLLER_PRIORITY = Decimal('1.0')
+        if not ENABLE_FRAME_SCREW_PRIORITY:
+            FRAME_SCREW_PRIORITY = Decimal('1.0')
+        if not ENABLE_GASKET_4MM_PRIORITY:
+            GASKET_4MM_PRIORITY = Decimal('1.0')
+        if not ENABLE_GASKET_6MM_PRIORITY:
+            GASKET_6MM_PRIORITY = Decimal('1.0')
+        if not ENABLE_GASKET_8MM_PRIORITY:
+            GASKET_8MM_PRIORITY = Decimal('1.0')
+
+        VAT_RATE = Decimal('1.00') + (vat_percent / Decimal('100'))
+
+        def classify_special_rau_item(accessory):
+            if not APPLY_SPECIAL_TRACK_RULES:
+                return None, None
+            text = f"{accessory.sku} {accessory.name}".upper()
+
+            def has_words(*words):
+                return all(word in text for word in words)
+
+            if 'BOTTOM RAIL' in text:
+                return 'bottom_rail', BOTTOM_RAIL_DIVISOR
+            if 'TOP RAIL' in text:
+                return 'top_rail', TOP_RAIL_DIVISOR
+            if has_words('BOTTOM', 'TRACK', 'DOUBLE') or has_words('TRACK', 'DOUBLE'):
+                return 'double_bottom_track', DOUBLE_TRACK_DIVISOR
+            if has_words('SINGLE', 'TRACK') or has_words('TRACK', 'SINGLE'):
+                return 'single_track', SINGLE_TRACK_DIVISOR
+            if has_words('TRIPLE', 'TRACK') or has_words('TRACK', 'TRIPLE') or has_words('TRIPPLE', 'TRACK') or has_words('TRACK', 'TRIPPLE'):
+                return 'triple_track', TRIPLE_TRACK_DIVISOR
+            return None, None
+
+        def extract_colour_key(accessory):
+            text = (accessory.name or '').upper()
+            if not text.strip():
+                text = (accessory.sku or '').upper()
+            # Strip style/profile and dimensional tokens so colour matching is stable
+            # across style rows and track/rail rows (e.g. S150 vs S34 40mm).
+            text = re.sub(r'\bS\d{2,3}\b', ' ', text)
+            text = re.sub(r'\b\d+(?:MM|CM|M)\b', ' ', text)
+            drop = {
+                'RAU', 'RAUMPLUS', 'DOUBLE', 'SINGLE', 'TRIPLE', 'TRIPPLE',
+                'BOTTOM', 'TOP', 'TRACK', 'RAIL',
+                'SURFACE', 'RECESSED', 'ANODISED',
+            }
+            tokens = [t for t in re.split(r'[^A-Z0-9]+', text) if t and t not in drop]
+            return ' '.join(tokens) if tokens else 'UNKNOWN'
+
+        def classify_top_bottom_pair(accessory):
+            text = f"{accessory.sku} {accessory.name}".upper()
+            side = None
+            if 'TOP' in text:
+                side = 'top'
+            elif 'BOTTOM' in text:
+                side = 'bottom'
+            if not side:
+                return None, None, None
+
+            if 'DIVIDING RAIL' in text:
+                return None, None, None
+            if 'RAIL' in text:
+                group_type = 'rail'
+            elif 'TRACK' in text:
+                group_type = 'track'
+            else:
+                return None, None, None
+
+            # Pair by family + subtype + colour so we only balance like-for-like
+            # items (e.g. double top track with double bottom track).
+            subtype = 'generic'
+            if group_type == 'track':
+                if 'TRIPLE' in text or 'TRIPPLE' in text:
+                    subtype = 'triple'
+                elif 'DOUBLE' in text:
+                    subtype = 'double'
+                elif 'SINGLE' in text:
+                    subtype = 'single'
+            colour_key = extract_colour_key(accessory)
+            pair_key = f"{subtype}|{colour_key}"
+            return group_type, side, pair_key
+
+        def get_order_normalized_rau_usage(order_obj):
+            qty_by_sku = defaultdict(float)
+            meta_by_sku = {}
+            special_groups = defaultdict(list)
+
+            for accessory in order_obj.accessories.all():
+                if 'RAU' not in accessory.sku.upper():
+                    continue
+                if accessory.is_allocated:
+                    continue
+
+                qty = float(accessory.quantity or 0)
+                if qty <= 0:
+                    continue
+
+                meta_by_sku.setdefault(accessory.sku, accessory)
+                family, divisor = classify_special_rau_item(accessory)
+                if not family:
+                    qty_by_sku[accessory.sku] += qty
+                    continue
+
+                colour_key = extract_colour_key(accessory)
+                special_groups[(family, colour_key, divisor)].append((accessory.sku, qty))
+
+            for (_family, _colour, divisor), entries in special_groups.items():
+                total_qty = sum(q for _, q in entries)
+                normalized_total = math.ceil(total_qty / divisor)
+                if normalized_total <= 0:
+                    continue
+
+                for sku, raw_qty in entries:
+                    share = (raw_qty / total_qty) if total_qty else 0
+                    qty_by_sku[sku] += normalized_total * share
+
+            return qty_by_sku, meta_by_sku
         
         upcoming_orders = Order.objects.filter(
             job_finished=False
@@ -1184,13 +1526,15 @@ def shortages(request):
         })
         
         for order in upcoming_orders:
-            for accessory in order.accessories.all():
-                if 'RAU' not in accessory.sku.upper():
+            qty_by_sku, meta_by_sku = get_order_normalized_rau_usage(order)
+            for key, required_qty in qty_by_sku.items():
+                if required_qty <= 0:
                     continue
-                # Skip accessories that have already been allocated (stock deducted)
-                if accessory.is_allocated:
+
+                accessory = meta_by_sku.get(key)
+                if not accessory:
                     continue
-                key = accessory.sku
+
                 if not upcoming_requirements[key]['name']:
                     upcoming_requirements[key]['name'] = accessory.name
                     upcoming_requirements[key]['sku'] = accessory.sku
@@ -1198,10 +1542,10 @@ def shortages(request):
                         upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
                         upcoming_requirements[key]['cost'] = accessory.stock_item.cost
                         upcoming_requirements[key]['stock_item_id'] = accessory.stock_item.id
-                upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
+                upcoming_requirements[key]['required_qty'] += required_qty
                 upcoming_requirements[key]['orders'].append({
                     'sale_number': order.sale_number, 'fit_date': order.fit_date,
-                    'quantity': float(accessory.quantity),
+                    'quantity': required_qty,
                     'first_name': order.first_name, 'last_name': order.last_name,
                     'order_id': order.id
                 })
@@ -1229,15 +1573,11 @@ def shortages(request):
         
         all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
         for order in all_time_orders:
-            for accessory in order.accessories.all():
-                if 'RAU' not in accessory.sku.upper():
+            qty_by_sku, _meta_by_sku = get_order_normalized_rau_usage(order)
+            for key, used_qty in qty_by_sku.items():
+                if used_qty <= 0:
                     continue
-                # Skip already-allocated accessories — stock was already deducted,
-                # counting them again inflates the prediction model.
-                if accessory.is_allocated:
-                    continue
-                key = accessory.sku
-                all_time_usage[key]['total_used'] += float(accessory.quantity)
+                all_time_usage[key]['total_used'] += used_qty
                 all_time_usage[key]['order_count'] += 1
                 if order.order_date:
                     if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
@@ -1257,13 +1597,15 @@ def shortages(request):
         })
         
         for order in recent_orders:
-            for accessory in order.accessories.all():
-                if 'RAU' not in accessory.sku.upper():
+            qty_by_sku, meta_by_sku = get_order_normalized_rau_usage(order)
+            for key, used_qty in qty_by_sku.items():
+                if used_qty <= 0:
                     continue
-                # Skip already-allocated accessories (stock already deducted)
-                if accessory.is_allocated:
+
+                accessory = meta_by_sku.get(key)
+                if not accessory:
                     continue
-                key = accessory.sku
+
                 if not historical_usage[key]['name']:
                     historical_usage[key]['name'] = accessory.name
                     historical_usage[key]['sku'] = accessory.sku
@@ -1271,23 +1613,24 @@ def shortages(request):
                         historical_usage[key]['current_stock'] = accessory.stock_item.quantity
                         historical_usage[key]['cost'] = accessory.stock_item.cost
                         historical_usage[key]['stock_item_id'] = accessory.stock_item.id
-                historical_usage[key]['total_used'] += float(accessory.quantity)
+                historical_usage[key]['total_used'] += used_qty
                 historical_usage[key]['order_count'] += 1
         
         for key, data in historical_usage.items():
             recent_monthly_avg = data['total_used'] / 3
             data['monthly_average'] = recent_monthly_avg
-            if key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
+            if APPLY_WEIGHTED_AVERAGE and key in all_time_usage and all_time_usage[key]['first_order'] and all_time_usage[key]['last_order']:
                 months_span = max(1, ((all_time_usage[key]['last_order'] - all_time_usage[key]['first_order']).days / 30.44))
                 all_time_monthly_avg = all_time_usage[key]['total_used'] / months_span
                 data['all_time_monthly_avg'] = all_time_monthly_avg
-                data['weighted_monthly_avg'] = (recent_monthly_avg * 0.7) + (all_time_monthly_avg * 0.3)
+                data['weighted_monthly_avg'] = (recent_monthly_avg * float(recent_weight)) + (all_time_monthly_avg * float(historical_weight))
             else:
                 data['all_time_monthly_avg'] = recent_monthly_avg
                 data['weighted_monthly_avg'] = recent_monthly_avg
-            data['predicted_need'] = data['weighted_monthly_avg'] * prediction_months * 1.2
-            if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
-                target_stock = 800
+            prediction_multiplier = 1 + (float(prediction_buffer_percent) / 100)
+            data['predicted_need'] = data['weighted_monthly_avg'] * prediction_months * prediction_multiplier
+            if APPLY_GASKET_TARGET and ('GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper()):
+                target_stock = gasket_target_stock
                 data['predicted_shortage'] = max(0, max(data['predicted_need'], target_stock) - data['current_stock'])
             else:
                 data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'])
@@ -1302,8 +1645,8 @@ def shortages(request):
         predicted_incoming_map = {item['sku']: float(item['total'] or 0) for item in predicted_incoming_data}
         for key, data in historical_usage.items():
             data['incoming_qty'] = predicted_incoming_map.get(key, 0)
-            if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
-                target_stock = 800
+            if APPLY_GASKET_TARGET and ('GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper()):
+                target_stock = gasket_target_stock
                 data['predicted_shortage'] = max(0, max(data['predicted_need'], target_stock) - data['current_stock'] - data['incoming_qty'])
             else:
                 data['predicted_shortage'] = max(0, data['predicted_need'] - data['current_stock'] - data['incoming_qty'])
@@ -1321,12 +1664,16 @@ def shortages(request):
         
         def get_style_prefix(sku, name=''):
             text_to_check = (sku + ' ' + name).upper()
-            for code in ['S150', 'S750', 'S751', 'S753']:
-                if code in text_to_check:
-                    return code
+            if re.search(r'\bS\s*150\b', text_to_check) or re.search(r'\b150W\b', text_to_check):
+                return 'S150'
+            if re.search(r'\bS\s*750\b', text_to_check):
+                return 'S750'
+            if re.search(r'\bS\s*751\b', text_to_check):
+                return 'S751'
+            if re.search(r'\bS\s*753\b', text_to_check):
+                return 'S753'
             return None
         
-        MIN_STYLE_BUFFER = 8
         critical_items = []
         upcoming_skus = {item['sku'] for item in upcoming_list}
         
@@ -1335,18 +1682,37 @@ def shortages(request):
         
         for item in predicted_list:
             if item['sku'] in upcoming_skus:
+
                 upcoming_item = next((u for u in upcoming_list if u['sku'] == item['sku']), None)
                 if upcoming_item:
                     stock_item = stock_items_dict.get(item['sku'])
                     min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
                     total_shortage = upcoming_item['shortage'] + item['predicted_shortage']
                     is_style = get_style_prefix(item['sku'], item['name']) is not None
-                    if is_style:
-                        order_qty = round_to_min_order_qty(total_shortage + MIN_STYLE_BUFFER, min_order_qty)
-                    else:
-                        order_qty = round_to_min_order_qty(total_shortage, min_order_qty)
+            
+                    # Determine which buffer to apply (if any)
+                    buffer_qty = 0
+                    if is_style and APPLY_STYLE_BUFFER and _style_buffer_applies(item['sku']):
+                        buffer_qty = MIN_STYLE_BUFFER
+                    elif APPLY_SPECIAL_TRACK_RULES:
+                        # Check if it's a track/rail item and apply appropriate buffer
+                        item_like = type('ItemLike', (), {
+                            'sku': item.get('sku', ''),
+                            'name': item.get('name', ''),
+                        })
+                        family, divisor = classify_special_rau_item(item_like)
+                        if family:
+                            is_rail_family = family in ('bottom_rail', 'top_rail')
+                            buffer_qty = RAIL_BUFFER if is_rail_family else TRACK_BUFFER
+            
+                    order_qty = round_to_min_order_qty(total_shortage + buffer_qty, min_order_qty)
+                    if APPLY_DIVIDING_RAIL_EXTRA_PACK and 'DIVIDING RAIL' in (item['sku'] + ' ' + item['name']).upper():
+                        projected_remaining = item['current_stock'] - total_shortage + order_qty
+                        if projected_remaining < DIVIDING_RAIL_THRESHOLD:
+                            order_qty += min_order_qty
+
                     line_cost = Decimal(str(order_qty)) * item['cost']
-                    if line_cost < MIN_LINE_COST and item['cost'] > 0:
+                    if ENFORCE_MIN_LINE_COST and line_cost < MIN_LINE_COST and item['cost'] > 0:
                         min_qty_for_cost = int((MIN_LINE_COST / item['cost']).to_integral_value() + 1)
                         order_qty = max(order_qty, min_qty_for_cost)
                         order_qty = round_to_min_order_qty(order_qty, min_order_qty)
@@ -1371,16 +1737,35 @@ def shortages(request):
         
         predicted_only_list = []
         for item in predicted_list:
+
             if item['sku'] not in upcoming_skus:
                 stock_item = predicted_stock_items_dict.get(item['sku'])
                 min_order_qty = stock_item.min_order_qty if stock_item and stock_item.min_order_qty else 1
                 is_style = get_style_prefix(item['sku'], item['name']) is not None
-                if is_style:
-                    order_qty = round_to_min_order_qty(item['predicted_shortage'] + MIN_STYLE_BUFFER, min_order_qty)
-                else:
-                    order_qty = round_to_min_order_qty(item['predicted_shortage'], min_order_qty)
+        
+                # Determine which buffer to apply (if any)
+                buffer_qty = 0
+                if is_style and APPLY_STYLE_BUFFER and _style_buffer_applies(item['sku']):
+                    buffer_qty = MIN_STYLE_BUFFER
+                elif APPLY_SPECIAL_TRACK_RULES:
+                    # Check if it's a track/rail item and apply appropriate buffer
+                    item_like = type('ItemLike', (), {
+                        'sku': item.get('sku', ''),
+                        'name': item.get('name', ''),
+                    })
+                    family, divisor = classify_special_rau_item(item_like)
+                    if family:
+                        is_rail_family = family in ('bottom_rail', 'top_rail')
+                        buffer_qty = RAIL_BUFFER if is_rail_family else TRACK_BUFFER
+        
+                order_qty = round_to_min_order_qty(item['predicted_shortage'] + buffer_qty, min_order_qty)
+                if APPLY_DIVIDING_RAIL_EXTRA_PACK and 'DIVIDING RAIL' in (item['sku'] + ' ' + item['name']).upper():
+                    projected_remaining = item['current_stock'] - item['predicted_shortage'] + order_qty
+                    if projected_remaining < DIVIDING_RAIL_THRESHOLD:
+                        order_qty += min_order_qty
+
                 line_cost = Decimal(str(order_qty)) * item['cost']
-                if line_cost < MIN_LINE_COST and item['cost'] > 0:
+                if ENFORCE_MIN_LINE_COST and line_cost < MIN_LINE_COST and item['cost'] > 0:
                     min_qty_for_cost = int((MIN_LINE_COST / item['cost']).to_integral_value() + 1)
                     order_qty = max(order_qty, min_qty_for_cost)
                     order_qty = round_to_min_order_qty(order_qty, min_order_qty)
@@ -1392,12 +1777,126 @@ def shortages(request):
         
         predicted_only_cost = sum(item['line_cost'] for item in predicted_only_list)
         critical_skus = {item['sku'] for item in critical_items}
+
+        # Threshold trigger items (proactive top-ups that are not immediate shortages)
+        threshold_items = []
+        threshold_exclude_skus = {item['sku'] for item in critical_items + predicted_only_list}
+        style_qty_by_colour = defaultdict(float)
+        track_stock_items = []
+        track_incoming_map = {}
+
+        dividing_rail_stock_items = StockItem.objects.filter(
+            sku__icontains='RAU',
+            quantity__lt=DIVIDING_RAIL_THRESHOLD
+        ).filter(
+            Q(name__icontains='DIVIDING RAIL') | Q(sku__icontains='DIVIDING RAIL')
+        ).exclude(
+            sku__in=list(threshold_exclude_skus)
+        )
+
+        for stock_item in dividing_rail_stock_items:
+            min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+            order_qty = min_order_qty
+            line_cost = Decimal(str(order_qty)) * stock_item.cost
+
+            threshold_items.append({
+                'sku': stock_item.sku,
+                'name': stock_item.name,
+                'current_stock': stock_item.quantity,
+                'threshold': DIVIDING_RAIL_THRESHOLD,
+                'min_order_qty': min_order_qty,
+                'order_qty': order_qty,
+                'cost': stock_item.cost,
+                'line_cost': line_cost,
+                'reason': f'Stock below {DIVIDING_RAIL_THRESHOLD}: add one pack',
+            })
+
+        if APPLY_SPECIAL_TRACK_RULES:
+            # Primary driver: current style stock by colour (e.g. 29 white styles).
+            style_stock_items = StockItem.objects.filter(sku__icontains='RAU')
+            for stock_item in style_stock_items:
+                if get_style_prefix(stock_item.sku, stock_item.name) is None:
+                    continue
+                qty = float(stock_item.quantity or 0)
+                if qty <= 0:
+                    continue
+                colour_key = extract_colour_key(stock_item)
+                style_qty_by_colour[colour_key] += qty
+
+            # Secondary signal: open-order style demand by colour.
+            for data in upcoming_requirements.values():
+                sku = data.get('sku', '')
+                name = data.get('name', '')
+                if get_style_prefix(sku, name) is None:
+                    continue
+                qty = float(data.get('required_qty') or 0)
+                if qty <= 0:
+                    continue
+                style_like = type('StyleLike', (), {'sku': sku, 'name': name})
+                colour_key = extract_colour_key(style_like)
+                style_qty_by_colour[colour_key] = max(style_qty_by_colour[colour_key], qty)
+
+            track_stock_items = list(StockItem.objects.filter(
+                sku__icontains='RAU'
+            ).filter(
+                Q(name__icontains='TRACK') |
+                Q(name__icontains='BOTTOM RAIL') |
+                Q(name__icontains='TOP RAIL') |
+                Q(sku__icontains='TRACK') |
+                Q(sku__icontains='BOTTOM RAIL') |
+                Q(sku__icontains='TOP RAIL')
+            ).exclude(
+                sku__in=list(threshold_exclude_skus)
+            ))
+
+            track_incoming_data = PurchaseOrderProduct.objects.filter(
+                sku__in=[item.sku for item in track_stock_items],
+                purchase_order__status='Approved'
+            ).values('sku').annotate(total=RauSum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+            track_incoming_map = {item['sku']: float(item['total'] or 0) for item in track_incoming_data}
+
+            for stock_item in track_stock_items:
+                family, divisor = classify_special_rau_item(stock_item)
+                if not family or not divisor:
+                    continue
+
+                colour_key = extract_colour_key(stock_item)
+                style_qty = style_qty_by_colour.get(colour_key, 0)
+                if style_qty <= 0:
+                    continue
+
+                required_lengths = math.ceil(style_qty / divisor)
+                available = float(stock_item.quantity or 0) + track_incoming_map.get(stock_item.sku, 0)
+                if available >= required_lengths:
+                    continue
+
+                min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+                shortage = required_lengths - available
+                is_rail_family = family in ('bottom_rail', 'top_rail')
+                buffer_qty = (RAIL_BUFFER if is_rail_family else TRACK_BUFFER)
+                order_qty = round_to_min_order_qty(shortage, min_order_qty)
+                line_cost = Decimal(str(order_qty)) * stock_item.cost
+
+                threshold_items.append({
+                    'sku': stock_item.sku,
+                    'name': stock_item.name,
+                    'current_stock': stock_item.quantity,
+                    'threshold': required_lengths,
+                    'shortage': shortage,
+                    'buffer': buffer_qty,
+                    'min_order_qty': min_order_qty,
+                    'order_qty': order_qty,
+                    'cost': stock_item.cost,
+                    'line_cost': line_cost,
+                    'reason': f'{style_qty:.0f} style units ({colour_key}) / {divisor} = {required_lengths} required lengths',
+                })
+
+        threshold_total_cost = sum(item['line_cost'] for item in threshold_items)
         
         # Suggest additional items to reach minimum order value
         suggested_items = []
-        current_order_value = critical_total_cost + predicted_only_cost
-        
-        from django.db.models import Q
+        current_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost
+
         MIN_STYLES_PER_VARIANT = 8
         style_prefixes = ['S150', 'S750', 'S751', 'S753']
         styles_to_order = []
@@ -1432,21 +1931,166 @@ def shortages(request):
                         'line_cost': item_cost, 'is_style': True, 'variant': prefix,
                         'reason': f'Stock variant {prefix} below minimum'
                     })
+
+        if APPLY_SPECIAL_TRACK_RULES and styles_to_order:
+            extra_style_qty_by_colour = defaultdict(float)
+            for item in styles_to_order:
+                if not item.get('is_style'):
+                    continue
+                style_like = type('StyleLike', (), {
+                    'sku': item.get('sku', ''),
+                    'name': item.get('name', ''),
+                })
+                colour_key = extract_colour_key(style_like)
+                extra_style_qty_by_colour[colour_key] += float(item.get('suggested_qty') or 0)
+
+            if extra_style_qty_by_colour:
+                threshold_by_sku = {item['sku']: item for item in threshold_items}
+                for stock_item in track_stock_items:
+                    family, divisor = classify_special_rau_item(stock_item)
+                    if not family or not divisor:
+                        continue
+
+                    colour_key = extract_colour_key(stock_item)
+                    base_style_qty = style_qty_by_colour.get(colour_key, 0)
+                    extra_style_qty = extra_style_qty_by_colour.get(colour_key, 0)
+                    total_style_qty = base_style_qty + extra_style_qty
+                    if total_style_qty <= 0:
+                        continue
+
+                    required_lengths = math.ceil(total_style_qty / divisor)
+                    available = float(stock_item.quantity or 0) + track_incoming_map.get(stock_item.sku, 0)
+                    existing_row = threshold_by_sku.get(stock_item.sku)
+                    existing_order_qty = float(existing_row['order_qty']) if existing_row else 0.0
+
+                    if (available + existing_order_qty) >= required_lengths:
+                        continue
+
+                    min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+                    additional_needed = required_lengths - (available + existing_order_qty)
+                    add_qty = round_to_min_order_qty(additional_needed, min_order_qty)
+
+                    if existing_row:
+                        existing_row['order_qty'] += add_qty
+                        existing_row['threshold'] = required_lengths
+                        existing_row['line_cost'] = Decimal(str(existing_row['order_qty'])) * existing_row['cost']
+                        existing_row['reason'] = f'{total_style_qty:.0f} style units ({colour_key}) / {divisor} = {required_lengths} required lengths (includes suggested styles)'
+                    else:
+                        is_rail_family = family in ('bottom_rail', 'top_rail')
+                        buffer_qty = (RAIL_BUFFER if is_rail_family else TRACK_BUFFER)
+                        add_qty = round_to_min_order_qty(additional_needed + buffer_qty, min_order_qty)
+                        line_cost = Decimal(str(add_qty)) * stock_item.cost
+                        new_row = {
+                            'sku': stock_item.sku,
+                            'name': stock_item.name,
+                            'current_stock': stock_item.quantity,
+                            'threshold': required_lengths,
+                            'shortage': additional_needed,
+                            'buffer': buffer_qty,
+                            'min_order_qty': min_order_qty,
+                            'order_qty': add_qty,
+                            'cost': stock_item.cost,
+                            'line_cost': line_cost,
+                            'reason': f'{total_style_qty:.0f} style units ({colour_key}) / {divisor} = {required_lengths} required lengths (includes suggested styles)',
+                        }
+                        threshold_items.append(new_row)
+                        threshold_by_sku[stock_item.sku] = new_row
+
+                threshold_total_cost = sum(item['line_cost'] for item in threshold_items)
+                current_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost
+
+        if APPLY_SPECIAL_TRACK_RULES and PAIR_BALANCE_PACKS > 0 and track_stock_items:
+            threshold_by_sku = {item['sku']: item for item in threshold_items}
+
+            pair_groups = defaultdict(dict)
+            for stock_item in track_stock_items:
+                group_type, side, pair_key = classify_top_bottom_pair(stock_item)
+                if not group_type or not side or not pair_key:
+                    continue
+                pair_groups[(group_type, pair_key)][side] = stock_item
+
+            for (group_type, pair_key), sides in pair_groups.items():
+                top_item = sides.get('top')
+                bottom_item = sides.get('bottom')
+                if not top_item or not bottom_item:
+                    continue
+
+                def effective_available(item):
+                    base = float(item.quantity or 0) + track_incoming_map.get(item.sku, 0)
+                    existing = threshold_by_sku.get(item.sku)
+                    existing_order = float(existing['order_qty']) if existing else 0.0
+                    return base + existing_order
+
+                top_available = effective_available(top_item)
+                bottom_available = effective_available(bottom_item)
+
+                lower_item = top_item if top_available < bottom_available else bottom_item
+                higher_qty = max(top_available, bottom_available)
+                lower_qty = min(top_available, bottom_available)
+                gap = higher_qty - lower_qty
+                # Small variance is acceptable; only rebalance when pair gap is > 6.
+                if gap <= 6:
+                    continue
+
+                min_order_qty = lower_item.min_order_qty if lower_item.min_order_qty else 1
+                target_gap = gap + (PAIR_BALANCE_PACKS - 1) * min_order_qty
+                add_qty = round_to_min_order_qty(target_gap, min_order_qty)
+                if add_qty <= 0:
+                    continue
+
+                existing_row = threshold_by_sku.get(lower_item.sku)
+                reason = (
+                    f'Pair balance ({group_type}): keep TOP and BOTTOM aligned for {pair_key} '
+                    f'({lower_qty:.0f} vs {higher_qty:.0f})'
+                )
+                if existing_row:
+                    existing_row['order_qty'] += add_qty
+                    existing_row['threshold'] = max(float(existing_row.get('threshold', 0) or 0), higher_qty)
+                    existing_row['shortage'] = float(existing_row.get('shortage', 0) or 0) + gap
+                    existing_row['line_cost'] = Decimal(str(existing_row['order_qty'])) * existing_row['cost']
+                    existing_row['reason'] = f"{existing_row['reason']}; {reason}"
+                else:
+                    line_cost = Decimal(str(add_qty)) * lower_item.cost
+                    new_row = {
+                        'sku': lower_item.sku,
+                        'name': lower_item.name,
+                        'current_stock': lower_item.quantity,
+                        'threshold': higher_qty,
+                        'shortage': gap,
+                        'buffer': 0,
+                        'min_order_qty': min_order_qty,
+                        'order_qty': add_qty,
+                        'cost': lower_item.cost,
+                        'line_cost': line_cost,
+                        'reason': reason,
+                    }
+                    threshold_items.append(new_row)
+                    threshold_by_sku[lower_item.sku] = new_row
+
+        threshold_total_cost = sum(item['line_cost'] for item in threshold_items)
+        current_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost
         
-        suggested_items.extend(styles_to_order)
-        accumulated_value = sum(item['line_cost'] * VAT_RATE for item in styles_to_order)
-        current_order_value_inc_vat = (critical_total_cost + predicted_only_cost) * VAT_RATE
-        remaining_value = MIN_ORDER_VALUE - (current_order_value_inc_vat + accumulated_value)
-        
+        current_order_value_inc_vat = current_order_value * VAT_RATE
+        remaining_value = MIN_ORDER_VALUE - current_order_value_inc_vat
+
+        if remaining_value > 0:
+            suggested_items.extend(styles_to_order)
+            accumulated_value = sum(item['line_cost'] * VAT_RATE for item in styles_to_order)
+            remaining_value = MIN_ORDER_VALUE - (current_order_value_inc_vat + accumulated_value)
+
         if remaining_value > 0:
             PRIORITY_KEYWORDS = {
-                'TOP ROLLER': 3.0, 'BOTTOM ROLLER': 2.5, 'FRAME SCREW': 2.5,
-                'GASKET - 4MM': 2.0, 'GASKET - 6MM': 0.5, 'GASKET - 8MM': 0.5,
+                'TOP ROLLER': float(TOP_ROLLER_PRIORITY),
+                'BOTTOM ROLLER': float(BOTTOM_ROLLER_PRIORITY),
+                'FRAME SCREW': float(FRAME_SCREW_PRIORITY),
+                'GASKET - 4MM': float(GASKET_4MM_PRIORITY),
+                'GASKET - 6MM': float(GASKET_6MM_PRIORITY),
+                'GASKET - 8MM': float(GASKET_8MM_PRIORITY),
             }
-            EXCLUDE_KEYWORDS = ['DUST BRUSH CLIP', 'DUST EXCLUDING BRUSH']
+            EXCLUDE_KEYWORDS = ['DUST BRUSH CLIP', 'DUST EXCLUDING BRUSH'] if APPLY_EXCLUDED_ITEMS else []
             
             all_rau_items = StockItem.objects.filter(sku__icontains='RAU').exclude(
-                sku__in=[item['sku'] for item in critical_items + predicted_only_list + suggested_items]
+                sku__in=[item['sku'] for item in critical_items + predicted_only_list + threshold_items + suggested_items]
             )
             filtered_items = []
             for stock_item in all_rau_items:
@@ -1454,10 +2098,11 @@ def shortages(request):
                 if any(keyword in item_name_upper for keyword in EXCLUDE_KEYWORDS):
                     continue
                 priority_multiplier = 1.0
-                for keyword, multiplier in PRIORITY_KEYWORDS.items():
-                    if keyword in item_name_upper:
-                        priority_multiplier = multiplier
-                        break
+                if APPLY_PRIORITY_WEIGHTING:
+                    for keyword, multiplier in PRIORITY_KEYWORDS.items():
+                        if keyword in item_name_upper:
+                            priority_multiplier = multiplier
+                            break
                 score = stock_item.quantity * priority_multiplier
                 filtered_items.append((stock_item, score, priority_multiplier))
             filtered_items.sort(key=lambda x: x[1], reverse=True)
@@ -1472,7 +2117,7 @@ def shortages(request):
                     base_qty = max(min_order_qty, min(5, max(2, int(stock_item.quantity * 0.1))))
                 suggested_qty = round_to_min_order_qty(base_qty, min_order_qty)
                 item_cost = Decimal(str(suggested_qty)) * stock_item.cost
-                if item_cost < MIN_LINE_COST and stock_item.cost > 0:
+                if ENFORCE_MIN_LINE_COST and item_cost < MIN_LINE_COST and stock_item.cost > 0:
                     min_qty_for_cost = int((MIN_LINE_COST / stock_item.cost).to_integral_value() + 1)
                     suggested_qty = max(suggested_qty, min_qty_for_cost)
                     suggested_qty = round_to_min_order_qty(suggested_qty, min_order_qty)
@@ -1489,7 +2134,7 @@ def shortages(request):
                 accumulated_value += item_cost * VAT_RATE
         
         suggested_total_cost = sum(item['line_cost'] for item in suggested_items)
-        total_order_value = critical_total_cost + predicted_only_cost + suggested_total_cost
+        total_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost + suggested_total_cost
         total_order_value_inc_vat = total_order_value * VAT_RATE
         current_order_value_inc_vat = current_order_value * VAT_RATE
         suggested_total_cost_inc_vat = suggested_total_cost * VAT_RATE
@@ -1498,23 +2143,26 @@ def shortages(request):
         ordering_rules = [
             {'category': 'Minimum Order Values', 'rules': [
                 f'Minimum total order value: £{MIN_ORDER_VALUE:,.2f} (inc VAT for free shipping)',
-                f'Minimum line item cost: £{MIN_LINE_COST:,.2f} per SKU (pre-VAT)',
-                'All prices shown are pre-VAT; 20% VAT applied when calculating order totals',
+                f'Minimum line item cost: £{MIN_LINE_COST:,.2f} per SKU (pre-VAT) ({"ON" if ENFORCE_MIN_LINE_COST else "OFF"})',
+                f'VAT rate used for totals: {vat_percent}% (multiplier {VAT_RATE})',
             ]},
             {'category': 'Style Variants', 'rules': [
                 'Maintain all style color variants in stock for each type (S150, S750, S751, S753)',
-                f'Add buffer of {MIN_STYLE_BUFFER} units when ordering styles to ensure stock after orders',
+                f'Add buffer of {MIN_STYLE_BUFFER} units when ordering styles ({"ON" if APPLY_STYLE_BUFFER else "OFF"})',
+                f'Track buffer: {TRACK_BUFFER} extra lengths per track requirement ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Rail buffer: {RAIL_BUFFER} extra lengths per rail requirement ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Top/Bottom pair balancing packs: {PAIR_BALANCE_PACKS} ({"ON" if APPLY_SPECIAL_TRACK_RULES and ENABLE_PAIR_BALANCE_PACKS else "OFF"})',
                 'Any out-of-stock color variant will be suggested for reordering',
             ]},
             {'category': 'Priority Items (Higher Weighting)', 'rules': [
-                'Top Rollers: 3.0x priority (frequently needed)',
-                'Bottom Rollers: 2.5x priority (frequently needed)',
-                'Frame Screws: 2.5x priority (frequently needed)',
-                'Gasket - 4mm: 2.0x priority (high usage)',
+                f'Top Rollers: {TOP_ROLLER_PRIORITY} multi priority',
+                f'Bottom Rollers: {BOTTOM_ROLLER_PRIORITY} multi priority',
+                f'Frame Screws: {FRAME_SCREW_PRIORITY} multi priority',
+                f'Gasket - 4mm: {GASKET_4MM_PRIORITY} multi priority',
             ]},
             {'category': 'Low Priority Items (Lower Weighting)', 'rules': [
-                'Gasket - 6mm: 0.5x priority (hardly used)',
-                'Gasket - 8mm: 0.5x priority (very rarely used)',
+                f'Gasket - 6mm: {GASKET_6MM_PRIORITY} multi priority',
+                f'Gasket - 8mm: {GASKET_8MM_PRIORITY} multi priority',
             ]},
             {'category': 'Excluded Items', 'rules': [
                 'Dust Brush Clip: Excluded from suggestions (not used)',
@@ -1523,16 +2171,190 @@ def shortages(request):
             {'category': 'Rounding Rules', 'rules': [
                 'Items with minimum order quantity of 1: Rounded to nearest 10 (e.g., 257 → 260)',
                 'Items with other minimum order quantities: Rounded to nearest multiple of min qty',
+                f'Single tracks divisor: {SINGLE_TRACK_DIVISOR} ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Double tracks divisor: {DOUBLE_TRACK_DIVISOR} ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Triple tracks divisor: {TRIPLE_TRACK_DIVISOR} ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Bottom rail divisor: {BOTTOM_RAIL_DIVISOR} ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Top rail divisor: {TOP_RAIL_DIVISOR} ({"ON" if APPLY_SPECIAL_TRACK_RULES else "OFF"})',
+                f'Dividing rail extra pack threshold: {DIVIDING_RAIL_THRESHOLD} ({"ON" if APPLY_DIVIDING_RAIL_EXTRA_PACK else "OFF"})',
             ]},
             {'category': 'Prediction Model', 'rules': [
                 'Historical period: Last 90 days of orders',
-                'Prediction window: Next 4 months + 20% buffer',
-                'Weighted average: 70% recent trend + 30% historical baseline',
+                f'Prediction window: Next {prediction_months} months + {prediction_buffer_percent}% buffer',
+                f'Weighted average: {recent_weight_percent}% recent + {100 - recent_weight_percent}% historical ({"ON" if APPLY_WEIGHTED_AVERAGE else "OFF"})',
             ]},
             {'category': 'Target Stock Levels', 'rules': [
-                'Gasket - 4mm: Minimum target stock of 800 units (high usage item)',
+                f'Gasket - 4mm target stock: {gasket_target_stock} ({"ON" if APPLY_GASKET_TARGET else "OFF"})',
                 'All other items: Predicted 4-month usage with 20% safety buffer',
             ]},
+        ]
+
+        computed_rule_values = {
+            'rule_style_buffer': MIN_STYLE_BUFFER,
+            'rule_min_line_cost': MIN_LINE_COST,
+            'rule_min_order_value': MIN_ORDER_VALUE,
+            'rule_vat_percent': vat_percent,
+            'rule_apply_weighted_average': APPLY_WEIGHTED_AVERAGE,
+            'rule_recent_weight_percent': recent_weight_percent,
+            'rule_prediction_buffer_percent': prediction_buffer_percent,
+            'rule_apply_gasket_target': APPLY_GASKET_TARGET,
+            'rule_gasket_target_stock': gasket_target_stock,
+            'rule_apply_track_rules': APPLY_SPECIAL_TRACK_RULES,
+            'rule_double_track_divisor': DOUBLE_TRACK_DIVISOR,
+            'rule_single_track_divisor': SINGLE_TRACK_DIVISOR,
+            'rule_triple_track_divisor': TRIPLE_TRACK_DIVISOR,
+            'rule_track_buffer': TRACK_BUFFER,
+            'rule_rail_buffer': RAIL_BUFFER,
+            'rule_pair_balance_packs': PAIR_BALANCE_PACKS,
+            'rule_bottom_rail_divisor': BOTTOM_RAIL_DIVISOR,
+            'rule_top_rail_divisor': TOP_RAIL_DIVISOR,
+            'rule_apply_dividing_rail_pack': APPLY_DIVIDING_RAIL_EXTRA_PACK,
+            'rule_dividing_rail_threshold': DIVIDING_RAIL_THRESHOLD,
+            'rule_apply_priority_weighting': APPLY_PRIORITY_WEIGHTING,
+            'rule_top_roller_priority': TOP_ROLLER_PRIORITY,
+            'rule_bottom_roller_priority': BOTTOM_ROLLER_PRIORITY,
+            'rule_frame_screw_priority': FRAME_SCREW_PRIORITY,
+            'rule_gasket_4mm_priority': GASKET_4MM_PRIORITY,
+            'rule_gasket_6mm_priority': GASKET_6MM_PRIORITY,
+            'rule_gasket_8mm_priority': GASKET_8MM_PRIORITY,
+            'rule_apply_exclusions': APPLY_EXCLUDED_ITEMS,
+        }
+
+        computed_enabled_values = {
+            'rule_min_order_value': ENABLE_MIN_ORDER_VALUE,
+            'rule_vat_percent': ENABLE_VAT_PERCENT,
+            'rule_style_buffer': ENABLE_STYLE_BUFFER,
+            'rule_min_line_cost': ENABLE_MIN_LINE_COST,
+            'rule_recent_weight_percent': ENABLE_RECENT_WEIGHT_PERCENT,
+            'rule_prediction_buffer_percent': ENABLE_PREDICTION_BUFFER_PERCENT,
+            'rule_gasket_target_stock': ENABLE_GASKET_TARGET_STOCK,
+            'rule_double_track_divisor': ENABLE_DOUBLE_TRACK_DIVISOR,
+            'rule_single_track_divisor': ENABLE_SINGLE_TRACK_DIVISOR,
+            'rule_triple_track_divisor': ENABLE_TRIPLE_TRACK_DIVISOR,
+            'rule_track_buffer': ENABLE_TRACK_BUFFER,
+            'rule_rail_buffer': ENABLE_RAIL_BUFFER,
+            'rule_pair_balance_packs': ENABLE_PAIR_BALANCE_PACKS,
+            'rule_bottom_rail_divisor': ENABLE_BOTTOM_RAIL_DIVISOR,
+            'rule_top_rail_divisor': ENABLE_TOP_RAIL_DIVISOR,
+            'rule_dividing_rail_threshold': ENABLE_DIVIDING_RAIL_THRESHOLD,
+            'rule_top_roller_priority': ENABLE_TOP_ROLLER_PRIORITY,
+            'rule_bottom_roller_priority': ENABLE_BOTTOM_ROLLER_PRIORITY,
+            'rule_frame_screw_priority': ENABLE_FRAME_SCREW_PRIORITY,
+            'rule_gasket_4mm_priority': ENABLE_GASKET_4MM_PRIORITY,
+            'rule_gasket_6mm_priority': ENABLE_GASKET_6MM_PRIORITY,
+            'rule_gasket_8mm_priority': ENABLE_GASKET_8MM_PRIORITY,
+        }
+
+        GLOBAL_RULE_NAMES = {
+            'rule_min_line_cost',
+            'rule_min_order_value',
+            'rule_vat_percent',
+            'rule_recent_weight_percent',
+            'rule_prediction_buffer_percent',
+        }
+
+        BUFFER_RULE_NAMES = {
+            'rule_style_buffer',
+            'rule_track_buffer',
+            'rule_rail_buffer',
+            'rule_pair_balance_packs',
+            'rule_dividing_rail_threshold',
+            'rule_gasket_target_stock',
+        }
+        DIVISOR_RULE_NAMES = {
+            'rule_single_track_divisor',
+            'rule_double_track_divisor',
+            'rule_triple_track_divisor',
+            'rule_bottom_rail_divisor',
+            'rule_top_rail_divisor',
+        }
+        PRIORITY_RULE_NAMES = {
+            'rule_top_roller_priority',
+            'rule_bottom_roller_priority',
+            'rule_frame_screw_priority',
+            'rule_gasket_4mm_priority',
+            'rule_gasket_6mm_priority',
+            'rule_gasket_8mm_priority',
+        }
+
+        rule_controls = []
+        global_rule_controls = []
+        normal_rule_controls = []
+        rule_products_map = {}
+        for rule in rule_records:
+            if rule.value_type == RaumplusOrderingRule.VALUE_TYPE_BOOL:
+                # Checkbox-only rules do not expose an editable variable in the modal.
+                continue
+
+            value = computed_rule_values.get(rule.name)
+            if value is None:
+                if rule.value_type == RaumplusOrderingRule.VALUE_TYPE_BOOL:
+                    value = _parse_bool(rule.name, _rule_bool_default(rule.name, rule.enabled_default))
+                elif rule.value_type == RaumplusOrderingRule.VALUE_TYPE_INT:
+                    value = _parse_int(rule.name, _rule_default(rule.name, 0))
+                else:
+                    value = _parse_decimal(rule.name, _rule_default(rule.name, '0'))
+
+            enabled_name = (rule.enabled_name or '').strip()
+            if enabled_name:
+                enabled_value = computed_enabled_values.get(rule.name)
+                if enabled_value is None:
+                    enabled_value = _parse_bool(enabled_name, rule.enabled_default)
+            else:
+                enabled_value = bool(value) if rule.value_type == RaumplusOrderingRule.VALUE_TYPE_BOOL else True
+
+            applicable_products = list(rule.applicable_products.all())
+            rule_products_map[rule.name] = [
+                {
+                    'sku': product.sku,
+                    'name': product.name,
+                    'quantity': float(product.quantity or 0),
+                    'cost': float(product.cost or 0),
+                }
+                for product in applicable_products
+            ]
+
+            rule_data = {
+                'id': rule.id,
+                'name': rule.name,
+                'label': rule.label,
+                'type': rule.value_type,
+                'value': value,
+                'value_display': f"{Decimal(str(value)).quantize(Decimal('0.01'))}" if rule.value_type == RaumplusOrderingRule.VALUE_TYPE_DECIMAL else value,
+                'enabled_name': enabled_name,
+                'enabled_value': enabled_value,
+                'unit_prefix': rule.unit_prefix,
+                'unit_suffix': 'multi' if rule.unit_suffix == 'x' else rule.unit_suffix,
+                'step': '0.01' if rule.value_type == RaumplusOrderingRule.VALUE_TYPE_DECIMAL else '1',
+                'help': rule.help_text or '-',
+                'affected_products_count': len(applicable_products),
+                'can_manage_products': rule.name not in GLOBAL_RULE_NAMES,
+                'toggle_name': f"rule_enable_{rule.name}",
+            }
+
+            rule_controls.append(rule_data)
+            if rule.name in GLOBAL_RULE_NAMES:
+                global_rule_controls.append(rule_data)
+            else:
+                normal_rule_controls.append(rule_data)
+
+        normal_rule_sections = {
+            'Buffers': [],
+            'Divisors': [],
+            'Priorities': [],
+        }
+        for rule in normal_rule_controls:
+            if rule['name'] in DIVISOR_RULE_NAMES:
+                normal_rule_sections['Divisors'].append(rule)
+            elif rule['name'] in PRIORITY_RULE_NAMES:
+                normal_rule_sections['Priorities'].append(rule)
+            else:
+                normal_rule_sections['Buffers'].append(rule)
+
+        normal_rule_sections_list = [
+            {'title': 'Buffers', 'rules': normal_rule_sections['Buffers']},
+            {'title': 'Divisors', 'rules': normal_rule_sections['Divisors']},
+            {'title': 'Priorities', 'rules': normal_rule_sections['Priorities']},
         ]
         
         # Build full requirements list - ALL RAU items needed for upcoming orders
@@ -1592,6 +2414,8 @@ def shortages(request):
             'historical_period_days': 90,
             'critical_total_cost': critical_total_cost,
             'predicted_total_cost': predicted_only_cost,
+            'threshold_items': threshold_items,
+            'threshold_total_cost': threshold_total_cost,
             'suggested_total_cost': suggested_total_cost,
             'total_order_value': total_order_value,
             'total_order_value_inc_vat': total_order_value_inc_vat,
@@ -1604,6 +2428,11 @@ def shortages(request):
             'vat_rate': VAT_RATE,
             'style_stock_status': style_stock_status,
             'ordering_rules': ordering_rules,
+            'rule_controls': rule_controls,
+            'global_rule_controls': global_rule_controls,
+            'normal_rule_controls': normal_rule_controls,
+            'normal_rule_sections': normal_rule_sections_list,
+            'rule_products_map': rule_products_map,
         }
         context['raumplus_previous_pos'] = list(
             PurchaseOrder.objects.filter(supplier_name__icontains='Raumplus')
@@ -1846,12 +2675,14 @@ def rau_prediction_compare(request):
     from datetime import timedelta
     from collections import defaultdict
     import math
+    import re
 
     months = int(request.GET.get('months', 4))
     if months not in [1, 2, 3, 4, 6]:
         months = 4
 
     today = timezone.now().date()
+    three_months_ago = today - timedelta(days=90)
     MIN_STYLE_BUFFER = 8
     MIN_LINE_COST = Decimal('100.00')
 
@@ -1863,16 +2694,22 @@ def rau_prediction_compare(request):
         return math.ceil(quantity / min_order_qty) * min_order_qty
 
     def _style_prefix(sku, name=''):
-        text = (sku + ' ' + name).upper()
-        for code in ['S150', 'S750', 'S751', 'S753']:
-            if code in text:
-                return code
+        text_to_check = (sku + ' ' + name).upper()
+        if re.search(r'\bS\s*150\b', text_to_check) or re.search(r'\b150W\b', text_to_check):
+            return 'S150'
+        elif re.search(r'\bS\s*750\b', text_to_check):
+            return 'S750'
+        elif re.search(r'\bS\s*751\b', text_to_check):
+            return 'S751'
+        elif re.search(r'\bS\s*753\b', text_to_check):
+            return 'S753'
         return None
 
-    three_months_ago = today - timedelta(days=90)
     recent_orders = Order.objects.filter(
-        order_date__gte=three_months_ago, order_date__lte=today
+        order_date__gte=three_months_ago,
+        order_date__lte=today
     ).prefetch_related('accessories__stock_item')
+
     all_time_orders = Order.objects.prefetch_related('accessories__stock_item').all()
 
     all_time_usage = defaultdict(lambda: {'total_used': 0, 'first_order': None, 'last_order': None})
@@ -2235,11 +3072,89 @@ def raumplus_storage(request):
     from django.utils import timezone
     from collections import defaultdict
     from decimal import Decimal
+    import math
+    import re
     
     today = timezone.now().date()
     MIN_ORDER_VALUE = Decimal('5000.00')  # £5000 minimum order for free shipping (inc VAT)
     MIN_LINE_COST = Decimal('100.00')  # £100 minimum per line item
     VAT_RATE = Decimal('1.19')  # 19% VAT (Raumplus is a German supplier)
+
+    def classify_special_rau_item(accessory):
+        """Return (family, divisor) for special rail/track rules, else (None, None)."""
+        text = f"{accessory.sku} {accessory.name}".upper()
+
+        def has_words(*words):
+            return all(word in text for word in words)
+
+        if 'BOTTOM RAIL' in text:
+            return 'bottom_rail', 4
+        if has_words('BOTTOM', 'TRACK', 'DOUBLE') or has_words('TRACK', 'DOUBLE'):
+            return 'double_bottom_track', 4
+        if has_words('SINGLE', 'TRACK') or has_words('TRACK', 'SINGLE'):
+            return 'single_track', 8
+        if has_words('TRIPLE', 'TRACK') or has_words('TRACK', 'TRIPLE') or has_words('TRIPPLE', 'TRACK') or has_words('TRACK', 'TRIPPLE'):
+            return 'triple_track', 8
+
+        return None, None
+
+    def extract_colour_key(accessory):
+        """Extract a stable colour key so style variants can be pooled by colour."""
+        text = (accessory.name or '').upper()
+        if not text.strip():
+            text = (accessory.sku or '').upper()
+        # Strip style/profile and dimensional tokens so colour matching is stable
+        # across style rows and track/rail rows (e.g. S150 vs S34 40mm).
+        text = re.sub(r'\bS\d{2,3}\b', ' ', text)
+        text = re.sub(r'\b\d+(?:MM|CM|M)\b', ' ', text)
+        drop = {
+            'RAU', 'RAUMPLUS', 'DOUBLE', 'SINGLE', 'TRIPLE', 'TRIPPLE',
+            'BOTTOM', 'TOP', 'TRACK', 'RAIL',
+            'SURFACE', 'RECESSED', 'ANODISED',
+        }
+        tokens = [t for t in re.split(r'[^A-Z0-9]+', text) if t and t not in drop]
+        return ' '.join(tokens) if tokens else 'UNKNOWN'
+
+    def get_order_normalized_rau_usage(order_obj):
+        """Return (qty_by_sku, meta_by_sku) applying special colour-grouped rail/track rules.
+
+        For special items, quantities are pooled by (family, colour) across style types first,
+        then divided once (ceil) using the family divisor.
+        """
+        qty_by_sku = defaultdict(float)
+        meta_by_sku = {}
+        special_groups = defaultdict(list)
+
+        for accessory in order_obj.accessories.all():
+            if 'RAU' not in accessory.sku.upper():
+                continue
+
+            qty = float(accessory.quantity or 0)
+            if qty <= 0:
+                continue
+
+            meta_by_sku.setdefault(accessory.sku, accessory)
+
+            family, divisor = classify_special_rau_item(accessory)
+            if not family:
+                qty_by_sku[accessory.sku] += qty
+                continue
+
+            colour_key = extract_colour_key(accessory)
+            special_groups[(family, colour_key, divisor)].append((accessory.sku, qty))
+
+        for (_family, _colour, divisor), entries in special_groups.items():
+            total_qty = sum(q for _, q in entries)
+            normalized_total = math.ceil(total_qty / divisor)
+            if normalized_total <= 0:
+                continue
+
+            for sku, raw_qty in entries:
+                # Split pooled normalized qty back across style rows by proportional share.
+                share = (raw_qty / total_qty) if total_qty else 0
+                qty_by_sku[sku] += normalized_total * share
+
+        return qty_by_sku, meta_by_sku
     
     # Get upcoming orders with prefetched accessories and stock items (OPTIMIZATION)
     upcoming_orders = Order.objects.filter(
@@ -2262,24 +3177,27 @@ def raumplus_storage(request):
     
     # Process accessories from upcoming orders (RAU items only)
     for order in upcoming_orders:
-        for accessory in order.accessories.all():
-            # Only process RAU items
-            if 'RAU' not in accessory.sku.upper():
+        qty_by_sku, meta_by_sku = get_order_normalized_rau_usage(order)
+        for key, required_qty in qty_by_sku.items():
+            if required_qty <= 0:
                 continue
-                
-            key = accessory.sku
+
+            accessory = meta_by_sku.get(key)
+            if not accessory:
+                continue
+
             if not upcoming_requirements[key]['name']:
                 upcoming_requirements[key]['name'] = accessory.name
                 upcoming_requirements[key]['sku'] = accessory.sku
                 if accessory.stock_item:
                     upcoming_requirements[key]['current_stock'] = accessory.stock_item.quantity
                     upcoming_requirements[key]['cost'] = accessory.stock_item.cost
-            
-            upcoming_requirements[key]['required_qty'] += float(accessory.quantity)
+
+            upcoming_requirements[key]['required_qty'] += required_qty
             upcoming_requirements[key]['orders'].append({
                 'sale_number': order.sale_number,
                 'fit_date': order.fit_date,
-                'quantity': float(accessory.quantity)
+                'quantity': required_qty
             })
     
     # Calculate shortage for each material
@@ -2305,15 +3223,14 @@ def raumplus_storage(request):
     all_time_usage = defaultdict(lambda: {'total_used': 0, 'order_count': 0, 'first_order': None, 'last_order': None})
     
     for order in all_time_orders:
-        for accessory in order.accessories.all():
-            # Only process RAU items
-            if 'RAU' not in accessory.sku.upper():
+        qty_by_sku, _meta_by_sku = get_order_normalized_rau_usage(order)
+        for key, used_qty in qty_by_sku.items():
+            if used_qty <= 0:
                 continue
-                
-            key = accessory.sku
-            all_time_usage[key]['total_used'] += float(accessory.quantity)
+
+            all_time_usage[key]['total_used'] += used_qty
             all_time_usage[key]['order_count'] += 1
-            
+
             # Track date range
             if order.order_date:
                 if all_time_usage[key]['first_order'] is None or order.order_date < all_time_usage[key]['first_order']:
@@ -2337,20 +3254,23 @@ def raumplus_storage(request):
     })
     
     for order in recent_orders:
-        for accessory in order.accessories.all():
-            # Only process RAU items
-            if 'RAU' not in accessory.sku.upper():
+        qty_by_sku, meta_by_sku = get_order_normalized_rau_usage(order)
+        for key, used_qty in qty_by_sku.items():
+            if used_qty <= 0:
                 continue
-                
-            key = accessory.sku
+
+            accessory = meta_by_sku.get(key)
+            if not accessory:
+                continue
+
             if not historical_usage[key]['name']:
                 historical_usage[key]['name'] = accessory.name
                 historical_usage[key]['sku'] = accessory.sku
                 if accessory.stock_item:
                     historical_usage[key]['current_stock'] = accessory.stock_item.quantity
                     historical_usage[key]['cost'] = accessory.stock_item.cost
-            
-            historical_usage[key]['total_used'] += float(accessory.quantity)
+
+            historical_usage[key]['total_used'] += used_qty
             historical_usage[key]['order_count'] += 1
     
     # Calculate predictions combining recent and all-time averages
@@ -2410,6 +3330,10 @@ def raumplus_storage(request):
         elif 'S753' in text_to_check:
             return 'S753'
         return None
+
+    def is_dividing_rail(sku, name=''):
+        text_to_check = (sku + ' ' + name).upper()
+        return 'DIVIDING RAIL' in text_to_check
     
     MIN_STYLE_BUFFER = 8  # Always maintain at least 8 styles in stock after orders
     
@@ -2439,6 +3363,13 @@ def raumplus_storage(request):
                     order_qty = round_to_min_order_qty(total_shortage + MIN_STYLE_BUFFER, min_order_qty)
                 else:
                     order_qty = round_to_min_order_qty(total_shortage, min_order_qty)
+
+                # Dividing Rails rule: if projected remaining stock is < 8,
+                # add one extra pack (pack size = min_order_qty)
+                if is_dividing_rail(item['sku'], item['name']):
+                    projected_remaining = item['current_stock'] - total_shortage + order_qty
+                    if projected_remaining < 8:
+                        order_qty += min_order_qty
                 
                 # Ensure minimum line cost of 100 pounds
                 line_cost = Decimal(str(order_qty)) * item['cost']
@@ -2487,6 +3418,13 @@ def raumplus_storage(request):
                 order_qty = round_to_min_order_qty(item['predicted_shortage'] + MIN_STYLE_BUFFER, min_order_qty)
             else:
                 order_qty = round_to_min_order_qty(item['predicted_shortage'], min_order_qty)
+
+            # Dividing Rails rule: if projected remaining stock is < 8,
+            # add one extra pack (pack size = min_order_qty)
+            if is_dividing_rail(item['sku'], item['name']):
+                projected_remaining = item['current_stock'] - item['predicted_shortage'] + order_qty
+                if projected_remaining < 8:
+                    order_qty += min_order_qty
             
             # Ensure minimum line cost of 100 pounds
             line_cost = Decimal(str(order_qty)) * item['cost']
@@ -2508,10 +3446,44 @@ def raumplus_storage(request):
     
     # Get set of critical SKUs for template filtering
     critical_skus = {item['sku'] for item in critical_items}
+
+    # Threshold trigger items (not shortages): Dividing Rails below stock threshold
+    DIVIDING_RAIL_THRESHOLD = 8
+    threshold_items = []
+    threshold_exclude_skus = {item['sku'] for item in critical_items + predicted_only_list}
+
+    dividing_rail_stock_items = StockItem.objects.filter(
+        sku__icontains='RAU',
+        quantity__lt=DIVIDING_RAIL_THRESHOLD
+    ).filter(
+        Q(name__icontains='DIVIDING RAIL') | Q(sku__icontains='DIVIDING RAIL')
+    ).exclude(
+        sku__in=list(threshold_exclude_skus)
+    )
+
+    for stock_item in dividing_rail_stock_items:
+        min_order_qty = stock_item.min_order_qty if stock_item.min_order_qty else 1
+        # User rule: if stock is below threshold, add one pack
+        order_qty = min_order_qty
+        line_cost = Decimal(str(order_qty)) * stock_item.cost
+
+        threshold_items.append({
+            'sku': stock_item.sku,
+            'name': stock_item.name,
+            'current_stock': stock_item.quantity,
+            'threshold': DIVIDING_RAIL_THRESHOLD,
+            'min_order_qty': min_order_qty,
+            'order_qty': order_qty,
+            'cost': stock_item.cost,
+            'line_cost': line_cost,
+            'reason': f'Stock below {DIVIDING_RAIL_THRESHOLD}: add one pack'
+        })
+
+    threshold_total_cost = sum(item['line_cost'] for item in threshold_items)
     
     # Suggest additional items to reach £5000 minimum order
     suggested_items = []
-    current_order_value = critical_total_cost + predicted_only_cost
+    current_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost
     
     # Check stock levels for each style variant
     from django.db.models import Q
@@ -2599,7 +3571,7 @@ def raumplus_storage(request):
         all_rau_items = StockItem.objects.filter(
             sku__icontains='RAU'
         ).exclude(
-            sku__in=[item['sku'] for item in critical_items + predicted_only_list + suggested_items]
+            sku__in=[item['sku'] for item in critical_items + predicted_only_list + threshold_items + suggested_items]
         )
         
         # Filter out excluded items
@@ -2670,8 +3642,8 @@ def raumplus_storage(request):
     suggested_total_cost = sum(item['line_cost'] for item in suggested_items)
     
     # Calculate totals (pre-VAT)
-    total_order_value = critical_total_cost + predicted_only_cost + suggested_total_cost
-    current_order_value = critical_total_cost + predicted_only_cost
+    total_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost + suggested_total_cost
+    current_order_value = critical_total_cost + predicted_only_cost + threshold_total_cost
     
     # Calculate totals (inc VAT)
     total_order_value_inc_vat = total_order_value * VAT_RATE
@@ -2696,6 +3668,14 @@ def raumplus_storage(request):
                 'Maintain all style color variants in stock for each type (S150, S750, S751, S753)',
                 f'Add buffer of {MIN_STYLE_BUFFER} units when ordering styles to ensure stock after orders',
                 'Any out-of-stock color variant will be suggested for reordering',
+                'Dividing Rails: if projected stock after order is below 8, add one extra pack',
+            ]
+        },
+        {
+            'category': 'Threshold Triggers',
+            'rules': [
+                f'Dividing Rails with stock below {DIVIDING_RAIL_THRESHOLD} are added to a dedicated trigger list',
+                'These are not shortages; they are proactive threshold pack top-ups',
             ]
         },
         {
@@ -2726,6 +3706,9 @@ def raumplus_storage(request):
             'rules': [
                 'Items with minimum order quantity of 1: Rounded to nearest 10 (e.g., 257 → 260)',
                 'Items with other minimum order quantities: Rounded to nearest multiple of min qty',
+                'Bottom rails and double bottom tracks use 4 doors per length (qty = ceil(doors/4))',
+                'Single and triple tracks use 8 doors per length (qty = ceil(doors/8))',
+                'Special rail/track quantities are grouped by colour across style types before division',
             ]
         },
         {
@@ -2759,6 +3742,8 @@ def raumplus_storage(request):
         'historical_period_days': 90,
         'critical_total_cost': critical_total_cost,
         'predicted_total_cost': predicted_only_cost,
+        'threshold_items': threshold_items,
+        'threshold_total_cost': threshold_total_cost,
         'suggested_total_cost': suggested_total_cost,
         'total_order_value': total_order_value,
         'total_order_value_inc_vat': total_order_value_inc_vat,
@@ -2811,6 +3796,70 @@ def substitutions(request):
         'form': form,
         'skip_form': skip_form,
     })
+
+
+@login_required
+def raumplus_ordering_rule_edit(request, rule_id):
+    rule = get_object_or_404(RaumplusOrderingRule, id=rule_id)
+    form = RaumplusOrderingRuleForm(request.POST or None, instance=rule)
+
+    if request.method == 'POST' and form.is_valid():
+        form.save()
+        messages.success(request, 'Rule details saved.')
+        return redirect('raumplus_ordering_rule_edit', rule_id=rule.id)
+
+    if request.method == 'POST':
+        selected_product_ids = set(request.POST.getlist('applicable_products'))
+    else:
+        selected_product_ids = set(str(pid) for pid in rule.applicable_products.values_list('id', flat=True))
+
+    applicable_products = list(form.fields['applicable_products'].queryset)
+
+    return render(request, 'stock_take/raumplus_ordering_rule_form.html', {
+        'rule': rule,
+        'form': form,
+        'applicable_products': applicable_products,
+        'selected_product_ids': selected_product_ids,
+    })
+
+
+@login_required
+def save_rau_rule_defaults(request):
+    """Save submitted rule values as the new DB defaults for RaumplusOrderingRule."""
+    if request.method != 'POST':
+        return redirect('shortages')
+
+    rule_records = RaumplusOrderingRule.objects.filter(is_active=True)
+    rules_by_name = {rule.name: rule for rule in rule_records}
+
+    redirect_params = {'tab': 'raumplus'}
+    if 'months' in request.POST:
+        redirect_params['months'] = request.POST['months']
+
+    for rule in rules_by_name.values():
+        new_value = request.POST.get(rule.name)
+        if new_value is not None and new_value.strip() != '':
+            if rule.default_value != new_value.strip():
+                rule.default_value = new_value.strip()
+                rule.save(update_fields=['default_value'])
+        # Persist enabled_default from toggle
+        toggle_name = rule.enabled_name or f'rule_enable_{rule.name}'
+        toggle_val = request.POST.get(toggle_name)
+        if toggle_val is not None:
+            new_enabled = str(toggle_val).strip() in {'1', 'true', 'yes', 'on'}
+            if rule.enabled_default != new_enabled:
+                rule.enabled_default = new_enabled
+                rule.save(update_fields=['enabled_default'])
+
+    # Redirect back with the same GET params so results reflect the saved defaults
+    for key, value in request.POST.items():
+        if key not in ('csrfmiddlewaretoken', 'months') and not key.startswith('rule_help_'):
+            redirect_params[key] = value
+
+    from urllib.parse import urlencode
+    from django.urls import reverse
+    return redirect(f"{reverse('shortages')}?{urlencode(redirect_params)}")
+
 
 @login_required
 @login_required
@@ -3224,6 +4273,57 @@ def _build_customer_value(order):
     if customer_name:
         value = f"{value} {customer_name}"
     return value
+
+
+def _barcode_part_abbrev(partdesc):
+    clean = ''.join(ch for ch in (partdesc or '').upper() if ch.isalnum())
+    return clean[:3] or 'CUS'
+
+
+def _barcode_prefix(boards_po, partdesc):
+    if not boards_po or not boards_po.po_number:
+        return ''
+    return f"{boards_po.po_number}_{_barcode_part_abbrev(partdesc)}"
+
+
+def _is_generic_generated_barcode(barcode):
+    return (barcode or '').strip().lower() == 'board'
+
+
+def _looks_like_generated_barcode(barcode, boards_po, partdesc):
+    prefix = _barcode_prefix(boards_po, partdesc)
+    if not prefix:
+        return False
+    return re.match(rf"^{re.escape(prefix)}_\d+$", (barcode or '').strip()) is not None
+
+
+def _generation_match_key(boards_po, barcode, partdesc, matname, cleng, cwidth):
+    b = (barcode or '').strip()
+    p = (partdesc or '').strip().lower()
+    m = (matname or '').strip()
+    l = float(cleng)
+    w = float(cwidth)
+
+    if _is_generic_generated_barcode(b) or _looks_like_generated_barcode(b, boards_po, partdesc):
+        return ('generated', p, m, l, w)
+    return ('barcode', b, m, l, w)
+
+
+def _next_generated_barcode(boards_po, partdesc, taken_barcodes):
+    prefix = _barcode_prefix(boards_po, partdesc)
+    if not prefix:
+        return ''
+
+    pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)$")
+    max_seq = 0
+    for barcode in taken_barcodes:
+        match = pattern.match((barcode or '').strip())
+        if match:
+            max_seq = max(max_seq, int(match.group(1)))
+
+    next_barcode = f"{prefix}_{str(max_seq + 1).zfill(3)}"
+    taken_barcodes.add(next_barcode)
+    return next_barcode
 
 
 def regenerate_pnx_csv_files(boards_po):
@@ -6139,7 +7239,12 @@ def update_item(request, item_id):
             cost_str = request.POST.get('cost', str(item.cost))
             try:
                 cost_str = cost_str.replace('£', '').strip()
-                item.cost = float(cost_str)
+                item.cost = Decimal(cost_str or '0')
+                pack_size = int(item.pack_size or 1)
+                if pack_size < 1:
+                    pack_size = 1
+                # Keep pack cost aligned with manual unit cost edits.
+                item.pack_cost_price = (Decimal(str(item.cost)) * Decimal(pack_size)).quantize(Decimal('0.001'))
             except (ValueError, TypeError):
                 item.cost = 0
             
@@ -8596,6 +9701,11 @@ def update_stock_items_batch(request):
                         item.name = item_data['name']
                     if 'cost' in item_data:
                         item.cost = Decimal(str(item_data['cost']))
+                        pack_size = int(item.pack_size or 1)
+                        if pack_size < 1:
+                            pack_size = 1
+                        # Manual unit cost edits should persist; sync pack cost explicitly.
+                        item.pack_cost_price = (item.cost * Decimal(pack_size)).quantize(Decimal('0.001'))
                     if 'pack_cost_price' in item_data:
                         value = item_data['pack_cost_price']
                         item.pack_cost_price = Decimal(str(value)) if value else None
@@ -10449,9 +11559,9 @@ def generate_and_attach_pnx(request, order_id):
         io_string = io.StringIO(pnx_content)
         reader = csv.DictReader(io_string, delimiter=';')
         
-        # Get existing items
+        # Get existing items keyed the same way as confirm step
         existing_items = {
-            (item.barcode, item.matname, float(item.cleng), float(item.cwidth)): item
+            _generation_match_key(boards_po, item.barcode, item.partdesc, item.matname, item.cleng, item.cwidth): item
             for item in boards_po.pnx_items.all()
         }
         
@@ -10466,12 +11576,13 @@ def generate_and_attach_pnx(request, order_id):
             try:
                 barcode = row.get('BARCODE', '').strip()
                 matname = row.get('MATNAME', '').strip()
+                partdesc = row.get('PARTDESC', '').strip()
                 cleng = float(row.get('CLENG', '0').strip() or '0')
                 cwidth = float(row.get('CWIDTH', '0').strip() or '0')
                 cnt = float(row.get('CNT', '0').strip() or '0')
                 customer = row.get('CUSTOMER', '').strip()
                 
-                key = (barcode, matname, cleng, cwidth)
+                key = _generation_match_key(boards_po, barcode, partdesc, matname, cleng, cwidth)
                 
                 # Determine status
                 status = 'new'
@@ -10487,6 +11598,7 @@ def generate_and_attach_pnx(request, order_id):
                 all_items.append({
                     'barcode': barcode,
                     'matname': matname,
+                    'partdesc': partdesc,
                     'cleng': cleng,
                     'cwidth': cwidth,
                     'dimensions': f"{cleng} x {cwidth}",
@@ -10575,9 +11687,12 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
         
         # Get existing items for update detection
         existing_items = {
-            (item.barcode, item.matname, float(item.cleng), float(item.cwidth)): item
+            _generation_match_key(boards_po, item.barcode, item.partdesc, item.matname, item.cleng, item.cwidth): item
             for item in boards_po.pnx_items.all()
         }
+        taken_barcodes = set(
+            boards_po.pnx_items.values_list('barcode', flat=True)
+        )
         
         items_created = 0
         items_updated = 0
@@ -10596,6 +11711,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 
                 barcode = row.get('BARCODE', '').strip()
                 matname = row.get('MATNAME', '').strip()
+                partdesc = row.get('PARTDESC', '').strip()
                 cleng = Decimal(row.get('CLENG', '0').strip() or '0')
                 cwidth = Decimal(row.get('CWIDTH', '0').strip() or '0')
                 cnt = Decimal(row.get('CNT', '0').strip() or '0')
@@ -10604,7 +11720,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                 if items_created == 0 and items_updated == 0:
                     logger.info(f"First PNX item - customer_value: '{customer_value}', order.sale_number: '{order.sale_number}'")
                 
-                key = (barcode, matname, float(cleng), float(cwidth))
+                key = _generation_match_key(boards_po, barcode, partdesc, matname, cleng, cwidth)
                 
                 # Check if this barcode should be force-imported (user moved it from duplicates)
                 force_import = barcode in force_import_barcodes
@@ -10614,6 +11730,11 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                     existing_item = existing_items[key]
                     # Always update customer field
                     needs_save = False
+                    if _is_generic_generated_barcode(existing_item.barcode):
+                        new_barcode = _next_generated_barcode(boards_po, partdesc, taken_barcodes)
+                        if new_barcode:
+                            existing_item.barcode = new_barcode
+                            needs_save = True
                     if existing_item.customer != customer_value:
                         existing_item.customer = customer_value
                         needs_save = True
@@ -10633,10 +11754,14 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                     if needs_save:
                         existing_item.save()
                 else:
+                    barcode_to_save = barcode
+                    if _is_generic_generated_barcode(barcode_to_save):
+                        barcode_to_save = _next_generated_barcode(boards_po, partdesc, taken_barcodes)
+
                     # Create new item
                     PNXItem.objects.create(
                         boards_po=boards_po,
-                        barcode=barcode,
+                        barcode=barcode_to_save,
                         matname=matname,
                         cleng=cleng,
                         cwidth=cwidth,
@@ -10644,7 +11769,7 @@ def confirm_pnx_generation_internal(request, order_id, pnx_content, force_import
                         customer=customer_value,
                         grain=row.get('GRAIN', '').strip(),
                         articlename=row.get('ARTICLENAME', '').strip(),
-                        partdesc=row.get('PARTDESC', '').strip(),
+                        partdesc=partdesc,
                         prfid1=row.get('PRFID1', '').strip(),
                         prfid2=row.get('PRFID2', '').strip(),
                         prfid3=row.get('PRFID3', '').strip(),

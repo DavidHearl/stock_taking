@@ -2673,6 +2673,55 @@ class SyncLog(models.Model):
         return f"{self.script_name} @ {self.ran_at.strftime('%Y-%m-%d %H:%M')} [{self.get_status_display()}]"
 
 
+class RaumplusRuleTextOverride(models.Model):
+    rule_name = models.CharField(max_length=100, unique=True, db_index=True)
+    help_text = models.TextField(blank=True, default='-')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['rule_name']
+        verbose_name = 'Raumplus Rule Text Override'
+        verbose_name_plural = 'Raumplus Rule Text Overrides'
+
+    def __str__(self):
+        return self.rule_name
+
+
+class RaumplusOrderingRule(models.Model):
+    VALUE_TYPE_INT = 'int'
+    VALUE_TYPE_DECIMAL = 'decimal'
+    VALUE_TYPE_BOOL = 'bool'
+    VALUE_TYPE_CHOICES = [
+        (VALUE_TYPE_INT, 'Integer'),
+        (VALUE_TYPE_DECIMAL, 'Decimal'),
+        (VALUE_TYPE_BOOL, 'Boolean'),
+    ]
+
+    name = models.CharField(max_length=100, unique=True, db_index=True)
+    label = models.CharField(max_length=150)
+    value_type = models.CharField(max_length=20, choices=VALUE_TYPE_CHOICES)
+    default_value = models.CharField(max_length=50, blank=True, default='')
+    enabled_name = models.CharField(max_length=100, blank=True, default='')
+    enabled_default = models.BooleanField(default=True)
+    unit_prefix = models.CharField(max_length=10, blank=True, default='')
+    unit_suffix = models.CharField(max_length=20, blank=True, default='')
+    default_help_text = models.TextField(blank=True, default='-')
+    help_text = models.TextField(blank=True, default='-')
+    applicable_products = models.ManyToManyField('StockItem', blank=True, related_name='raumplus_rules')
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'label']
+        verbose_name = 'Raumplus Ordering Rule'
+        verbose_name_plural = 'Raumplus Ordering Rules'
+
+    def __str__(self):
+        return f"{self.label} ({self.name})"
+
+
 class RaumplusDraftOrder(models.Model):
     """A saved draft of a Raumplus order being built in the shortage modal."""
     name = models.CharField(max_length=200, default='Draft Order', help_text='Descriptive name for this draft')

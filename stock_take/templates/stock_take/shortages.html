@@ -185,12 +185,18 @@
     <div class="rau-order-badges">
         <span class="meta-badge">{{ critical_items|length }} critical</span>
         <span class="meta-badge">{{ predicted_shortages|length }} predicted</span>
+        <span class="meta-badge">{{ threshold_items|length }} threshold</span>
         <span class="meta-badge">{{ suggested_items|length }} suggested</span>
         <span class="meta-badge highlight">Order Value (ex VAT): £{{ current_order_value|floatformat:2 }}</span>
     </div>
-    <button class="btn btn-primary" onclick="openRauplusOrderModal()">
-        <i class="bi bi-cart3"></i> View Raumplus Order
-    </button>
+    <div class="rau-action-buttons">
+        <button class="btn btn-primary" onclick="openRauplusOrderModal()">
+            <i class="bi bi-cart3"></i> View Raumplus Order
+        </button>
+        <button class="btn btn-outline-secondary" title="Rule controls" onclick="openRauRulesModal()">
+            <i class="bi bi-three-dots-vertical"></i>
+        </button>
+    </div>
 </div>
 
 <!-- All RAU Requirements -->
@@ -472,6 +478,59 @@
     {% endif %}
 </div>
 
+<!-- Threshold Trigger Items -->
+<div class="content-card">
+    <div class="section-header">
+        <h2>Threshold Trigger Items</h2>
+        <span class="section-subtitle">Not currently short, but below threshold so one pack is added proactively</span>
+    </div>
+    <div class="section-meta">
+        <span class="meta-badge">Total Cost: £{{ threshold_total_cost|floatformat:2 }}</span>
+    </div>
+    {% if threshold_items %}
+    <div class="shortage-table-wrap">
+        <table class="shortage-tbl">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Material</th>
+                    <th class="text-right">In Stock</th>
+                    <th class="text-right">Threshold</th>
+                    <th class="text-right">Shortage</th>
+                    <th class="text-right">Buffer</th>
+                    <th class="text-right">Min Ord Qty</th>
+                    <th class="text-right">Order Qty</th>
+                    <th class="text-right">Unit Cost</th>
+                    <th class="text-right">Line Cost</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in threshold_items %}
+                <tr>
+                    <td><a href="#" class="sku-link" target="_blank">{{ item.sku }}</a></td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
+                    <td class="text-right">{{ item.threshold|floatformat:0 }}</td>
+                    <td class="text-right"><span class="badge-shortage">{{ item.shortage|default:0|floatformat:0 }}</span></td>
+                    <td class="text-right">{% if item.buffer %}+{{ item.buffer }}{% else %}&mdash;{% endif %}</td>
+                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
+                    <td class="text-right"><strong>{{ item.order_qty|floatformat:0 }}</strong></td>
+                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                    <td>{{ item.reason }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-check-circle"></i> No items currently below the active threshold rules.
+    </div>
+    {% endif %}
+</div>
+
 <!-- Suggested Additional Items -->
 {% if suggested_items %}
 <div class="content-card">
@@ -515,25 +574,6 @@
     </div>
 </div>
 {% endif %}
-
-<!-- Ordering Rules -->
-<div class="content-card">
-    <div class="section-header">
-        <h2>Ordering Rules & Logic</h2>
-    </div>
-    <div class="rules-grid">
-        {% for rule_category in ordering_rules %}
-        <div class="rules-block">
-            <h4>{{ rule_category.category }}</h4>
-            <ul>
-                {% for rule in rule_category.rules %}
-                <li>{{ rule }}</li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% endfor %}
-    </div>
-</div>
 
 <!-- Previous Raumplus Orders -->
 {% if raumplus_previous_pos %}
@@ -589,9 +629,192 @@
 {
     "critical": [{% for item in critical_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
     "predicted": [{% for item in predicted_shortages %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
+    "threshold": [{% for item in threshold_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
     "suggested": [{% for item in suggested_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.suggested_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}]
 }
 </script>
+
+<!-- Rule Controls Modal -->
+<div id="rau-rules-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRauRulesModal(event)">
+    <div class="rau-order-modal" onclick="event.stopPropagation()">
+        <div class="rau-order-modal-header">
+            <h3>Ordering Rule Controls</h3>
+            <button class="pred-modal-close" onclick="closeRauRulesModal()">&times;</button>
+        </div>
+        <div class="rau-order-modal-body">
+            <form method="get" class="rau-rules-form">
+                <input type="hidden" name="tab" value="raumplus">
+                <input type="hidden" name="months" value="{{ prediction_months }}">
+                <div class="rau-rules-table-wrap">
+                    <table class="rau-rules-table">
+                        <thead>
+                            <tr>
+                                <th class="checkbox-col"></th>
+                                <th>Rule</th>
+                                <th>Description</th>
+                                <th class="value-col">Value</th>
+                                <th class="edit-col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if global_rule_controls %}
+                            <tr class="rau-rules-section-row">
+                                <td colspan="5">Global Rules</td>
+                            </tr>
+                            {% for rule in global_rule_controls %}
+                            <tr data-rule="{{ rule.name }}">
+                                <td class="checkbox-col">
+                                    <input type="hidden" name="{{ rule.toggle_name }}" value="0">
+                                    <input id="modal-{{ rule.name }}-enable" type="checkbox" name="{{ rule.toggle_name }}" value="1" {% if rule.enabled_value %}checked{% endif %}>
+                                </td>
+                                <td><label for="modal-{{ rule.name }}-enable">{{ rule.label }}</label></td>
+                                <td class="rau-rule-help">
+                                    <span class="rau-rule-help-text">{{ rule.help|default:"-" }}</span>
+                                    <input type="hidden" name="rule_help_{{ rule.name }}" value="{{ rule.help|default:'-' }}">
+                                </td>
+                                <td class="value-col">
+                                    {% if rule.type == 'int' %}
+                                    <div class="rau-rule-input-wrap{% if rule.unit_prefix %} has-prefix{% endif %}{% if rule.unit_suffix %} has-suffix{% endif %}">
+                                        {% if rule.unit_prefix %}<span class="rau-rule-unit prefix">{{ rule.unit_prefix }}</span>{% endif %}
+                                        <input id="modal-{{ rule.name }}" type="number" step="{{ rule.step|default:'1' }}" name="{{ rule.name }}" value="{{ rule.value_display|default:rule.value }}">
+                                        {% if rule.unit_suffix %}<span class="rau-rule-unit suffix">{{ rule.unit_suffix }}</span>{% endif %}
+                                    </div>
+                                    {% elif rule.type == 'decimal' %}
+                                    <div class="rau-rule-input-wrap{% if rule.unit_prefix %} has-prefix{% endif %}{% if rule.unit_suffix %} has-suffix{% endif %}">
+                                        {% if rule.unit_prefix %}<span class="rau-rule-unit prefix">{{ rule.unit_prefix }}</span>{% endif %}
+                                        <input id="modal-{{ rule.name }}" type="number" step="{{ rule.step|default:'0.01' }}" name="{{ rule.name }}" value="{{ rule.value_display|default:rule.value }}">
+                                        {% if rule.unit_suffix %}<span class="rau-rule-unit suffix">{{ rule.unit_suffix }}</span>{% endif %}
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td class="edit-col">
+                                    <a class="rau-rule-help-edit" title="Open rule details" href="{% url 'raumplus_ordering_rule_edit' rule.id %}" target="_blank" rel="noopener noreferrer">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+
+                            {% if normal_rule_controls %}
+                            <tr class="rau-rules-section-row">
+                                <td colspan="5">Normal Rules</td>
+                            </tr>
+                            {% for section in normal_rule_sections %}
+                            {% if section.rules %}
+                            <tr class="rau-rules-section-row">
+                                <td colspan="5">{{ section.title }}</td>
+                            </tr>
+                            {% for rule in section.rules %}
+                            <tr data-rule="{{ rule.name }}">
+                                <td class="checkbox-col">
+                                    <input type="hidden" name="{{ rule.toggle_name }}" value="0">
+                                    <input id="modal-{{ rule.name }}-enable" type="checkbox" name="{{ rule.toggle_name }}" value="1" {% if rule.enabled_value %}checked{% endif %}>
+                                </td>
+                                <td><label for="modal-{{ rule.name }}-enable">{{ rule.label }}</label></td>
+                                <td class="rau-rule-help">
+                                    <span class="rau-rule-help-text">{{ rule.help|default:"-" }}</span>
+                                    <input type="hidden" name="rule_help_{{ rule.name }}" value="{{ rule.help|default:'-' }}">
+                                </td>
+                                <td class="value-col">
+                                    {% if rule.type == 'int' %}
+                                    <div class="rau-rule-input-wrap{% if rule.unit_prefix %} has-prefix{% endif %}{% if rule.unit_suffix %} has-suffix{% endif %}">
+                                        {% if rule.unit_prefix %}<span class="rau-rule-unit prefix">{{ rule.unit_prefix }}</span>{% endif %}
+                                        <input id="modal-{{ rule.name }}" type="number" step="{{ rule.step|default:'1' }}" name="{{ rule.name }}" value="{{ rule.value_display|default:rule.value }}">
+                                        {% if rule.unit_suffix %}<span class="rau-rule-unit suffix">{{ rule.unit_suffix }}</span>{% endif %}
+                                    </div>
+                                    {% elif rule.type == 'decimal' %}
+                                    <div class="rau-rule-input-wrap{% if rule.unit_prefix %} has-prefix{% endif %}{% if rule.unit_suffix %} has-suffix{% endif %}">
+                                        {% if rule.unit_prefix %}<span class="rau-rule-unit prefix">{{ rule.unit_prefix }}</span>{% endif %}
+                                        <input id="modal-{{ rule.name }}" type="number" step="{{ rule.step|default:'0.01' }}" name="{{ rule.name }}" value="{{ rule.value_display|default:rule.value }}">
+                                        {% if rule.unit_suffix %}<span class="rau-rule-unit suffix">{{ rule.unit_suffix }}</span>{% endif %}
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td class="edit-col">
+                                    {% if rule.can_manage_products %}
+                                    <button
+                                        type="button"
+                                        class="rau-rule-products-btn"
+                                        onclick="openRuleProductsModal('{{ rule.name }}', '{{ rule.label|escapejs }}')">
+                                        Products ({{ rule.affected_products_count }})
+                                    </button>
+                                    {% endif %}
+                                    <a class="rau-rule-help-edit" title="Open rule details" href="{% url 'raumplus_ordering_rule_edit' rule.id %}" target="_blank" rel="noopener noreferrer">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+                            {% endfor %}
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rau-rules-actions">
+                    <a class="btn btn-secondary btn-sm" href="{% url 'shortages' %}?tab=raumplus&months={{ prediction_months }}&reset_rule_help=1">
+                        <i class="bi bi-arrow-counterclockwise"></i> Reset Defaults
+                    </a>
+                    <button type="button" class="btn btn-outline-success btn-sm" onclick="saveRauRuleDefaults(this.closest('form'))">
+                        <i class="bi bi-floppy"></i> Save as Default
+                    </button>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-sliders"></i> Apply Rules
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{{ rule_products_map|json_script:"rule-products-map-data" }}
+
+<!-- Rule Description Edit Modal -->
+<div id="rule-help-edit-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRuleHelpModal(event)">
+    <div class="rau-rule-help-editor-modal" onclick="event.stopPropagation()">
+        <div class="rau-rule-help-editor-header">
+            <h4><i class="bi bi-pencil-square"></i> Edit Rule Description</h4>
+            <button class="pred-modal-close" onclick="closeRuleHelpModal()">&times;</button>
+        </div>
+        <div class="rau-rule-help-editor-body">
+            <textarea id="rule-help-edit-text" rows="5" placeholder="Enter description..."></textarea>
+            <small>Tip: Press Ctrl+Enter to save.</small>
+        </div>
+        <div class="rau-rule-help-editor-actions">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeRuleHelpModal()">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveRuleHelpModal()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Rule Products Modal -->
+<div id="rule-products-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRuleProductsModal(event)">
+    <div class="rau-order-modal" onclick="event.stopPropagation()" style="max-width:960px;">
+        <div class="rau-order-modal-header">
+            <h3 id="rule-products-title">Affected Products</h3>
+            <button class="pred-modal-close" onclick="closeRuleProductsModal()">&times;</button>
+        </div>
+        <div class="rau-order-modal-body">
+            <div id="rule-products-empty" style="display:none;color:var(--text-secondary);padding:12px;">
+                No specific products are assigned to this rule. This rule currently applies globally.
+            </div>
+            <div id="rule-products-table-wrap" class="shortage-table-wrap" style="max-height:56vh;overflow:auto;">
+                <table class="shortage-tbl" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Name</th>
+                            <th class="text-right">Stock</th>
+                            <th class="text-right">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rule-products-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- ── Raumplus Order Modal ───────────────────────────────────────────── -->
 <div id="rau-order-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRauplusOrderModal(event)">
@@ -788,7 +1011,7 @@
         const raw = JSON.parse(document.getElementById('rau-order-data').textContent);
         RAU_ORDER_ROWS = [];
 
-        ['critical','predicted','suggested'].forEach(section => {
+        ['critical','predicted','threshold','suggested'].forEach(section => {
             (raw[section] || []).forEach(item => {
                 // Deduplicate: if already added (same SKU from a different section), skip
                 if (!RAU_ORDER_ROWS.find(r => r.sku === item.sku)) {
@@ -816,6 +1039,139 @@
         }
     }
 
+    function openRauRulesModal() {
+        document.getElementById('rau-rules-modal').style.display = 'flex';
+    }
+
+    function closeRauRulesModal(e) {
+        if (!e || e.target === document.getElementById('rau-rules-modal')) {
+            document.getElementById('rau-rules-modal').style.display = 'none';
+        }
+    }
+
+    const RULE_PRODUCTS_MAP = JSON.parse(
+        document.getElementById('rule-products-map-data').textContent || '{}'
+    );
+
+    function openRuleProductsModal(ruleName, ruleLabel) {
+        const modal = document.getElementById('rule-products-modal');
+        const title = document.getElementById('rule-products-title');
+        const empty = document.getElementById('rule-products-empty');
+        const tableWrap = document.getElementById('rule-products-table-wrap');
+        const body = document.getElementById('rule-products-body');
+        if (!modal || !title || !empty || !tableWrap || !body) return;
+
+        const products = RULE_PRODUCTS_MAP[ruleName] || [];
+        title.textContent = `${ruleLabel} - Affected Products (${products.length})`;
+        body.innerHTML = '';
+
+        if (!products.length) {
+            empty.style.display = 'block';
+            tableWrap.style.display = 'none';
+            modal.style.display = 'flex';
+            return;
+        }
+
+        empty.style.display = 'none';
+        tableWrap.style.display = 'block';
+
+        products.forEach((product) => {
+            const tr = document.createElement('tr');
+
+            const skuTd = document.createElement('td');
+            const skuCode = document.createElement('code');
+            skuCode.textContent = product.sku || '';
+            skuTd.appendChild(skuCode);
+
+            const nameTd = document.createElement('td');
+            nameTd.textContent = product.name || '';
+
+            const qtyTd = document.createElement('td');
+            qtyTd.className = 'text-right';
+            qtyTd.textContent = String(Math.round(Number(product.quantity || 0)));
+
+            const costTd = document.createElement('td');
+            costTd.className = 'text-right';
+            costTd.textContent = `£${Number(product.cost || 0).toFixed(2)}`;
+
+            tr.appendChild(skuTd);
+            tr.appendChild(nameTd);
+            tr.appendChild(qtyTd);
+            tr.appendChild(costTd);
+            body.appendChild(tr);
+        });
+
+        modal.style.display = 'flex';
+    }
+
+    function closeRuleProductsModal(e) {
+        const modal = document.getElementById('rule-products-modal');
+        if (!modal) return;
+        if (!e || e.target === modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    let RULE_HELP_EDIT_TARGET = null;
+
+    function editRuleHelp(ruleName) {
+        const row = document.querySelector(`#rau-rules-modal tr[data-rule="${ruleName}"]`);
+        if (!row) return;
+        const helpText = row.querySelector('.rau-rule-help-text');
+        const helpInput = row.querySelector(`input[name="rule_help_${ruleName}"]`);
+        const current = (helpInput?.value || helpText?.textContent || '').trim();
+
+        RULE_HELP_EDIT_TARGET = { ruleName, helpText, helpInput };
+
+        const modal = document.getElementById('rule-help-edit-modal');
+        const textarea = document.getElementById('rule-help-edit-text');
+        if (!modal || !textarea) return;
+
+        textarea.value = current === '-' ? '' : current;
+        modal.style.display = 'flex';
+
+        setTimeout(() => {
+            textarea.focus();
+            textarea.selectionStart = textarea.value.length;
+            textarea.selectionEnd = textarea.value.length;
+        }, 0);
+    }
+
+    function closeRuleHelpModal(e) {
+        const modal = document.getElementById('rule-help-edit-modal');
+        if (!modal) return;
+        if (!e || e.target === modal) {
+            modal.style.display = 'none';
+            RULE_HELP_EDIT_TARGET = null;
+        }
+    }
+
+    function saveRuleHelpModal() {
+        if (!RULE_HELP_EDIT_TARGET) return;
+        const textarea = document.getElementById('rule-help-edit-text');
+        if (!textarea) return;
+
+        const value = (textarea.value || '').trim() || '-';
+        if (RULE_HELP_EDIT_TARGET.helpText) RULE_HELP_EDIT_TARGET.helpText.textContent = value;
+        if (RULE_HELP_EDIT_TARGET.helpInput) RULE_HELP_EDIT_TARGET.helpInput.value = value;
+        closeRuleHelpModal();
+    }
+
+    document.addEventListener('keydown', function (event) {
+        const modal = document.getElementById('rule-help-edit-modal');
+        if (!modal || modal.style.display !== 'flex') return;
+
+        if (event.key === 'Escape') {
+            closeRuleHelpModal();
+            return;
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            saveRuleHelpModal();
+        }
+    });
+
     function renderRauplusOrderTable() {
         const tbody = document.getElementById('rau-order-tbody');
         tbody.innerHTML = '';
@@ -823,6 +1179,7 @@
         const sections = [
             { key: 'critical',  label: 'Critical Items',   cls: 'critical' },
             { key: 'predicted', label: 'Predicted Items',  cls: 'predicted' },
+            { key: 'threshold', label: 'Threshold Items',  cls: 'suggested' },
             { key: 'suggested', label: 'Suggested Items',  cls: 'suggested' },
             { key: 'manual',    label: 'Manually Added',   cls: 'manual' },
         ];
@@ -1112,6 +1469,34 @@
     }
 
     // ── Draft Save / Load ─────────────────────────────────────────────────
+
+    function saveRauRuleDefaults(form) {
+        const postForm = document.createElement('form');
+        postForm.method = 'POST';
+        postForm.action = '{% url "save_rau_rule_defaults" %}';
+
+        const csrf = document.createElement('input');
+        csrf.type = 'hidden';
+        csrf.name = 'csrfmiddlewaretoken';
+        csrf.value = '{{ csrf_token }}';
+        postForm.appendChild(csrf);
+
+        const elements = form.elements;
+        for (let i = 0; i < elements.length; i++) {
+            const el = elements[i];
+            if (!el.name) continue;
+            if (el.type === 'checkbox' && !el.checked) continue;
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = el.name;
+            hidden.value = el.value;
+            postForm.appendChild(hidden);
+        }
+
+        document.body.appendChild(postForm);
+        postForm.submit();
+    }
+
     // ── Previous POs list (for Copy from PO dropdown) ───────────────────
     const RAU_PREVIOUS_POS = [
         {% for po in raumplus_previous_pos %}
