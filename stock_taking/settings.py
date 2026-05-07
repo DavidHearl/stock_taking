@@ -124,6 +124,13 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'david.hearl@sliderobes.com')
 PO_FROM_EMAIL = os.getenv('PO_FROM_EMAIL', 'orders@sliderobes.com')
 
+# Microsoft Graph API — Accounts Payable mailbox integration
+# Set these in your .env file. See stock_take/services/graph_api.py for setup instructions.
+MS_GRAPH_TENANT_ID = os.getenv('MS_GRAPH_TENANT_ID', '')
+MS_GRAPH_CLIENT_ID = os.getenv('MS_GRAPH_CLIENT_ID', '')
+MS_GRAPH_CLIENT_SECRET = os.getenv('MS_GRAPH_CLIENT_SECRET', '')
+MS_GRAPH_MAILBOX = os.getenv('MS_GRAPH_MAILBOX', 'accounts.payable@sliderobes.com')
+
 WSGI_APPLICATION = 'stock_taking.wsgi.application'
 
 # Database

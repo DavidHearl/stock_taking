@@ -62,6 +62,14 @@ URL_TO_PAGE = {
     'invoices_list': 'invoices',
     'invoice_detail': 'invoices',
     'sync_invoices': 'invoices',
+    'accounts_payable_inbox': 'accounts_payable',
+    'sync_mailbox': 'accounts_payable',
+    'create_invoice_from_email': 'accounts_payable',
+    'ignore_email': 'accounts_payable',
+    'unprocess_email': 'accounts_payable',
+    'download_mailbox_attachment': 'accounts_payable',
+    'manage_exemptions': 'accounts_payable',
+    'bulk_email_action': 'accounts_payable',
 
     # Purchase
     'purchase_orders_list': 'purchase_orders',
@@ -130,6 +138,14 @@ URL_TO_PAGE = {
     'claim_service': 'claim_service',
     'claim_delete': 'claim_service',
     'claim_download_zip': 'claim_service',
+
+    # IT
+    'mobile_devices': 'mobile_devices',
+    'mobile_device_save': 'mobile_devices',
+    'mobile_device_create': 'mobile_devices',
+    'mobile_device_delete': 'mobile_devices',
+    'laptop_devices': 'laptop_devices',
+    'desktop_devices': 'desktop_devices',
 }
 
 

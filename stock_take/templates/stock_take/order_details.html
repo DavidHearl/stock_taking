@@ -1122,7 +1122,7 @@
                     </button>
                     {% if order.os_doors_required %}
                     <button type="button" class="btn btn-sm btn-outline-danger" title="Remove OS Doors Required marker"
-                            onclick="if(confirm('Remove the OS Doors Required marker from this order?')){removeOSDoorsRequired({{ order.id }})}">
+                            onclick="openModal('confirmRemoveOSDoorsModal')">
                         <i class="bi bi-x-lg"></i> Remove
                     </button>
                     {% endif %}
@@ -2322,6 +2322,26 @@
     </div>
 </div>
 
+<!-- Confirm Remove OS Doors Required Modal -->
+<div class="modal" id="confirmRemoveOSDoorsModal">
+    <div class="modal-overlay" onclick="closeModal('confirmRemoveOSDoorsModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Remove OS Doors Required</h3>
+                <button type="button" class="modal-close" onclick="closeModal('confirmRemoveOSDoorsModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>Remove the OS Doors Required marker from this order?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('confirmRemoveOSDoorsModal')">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="closeModal('confirmRemoveOSDoorsModal'); removeOSDoorsRequired({{ order.id }})">Remove</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Confirm Swap Modal -->
 <div class="modal" id="confirmSwapModal">
     <div class="modal-overlay" onclick="closeModal('confirmSwapModal')"></div>
@@ -2338,6 +2358,26 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('confirmSwapModal')">Cancel</button>
                 <button type="button" class="btn btn-primary" id="confirmSwapBtn">Confirm Swap</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Update Boards PO Confirmation -->
+<div class="modal" id="confirmUpdateBoardsPOModal" style="display:none;">
+    <div class="modal-overlay" onclick="closeUpdateBoardsPOModal()"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Update Purchase Order</h3>
+                <button type="button" class="modal-close" onclick="closeUpdateBoardsPOModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>This will regenerate PNX/CSV files and update the Purchase Order attachments. Continue?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeUpdateBoardsPOModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmUpdateBoardsPO()">Continue</button>
             </div>
         </div>
     </div>
@@ -5315,14 +5355,35 @@ function regenerateBoardsFiles() {
 }
 
 // Update PO - regenerate PNX/CSV files and update PO attachments
+let _pendingUpdateBoardsPOId = null;
+let _pendingUpdateBoardsPOBtn = null;
+let _pendingUpdateBoardsPOOriginalHtml = null;
+
 function updateBoardsPO(boardsPoId) {
-    if (!confirm('This will regenerate PNX/CSV files and update the Purchase Order attachments. Continue?')) {
-        return;
-    }
+    _pendingUpdateBoardsPOId = boardsPoId;
+    _pendingUpdateBoardsPOBtn = event.target.closest('button');
+    _pendingUpdateBoardsPOOriginalHtml = _pendingUpdateBoardsPOBtn.innerHTML;
+    document.getElementById('confirmUpdateBoardsPOModal').style.display = 'flex';
+}
+
+function closeUpdateBoardsPOModal() {
+    document.getElementById('confirmUpdateBoardsPOModal').style.display = 'none';
+    _pendingUpdateBoardsPOId = null;
+    _pendingUpdateBoardsPOBtn = null;
+    _pendingUpdateBoardsPOOriginalHtml = null;
+}
+
+function confirmUpdateBoardsPO() {
+    document.getElementById('confirmUpdateBoardsPOModal').style.display = 'none';
+
+    const boardsPoId = _pendingUpdateBoardsPOId;
+    const btn = _pendingUpdateBoardsPOBtn;
+    const originalHtml = _pendingUpdateBoardsPOOriginalHtml;
+    _pendingUpdateBoardsPOId = null;
+    _pendingUpdateBoardsPOBtn = null;
+    _pendingUpdateBoardsPOOriginalHtml = null;
 
     const orderId = {{ order.id }};
-    const btn = event.target.closest('button');
-    const originalHtml = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
 

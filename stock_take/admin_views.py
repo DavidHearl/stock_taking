@@ -88,6 +88,43 @@ def admin_users(request):
                 messages.success(request, f"Role updated for {target_user.username}")
             except (User.DoesNotExist, Role.DoesNotExist):
                 messages.error(request, "Invalid user or role")
+
+        elif action == 'toggle_active':
+            try:
+                target_user = User.objects.get(id=user_id)
+                if target_user == request.user:
+                    messages.error(request, "You cannot deactivate your own account.")
+                else:
+                    target_user.is_active = not target_user.is_active
+                    target_user.save(update_fields=['is_active'])
+                    state = 'activated' if target_user.is_active else 'deactivated'
+                    messages.success(request, f"User {target_user.username} {state}.")
+            except User.DoesNotExist:
+                messages.error(request, "User not found.")
+
+        elif action == 'delete_user':
+            try:
+                target_user = User.objects.get(id=user_id)
+                if target_user == request.user:
+                    messages.error(request, "You cannot delete your own account.")
+                else:
+                    username = target_user.username
+                    target_user.delete()
+                    messages.success(request, f"User '{username}' deleted.")
+            except User.DoesNotExist:
+                messages.error(request, "User not found.")
+
+        elif action == 'edit_user':
+            try:
+                target_user = User.objects.get(id=user_id)
+                target_user.first_name = request.POST.get('first_name', '').strip()
+                target_user.last_name = request.POST.get('last_name', '').strip()
+                target_user.email = request.POST.get('email', '').strip()
+                target_user.save(update_fields=['first_name', 'last_name', 'email'])
+                messages.success(request, f"Details updated for {target_user.username}.")
+            except User.DoesNotExist:
+                messages.error(request, "User not found.")
+
         return redirect('admin_users')
 
     users = User.objects.all().select_related('profile', 'profile__role').order_by('username')

@@ -1,3 +1,5 @@
+import json
+
 from django.db import models
 from django.utils import timezone
 from decimal import Decimal
@@ -2073,8 +2075,10 @@ class PurchaseInvoice(models.Model):
         ('paid', 'Paid'),
     ]
 
-    invoice_number   = models.CharField(max_length=100, db_index=True)
-    supplier_name    = models.CharField(max_length=255, blank=True, help_text='Who sent this invoice')
+    invoice_number      = models.CharField(max_length=100, db_index=True)
+    reference           = models.CharField(max_length=255, blank=True, help_text='Internal reference / filename (without extension)')
+    supplier_reference  = models.CharField(max_length=255, blank=True, help_text="Supplier's own invoice number or reference code")
+    supplier_name       = models.CharField(max_length=255, blank=True, help_text='Who sent this invoice')
     date             = models.DateField(null=True, blank=True)
     due_date         = models.DateField(null=True, blank=True)
     status           = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
@@ -2090,6 +2094,7 @@ class PurchaseInvoice(models.Model):
         'PurchaseOrder', blank=True, related_name='linked_purchase_invoices',
         help_text='Purchase orders this supplier invoice is associated with',
     )
+    xero_id          = models.CharField(max_length=100, blank=True, help_text='Xero InvoiceID once pushed to Xero')
     created_at       = models.DateTimeField(auto_now_add=True)
     updated_at       = models.DateTimeField(auto_now=True)
     created_by       = models.CharField(max_length=200, blank=True)
@@ -2099,6 +2104,37 @@ class PurchaseInvoice(models.Model):
 
     def __str__(self):
         return f"{self.invoice_number} – {self.supplier_name}"
+
+    @classmethod
+    def generate_invoice_number(cls):
+        """Return the next invoice number in the scheme INV-A00-001 … INV-A00-999,
+        INV-A01-000 … INV-A01-999, INV-A02-000 … etc.
+
+        The sequence is derived from the total number of existing invoices so it is
+        always monotonically increasing (no gaps needed — it just needs to be unique
+        and human-readable).
+        """
+        import re
+        # Find the highest existing auto-generated number
+        pattern = re.compile(r'^INV-A(\d{2})-(\d{3})$')
+        best = (-1, -1)
+        for num in cls.objects.values_list('invoice_number', flat=True):
+            m = pattern.match(num or '')
+            if m:
+                pair = (int(m.group(1)), int(m.group(2)))
+                if pair > best:
+                    best = pair
+
+        if best == (-1, -1):
+            group, seq = 0, 1
+        else:
+            group, seq = best
+            seq += 1
+            if seq > 999:
+                group += 1
+                seq = 0
+
+        return f'INV-A{group:02d}-{seq:03d}'
 
     @property
     def amount_outstanding(self):
@@ -2117,6 +2153,100 @@ class PurchaseInvoice(models.Model):
         from django.db.models import Sum
         result = self.line_items.filter(order=None).aggregate(t=Sum('line_total'))['t']
         return result or 0
+
+
+class MailboxEmail(models.Model):
+    """An email from the Accounts Payable shared mailbox, cached locally.
+
+    The actual attachment bytes are not stored here — they are downloaded
+    on-demand from the Graph API when creating a Purchase Invoice.
+    """
+
+    graph_message_id = models.CharField(
+        max_length=1000, unique=True,
+        help_text='Microsoft Graph API message ID',
+    )
+    subject = models.CharField(max_length=500, blank=True)
+    sender_name = models.CharField(max_length=255, blank=True)
+    sender_email = models.CharField(max_length=254, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    body_preview = models.TextField(blank=True)
+    is_read = models.BooleanField(default=False)
+    is_processed = models.BooleanField(
+        default=False, db_index=True,
+        help_text='True once a Purchase Invoice has been created from this email',
+    )
+    processed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='processed_emails',
+        help_text='User who created the purchase invoice from this email',
+    )
+    is_ignored = models.BooleanField(
+        default=False, db_index=True,
+        help_text='True if the email has been marked as ignored/not relevant',
+    )
+    attachment_names = models.TextField(
+        blank=True,
+        help_text='JSON array of {id, name, content_type, size} for non-inline attachments',
+    )
+    purchase_invoice = models.ForeignKey(
+        'PurchaseInvoice',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_emails',
+    )
+    synced_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-received_at']
+        verbose_name = 'Mailbox Email'
+        verbose_name_plural = 'Mailbox Emails'
+
+    def __str__(self):
+        return f'{self.sender_email}: {self.subject[:60]}'
+
+    @property
+    def attachment_list(self):
+        """Return the stored attachment metadata as a Python list."""
+        try:
+            return json.loads(self.attachment_names) if self.attachment_names else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @property
+    def attachment_count(self):
+        return len(self.attachment_list)
+
+    @property
+    def has_pdf(self):
+        return any('pdf' in a.get('content_type', '').lower() for a in self.attachment_list)
+
+
+class MailboxExemption(models.Model):
+    """An email address whose emails should be silently skipped during mailbox sync."""
+
+    email_address = models.EmailField(
+        max_length=254, unique=True,
+        help_text='Emails from this address are skipped during sync',
+    )
+    note = models.CharField(
+        max_length=255, blank=True,
+        help_text='Optional note explaining why this address is exempted',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['email_address']
+        verbose_name = 'Mailbox Exemption'
+        verbose_name_plural = 'Mailbox Exemptions'
+
+    def __str__(self):
+        return self.email_address
 
 
 class PurchaseInvoiceLineItem(models.Model):
@@ -2213,6 +2343,7 @@ PAGE_SECTIONS = [
     ('Accounting', [
         ('invoices', 'Invoices'),
         ('purchase_invoices', 'Purchase Invoices'),
+        ('accounts_payable', 'Accounts Payable'),
     ]),
     ('Purchase', [
         ('purchase_orders', 'Purchase Orders'),
@@ -2244,6 +2375,11 @@ PAGE_SECTIONS = [
         ('material_report', 'Material Report'),
         ('costing_report', 'Costing Report'),
         ('remedial_report', 'Remedial Report'),
+    ]),
+    ('IT', [
+        ('mobile_devices', 'Mobile Devices'),
+        ('laptop_devices', 'Laptops'),
+        ('desktop_devices', 'Desktops'),
     ]),
     ('Other', [
         ('tickets', 'Tickets'),
@@ -2764,3 +2900,103 @@ class RaumplusOption(models.Model):
 
     def __str__(self):
         return f"{self.get_option_type_display()}: {self.name}"
+
+
+# =============================================
+# IT Asset Models
+# =============================================
+
+class PhoneTemplate(models.Model):
+    """Pre-defined phone hardware templates for quick device creation."""
+
+    DEVICE_TYPE_CHOICES = [
+        ('iphone', 'iPhone'),
+        ('samsung', 'Samsung'),
+        ('google', 'Google'),
+        ('other', 'Other'),
+    ]
+
+    name = models.CharField(max_length=100, help_text='e.g. iPhone 15 Pro, Samsung S23+')
+    device_type = models.CharField(max_length=20, choices=DEVICE_TYPE_CHOICES, default='iphone')
+    model = models.CharField(max_length=100, blank=True, default='', help_text='e.g. 15 Pro, S23+')
+    chip = models.CharField(max_length=100, blank=True, default='', help_text='e.g. A17 Pro')
+    security_updates_until = models.CharField(max_length=50, blank=True, default='', help_text='e.g. 2027')
+
+    class Meta:
+        ordering = ['device_type', 'name']
+        verbose_name = 'Phone Template'
+        verbose_name_plural = 'Phone Templates'
+
+    def __str__(self):
+        return self.name
+
+
+class MobileDevice(models.Model):
+    """Company mobile phone and SIM asset register."""
+
+    DEVICE_TYPE_CHOICES = [
+        ('iphone', 'iPhone'),
+        ('samsung', 'Samsung'),
+        ('google', 'Google'),
+        ('other', 'Other'),
+    ]
+
+    CONDITION_CHOICES = [
+        ('excellent', 'Excellent'),
+        ('good', 'Good'),
+        ('ok', 'Ok'),
+        ('poor', 'Poor'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('sim_removed', 'SIM Removed'),
+        ('locked', 'Locked'),
+        ('cracked_screen', 'Cracked Screen'),
+        ('marketing', 'Marketing Phone'),
+        ('spare', 'Spare'),
+        ('other', 'Other'),
+    ]
+
+    # Device identity
+    device_type = models.CharField(max_length=20, choices=DEVICE_TYPE_CHOICES, blank=True, default='')
+    model = models.CharField(max_length=100, blank=True, default='', help_text='e.g. SE (2nd Generation), A53 5G')
+    chip = models.CharField(max_length=100, blank=True, default='', help_text='e.g. A13 Bionic, Snapdragon 670')
+    serial_number = models.CharField(max_length=100, blank=True, default='', help_text='IMEI / Serial number')
+    condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+
+    # Dates
+    purchase_date = models.CharField(max_length=50, blank=True, default='', help_text='e.g. November 2021')
+    security_updates_until = models.CharField(max_length=50, blank=True, default='', help_text='e.g. 2027')
+
+    # SIM / assignment
+    phone_number = models.CharField(max_length=30, blank=True, default='')
+    assigned_user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='mobile_devices',
+        help_text='Atlas user this device is assigned to',
+    )
+    sim_cost = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, help_text='Monthly SIM cost')
+    is_esim = models.BooleanField(default=False, help_text='Tick if this is an eSIM-only entry')
+
+    # Status flags
+    is_dead = models.BooleanField(default=False, help_text='Device no longer in use')
+
+    # Free text
+    notes = models.TextField(blank=True, default='')
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['is_dead', 'assigned_user__last_name', 'assigned_user__first_name']
+        verbose_name = 'Mobile Device'
+        verbose_name_plural = 'Mobile Devices'
+
+    def __str__(self):
+        if self.is_esim:
+            return f"eSIM – {self.phone_number or 'no number'}"
+        name = self.assigned_user.get_full_name() if self.assigned_user else 'Unassigned'
+        return f"{self.get_device_type_display()} {self.model} – {name}"

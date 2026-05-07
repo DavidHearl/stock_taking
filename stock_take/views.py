@@ -10016,12 +10016,13 @@ def calendar_view(request):
     ).order_by('fit_date', 'last_name')
     
     # Create appointments dict by date and fitter (for backwards compat / modals)
+    _all_fitter_codes = [code for code, _ in FitAppointment.FITTER_CHOICES]
     appointments_by_date = {}
     for appointment in appointments:
         date_key = appointment.fit_date.day
         if date_key not in appointments_by_date:
-            appointments_by_date[date_key] = {'R': [], 'G': [], 'S': [], 'P': []}
-        appointments_by_date[date_key][appointment.fitter].append(appointment)
+            appointments_by_date[date_key] = {code: [] for code in _all_fitter_codes}
+        appointments_by_date[date_key].setdefault(appointment.fitter, []).append(appointment)
 
     # Flat list per day (for the monthly grid display)
     from calendar import monthrange as _mr

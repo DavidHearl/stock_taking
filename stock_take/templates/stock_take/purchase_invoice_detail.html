@@ -2,7 +2,7 @@
 {% load static humanize %}
 
 {% block title %}{{ invoice.invoice_number }} – Purchase Invoice{% endblock %}
-{% block page_title %}{{ invoice.invoice_number }}{% endblock %}
+{% block page_title %}<a href="{% url 'purchase_invoices_list' %}" style="color:inherit;text-decoration:none;margin-right:8px;" title="Back to Purchase Invoices"><i class="bi bi-arrow-left"></i></a>{{ invoice.invoice_number }}{% endblock %}
 
 {% block nav_purchase_invoices_active %}active{% endblock %}
 
@@ -11,13 +11,6 @@
 {% endblock %}
 
 {% block content %}
-
-<!-- Back link -->
-<div class="pinv-detail-back">
-    <a href="{% url 'purchase_invoices_list' %}" class="pinv-back-link">
-        <i class="bi bi-arrow-left"></i> Back to Purchase Invoices
-    </a>
-</div>
 
 <!-- Header card -->
 <div class="pinv-detail-header">
@@ -37,9 +30,36 @@
             <button class="pinv-btn-sm" onclick="toggleHeaderEdit()">
                 <i class="bi bi-pencil"></i> Edit
             </button>
+            {% if not invoice.xero_id %}
+            <button class="pinv-btn-sm" id="xero-push-btn" onclick="pushToXero()" title="Push to Xero as draft bill">
+                <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+            {% else %}
+            <a class="pinv-btn-sm" id="xero-link-btn" href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" title="View in Xero (ID: {{ invoice.xero_id }})">
+                <i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> In Xero <i class="bi bi-box-arrow-up-right" style="font-size:0.75rem;"></i>
+            </a>
+            {% endif %}
             <button class="pinv-btn-sm danger" onclick="deleteInvoice()" title="Delete this invoice">
                 <i class="bi bi-trash"></i> Delete
             </button>
+            <!-- 3-dots menu -->
+            <div class="pinv-kebab-wrapper" id="kebab-wrapper">
+                <button class="pinv-btn-sm pinv-kebab-btn" id="kebab-btn" onclick="toggleKebab(event)" title="More options">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <div class="pinv-kebab-menu" id="kebab-menu" style="display:none;">
+                    {% if invoice.xero_id %}
+                    <button class="pinv-kebab-item" onclick="confirmRemoveXeroLink()">
+                        <i class="bi bi-cloud-slash"></i> Remove Xero link
+                    </button>
+                    {% else %}
+                    <span class="pinv-kebab-item disabled"><i class="bi bi-cloud-slash"></i> Remove Xero link</span>
+                    {% endif %}
+                    <button class="pinv-kebab-item" onclick="openManualLinkModal()">
+                        <i class="bi bi-link-45deg"></i> Manually link Xero ID
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -76,25 +96,25 @@
     </div>
 
     <!-- Edit mode fields (hidden by default) -->
-    <div id="meta-edit" style="display:none;">
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:12px;">
-            <div>
+    <div id="meta-edit" style="display:none;margin-top:16px;">
+        <div class="pinv-form-rows">
+            <div class="pinv-form-row">
                 <label class="pinv-label">Invoice Number</label>
                 <input type="text" id="edit-number" class="pinv-input" value="{{ invoice.invoice_number }}">
             </div>
-            <div>
+            <div class="pinv-form-row">
                 <label class="pinv-label">Supplier</label>
                 <input type="text" id="edit-supplier" class="pinv-input" value="{{ invoice.supplier_name|default:'' }}">
             </div>
-            <div>
+            <div class="pinv-form-row">
                 <label class="pinv-label">Invoice Date</label>
                 <input type="date" id="edit-date" class="pinv-input" value="{{ invoice.date|date:'Y-m-d'|default:'' }}">
             </div>
-            <div>
+            <div class="pinv-form-row">
                 <label class="pinv-label">Due Date</label>
                 <input type="date" id="edit-due-date" class="pinv-input" value="{{ invoice.due_date|date:'Y-m-d'|default:'' }}">
             </div>
-            <div>
+            <div class="pinv-form-row">
                 <label class="pinv-label">Status</label>
                 <select id="edit-status" class="pinv-input">
                     <option value="Draft" {% if invoice.status == 'Draft' %}selected{% endif %}>Draft</option>
@@ -103,25 +123,46 @@
                     <option value="Void" {% if invoice.status == 'Void' %}selected{% endif %}>Void</option>
                 </select>
             </div>
-            <div>
+            <div class="pinv-form-row">
                 <label class="pinv-label">Amount Paid (£)</label>
                 <input type="number" id="edit-amount-paid" class="pinv-input" step="0.01" min="0" value="{{ invoice.amount_paid|floatformat:2 }}">
             </div>
-            <div>
+            <div class="pinv-form-row">
                 <label class="pinv-label">Invoice Total (£)</label>
-                <input type="number" id="edit-total" class="pinv-input" step="0.01" min="0" value="{{ invoice.total|floatformat:2 }}" placeholder="0.00">
-                <small style="color:var(--text-secondary);font-size:0.75rem;">Set a flat value when not using line items. Auto-calculated when line items exist.</small>
+                <div class="pinv-form-row-stack">
+                    <input type="number" id="edit-total" class="pinv-input" step="0.01" min="0" value="{{ invoice.total|floatformat:2 }}" placeholder="0.00">
+                </div>
+            </div>
+            <div class="pinv-form-row">
+                <label class="pinv-label">Notes</label>
+                <input type="text" id="edit-notes" class="pinv-input" value="{{ invoice.notes|default:'' }}" placeholder="Optional notes">
             </div>
         </div>
-        <div style="margin-top:12px;">
-            <label class="pinv-label">Notes</label>
-            <input type="text" id="edit-notes" class="pinv-input" value="{{ invoice.notes|default:'' }}" placeholder="Optional notes">
-        </div>
-        <div style="display:flex;gap:8px;margin-top:12px;">
-            <button class="btn-save" onclick="saveHeader()"><i class="bi bi-check-lg"></i> Save</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">
             <button class="btn-cancel" onclick="toggleHeaderEdit()">Cancel</button>
+            <button class="btn-save" onclick="saveHeader()"><i class="bi bi-check-lg"></i> Save Changes</button>
         </div>
     </div>
+</div>
+
+<!-- ── Attachment bar ─────────────────────────────────────────── -->
+<div class="pinv-attachment-bar" id="attachment-area">
+    {% if invoice.attachment %}
+    <i class="bi bi-file-earmark-pdf" style="font-size:1rem;color:#dc3545;flex-shrink:0;"></i>
+    <a href="{{ invoice.attachment.url }}" target="_blank" class="pinv-att-bar-name">
+        {{ invoice.attachment.name|cut:"purchase_invoice_attachments/" }}
+    </a>
+    <button class="pinv-btn-icon danger" onclick="deleteAttachment()" title="Remove attachment">
+        <i class="bi bi-trash"></i>
+    </button>
+    {% else %}
+    <i class="bi bi-paperclip" style="color:var(--text-secondary);flex-shrink:0;"></i>
+    <span style="flex:1;color:var(--text-secondary);font-size:0.82rem;">No attachment</span>
+    <label class="pinv-btn-sm" style="cursor:pointer;margin:0;">
+        <i class="bi bi-upload"></i> Upload
+        <input type="file" id="attachment-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadAttachment(this)">
+    </label>
+    {% endif %}
 </div>
 
 <!-- ── Line Items ─────────────────────────────────────────────── -->
@@ -181,6 +222,8 @@
                                    onfocus="searchOrders(this, {{ line.id }})">
                             <div class="order-search-dropdown" id="order-dd-{{ line.id }}"></div>
                         </div>
+                    </td>
+                    <td style="text-align:center; white-space:nowrap;">
                         {% if line.order %}
                         <a href="{% url 'order_details' line.order.id %}" class="pinv-order-link" id="order-link-{{ line.id }}" target="_blank">
                             <i class="bi bi-box-arrow-up-right"></i> {{ line.order.sale_number }}
@@ -188,8 +231,6 @@
                         {% else %}
                         <a href="#" class="pinv-order-link" id="order-link-{{ line.id }}" style="display:none;"></a>
                         {% endif %}
-                    </td>
-                    <td style="text-align:center;">
                         <button class="pinv-btn-icon danger" onclick="deleteLine({{ line.id }})" title="Delete line">
                             <i class="bi bi-trash"></i>
                         </button>
@@ -211,9 +252,9 @@
                                    onfocus="searchOrdersNew(this)">
                             <div class="order-search-dropdown" id="new-order-dd"></div>
                         </div>
-                        <a href="#" class="pinv-order-link" id="new-order-link" style="display:none;"></a>
                     </td>
-                    <td style="text-align:center;">
+                    <td style="text-align:center; white-space:nowrap;">
+                        <a href="#" class="pinv-order-link" id="new-order-link" style="display:none;"></a>
                         <button class="pinv-btn-icon success" onclick="saveNewLine()" title="Save line">
                             <i class="bi bi-check-lg"></i>
                         </button>
@@ -244,55 +285,34 @@
 {% if order_allocations %}
 <div class="pinv-detail-section">
     <h3 class="pinv-section-title"><i class="bi bi-diagram-3"></i> Order Allocations</h3>
-    <div class="pinv-alloc-grid">
-        {% for alloc in order_allocations %}
-        <div class="pinv-alloc-card">
-            <div class="pinv-alloc-header">
-                <a href="{% url 'order_details' alloc.order.id %}" class="pinv-alloc-order">{{ alloc.order.sale_number }}</a>
-                <span class="pinv-alloc-total">£{{ alloc.total|floatformat:2 }}</span>
-            </div>
-            <div class="pinv-alloc-lines">
-                {% for line in alloc.lines %}
-                <div class="pinv-alloc-line">
-                    <span>{{ line.description }}</span>
-                    <span>£{{ line.line_total|floatformat:2 }}</span>
-                </div>
+    <div class="pinv-table-container" style="max-height:none;">
+        <table class="pinv-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Lines</th>
+                    <th style="text-align:right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for alloc in order_allocations %}
+                <tr>
+                    <td style="white-space:nowrap;">
+                        <a href="{% url 'order_details' alloc.order.id %}" class="pinv-order-link" style="display:inline-flex;">
+                            <i class="bi bi-box-arrow-up-right"></i>&nbsp;{{ alloc.order.sale_number }}
+                        </a>
+                    </td>
+                    <td style="color:var(--text-secondary);font-size:0.82rem;">
+                        {% for line in alloc.lines %}{{ line.description }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                    </td>
+                    <td style="text-align:right;font-weight:600;white-space:nowrap;">£{{ alloc.total|floatformat:2 }}</td>
+                </tr>
                 {% endfor %}
-            </div>
-        </div>
-        {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 {% endif %}
-
-<!-- ── Attachment ──────────────────────────────────────────────── -->
-<div class="pinv-detail-section">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <h3 class="pinv-section-title" style="margin:0;"><i class="bi bi-paperclip"></i> Attachment</h3>
-    </div>
-    <div id="attachment-area">
-        {% if invoice.attachment %}
-        <div class="pinv-attachment-card">
-            <i class="bi bi-file-earmark-text pinv-attachment-icon"></i>
-            <div class="pinv-attachment-info">
-                <a href="{{ invoice.attachment.url }}" target="_blank" class="pinv-attachment-name">
-                    {{ invoice.attachment.name|cut:"purchase_invoice_attachments/" }}
-                </a>
-                <span class="pinv-attachment-meta">Uploaded</span>
-            </div>
-            <button class="pinv-btn-icon danger" onclick="deleteAttachment()" title="Remove attachment">
-                <i class="bi bi-trash"></i>
-            </button>
-        </div>
-        {% else %}
-        <div id="no-attachment-msg" class="pinv-upload-zone" onclick="document.getElementById('attachment-file-input').click()">
-            <i class="bi bi-cloud-upload"></i>
-            <span>Click to upload an invoice document</span>
-            <input type="file" id="attachment-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadAttachment(this)">
-        </div>
-        {% endif %}
-    </div>
-</div>
 
 <!-- ── Linked Purchase Orders ─────────────────────────────────── -->
 <div class="pinv-detail-section">
@@ -495,9 +515,9 @@ function buildLineHTML(line) {
                        oninput="searchOrders(this,${line.id})" onfocus="searchOrders(this,${line.id})">
                 <div class="order-search-dropdown" id="order-dd-${line.id}"></div>
             </div>
-            <a href="${linkHref}" class="pinv-order-link" id="order-link-${line.id}" style="display:${linkDisplay};">${linkText}</a>
         </td>
-        <td style="text-align:center;">
+        <td style="text-align:center; white-space:nowrap;">
+            <a href="${linkHref}" class="pinv-order-link" id="order-link-${line.id}" style="display:${linkDisplay};">${linkText}</a>
             <button class="pinv-btn-icon danger" onclick="deleteLine(${line.id})" title="Delete line">
                 <i class="bi bi-trash"></i>
             </button>
@@ -718,16 +738,11 @@ function uploadAttachment(input) {
     .then(data => {
         if (data.success) {
             document.getElementById('attachment-area').innerHTML = `
-                <div class="pinv-attachment-card">
-                    <i class="bi bi-file-earmark-text pinv-attachment-icon"></i>
-                    <div class="pinv-attachment-info">
-                        <a href="${data.url}" target="_blank" class="pinv-attachment-name">${data.filename}</a>
-                        <span class="pinv-attachment-meta">Uploaded</span>
-                    </div>
-                    <button class="pinv-btn-icon danger" onclick="deleteAttachment()" title="Remove attachment">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </div>`;
+                <i class="bi bi-file-earmark-pdf" style="font-size:1rem;color:#dc3545;flex-shrink:0;"></i>
+                <a href="${data.url}" target="_blank" class="pinv-att-bar-name">${data.filename}</a>
+                <button class="pinv-btn-icon danger" onclick="deleteAttachment()" title="Remove attachment">
+                    <i class="bi bi-trash"></i>
+                </button>`;
 
             // For PDF files, parse and offer to fill in header fields
             if (file.name.toLowerCase().endsWith('.pdf')) {
@@ -864,11 +879,12 @@ function deleteAttachment() {
     .then(data => {
         if (data.success) {
             document.getElementById('attachment-area').innerHTML = `
-                <div class="pinv-upload-zone" onclick="document.getElementById('att-input').click()">
-                    <i class="bi bi-cloud-upload"></i>
-                    <span>Click to upload an invoice document</span>
+                <i class="bi bi-paperclip" style="color:var(--text-secondary);flex-shrink:0;"></i>
+                <span style="flex:1;color:var(--text-secondary);font-size:0.82rem;">No attachment</span>
+                <label class="pinv-btn-sm" style="cursor:pointer;margin:0;">
+                    <i class="bi bi-upload"></i> Upload
                     <input type="file" id="att-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadAttachment(this)">
-                </div>`;
+                </label>`;
         }
     });
 }
@@ -1021,5 +1037,181 @@ document.addEventListener('click', function(e) {
         if (dd) dd.style.display = 'none';
     }
 });
+
+// ── Push to Xero ──────────────────────────────────────────────
+// ── 3-dots kebab menu ──────────────────────────────────────────
+function toggleKebab(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('kebab-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+document.addEventListener('click', () => {
+    const m = document.getElementById('kebab-menu');
+    if (m) m.style.display = 'none';
+});
+
+function openManualLinkModal() {
+    document.getElementById('kebab-menu').style.display = 'none';
+    document.getElementById('manual-xero-input').value = '';
+    document.getElementById('manual-link-error').style.display = 'none';
+    document.getElementById('manual-link-modal').style.display = 'flex';
+}
+
+function doManualLink() {
+    const val = document.getElementById('manual-xero-input').value.trim();
+    const errEl = document.getElementById('manual-link-error');
+    errEl.style.display = 'none';
+    if (!val) { errEl.textContent = 'Please enter a Xero URL or ID.'; errEl.style.display = 'block'; return; }
+
+    const fd = new FormData();
+    fd.append('xero_id', val);
+    fetch(`/purchase-invoices/${INVOICE_ID}/manual-link-xero/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+        body: fd,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('manual-link-modal').style.display = 'none';
+            // Swap push button for In Xero link
+            const pushBtn = document.getElementById('xero-push-btn');
+            if (pushBtn) {
+                pushBtn.outerHTML = `<a class="pinv-btn-sm" id="xero-link-btn" href="${data.xero_url}" target="_blank" title="View in Xero (ID: ${escHtml(data.xero_id)})"><i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> In Xero <i class="bi bi-box-arrow-up-right" style="font-size:0.75rem;"></i></a>`;
+            }
+            // Enable the Remove link kebab item
+            const disabledItem = document.querySelector('#kebab-menu .pinv-kebab-item.disabled');
+            if (disabledItem) {
+                disabledItem.outerHTML = `<button class="pinv-kebab-item" onclick="confirmRemoveXeroLink()"><i class="bi bi-cloud-slash"></i> Remove Xero link</button>`;
+            }
+        } else {
+            errEl.textContent = data.error || 'Failed to save link.';
+            errEl.style.display = 'block';
+        }
+    })
+    .catch(err => { errEl.textContent = 'Network error: ' + err.message; errEl.style.display = 'block'; });
+}
+
+function confirmRemoveXeroLink() {
+    document.getElementById('kebab-menu').style.display = 'none';
+    document.getElementById('remove-xero-modal').style.display = 'flex';
+}
+
+function doRemoveXeroLink() {
+    document.getElementById('remove-xero-modal').style.display = 'none';
+    fetch(`/purchase-invoices/${INVOICE_ID}/remove-xero-link/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Swap the In Xero link for a Push to Xero button
+            const link = document.getElementById('xero-link-btn');
+            if (link) {
+                link.outerHTML = `<button class="pinv-btn-sm" id="xero-push-btn" onclick="pushToXero()" title="Push to Xero as draft bill"><i class="bi bi-cloud-upload"></i> Push to Xero</button>`;
+            }
+            // Hide the kebab item since there's no link to remove now
+            const item = document.querySelector('#kebab-menu .pinv-kebab-item');
+            if (item) item.outerHTML = `<span class="pinv-kebab-item disabled"><i class="bi bi-cloud-slash"></i> Remove Xero link</span>`;
+        }
+    })
+    .catch(err => alert('Error removing link: ' + err.message));
+}
+
+function pushToXero() {
+    document.getElementById('xero-confirm-modal').style.display = 'flex';
+}
+
+function xeroConfirmed() {
+    document.getElementById('xero-confirm-modal').style.display = 'none';
+    const btn = document.getElementById('xero-push-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing…'; }
+
+    fetch(`/purchase-invoices/${INVOICE_ID}/push-to-xero/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            if (btn) {
+                const xeroUrl = data.xero_url || `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${escHtml(data.xero_id)}`;
+                btn.outerHTML = `<a class="pinv-btn-sm" href="${xeroUrl}" target="_blank" title="View in Xero (ID: ${escHtml(data.xero_id)})">
+                    <i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> In Xero <i class="bi bi-box-arrow-up-right" style="font-size:0.75rem;"></i>
+                </a>`;
+            }
+        } else {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
+            alert('Error: ' + (data.error || 'Failed to push to Xero'));
+        }
+    })
+    .catch(err => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
+        alert('Network error: ' + err.message);
+    });
+}
 </script>
+
+<!-- Manual link Xero modal -->
+<div id="manual-link-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:var(--overlay-bg);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:440px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <i class="bi bi-link-45deg" style="font-size:1.4rem;color:var(--primary-color);flex-shrink:0;"></i>
+            <div>
+                <div style="font-weight:600;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px;">Manually link Xero bill</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);">Paste the Xero bill URL or just the UUID. The link is saved locally only.</div>
+            </div>
+        </div>
+        <input id="manual-xero-input" type="text" class="pinv-input"
+               placeholder="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=..."
+               style="width:100%;box-sizing:border-box;">
+        <div id="manual-link-error" style="display:none;font-size:0.82rem;color:var(--danger-color);"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn-cancel" onclick="document.getElementById('manual-link-modal').style.display='none'">Cancel</button>
+            <button class="btn-save" onclick="doManualLink()">
+                <i class="bi bi-link-45deg"></i> Link
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Remove Xero link confirm modal -->
+<div id="remove-xero-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:var(--overlay-bg);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:400px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <i class="bi bi-cloud-slash" style="font-size:1.4rem;color:var(--warning-color);flex-shrink:0;"></i>
+            <div>
+                <div style="font-weight:600;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px;">Remove Xero link</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);">This will only remove the local link — nothing is changed or deleted in Xero. You can re-link by searching again.</div>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn-cancel" onclick="document.getElementById('remove-xero-modal').style.display='none'">Cancel</button>
+            <button class="btn-save" style="background:var(--warning-color);" onclick="doRemoveXeroLink()">
+                <i class="bi bi-cloud-slash"></i> Remove link
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Xero confirm modal -->
+<div id="xero-confirm-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:var(--overlay-bg);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:400px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <i class="bi bi-cloud-upload" style="font-size:1.4rem;color:var(--primary-color);flex-shrink:0;"></i>
+            <div>
+                <div style="font-weight:600;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px;">Push to Xero</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);">This will create a <strong style="color:var(--text-primary);">draft bill</strong> in Xero under accounts payable. You can review and approve it there.</div>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn-cancel" onclick="document.getElementById('xero-confirm-modal').style.display='none'">Cancel</button>
+            <button class="btn-save" onclick="xeroConfirmed()">
+                <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

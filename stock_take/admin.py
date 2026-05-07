@@ -11,7 +11,7 @@ from .models import (
     PurchaseOrder, PurchaseOrderProduct, PurchaseOrderAttachment, PurchaseOrderInvoice,
     PurchaseOrderProject, ProductCustomerAllocation, Invoice, InvoiceLineItem, InvoicePayment,
     PurchaseInvoice, PurchaseInvoiceLineItem, GalleryImage, Ticket, ClaimDocument,
-    PriceHistory, ActivityLog, RaumplusDraftOrder,
+    PriceHistory, ActivityLog, RaumplusDraftOrder, MobileDevice, PhoneTemplate,
 )
 
 @admin.register(Customer)
@@ -570,3 +570,21 @@ class RaumplusDraftOrderAdmin(admin.ModelAdmin):
     search_fields = ['name']
     readonly_fields = ['created_at', 'updated_at']
     raw_id_fields = ['created_by']
+
+
+@admin.register(PhoneTemplate)
+class PhoneTemplateAdmin(admin.ModelAdmin):
+    list_display = ['name', 'device_type', 'model', 'chip', 'security_updates_until']
+    list_filter = ['device_type']
+    search_fields = ['name', 'model', 'chip']
+
+
+@admin.register(MobileDevice)
+class MobileDeviceAdmin(admin.ModelAdmin):
+    list_display = [
+        'device_type', 'model', 'condition', 'phone_number',
+        'assigned_user', 'sim_cost', 'is_dead',
+    ]
+    list_filter = ['device_type', 'condition', 'status', 'is_dead', 'is_esim']
+    search_fields = ['model', 'serial_number', 'phone_number', 'notes', 'assigned_user__first_name', 'assigned_user__last_name']
+    readonly_fields = ['created_at', 'updated_at']

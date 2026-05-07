@@ -16,45 +16,43 @@
 <div class="admin-page">
     <p class="page-subtitle">Manage user accounts and role assignments — {{ users|length }} total users</p>
 
-    <div class="admin-users-grid">
-
-    {% for group in role_groups %}
-    {% if group.users %}
     <div class="admin-card">
-        <div class="admin-card-header">
-            <h2 style="display: flex; align-items: center; gap: 10px;">
-                {% if group.role %}
-                <span class="role-tag {{ group.role.name }}">{{ group.role.get_name_display }}</span>
-                {% else %}
-                <span class="role-tag none">No Role Assigned</span>
-                {% endif %}
-                <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 400;">({{ group.users|length }} user{{ group.users|length|pluralize }})</span>
-            </h2>
-        </div>
         <div class="admin-table-wrapper">
-            <table class="admin-table">
+            <table class="admin-table admin-users-table">
                 <thead>
                     <tr>
                         <th>Username</th>
                         <th>Email</th>
                         <th>Name</th>
                         <th>Role</th>
-                        <th>Staff</th>
-                        <th>Active</th>
+                        <th style="text-align:center;">Staff</th>
+                        <th style="text-align:center;">Active</th>
                         <th>Last Login</th>
                         <th style="text-align: center;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
+                {% for group in role_groups %}
+                {% if group.users %}
+                    <tr class="users-group-header">
+                        <td colspan="8">
+                            {% if group.role %}
+                            <span class="role-tag {{ group.role.name }}">{{ group.role.get_name_display }}</span>
+                            {% else %}
+                            <span class="role-tag none">No Role Assigned</span>
+                            {% endif %}
+                            <span class="users-group-count">({{ group.users|length }} user{{ group.users|length|pluralize }})</span>
+                        </td>
+                    </tr>
                     {% for u in group.users %}
                     <tr>
-                        <td>
+                        <td class="col-username">
                             <span class="user-badge">
                                 <i class="bi bi-person-circle"></i>
                                 {{ u.username }}
                             </span>
                         </td>
-                        <td>{{ u.email|default:"—" }}</td>
+                        <td class="col-email">{{ u.email|default:"—" }}</td>
                         <td>{{ u.first_name }} {{ u.last_name|default:"" }}</td>
                         <td>
                             <form method="post" style="display: inline;">
@@ -71,14 +69,14 @@
                                 </select>
                             </form>
                         </td>
-                        <td>
+                        <td style="text-align:center;">
                             {% if u.is_staff %}
                                 <span class="status-badge status-active"><i class="bi bi-check-lg"></i></span>
                             {% else %}
                                 <span class="status-badge status-inactive"><i class="bi bi-x-lg"></i></span>
                             {% endif %}
                         </td>
-                        <td>
+                        <td style="text-align:center;">
                             {% if u.is_active %}
                                 <span class="status-badge status-active"><i class="bi bi-check-lg"></i></span>
                             {% else %}
@@ -87,6 +85,11 @@
                         </td>
                         <td>{{ u.last_login|date:"d M Y H:i"|default:"Never" }}</td>
                         <td style="text-align: center;">
+                            <div style="display:flex; align-items:center; justify-content:center; gap:6px; flex-wrap:wrap;">
+                            <button type="button" class="btn-impersonate btn-edit-user" title="Edit {{ u.username }}"
+                                onclick="openEditUser({{ u.id }}, '{{ u.username|escapejs }}', '{{ u.first_name|escapejs }}', '{{ u.last_name|escapejs }}', '{{ u.email|escapejs }}')">
+                                <i class="bi bi-pencil"></i>
+                            </button>
                             {% if u != request.user and u != request.real_user %}
                             <form method="POST" action="{% url 'impersonate_start' u.id %}" style="display: inline; margin: 0;">
                                 {% csrf_token %}
@@ -94,18 +97,87 @@
                                     <i class="bi bi-eye"></i> Impersonate
                                 </button>
                             </form>
+                            <form method="POST" style="display:inline; margin:0;">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="toggle_active">
+                                <input type="hidden" name="user_id" value="{{ u.id }}">
+                                <button type="submit" class="btn-impersonate {% if u.is_active %}btn-warn{% else %}btn-activate{% endif %}"
+                                    title="{% if u.is_active %}Deactivate {{ u.username }}{% else %}Activate {{ u.username }}{% endif %}">
+                                    {% if u.is_active %}<i class="bi bi-person-slash"></i> Deactivate
+                                    {% else %}<i class="bi bi-person-check"></i> Activate{% endif %}
+                                </button>
+                            </form>
+                            <form method="POST" style="display:inline; margin:0;"
+                                onsubmit="return confirm('Permanently delete {{ u.username }}? This cannot be undone.');">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete_user">
+                                <input type="hidden" name="user_id" value="{{ u.id }}">
+                                <button type="submit" class="btn-impersonate btn-danger-sm" title="Delete {{ u.username }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
                             {% else %}
                             <span style="font-size: 0.75rem; color: var(--text-muted);">—</span>
                             {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
+                {% endif %}
+                {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
-    {% endif %}
-    {% endfor %}
+</div>
+
+<!-- Edit User Modal -->
+<div class="modal" id="editUserModal">
+    <div class="modal-overlay" onclick="closeModal('editUserModal')"></div>
+    <div class="modal-dialog" style="width: 480px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-pencil"></i> Edit User</h3>
+                <button type="button" class="modal-close" onclick="closeModal('editUserModal')">✕</button>
+            </div>
+            <form method="POST" id="editUserForm">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="edit_user">
+                <input type="hidden" name="user_id" id="edit_user_id">
+                <div class="modal-body">
+                    <p id="editUserSubtitle" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;"></p>
+                    <div style="display:flex; flex-direction:column; gap:12px;">
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">First Name</label>
+                            <input type="text" name="first_name" id="edit_first_name" class="form-control">
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">Last Name</label>
+                            <input type="text" name="last_name" id="edit_last_name" class="form-control">
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">Email</label>
+                            <input type="email" name="email" id="edit_email" class="form-control">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('editUserModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
+
+<script>
+function openEditUser(userId, username, firstName, lastName, email) {
+    document.getElementById('edit_user_id').value = userId;
+    document.getElementById('edit_first_name').value = firstName;
+    document.getElementById('edit_last_name').value = lastName;
+    document.getElementById('edit_email').value = email;
+    document.getElementById('editUserSubtitle').textContent = 'Editing: ' + username;
+    openModal('editUserModal');
+}
+</script>
 {% endblock %}

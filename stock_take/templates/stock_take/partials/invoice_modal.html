@@ -1,0 +1,175 @@
+{# ─── Shared invoice-create modal ───────────────────────────────────────────── #}
+{# Include in any template that needs a "Create Purchase Invoice" modal.          #}
+{#                                                                                 #}
+{# Context variables (pass via {% include ... with %}):                            #}
+{#   attachment_mode – 'upload'  → file-upload zone  (purchase_invoices.html)     #}
+{#                     'select'  → email attachment radio list (accounts_payable)  #}
+{#                                                                                 #}
+{# Context variables from the parent view (automatic):                            #}
+{#   suppliers       – list/queryset of supplier name strings                      #}
+{#                                                                                 #}
+{# Page-specific JS functions required in the including template:                  #}
+{#   closeCreateModal(e)   – close handler (page may reset extra state)            #}
+{#   submitCreateInvoice() – form submission handler                               #}
+{# ─────────────────────────────────────────────────────────────────────────────── #}
+
+<div class="pinv-modal-overlay" id="create-invoice-modal" onclick="closeCreateModal(event)">
+    <div class="pinv-modal-box" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 style="margin:0;font-size:1rem;">Create Purchase Invoice</h3>
+            <button class="modal-close" onclick="closeCreateModal()"
+                    style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;">&times;</button>
+        </div>
+        <div class="pinv-modal-body">
+
+            {% if attachment_mode == 'select' %}
+            {# ── AP mode: email context + attachment radio list ────────────── #}
+            <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">From</div>
+                    <div id="modal-sender" style="font-size:0.82rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                </div>
+                <div style="flex:2;min-width:0;">
+                    <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Subject</div>
+                    <div id="modal-subject" style="font-size:0.82rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                </div>
+            </div>
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                    <label class="pinv-label" style="margin:0;">Attachment</label>
+                    <span id="modal-parse-status" style="font-size:0.72rem;color:var(--text-secondary);"></span>
+                </div>
+                <div id="modal-attachment-list" class="apay-att-list"></div>
+            </div>
+            {% else %}
+            {# ── Default: file-upload zone ──────────────────────────────────── #}
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                    <label class="pinv-label" style="margin:0;">Invoice PDF / Attachment</label>
+                    <span style="font-size:0.72rem;color:var(--text-secondary);">Upload first to auto-fill fields below</span>
+                </div>
+                <div id="modal-attachment-zone" class="pinv-upload-zone" style="padding:10px;cursor:pointer;"
+                     onclick="document.getElementById('modal-attachment-input').click()"
+                     ondragover="event.preventDefault(); this.classList.add('drag-over');"
+                     ondragleave="this.classList.remove('drag-over');"
+                     ondrop="event.preventDefault(); this.classList.remove('drag-over'); handleDroppedFile(event);">
+                    <i class="bi bi-cloud-upload" id="modal-attachment-icon" style="font-size:1rem;"></i>
+                    <span id="modal-attachment-name" style="font-size:0.82rem;">Click or drag &amp; drop to attach a file</span>
+                    <input type="file" id="modal-attachment-input" style="display:none;"
+                           accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onchange="handleModalAttachment(this)">
+                </div>
+            </div>
+            {% endif %}
+
+            <hr style="border-color:var(--border-color);">
+            <div class="pinv-form-rows">
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Invoice Number *</label>
+                    <div style="flex:1;min-width:0;">
+                        <input type="text" id="new-pinv-number" placeholder="e.g. INVOICE-047" class="pinv-input" style="width:100%;box-sizing:border-box;" oninput="checkDuplicateInvoiceNumber(this.value)">
+                        <div id="modal-duplicate-warning" style="display:none;margin-top:5px;padding:8px 10px;background:rgba(220,53,69,.08);border:1px solid rgba(220,53,69,.35);border-radius:6px;font-size:0.78rem;color:#dc3545;">
+                            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:space-between;">
+                                <span><i class="bi bi-exclamation-triangle-fill"></i> <span id="modal-duplicate-msg"></span></span>
+                                <div style="display:flex;gap:6px;flex-shrink:0;">
+                                    <a id="modal-duplicate-view-link" href="#" target="_blank"
+                                       style="font-size:0.75rem;font-weight:600;color:#dc3545;text-decoration:none;padding:3px 8px;border:1px solid rgba(220,53,69,.4);border-radius:4px;white-space:nowrap;"
+                                       onmouseover="this.style.background='rgba(220,53,69,.1)'" onmouseout="this.style.background=''">
+                                        <i class="bi bi-box-arrow-up-right"></i> View
+                                    </a>
+                                    <button type="button" id="modal-duplicate-process-btn"
+                                            style="font-size:0.75rem;font-weight:600;color:#fff;background:#dc3545;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;white-space:nowrap;"
+                                            onmouseover="this.style.background='#b02a37'" onmouseout="this.style.background='#dc3545'"
+                                            onclick="linkDuplicateAndProcess()">
+                                        <i class="bi bi-check-lg"></i> Mark as Processed
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Reference</label>
+                    <input type="text" id="new-pinv-reference" placeholder="Supplier ref / filename" class="pinv-input">
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Supplier / From</label>
+                    <div style="flex:1;min-width:0;position:relative;">
+                        <input type="text" id="new-pinv-supplier" placeholder="Search suppliers…"
+                               class="pinv-input" style="width:100%;box-sizing:border-box;"
+                               autocomplete="off" oninput="modalSearchSupplier(this.value)">
+                        <div id="new-pinv-supplier-dropdown"
+                             style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                                    background:var(--bg-primary);border:1px solid var(--border-color);
+                                    border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
+                                    max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Supplier Ref</label>
+                    <input type="text" id="new-pinv-supplier-ref" placeholder="Supplier's invoice number / ref" class="pinv-input">
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Purchase Order</label>
+                    <div style="flex:1;min-width:0;position:relative;">
+                        <input type="text" id="new-pinv-po-search" placeholder="Search order number…"
+                               class="pinv-input" style="width:100%;box-sizing:border-box;"
+                               autocomplete="off" oninput="modalSearchPO(this.value)" data-po-id="">
+                        <div id="new-pinv-po-dropdown"
+                             style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                                    background:var(--bg-primary);border:1px solid var(--border-color);
+                                    border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
+                                    max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Invoice Date</label>
+                    <input type="date" id="new-pinv-date" class="pinv-input">
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Due Date</label>
+                    <input type="date" id="new-pinv-due-date" class="pinv-input">
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Status</label>
+                    <select id="new-pinv-status" class="pinv-input">
+                        <option value="Draft">Draft</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Paid">Paid</option>
+                    </select>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Invoice Value (&pound;)</label>
+                    <div class="pinv-form-row-stack">
+                        <input type="number" id="new-pinv-total" class="pinv-input" step="0.01" min="0" placeholder="e.g. 1250.00">
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Notes</label>
+                    <input type="text" id="new-pinv-notes" placeholder="Optional notes" class="pinv-input">
+                </div>
+            </div>
+            <hr style="border-color:var(--border-color);">
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <label class="pinv-label" style="margin:0;">Line Items</label>
+                    <button type="button" class="pinv-btn-sm" onclick="addModalLine()">
+                        <i class="bi bi-plus-lg"></i> Add Line
+                    </button>
+                </div>
+                <div id="modal-lines"></div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px;">
+                <span style="font-size:0.82rem;color:var(--text-secondary);">Total:</span>
+                <span id="modal-total" style="font-size:0.9rem;font-weight:600;">&pound;0.00</span>
+            </div>
+
+        </div>
+        <div class="pinv-modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeCreateModal()">Cancel</button>
+            <button type="button" class="btn-save" id="modal-confirm-btn" onclick="submitCreateInvoice()">
+                <i class="bi bi-check-lg"></i> Create Invoice
+            </button>
+        </div>
+    </div>
+</div>
+

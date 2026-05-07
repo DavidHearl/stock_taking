@@ -6,6 +6,7 @@ flows through into job-level costing.
 
 import json
 import logging
+import re
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
@@ -111,43 +112,22 @@ _DATE_RE = (
 
 
 # ── PDF parsing ───────────────────────────────────────────────────
-@login_required
-def parse_purchase_invoice_pdf(request):
-    """Parse a PDF file upload and return extracted invoice fields as JSON.
+def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
+    """Extract invoice fields from raw PDF bytes. Returns the ``extracted`` dict.
 
-    Accepts a multipart POST with a ``file`` field.  Returns::
-
-        {"success": true, "extracted": {
-            "invoice_number": "INV-001",
-            "supplier_name":  "ACME Ltd",
-            "date":           "2024-01-15",
-            "due_date":       "2024-02-15",
-            "total":          "1234.56"
-        }}
-
-    Fields that cannot be found are omitted from ``extracted``.
-    Non-PDF files return ``{"success": true, "extracted": {}}``.
+    Called by both ``parse_purchase_invoice_pdf`` (file upload) and
+    ``parse_email_attachment`` (Graph API attachment).
     """
     import io
     import re
 
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST required'}, status=405)
-
-    uploaded = request.FILES.get('file')
-    if not uploaded:
-        return JsonResponse({'error': 'No file provided'}, status=400)
-
-    if not uploaded.name.lower().endswith('.pdf'):
-        return JsonResponse({'success': True, 'extracted': {}})
-
+    extracted: dict = {}
     try:
         import pdfplumber
         import warnings
 
-        pdf_bytes = uploaded.read()
         if not pdf_bytes:
-            return JsonResponse({'success': True, 'extracted': {}})
+            return extracted
 
         text_lines: list[str] = []
 
@@ -163,14 +143,13 @@ def parse_purchase_invoice_pdf(request):
                         text_lines.extend(page_text.split('\n'))
 
         full_text = '\n'.join(text_lines)
-        extracted: dict = {}
 
         # Always return the raw text so the front-end can log it for debugging
         # (truncated to keep response small)
         extracted['_raw_text'] = full_text[:2000]
 
         if not full_text.strip():
-            return JsonResponse({'success': True, 'extracted': extracted})
+            return extracted
 
         # ── Invoice number ────────────────────────────────────────
         inv_patterns = [
@@ -305,13 +284,111 @@ def parse_purchase_invoice_pdf(request):
                 except (InvalidOperation, ValueError):
                     pass
 
-        return JsonResponse({'success': True, 'extracted': extracted})
+        # ── Line items ────────────────────────────────────────────
+        # Strategy: find lines that end with a money amount (optionally qty + unit price + total)
+        # Pattern: <description text>  [qty]  [£unit]  £total
+        # We skip header/footer noise lines.
+        _SKIP_LINE_WORDS = re.compile(
+            r'^(?:Description|Qty|Quantity|Unit\s*price|Unit\s*amount|Amount|Total|'
+            r'Grand\s*total|Invoice\s*(?:sub)?total|Invoice\s*total|'
+            r'Payment\s*details|Bank\s*name|Account|Sort\s*code|Payment\s*ref|'
+            r'Invoice\s*(?:number|date|due)|Due\s*date|Billed?\s*(?:to|from)|'
+            r'Page\b|Tax|VAT|Sub\s*total|Subtotal|Balance|Discount|Shipping|Delivery|'
+            r'Credits?|Payments?)'
+            r'|^\+\d',           # +20.0%VAT style adjustment lines
+            re.IGNORECASE,
+        )
+        # Match a line item: non-empty description + optional qty + optional unit + amount
+        # Captures: (description, qty_or_empty, unit_or_empty, amount)
+        _LINE_ITEM_RE = re.compile(
+            r'^(.{3,}?)\s+'                          # description (min 3 chars)
+            r'(?:(\d+(?:\.\d+)?)\s+)?'               # optional qty
+            r'(?:[£\$€]?\s*[\d,]+\.\d{2}\s+)?'       # optional unit price
+            r'[£\$€]?\s*([\d,]+\.\d{2})\s*$',        # line total (required)
+            re.MULTILINE,
+        )
+
+        line_items_found = []
+        seen_descriptions = set()
+        known_total = extracted.get('total')
+
+        # Collect all summary/footer amounts to exclude from line items
+        # (subtotal, VAT, grand total, balance due, payments, credits)
+        _SUMMARY_AMOUNT_RE = re.compile(
+            r'(?:Subtotal|Sub\s*total|VAT|Tax|Grand\s*total|Invoice\s*(?:sub)?total|'
+            r'Invoice\s*total|Balance\s*[Dd]ue|Payments?|Credits?|Total\s*(?:Products?|Charges?)?)[:\s]+'
+            r'[£\$€]?\s*([\d,]+\.?\d*)',
+            re.IGNORECASE,
+        )
+        summary_amounts = {m.group(1).replace(',', '') for m in _SUMMARY_AMOUNT_RE.finditer(full_text)}
+        if known_total:
+            summary_amounts.add(known_total)
+
+        for line in text_lines:
+            line = line.strip()
+            if not line:
+                continue
+            if _SKIP_LINE_WORDS.match(line):
+                continue
+            m = _LINE_ITEM_RE.match(line)
+            if not m:
+                continue
+            desc = m.group(1).strip().rstrip('.')
+            qty_str = m.group(2) or '1'
+            amount_str = m.group(3).replace(',', '')
+
+            # Skip if the amount matches any summary/footer amount
+            if amount_str in summary_amounts:
+                continue
+            # Skip duplicate descriptions
+            if desc.lower() in seen_descriptions:
+                continue
+            # Skip very short descriptions (likely header noise)
+            if len(desc) < 3:
+                continue
+
+            try:
+                amount = float(amount_str)
+                qty = float(qty_str)
+            except ValueError:
+                continue
+
+            seen_descriptions.add(desc.lower())
+            line_items_found.append({
+                'description': desc,
+                'quantity': qty if qty != 1.0 else 1,
+                'amount': round(amount, 2),
+            })
+
+        if line_items_found:
+            extracted['line_items'] = line_items_found
+
+        return extracted
 
     except Exception as exc:
-        # Log the error server-side but return gracefully so the form still works;
-        # the user just won't get auto-populated fields.
         logger.warning('PDF parse failed (non-fatal): %s', exc)
+        return extracted
+
+
+@login_required
+def parse_purchase_invoice_pdf(request):
+    """Parse a PDF file upload and return extracted invoice fields as JSON."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        return JsonResponse({'error': 'No file provided'}, status=400)
+
+    if not uploaded.name.lower().endswith('.pdf'):
         return JsonResponse({'success': True, 'extracted': {}})
+
+    pdf_bytes = uploaded.read()
+    if not pdf_bytes:
+        return JsonResponse({'success': True, 'extracted': {}})
+
+    extracted = _extract_pdf_fields(pdf_bytes)
+    return JsonResponse({'success': True, 'extracted': extracted})
 
 
 # ── List ──────────────────────────────────────────────────────────
@@ -415,14 +492,16 @@ def create_purchase_invoice(request):
     total_val = _parse_decimal(data.get('total', '0'))
 
     invoice = PurchaseInvoice.objects.create(
-        invoice_number = invoice_number,
-        supplier_name  = (data.get('supplier_name') or '').strip(),
-        date           = _parse_date(data.get('date', '')),
-        due_date       = _parse_date(data.get('due_date', '')),
-        status         = data.get('status', 'Draft'),
-        total          = total_val,
-        notes          = (data.get('notes') or '').strip(),
-        created_by     = request.user.get_full_name() or request.user.username,
+        invoice_number     = invoice_number,
+        reference          = (data.get('reference') or '').strip(),
+        supplier_reference = (data.get('supplier_reference') or '').strip(),
+        supplier_name      = (data.get('supplier_name') or '').strip(),
+        date               = _parse_date(data.get('date', '')),
+        due_date           = _parse_date(data.get('due_date', '')),
+        status             = data.get('status', 'Draft'),
+        total              = total_val,
+        notes              = (data.get('notes') or '').strip(),
+        created_by         = request.user.get_full_name() or request.user.username,
     )
 
     # Parse and save line items
@@ -477,6 +556,14 @@ def create_purchase_invoice(request):
     if uploaded_file:
         invoice.attachment = uploaded_file
         invoice.save(update_fields=['attachment'])
+
+    # Link purchase order if provided
+    po_id = (data.get('purchase_order_id') or '').strip()
+    if po_id:
+        try:
+            invoice.purchase_orders.add(PurchaseOrder.objects.get(id=int(po_id)))
+        except (PurchaseOrder.DoesNotExist, ValueError):
+            pass
 
     log_activity(
         user=request.user,
@@ -835,8 +922,7 @@ def unlink_purchase_invoice_po(request, invoice_id, po_id):
 
 @login_required
 def search_purchase_invoices(request):
-    """Search PurchaseInvoice records by invoice number or supplier name.
-    Used from the PO detail page to find invoices to link."""
+    """Search PurchaseInvoice records by invoice number or supplier name."""
     q = request.GET.get('q', '').strip()
     if len(q) < 2:
         return JsonResponse({'results': []})
@@ -859,6 +945,27 @@ def search_purchase_invoices(request):
         })
 
     return JsonResponse({'results': results})
+
+
+@login_required
+def next_invoice_number(request):
+    """Return the next auto-generated invoice number."""
+    return JsonResponse({'invoice_number': PurchaseInvoice.generate_invoice_number()})
+
+
+@login_required
+def supplier_search(request):
+    """Search Supplier records by name for autocomplete."""
+    q = request.GET.get('q', '').strip()
+    if not q:
+        return JsonResponse({'results': []})
+    suppliers = Supplier.objects.filter(
+        name__icontains=q, is_active=True
+    ).order_by('name')[:20]
+    return JsonResponse({'results': [
+        {'id': s.id, 'name': s.name, 'city': s.city or ''}
+        for s in suppliers
+    ]})
 
 
 def _po_to_dict(po):
@@ -884,3 +991,283 @@ def _purchase_invoice_to_dict(inv):
         'payment_status': inv.payment_status,
         'url': f'/purchase-invoices/{inv.id}/',
     }
+
+
+# ── Search Xero for an existing invoice ──────────────────────────
+@login_required
+def search_purchase_invoice_in_xero(request, invoice_id):
+    """Search Xero for an ACCPAY invoice matching this invoice's number/reference.
+    If found, saves the xero_id locally and returns the Xero URL.
+    Does NOT create anything in Xero — use the detail page to push.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    if invoice.xero_id:
+        xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={invoice.xero_id}'
+        return JsonResponse({'found': True, 'xero_id': invoice.xero_id, 'xero_url': xero_url})
+
+    from stock_take.services import xero_api
+
+    inv_number = (invoice.invoice_number or '').strip()
+    if not inv_number:
+        return JsonResponse({'found': False, 'message': 'Invoice has no invoice number to search by'})
+
+    # Xero excludes DELETED invoices from results by default.
+    # Keep the filter simple — complex WHERE clauses with != can cause 400 errors.
+    result = xero_api._api_get('Invoices', params={
+        'where': f'Type=="ACCPAY" AND InvoiceNumber=="{inv_number}"',
+    })
+
+    invoices = (result or {}).get('Invoices', [])
+    # Exclude any that Xero happens to return as DELETED or VOIDED
+    invoices = [i for i in invoices if i.get('Status') not in ('DELETED', 'VOIDED')]
+    if not invoices:
+        return JsonResponse({'found': False, 'message': f'No Xero bill found with number "{inv_number}"'})
+
+    xero_invoice = invoices[0]
+    xero_id = xero_invoice.get('InvoiceID', '')
+    if not xero_id:
+        return JsonResponse({'found': False, 'message': 'Xero returned an invoice without an ID'})
+
+    invoice.xero_id = xero_id
+    invoice.save(update_fields=['xero_id'])
+
+    xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={xero_id}'
+    return JsonResponse({'found': True, 'xero_id': xero_id, 'xero_url': xero_url})
+
+
+# ── Sync payment statuses from Xero ──────────────────────────────────
+@login_required
+def sync_xero_payment_statuses(request):
+    """Fetch payment status from Xero for all locally-linked purchase invoices.
+    Batches up to 100 IDs per API call. Updates payment_status and amount_paid.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    from stock_take.services import xero_api
+
+    linked = list(PurchaseInvoice.objects.exclude(xero_id='').values('id', 'xero_id', 'total'))
+    if not linked:
+        return JsonResponse({'success': True, 'updated': 0, 'message': 'No linked invoices to sync'})
+
+    # Build a map xero_id -> local invoice info
+    xero_map = {item['xero_id']: item for item in linked}
+    ids = list(xero_map.keys())
+
+    updated = 0
+    errors = []
+    BATCH = 100
+
+    for i in range(0, len(ids), BATCH):
+        batch_ids = ids[i:i + BATCH]
+        result = xero_api._api_get('Invoices', params={'IDs': ','.join(batch_ids)})
+        if not result:
+            errors.append('Xero API call failed for a batch')
+            continue
+
+        for xero_inv in result.get('Invoices', []):
+            xero_id = xero_inv.get('InvoiceID', '')
+            if not xero_id or xero_id not in xero_map:
+                continue
+
+            xero_status = xero_inv.get('Status', '')
+            if xero_status in ('DELETED', 'VOIDED'):
+                continue
+
+            try:
+                amount_paid = Decimal(str(xero_inv.get('AmountPaid', 0)))
+                amount_due = Decimal(str(xero_inv.get('AmountDue', 0)))
+            except (InvalidOperation, TypeError):
+                continue
+
+            if xero_status == 'PAID' or amount_due == 0:
+                new_status = 'paid'
+                new_paid = xero_map[xero_id]['total']  # local total
+            elif amount_paid > 0:
+                new_status = 'partial'
+                new_paid = amount_paid
+            else:
+                new_status = 'unpaid'
+                new_paid = Decimal('0')
+
+            rows = PurchaseInvoice.objects.filter(
+                id=xero_map[xero_id]['id']
+            ).exclude(
+                payment_status=new_status,
+                amount_paid=new_paid,
+            ).update(payment_status=new_status, amount_paid=new_paid)
+            updated += rows
+
+    return JsonResponse({'success': True, 'updated': updated, 'errors': errors})
+
+
+# ── Manually link a Xero ID ──────────────────────────────────────
+UUID_RE = re.compile(
+    r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+    re.IGNORECASE,
+)
+
+
+@login_required
+def manual_link_xero(request, invoice_id):
+    """Save a manually entered Xero InvoiceID (or full URL) against the local invoice."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    raw = (request.POST.get('xero_id') or '').strip()
+    match = UUID_RE.search(raw)
+    if not match:
+        return JsonResponse({'success': False, 'error': 'No valid Xero UUID found in the value you entered'})
+
+    xero_id = match.group(0).lower()
+    invoice.xero_id = xero_id
+    invoice.save(update_fields=['xero_id'])
+
+    xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={xero_id}'
+    return JsonResponse({'success': True, 'xero_id': xero_id, 'xero_url': xero_url})
+
+
+# ── Remove Xero link ─────────────────────────────────────────────
+@login_required
+def remove_xero_link(request, invoice_id):
+    """Clear the locally stored xero_id, without touching Xero itself."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    invoice.xero_id = ''
+    invoice.save(update_fields=['xero_id'])
+    return JsonResponse({'success': True})
+
+
+# ── Push to Xero ──────────────────────────────────────────────────
+@login_required
+def push_purchase_invoice_to_xero(request, invoice_id):
+    """Push a purchase invoice to Xero as a DRAFT accounts-payable (ACCPAY) invoice."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    if invoice.xero_id:
+        return JsonResponse({
+            'success': False,
+            'error': f'Already pushed to Xero (ID: {invoice.xero_id})',
+        }, status=400)
+
+    from stock_take.services import xero_api
+
+    supplier_name = (invoice.supplier_name or '').strip()
+    if not supplier_name:
+        return JsonResponse({'success': False, 'error': 'Invoice has no supplier name'}, status=400)
+
+    # ── Find or create the supplier contact in Xero ───────────
+    contact_id = xero_api.find_contact_by_name(supplier_name)
+
+    if not contact_id:
+        # Try to look up from the Supplier model for richer contact data
+        supplier_obj = Supplier.objects.filter(name__iexact=supplier_name).first()
+        create_kwargs = dict(
+            name=supplier_name,
+            first_name='',
+            last_name='',
+            email='',
+            phone='',
+            address_line1='',
+            address_line2='',
+            city='',
+            region='',
+            postal_code='',
+            country='',
+        )
+        if supplier_obj:
+            create_kwargs.update({
+                'email': supplier_obj.email or '',
+                'phone': supplier_obj.phone or '',
+                'address_line1': supplier_obj.address or '',
+            })
+
+        create_res = xero_api.create_contact(**create_kwargs)
+        contacts = (create_res or {}).get('Contacts', []) if isinstance(create_res, dict) else []
+        if contacts:
+            contact_id = contacts[0].get('ContactID', '')
+
+        if not contact_id:
+            err = xero_api.get_last_api_error() or f'Contact "{supplier_name}" not found in Xero and auto-create failed.'
+            return JsonResponse({'success': False, 'error': err})
+
+    # ── Build line items ──────────────────────────────────────
+    line_items_qs = invoice.line_items.all().order_by('sort_order', 'id')
+
+    if line_items_qs.exists():
+        xero_lines = []
+        for li in line_items_qs:
+            xero_lines.append({
+                'Description': li.description or 'Item',
+                'Quantity': str(li.quantity),
+                'UnitAmount': str(li.rate),
+                'LineAmount': str(li.line_total),
+            })
+    else:
+        # Fallback: single line using invoice total
+        xero_lines = [{
+            'Description': invoice.notes or invoice.invoice_number,
+            'Quantity': '1',
+            'UnitAmount': str(invoice.total),
+        }]
+
+    # ── Build the Xero invoice payload ────────────────────────
+    invoice_data = {
+        'Type': 'ACCPAY',
+        'Contact': {'ContactID': contact_id},
+        'Status': 'DRAFT',
+        'InvoiceNumber': invoice.invoice_number,
+        'CurrencyCode': 'GBP',
+        'LineAmountTypes': 'Inclusive',
+        'LineItems': xero_lines,
+        'Reference': invoice.notes or '',
+    }
+
+    if invoice.date:
+        invoice_data['Date'] = invoice.date.isoformat()
+    if invoice.due_date:
+        invoice_data['DueDate'] = invoice.due_date.isoformat()
+    elif invoice.date:
+        invoice_data['DueDate'] = invoice.date.isoformat()
+
+    payload = {'Invoices': [invoice_data]}
+    result = xero_api._api_put('Invoices', payload)
+
+    if result is None:
+        err = xero_api.get_last_api_error() or 'Unknown Xero API error'
+        return JsonResponse({'success': False, 'error': err})
+
+    invoices_resp = result.get('Invoices', [])
+    if not invoices_resp:
+        return JsonResponse({'success': False, 'error': 'Xero returned no invoice data'})
+
+    xero_invoice_id = invoices_resp[0].get('InvoiceID', '')
+    if xero_invoice_id:
+        invoice.xero_id = xero_invoice_id
+        invoice.save(update_fields=['xero_id'])
+
+    log_activity(
+        user=request.user,
+        event_type='xero_push',
+        description=(
+            f'{request.user.get_full_name() or request.user.username} pushed purchase invoice '
+            f'{invoice.invoice_number} to Xero as draft ACCPAY (Xero ID: {xero_invoice_id}).'
+        ),
+    )
+
+    xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={xero_invoice_id}'
+    return JsonResponse({
+        'success': True,
+        'xero_id': xero_invoice_id,
+        'xero_url': xero_url,
+        'message': f'Invoice pushed to Xero as a draft bill (ID: {xero_invoice_id})',
+    })

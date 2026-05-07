@@ -9,6 +9,11 @@ from .purchase_order_views import purchase_orders_list, purchase_order_detail, p
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, sale_save, sale_merge, sale_link_order, sale_coversheet_save, sale_coversheet_pdf, sale_claim_document_upload, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage, bulk_delete_payments, bulk_copy_payments, edit_payment_from_manage, xero_search_invoices, xero_link_invoice, customer_xero_search, customer_xero_link, customer_anthill_scrape, customer_distribute_payments
 from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log, resolve_error_log, error_log_history, admin_design_rules
 from .about_views import about_page
+from .it_views import (
+    mobile_devices, mobile_device_save, mobile_device_create, mobile_device_delete, mobile_sim_transfer,
+    mobile_phone_templates, mobile_phone_template_create,
+    laptop_devices, desktop_devices,
+)
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products, push_invoice_to_xero, check_invoices_in_xero
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
@@ -26,6 +31,20 @@ from .purchase_invoice_views import (
     upload_purchase_invoice_attachment, delete_purchase_invoice_attachment,
     order_purchase_invoice_lines, parse_purchase_invoice_pdf,
     link_purchase_invoice_po, unlink_purchase_invoice_po, search_purchase_invoices,
+    push_purchase_invoice_to_xero, search_purchase_invoice_in_xero, remove_xero_link,
+    manual_link_xero, sync_xero_payment_statuses, next_invoice_number, supplier_search,
+)
+from .accounts_payable_views import (
+    accounts_payable_inbox,
+    sync_mailbox,
+    create_invoice_from_email,
+    link_existing_invoice_to_email,
+    parse_email_attachment,
+    ignore_email,
+    unprocess_email,
+    download_mailbox_attachment,
+    manage_exemptions,
+    bulk_email_action,
 )
 
 urlpatterns = [
@@ -78,8 +97,27 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/delete-attachment/', delete_purchase_invoice_attachment, name='delete_purchase_invoice_attachment'),
     path('purchase-invoices/<int:invoice_id>/link-po/', link_purchase_invoice_po, name='link_purchase_invoice_po'),
     path('purchase-invoices/<int:invoice_id>/unlink-po/<int:po_id>/', unlink_purchase_invoice_po, name='unlink_purchase_invoice_po'),
+    path('purchase-invoices/<int:invoice_id>/push-to-xero/', push_purchase_invoice_to_xero, name='push_purchase_invoice_to_xero'),
+    path('purchase-invoices/<int:invoice_id>/search-in-xero/', search_purchase_invoice_in_xero, name='search_purchase_invoice_in_xero'),
+    path('purchase-invoices/sync-xero-payments/', sync_xero_payment_statuses, name='sync_xero_payment_statuses'),
+    path('purchase-invoices/<int:invoice_id>/remove-xero-link/', remove_xero_link, name='remove_xero_link'),
+    path('purchase-invoices/<int:invoice_id>/manual-link-xero/', manual_link_xero, name='manual_link_xero'),
     path('api/order/<int:order_id>/purchase-invoice-lines/', order_purchase_invoice_lines, name='order_purchase_invoice_lines'),
     path('api/purchase-invoice-search/', search_purchase_invoices, name='search_purchase_invoices'),
+    path('api/next-invoice-number/', next_invoice_number, name='next_invoice_number'),
+    path('api/supplier-search/', supplier_search, name='supplier_search'),
+
+    # Accounts Payable
+    path('accounts-payable/', accounts_payable_inbox, name='accounts_payable_inbox'),
+    path('accounts-payable/sync/', sync_mailbox, name='sync_mailbox'),
+    path('accounts-payable/exemptions/', manage_exemptions, name='manage_exemptions'),
+    path('accounts-payable/bulk/', bulk_email_action, name='bulk_email_action'),
+    path('accounts-payable/<int:email_id>/create-invoice/', create_invoice_from_email, name='create_invoice_from_email'),
+    path('accounts-payable/<int:email_id>/link-invoice/', link_existing_invoice_to_email, name='link_existing_invoice_to_email'),
+    path('accounts-payable/<int:email_id>/ignore/', ignore_email, name='ignore_email'),
+    path('accounts-payable/<int:email_id>/unprocess/', unprocess_email, name='unprocess_email'),
+    path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/', download_mailbox_attachment, name='download_mailbox_attachment'),
+    path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
 
     # Sales Invoices
     path('invoices/', invoices_list, name='invoices_list'),
@@ -495,4 +533,15 @@ urlpatterns = [
 
     # About page
     path('about/', about_page, name='about'),
+
+    # IT
+    path('it/mobile/', mobile_devices, name='mobile_devices'),
+    path('it/mobile/create/', mobile_device_create, name='mobile_device_create'),
+    path('it/mobile/templates/', mobile_phone_templates, name='mobile_phone_templates'),
+    path('it/mobile/templates/create/', mobile_phone_template_create, name='mobile_phone_template_create'),
+    path('it/mobile/<int:device_id>/save/', mobile_device_save, name='mobile_device_save'),
+    path('it/mobile/<int:device_id>/delete/', mobile_device_delete, name='mobile_device_delete'),
+    path('it/mobile/<int:device_id>/transfer-sim/', mobile_sim_transfer, name='mobile_sim_transfer'),
+    path('it/laptops/', laptop_devices, name='laptop_devices'),
+    path('it/desktops/', desktop_devices, name='desktop_devices'),
 ]
