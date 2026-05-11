@@ -10,8 +10,10 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 
+import json
+
 from stock_take.services import xero_api
-from stock_take.models import XeroToken
+from stock_take.models import XeroToken, EnabledGLCode
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +94,25 @@ def xero_disconnect(request):
 @login_required
 def xero_status(request):
     """Show the Xero connection status and basic organisation info."""
+    import json as _json
     token = XeroToken.get_active_token()
+
+    stored_gl = list(
+        EnabledGLCode.objects.order_by('code').values('code', 'name', 'account_type', 'enabled')
+    )
+    # Convert to plain dicts with JSON-safe types
+    stored_gl_plain = [
+        {'code': g['code'], 'name': g['name'],
+         'account_type': g['account_type'], 'enabled': bool(g['enabled'])}
+        for g in stored_gl
+    ]
+
     context = {
         "connected": token is not None,
         "token": token,
         "organisation": None,
+        "enabled_gl_codes_json": _json.dumps([g['code'] for g in stored_gl_plain if g['enabled']]),
+        "stored_gl_codes_json": _json.dumps(stored_gl_plain),
     }
 
     if token:
@@ -311,3 +327,65 @@ def xero_check_contact(request):
         return JsonResponse({"found": True, "xero_id": xero_id, "name": display_name})
 
     return JsonResponse({"found": False, "xero_id": "", "name": display_name})
+
+
+@login_required
+def xero_gl_codes(request):
+    """
+    Return active expense-type GL accounts from Xero's chart of accounts.
+    Used to populate the supplier default GL code picker.
+    """
+    # Account types relevant to purchase/expense coding
+    _EXPENSE_TYPES = {
+        'EXPENSE', 'OVERHEADS', 'DIRECTCOSTS',
+        'CURRLIAB', 'LIABILITY', 'TERMLIAB',
+    }
+
+    result = xero_api.get_accounts()
+    if result is None:
+        error = xero_api.get_last_api_error() or 'Failed to fetch accounts from Xero'
+        return JsonResponse({'error': error}, status=502)
+
+    accounts = result.get('Accounts', [])
+    filtered = [
+        {'code': a['Code'], 'name': a['Name'], 'type': a.get('Type', '')}
+        for a in accounts
+        if a.get('Status') == 'ACTIVE'
+        and a.get('Type') in _EXPENSE_TYPES
+        and a.get('Code')
+    ]
+    filtered.sort(key=lambda x: x['code'])
+    return JsonResponse({'accounts': filtered})
+
+
+@login_required
+def xero_save_gl_codes(request):
+    """Save the set of enabled GL codes selected by the user on the Xero page."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    # Each entry: {code, name, type, enabled}
+    accounts = data.get('accounts', [])
+    if not isinstance(accounts, list):
+        return JsonResponse({'error': 'accounts must be a list'}, status=400)
+
+    for acct in accounts:
+        code = (acct.get('code') or '').strip()
+        if not code:
+            continue
+        EnabledGLCode.objects.update_or_create(
+            code=code,
+            defaults={
+                'name': (acct.get('name') or '').strip(),
+                'account_type': (acct.get('type') or '').strip(),
+                'enabled': bool(acct.get('enabled', False)),
+            },
+        )
+
+    enabled_count = EnabledGLCode.objects.filter(enabled=True).count()
+    return JsonResponse({'success': True, 'enabled_count': enabled_count})

@@ -58,7 +58,7 @@
     </div>
     <div class="search-input-wrapper">
         <i class="bi bi-search"></i>
-        <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, activity ID, contract, assigned to..." autocomplete="off">
+        <input type="text" id="sale-search" value="{{ search_query }}" placeholder="Search by customer name, sale number, contract, assigned to..." autocomplete="off">
     </div>
     {% if location_filter %}
     <div class="tab-actions">
@@ -74,7 +74,7 @@
         <table class="table orders-table">
             <thead>
                 <tr>
-                    <th>Activity ID</th>
+                    <th>Sale Number</th>
                     <th>Customer</th>
                     <th>Status</th>
                     <th>Assigned To</th>
@@ -89,9 +89,23 @@
                 {% for sale in sales %}
                 <tr>
                     <td>
-                        <a href="{% url 'sale_detail' sale.pk %}" class="customer-name-link">
-                            {{ sale.anthill_activity_id }}
+                        {% if sale.order %}
+                        <a href="{% url 'order_details' sale.order.id %}?tab=sale" class="customer-name-link">
+                            {{ sale.contract_number|default:sale.anthill_activity_id }}
                         </a>
+                        {% else %}
+                        {% with linked_order_sale=order_map|get_item:sale.anthill_activity_id %}
+                        {% if linked_order_sale %}
+                        <a href="{% url 'order_details' linked_order_sale.id %}?tab=sale" class="customer-name-link">
+                            {{ sale.contract_number|default:sale.anthill_activity_id }}
+                        </a>
+                        {% else %}
+                        <a href="{% url 'sale_detail' sale.pk %}" class="customer-name-link">
+                            {{ sale.contract_number|default:sale.anthill_activity_id }}
+                        </a>
+                        {% endif %}
+                        {% endwith %}
+                        {% endif %}
                     </td>
                     <td>
                         {% if sale.customer %}
@@ -120,13 +134,13 @@
                     <td>{{ sale.location|default:"-" }}</td>
                     <td>
                         {% if sale.order %}
-                        <a href="{% url 'order_details' sale.order.id %}" class="btn btn-sm btn-outline-primary">
+                        <a href="{% url 'order_details' sale.order.id %}?tab=order" class="btn btn-sm btn-outline-primary">
                             {{ sale.order.sale_number }}
                         </a>
                         {% else %}
                         {% with linked_order=order_map|get_item:sale.anthill_activity_id %}
                         {% if linked_order %}
-                        <a href="{% url 'order_details' linked_order.id %}" class="btn btn-sm btn-outline-primary">
+                        <a href="{% url 'order_details' linked_order.id %}?tab=order" class="btn btn-sm btn-outline-primary">
                             {{ linked_order.sale_number }}
                         </a>
                         {% else %}

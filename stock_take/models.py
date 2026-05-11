@@ -1086,6 +1086,12 @@ class Supplier(models.Model):
     supplier_tax_rate = models.CharField(max_length=100, blank=True, null=True)
     estimate_lead_time = models.IntegerField(null=True, blank=True, help_text='Estimated lead time in days')
     
+    # Xero
+    xero_default_account_code = models.CharField(
+        max_length=20, blank=True, default='',
+        help_text='Default Xero GL account code for purchase invoices from this supplier',
+    )
+
     # Status
     is_active = models.BooleanField(default=True)
     
@@ -3000,3 +3006,109 @@ class MobileDevice(models.Model):
             return f"eSIM – {self.phone_number or 'no number'}"
         name = self.assigned_user.get_full_name() if self.assigned_user else 'Unassigned'
         return f"{self.get_device_type_display()} {self.model} – {name}"
+
+
+class OverheadPurchaseOrder(models.Model):
+    """Manually-created purchase order for overhead / non-Cost-of-Sales spend.
+
+    These are NOT synced from WorkGuru. They cover things like rent, utilities,
+    insurance, marketing, IT, professional services, etc. — anything that is
+    not stock or installation.
+    """
+
+    CATEGORY_CHOICES = [
+        ('rent_rates',    'Rent & Rates'),
+        ('utilities',     'Utilities'),
+        ('insurance',     'Insurance'),
+        ('marketing',     'Marketing & Advertising'),
+        ('it_software',   'IT & Software'),
+        ('office',        'Office & Sundries'),
+        ('professional',  'Professional Services'),
+        ('vehicles',      'Vehicles & Transport'),
+        ('other',         'Other Overhead'),
+    ]
+
+    STATUS_CHOICES = [
+        ('draft',       'Draft'),
+        ('approved',    'Approved'),
+        ('invoiced',    'Invoiced'),
+        ('paid',        'Paid'),
+        ('cancelled',   'Cancelled'),
+    ]
+
+    reference       = models.CharField(max_length=20, unique=True, blank=True,
+                                       help_text='Auto-generated OPO reference e.g. OPO-0001')
+    supplier_name   = models.CharField(max_length=255)
+    supplier        = models.ForeignKey('Supplier', on_delete=models.SET_NULL,
+                                        null=True, blank=True,
+                                        related_name='overhead_pos')
+    category        = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
+    description     = models.TextField(blank=True)
+    status          = models.CharField(max_length=12, choices=STATUS_CHOICES, default='draft')
+
+    date            = models.DateField(null=True, blank=True, help_text='PO / order date')
+    expected_date   = models.DateField(null=True, blank=True,
+                                       help_text='Expected invoice or payment date')
+
+    amount_net      = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_vat      = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_gross    = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    gl_code         = models.CharField(
+                           max_length=20, blank=True, default='',
+                           help_text='Xero GL account code for this PO')
+
+    notes           = models.TextField(blank=True)
+
+    purchase_invoices = models.ManyToManyField(
+        'PurchaseInvoice', blank=True, related_name='overhead_pos',
+        help_text='Accounts-payable invoices associated with this overhead PO',
+    )
+
+    created_by      = models.CharField(max_length=200, blank=True)
+    created_at      = models.DateTimeField(auto_now_add=True)
+    updated_at      = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Overhead Purchase Order'
+        verbose_name_plural = 'Overhead Purchase Orders'
+
+    def __str__(self):
+        return f"{self.reference} – {self.supplier_name}"
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = self.__class__._next_reference()
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def _next_reference(cls):
+        import re as _re
+        pattern = _re.compile(r'^OPO-(\d{4})$')
+        best = 0
+        for ref in cls.objects.values_list('reference', flat=True):
+            m = pattern.match(ref or '')
+            if m:
+                n = int(m.group(1))
+                if n > best:
+                    best = n
+        return f'OPO-{best + 1:04d}'
+
+
+class EnabledGLCode(models.Model):
+    """Tracks which Xero GL account codes are enabled for use in overhead POs."""
+
+    code        = models.CharField(max_length=20, unique=True)
+    name        = models.CharField(max_length=255)
+    account_type = models.CharField(max_length=50, blank=True)
+    enabled     = models.BooleanField(default=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['code']
+        verbose_name = 'Enabled GL Code'
+        verbose_name_plural = 'Enabled GL Codes'
+
+    def __str__(self):
+        return f'{self.code} – {self.name}'

@@ -16,12 +16,12 @@ from .it_views import (
 )
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products, push_invoice_to_xero, check_invoices_in_xero
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
-from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download
+from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download, claim_search_api
 from .gallery_views import gallery, gallery_upload, gallery_delete, gallery_update, gallery_customer_orders, gallery_rotate
 from .upload_views import fitter_upload, upload_staging, upload_staging_publish, upload_staging_reject
 from .cad_views import cad_db_upload, cad_db_download, cad_db_status
 from .profile_views import user_profile, user_profile_save, user_change_password
-from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact
+from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact, xero_gl_codes, xero_save_gl_codes
 from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
 from .enquiry_views import website_enquiries_list, website_enquiry_receive, website_enquiry_update, website_enquiry_delete, website_enquiry_detail
 from .purchase_invoice_views import (
@@ -45,6 +45,12 @@ from .accounts_payable_views import (
     download_mailbox_attachment,
     manage_exemptions,
     bulk_email_action,
+)
+from .overhead_po_views import (
+    overhead_po_list, overhead_po_create, overhead_po_detail,
+    overhead_po_update, overhead_po_delete,
+    overhead_po_link_invoice, overhead_po_unlink_invoice,
+    overhead_po_search_invoices,
 )
 
 urlpatterns = [
@@ -106,6 +112,7 @@ urlpatterns = [
     path('api/purchase-invoice-search/', search_purchase_invoices, name='search_purchase_invoices'),
     path('api/next-invoice-number/', next_invoice_number, name='next_invoice_number'),
     path('api/supplier-search/', supplier_search, name='supplier_search'),
+    path('api/xero-gl-codes/', xero_gl_codes, name='xero_gl_codes'),
 
     # Accounts Payable
     path('accounts-payable/', accounts_payable_inbox, name='accounts_payable_inbox'),
@@ -118,6 +125,16 @@ urlpatterns = [
     path('accounts-payable/<int:email_id>/unprocess/', unprocess_email, name='unprocess_email'),
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/', download_mailbox_attachment, name='download_mailbox_attachment'),
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
+
+    # Overhead Purchase Orders
+    path('overhead-purchase-orders/', overhead_po_list, name='overhead_po_list'),
+    path('overhead-purchase-orders/create/', overhead_po_create, name='overhead_po_create'),
+    path('overhead-purchase-orders/<int:po_id>/', overhead_po_detail, name='overhead_po_detail'),
+    path('overhead-purchase-orders/<int:po_id>/update/', overhead_po_update, name='overhead_po_update'),
+    path('overhead-purchase-orders/<int:po_id>/delete/', overhead_po_delete, name='overhead_po_delete'),
+    path('overhead-purchase-orders/<int:po_id>/link-invoice/', overhead_po_link_invoice, name='overhead_po_link_invoice'),
+    path('overhead-purchase-orders/<int:po_id>/unlink-invoice/<int:invoice_id>/', overhead_po_unlink_invoice, name='overhead_po_unlink_invoice'),
+    path('overhead-purchase-orders/<int:po_id>/search-invoices/', overhead_po_search_invoices, name='overhead_po_search_invoices'),
 
     # Sales Invoices
     path('invoices/', invoices_list, name='invoices_list'),
@@ -385,6 +402,7 @@ urlpatterns = [
     
     # Calendar (renamed from Fit Board)
     path('calendar/', views.calendar_weekly, name='calendar_weekly'),
+    path('calendar/pdf/', views.calendar_pdf_view, name='calendar_pdf'),
     path('calendar/monthly/', views.calendar_view, name='calendar_view'),
     path('calendar/gantt/', views.gantt_chart, name='gantt_chart'),
     path('calendar/gantt/sync-anthill/<int:order_id>/', views.sync_anthill_workflow, name='sync_anthill_workflow'),
@@ -498,6 +516,7 @@ urlpatterns = [
     path('claims/', claim_service, name='claim_service'),
     path('claims/upload/', claim_upload, name='claim_upload'),
     path('claims/api/upload/', claim_api_upload, name='claim_api_upload'),
+    path('claims/api/search/', claim_search_api, name='claim_search_api'),
     path('claims/<int:doc_id>/delete/', claim_delete, name='claim_delete'),
     path('claims/<int:doc_id>/download/', claim_file_download, name='claim_file_download'),
     path('claims/download/<path:group_key>/', claim_download_zip, name='claim_download_zip'),
@@ -525,6 +544,7 @@ urlpatterns = [
     path('xero/api/create-customer/', xero_create_customer, name='xero_create_customer'),
     path('xero/api/customer-search/', xero_customer_search, name='xero_customer_search'),
     path('xero/api/check-contact/', xero_check_contact, name='xero_check_contact'),
+    path('xero/api/save-gl-codes/', xero_save_gl_codes, name='xero_save_gl_codes'),
 
     # CAD Database API
     path('api/cad-db/upload/', cad_db_upload, name='cad_db_upload'),

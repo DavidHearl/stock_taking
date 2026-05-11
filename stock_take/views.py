@@ -391,10 +391,12 @@ def load_order_indicators_ajax(request):
             is_allocated=False,
             missing=False,
             stock_item__isnull=False,
-        ).values('order__sale_number', 'sku', 'quantity')
+        ).values('order__sale_number', 'sku', 'quantity', 'name')
     )
     if batch_accs:
         unique_skus = {a['sku'] for a in batch_accs}
+        # Build a name lookup from the batch so we can label short items
+        sku_names = {a['sku']: a['name'] for a in batch_accs}
 
         # Current stock levels
         stock_qtys = dict(
@@ -409,18 +411,28 @@ def load_order_indicators_ajax(request):
         )
         incoming_qtys = {r['sku']: float(r['total'] or 0) for r in incoming_rows}
 
-        # Total demand for those SKUs across ALL active non-allocated accessories
+        # Total demand for those SKUs across ALL active non-allocated accessories.
+        # Only count accessories that have a stock_item link — unlinked accessories
+        # have no tracked stock so they must not inflate the shortage calculation.
         demand_rows = (
             Accessory.objects
-            .filter(sku__in=unique_skus, order__job_finished=False, is_allocated=False, missing=False)
+            .filter(
+                sku__in=unique_skus,
+                order__job_finished=False,
+                is_allocated=False,
+                missing=False,
+                stock_item__isnull=False,
+            )
             .values('sku').annotate(total=Sum('quantity'))
         )
         total_demand = {r['sku']: float(r['total'] or 0) for r in demand_rows}
 
-        # SKUs where stock + incoming < total demand
+        # SKUs where stock + incoming < total demand (use a small epsilon to
+        # avoid floating-point rounding noise triggering a false shortage)
+        _EPS = 0.001
         short_skus = {
             sku for sku in unique_skus
-            if (stock_qtys.get(sku, 0) or 0) + incoming_qtys.get(sku, 0) - total_demand.get(sku, 0) < 0
+            if (stock_qtys.get(sku, 0) or 0) + incoming_qtys.get(sku, 0) - total_demand.get(sku, 0) < -_EPS
         }
 
         # For short SKUs, determine WHICH specific orders are short by allocating
@@ -431,12 +443,14 @@ def load_order_indicators_ajax(request):
 
             # Fetch ALL active non-allocated accessories for short SKUs globally,
             # including their order's fit_date so we can sort by priority.
+            # Only count stock-linked accessories to stay consistent with demand calc.
             short_accs_global = list(
                 Accessory.objects.filter(
                     sku__in=short_skus,
                     order__job_finished=False,
                     is_allocated=False,
                     missing=False,
+                    stock_item__isnull=False,
                 ).values('order__sale_number', 'order__fit_date', 'sku', 'quantity')
             )
 
@@ -466,10 +480,20 @@ def load_order_indicators_ajax(request):
                 )
                 remaining = available
                 for sn, qty, fit_date in orders_sorted:
-                    if remaining < qty:
+                    if remaining < qty - _EPS:
                         shortage = qty - max(0.0, remaining)
-                        short_order_qtys[(sku, sn)] = shortage
+                        if shortage > _EPS:  # discard floating-point dust
+                            short_order_qtys[(sku, sn)] = round(shortage, 3)
                     remaining = max(0.0, remaining - qty)
+
+            # Build per-order short item detail lists for the response.
+            short_items_by_order = defaultdict(list)
+            for (sku, sn), shortage in short_order_qtys.items():
+                short_items_by_order[sn].append({
+                    'sku': sku,
+                    'name': sku_names.get(sku, sku),
+                    'shortage': shortage,
+                })
 
             # Tag orders in this batch that are short for at least one SKU.
             for acc in batch_accs:
@@ -477,6 +501,7 @@ def load_order_indicators_ajax(request):
                 key = (acc['sku'], sn)
                 if key in short_order_qtys and sn in indicators:
                     indicators[sn]['has_short'] = True
+                    indicators[sn]['short_items'] = short_items_by_order.get(sn, [])
     # ------------------------------------------------
     
     return JsonResponse({'success': True, 'indicators': indicators})
@@ -5791,6 +5816,270 @@ def order_delete(request, order_id):
     messages.success(request, f'Order {sale_number} deleted.')
     return redirect('ordering')
 
+
+def _build_order_context(order, request):
+    """Compute context dict for a single Order. Used by both order_details
+    (standalone) and sale_detail (order tab on the combined page)."""
+    from .models import OrderWorkflowProgress, WorkflowStage, TaskCompletion
+
+    workflow_progress, created = OrderWorkflowProgress.objects.get_or_create(
+        order=order,
+        defaults={'current_stage': WorkflowStage.objects.first()}
+    )
+    workflow_stages = WorkflowStage.objects.all().prefetch_related('tasks')
+
+    task_completions = {}
+    if workflow_progress.current_stage:
+        for task in workflow_progress.current_stage.tasks.all():
+            completion, _ = TaskCompletion.objects.get_or_create(
+                order_progress=workflow_progress,
+                task=task
+            )
+            task_completions[task.id] = completion
+
+    phases = [('enquiry', 'Enquiry'), ('lead', 'Lead'), ('sale', 'Sale')]
+    stages_by_phase = {}
+    for phase_code, phase_display in phases:
+        stages_by_phase[phase_code] = workflow_stages.filter(phase=phase_code)
+
+    price_per_sqm_str = request.session.get('price_per_sqm', '12')
+    price_per_sqm = float(price_per_sqm_str)
+
+    form = OrderForm(instance=order)
+
+    if order.os_doors.exists():
+        latest_os_door = order.os_doors.order_by('-id').first()
+        os_door_form = OSDoorForm(initial={
+            'door_style': latest_os_door.door_style,
+            'style_colour': latest_os_door.style_colour,
+            'colour': latest_os_door.colour,
+            'height': latest_os_door.height,
+            'width': latest_os_door.width,
+            'item_description': latest_os_door.item_description,
+        })
+    else:
+        os_door_form = OSDoorForm()
+
+    other_orders = []
+    if order.boards_po:
+        other_orders = Order.objects.filter(boards_po=order.boards_po).exclude(id=order.id)
+
+    all_boards_pos_list = []
+    if order.boards_po:
+        all_boards_pos_list.append(order.boards_po)
+    all_boards_pos_list.extend(list(order.additional_boards_pos.all()))
+
+    STANDARD_WIDTHS = {79, 250, 500, 680, 750, 1000}
+    WIDTH_ORDER = {w: i for i, w in enumerate(sorted(STANDARD_WIDTHS))}
+
+    def process_pnx_items(bpo, sale_number, price):
+        from django.db.models import Q
+        items = list(bpo.pnx_items.filter(
+            Q(customer__icontains=sale_number) | Q(customer='') | Q(customer__isnull=True)
+        ))
+        for item in items:
+            item.calculated_cost = item.get_cost(price)
+        total = sum(item.calculated_cost for item in items)
+        for item in items:
+            w = int(item.cwidth)
+            if w in STANDARD_WIDTHS:
+                item.is_standard_board = True
+                sku_prefix = f"{item.matname}{w}"
+                stock_item = StockItem.objects.filter(sku=sku_prefix).first()
+                item.stock_quantity = stock_item.quantity if stock_item else 0
+                item.sort_key = (0, WIDTH_ORDER.get(w, 999))
+            else:
+                item.is_standard_board = False
+                item.stock_quantity = None
+                item.sort_key = (1, w)
+        items.sort(key=lambda x: x.sort_key)
+        return items, total
+
+    boards_po_list = []
+    order_pnx_items = []
+    pnx_total_cost = 0
+    for idx, bpo in enumerate(all_boards_pos_list):
+        items, cost = process_pnx_items(bpo, order.sale_number, price_per_sqm)
+        local_po = PurchaseOrder.objects.filter(display_number=bpo.po_number).first()
+        boards_po_list.append({
+            'po': bpo,
+            'is_primary': (idx == 0 and order.boards_po_id == bpo.id),
+            'pnx_items': items,
+            'total_cost': cost,
+            'purchase_order': local_po,
+        })
+        order_pnx_items.extend(items)
+        pnx_total_cost += cost
+
+    has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
+
+    glass_items_qs = order.accessories.filter(sku__istartswith='GLS')
+    raumplus_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').filter(sku__icontains='_RAU_')
+    non_glass_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').exclude(sku__icontains='_RAU_')
+
+    glass_items = sorted(list(glass_items_qs), key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id))
+    raumplus_accessories = sorted(list(raumplus_accessories_qs), key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id))
+    non_glass_accessories = sorted(list(non_glass_accessories_qs), key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id))
+
+    skip_items_removed = 0
+    for skip_item in order.csv_skip_items.all():
+        for accessory in order.accessories.filter(sku=skip_item.sku):
+            accessory.delete()
+            skip_items_removed += 1
+    for skip_item in CSVSkipItem.objects.filter(order__isnull=True):
+        for accessory in order.accessories.filter(sku=skip_item.sku):
+            accessory.delete()
+            skip_items_removed += 1
+
+    if skip_items_removed > 0 and order.accessories.exists():
+        processed_rows = []
+        for accessory in order.accessories.all():
+            row = {
+                'Sku': accessory.sku, 'Name': accessory.name, 'Description': accessory.description,
+                'CostPrice': str(accessory.cost_price), 'SellPrice': str(accessory.sell_price),
+                'Quantity': str(accessory.quantity), 'Billable': 'TRUE' if accessory.billable else 'FALSE'
+            }
+            processed_rows.append(row)
+        if processed_rows:
+            processed_csv_content = io.StringIO()
+            fieldnames = ['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable']
+            writer = csv.DictWriter(processed_csv_content, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(processed_rows)
+            filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
+            order.processed_csv.save(
+                f"{order.customer_number}_processed_{filename}",
+                io.BytesIO(processed_csv_content.getvalue().encode('utf-8'))
+            )
+            order.processed_csv_created_at = timezone.now()
+            order.save()
+
+    materials_cost = order.calculate_materials_cost(price_per_sqm)
+    if order.materials_cost != materials_cost:
+        order.materials_cost = materials_cost
+        order.save(update_fields=['materials_cost'])
+
+    boards_cost = Decimal('0.00')
+    for bpo in all_boards_pos_list:
+        for pnx_item in bpo.pnx_items.filter(customer__icontains=order.sale_number):
+            boards_cost += pnx_item.get_cost(price_per_sqm)
+
+    accessories_cost = sum(a.cost_price * a.quantity for a in order.accessories.all())
+    os_doors_cost = sum(d.cost_price * d.quantity for d in order.os_doors.all())
+
+    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order', 'purchase_invoice_line__invoice')
+    manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
+    expenses = order.expenses.all().select_related('fitter')
+
+    calculated_installation_cost = order.calculate_installation_cost()
+    calculated_manufacturing_cost = order.calculate_manufacturing_cost()
+    installation_fitter_cost = sum(ts.total_cost for ts in installation_timesheets if ts.fitter)
+    purchase_invoice_ts_cost = sum(ts.total_cost for ts in installation_timesheets if ts.purchase_invoice_line_id)
+    petrol_cost = sum(exp.amount for exp in expenses.filter(expense_type='petrol'))
+    materials_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='materials'))
+    other_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='other'))
+
+    from collections import defaultdict
+    manufacturing_by_worker = defaultdict(Decimal)
+    for ts in manufacturing_timesheets:
+        manufacturing_by_worker[ts.worker_name] += ts.total_cost
+
+    from .models import BoardsPO
+    from django.db.models import Q, Count
+    if order.job_finished:
+        available_pos = BoardsPO.objects.all().order_by('-po_number')
+    else:
+        available_pos = BoardsPO.objects.annotate(
+            total_orders=Count('orders'),
+            finished_orders=Count('orders', filter=Q(orders__job_finished=True))
+        ).filter(
+            Q(total_orders=0) | Q(total_orders__gt=models.F('finished_orders'))
+        ).order_by('-po_number')
+
+    boards_purchase_order = None
+    if order.boards_po:
+        boards_purchase_order = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
+
+    os_doors_purchase_order = None
+    if order.os_doors_po:
+        os_doors_purchase_order = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+
+    additional_os_doors_pos_list = list(order.additional_os_doors_pos.order_by('-workguru_id'))
+
+    total_accessories = order.accessories.count()
+    all_allocated = total_accessories > 0 and not order.accessories.filter(is_allocated=False).exists()
+    unallocated_count = order.accessories.filter(is_allocated=False).count()
+
+    available_purchase_orders = PurchaseOrder.objects.filter(status__in=['Draft', 'Approved']).order_by('-workguru_id')[:50]
+
+    purchase_invoice_lines = PurchaseInvoiceLineItem.objects.filter(order=order).select_related('invoice').order_by('invoice__date', 'sort_order')
+    purchase_invoice_cost = purchase_invoice_lines.aggregate(total=Sum('line_total'))['total'] or Decimal('0.00')
+
+    anthill_sales = order.anthill_sale.select_related('customer').order_by('-activity_date')
+
+    distinct_materials = list(PNXItem.objects.values('matname', 'barcode').distinct().order_by('matname').values('matname', 'barcode'))
+    seen_matnames = set()
+    unique_materials = []
+    for m in distinct_materials:
+        if m['matname'] not in seen_matnames:
+            seen_matnames.add(m['matname'])
+            unique_materials.append(m)
+
+    order_matnames = set()
+    for item in order_pnx_items:
+        if item.matname:
+            order_matnames.add(item.matname)
+    order_materials = sorted(order_matnames)
+
+    return {
+        'order': order,
+        'form': form,
+        'os_door_form': os_door_form,
+        'other_orders': other_orders,
+        'available_pos': available_pos,
+        'boards_po_list': boards_po_list,
+        'order_pnx_items': order_pnx_items,
+        'pnx_total_cost': pnx_total_cost,
+        'has_os_door_accessories': has_os_door_accessories,
+        'glass_items': glass_items,
+        'raumplus_accessories': raumplus_accessories,
+        'non_glass_accessories': non_glass_accessories,
+        'price_per_sqm': price_per_sqm,
+        'materials_cost': materials_cost,
+        'boards_cost': boards_cost,
+        'accessories_cost': accessories_cost,
+        'os_doors_cost': os_doors_cost,
+        'all_allocated': all_allocated,
+        'unallocated_count': unallocated_count,
+        'workflow_progress': workflow_progress,
+        'workflow_stages': workflow_stages,
+        'task_completions': task_completions,
+        'phases': phases,
+        'stages_by_phase': stages_by_phase,
+        'installation_timesheets': installation_timesheets,
+        'manufacturing_timesheets': manufacturing_timesheets,
+        'expenses': expenses,
+        'calculated_installation_cost': calculated_installation_cost,
+        'calculated_manufacturing_cost': calculated_manufacturing_cost,
+        'installation_fitter_cost': installation_fitter_cost,
+        'petrol_cost': petrol_cost,
+        'materials_expense_cost': materials_expense_cost,
+        'other_expense_cost': other_expense_cost,
+        'manufacturing_by_worker': dict(manufacturing_by_worker),
+        'designers': Designer.objects.all().order_by('name'),
+        'boards_purchase_order': boards_purchase_order,
+        'os_doors_purchase_order': os_doors_purchase_order,
+        'additional_os_doors_pos_list': additional_os_doors_pos_list,
+        'available_purchase_orders': available_purchase_orders,
+        'purchase_invoice_lines': purchase_invoice_lines,
+        'purchase_invoice_cost': purchase_invoice_cost,
+        'purchase_invoice_ts_cost': purchase_invoice_ts_cost,
+        'anthill_sales': anthill_sales,
+        'board_materials_json': json.dumps(unique_materials),
+        'order_materials_json': json.dumps(order_materials),
+    }
+
+
 @login_required
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
@@ -5902,268 +6191,20 @@ def order_details(request, order_id):
                 item.sort_key = (1, w)
         items.sort(key=lambda x: x.sort_key)
         return items, total
-    
-    # Build per-PO data for template
-    boards_po_list = []
-    order_pnx_items = []
-    pnx_total_cost = 0
-    
-    for idx, bpo in enumerate(all_boards_pos_list):
-        items, cost = process_pnx_items(bpo, order.sale_number, price_per_sqm)
-        local_po = PurchaseOrder.objects.filter(display_number=bpo.po_number).first()
-        boards_po_list.append({
-            'po': bpo,
-            'is_primary': (idx == 0 and order.boards_po_id == bpo.id),
-            'pnx_items': items,
-            'total_cost': cost,
-            'purchase_order': local_po,
-        })
-        order_pnx_items.extend(items)
-        pnx_total_cost += cost
-    
-    # Check if order has OS door accessories
-    has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
-    
-    # Separate glass items (SKU starts with GLS), Raumplus (_RAU_), and other accessories
-    glass_items_qs = order.accessories.filter(sku__istartswith='GLS')
-    raumplus_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').filter(sku__icontains='_RAU_')
-    non_glass_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').exclude(sku__icontains='_RAU_')
-    
-    # Convert to lists and sort by out-of-stock status
-    # Out of stock = remaining (available - allocated) < 0
-    glass_items = sorted(
-        list(glass_items_qs),
-        key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
-    )
-    raumplus_accessories = sorted(
-        list(raumplus_accessories_qs),
-        key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
-    )
-    non_glass_accessories = sorted(
-        list(non_glass_accessories_qs),
-        key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
-    )
-    
-    # Automatically remove items that are in skip lists
-    skip_items_removed = 0
-    
-    # Remove order-specific skip items
-    for skip_item in order.csv_skip_items.all():
-        accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
-        for accessory in accessories_to_remove:
-            accessory.delete()
-            skip_items_removed += 1
-    
-    # Remove global skip items
-    global_skip_items = CSVSkipItem.objects.filter(order__isnull=True)
-    for skip_item in global_skip_items:
-        accessories_to_remove = order.accessories.filter(sku=skip_item.sku)
-        for accessory in accessories_to_remove:
-            accessory.delete()
-            skip_items_removed += 1
-    
-    # Regenerate processed CSV if items were removed
-    if skip_items_removed > 0:
-        if order.accessories.exists():
-            processed_rows = []
-            for accessory in order.accessories.all():
-                row = {
-                    'Sku': accessory.sku,
-                    'Name': accessory.name,
-                    'Description': accessory.description,
-                    'CostPrice': str(accessory.cost_price),
-                    'SellPrice': str(accessory.sell_price),
-                    'Quantity': str(accessory.quantity),
-                    'Billable': 'TRUE' if accessory.billable else 'FALSE'
-                }
-                processed_rows.append(row)
-            
-            if processed_rows:
-                processed_csv_content = io.StringIO()
-                fieldnames = ['Sku', 'Name', 'Description', 'CostPrice', 'SellPrice', 'Quantity', 'Billable']
-                writer = csv.DictWriter(processed_csv_content, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(processed_rows)
-                
-                # Save updated processed CSV
-                filename = order.original_csv.name.split('_')[-1] if order.original_csv else 'accessories.csv'
-                order.processed_csv.save(f"{order.customer_number}_processed_{filename}", 
-                                       io.BytesIO(processed_csv_content.getvalue().encode('utf-8')))
-                order.processed_csv_created_at = timezone.now()
-                order.save()
-        
-        messages.info(request, f'Automatically removed {skip_items_removed} items from skip lists.')
-    
-    # Calculate total materials cost and save it to the order
-    materials_cost = order.calculate_materials_cost(price_per_sqm)
-    if order.materials_cost != materials_cost:
-        order.materials_cost = materials_cost
-        order.save(update_fields=['materials_cost'])
-    
-    # Calculate materials cost breakdown
-    boards_cost = Decimal('0.00')
-    for bpo in all_boards_pos_list:
-        bpo_items = bpo.pnx_items.filter(customer__icontains=order.sale_number)
-        for pnx_item in bpo_items:
-            boards_cost += pnx_item.get_cost(price_per_sqm)
-    
-    accessories_cost = Decimal('0.00')
-    for accessory in order.accessories.all():
-        accessories_cost += accessory.cost_price * accessory.quantity
-    
-    os_doors_cost = Decimal('0.00')
-    for os_door in order.os_doors.all():
-        os_doors_cost += os_door.cost_price * os_door.quantity
-    
-    # Get timesheets and expenses for this order
-    installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order', 'purchase_invoice_line__invoice')
-    manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
-    expenses = order.expenses.all().select_related('fitter')
-    
-    # Calculate costs from timesheets with breakdown
-    calculated_installation_cost = order.calculate_installation_cost()
-    calculated_manufacturing_cost = order.calculate_manufacturing_cost()
-    
-    # Calculate installation cost breakdown (fitters vs expenses vs purchase invoices)
-    installation_fitter_cost = sum(
-        ts.total_cost for ts in installation_timesheets if ts.fitter
-    )
-    purchase_invoice_ts_cost = sum(
-        ts.total_cost for ts in installation_timesheets if ts.purchase_invoice_line_id
-    )
-    
-    # Calculate expenses breakdown by type
-    petrol_cost = sum(exp.amount for exp in expenses.filter(expense_type='petrol'))
-    materials_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='materials'))
-    other_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='other'))
-    
-    # Calculate manufacturing cost breakdown by worker
-    from collections import defaultdict
-    manufacturing_by_worker = defaultdict(Decimal)
-    for ts in manufacturing_timesheets:
-        worker_name = ts.worker_name
-        manufacturing_by_worker[worker_name] += ts.total_cost
-    
-    # Get all available boards POs for the dropdown
-    from .models import BoardsPO
-    from django.db.models import Q, Count
-    
-    # If the current order is finished, show all POs
-    # If not finished, only show POs that have at least one unfinished order or no orders
-    if order.job_finished:
-        available_pos = BoardsPO.objects.all().order_by('-po_number')
-    else:
-        # Get POs that either have no orders or have at least one order that isn't finished
-        available_pos = BoardsPO.objects.annotate(
-            total_orders=Count('orders'),
-            finished_orders=Count('orders', filter=Q(orders__job_finished=True))
-        ).filter(
-            Q(total_orders=0) | Q(total_orders__gt=models.F('finished_orders'))
-        ).order_by('-po_number')
-    
-    # Check if a local PurchaseOrder exists for this order's boards PO
-    boards_purchase_order = None
-    if order.boards_po:
-        boards_purchase_order = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
 
-    # Check if a local PurchaseOrder exists for this order's OS doors PO
-    os_doors_purchase_order = None
-    if order.os_doors_po:
-        os_doors_purchase_order = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+    ctx = _build_order_context(order, request)
 
-    # Additional OS Doors POs (M2M)
-    additional_os_doors_pos_list = list(order.additional_os_doors_pos.order_by('-workguru_id'))
-    
-    # Check if all accessories are allocated
-    total_accessories = order.accessories.count()
-    all_allocated = total_accessories > 0 and not order.accessories.filter(is_allocated=False).exists()
-    unallocated_count = order.accessories.filter(is_allocated=False).count()
-    
-    # Get available POs for "Add to Existing PO" (Draft/Approved, not yet received)
-    available_purchase_orders = PurchaseOrder.objects.filter(
-        status__in=['Draft', 'Approved']
-    ).order_by('-workguru_id')[:50]
-    
-    # Purchase Invoice lines allocated to this order
-    purchase_invoice_lines = PurchaseInvoiceLineItem.objects.filter(
-        order=order
-    ).select_related('invoice').order_by('invoice__date', 'sort_order')
-    purchase_invoice_cost = purchase_invoice_lines.aggregate(
-        total=Sum('line_total')
-    )['total'] or Decimal('0.00')
+    if ctx.get('_skip_items_removed', 0) > 0:
+        messages.info(request, f"Automatically removed {ctx['_skip_items_removed']} items from skip lists.")
 
-    # Linked Anthill sales for this order (with customer prefetched for template rendering)
-    anthill_sales = order.anthill_sale.select_related('customer').order_by('-activity_date')
+    # If this order has a linked sale, redirect to the combined sale page (sale is the anchor)
+    anthill_sales = ctx['anthill_sales']
+    primary_sale = anthill_sales.first()
+    if primary_sale:
+        from django.urls import reverse
+        return redirect(reverse('sale_detail', args=[primary_sale.pk]) + '?tab=order')
 
-    # Distinct material names for board add dropdown
-    distinct_materials = list(
-        PNXItem.objects.values('matname', 'barcode')
-        .distinct()
-        .order_by('matname')
-        .values('matname', 'barcode')
-    )
-    # Deduplicate by matname (keep first barcode per material)
-    seen_matnames = set()
-    unique_materials = []
-    for m in distinct_materials:
-        if m['matname'] not in seen_matnames:
-            seen_matnames.add(m['matname'])
-            unique_materials.append(m)
-
-    # Materials used in this order's boards (for priority section in dropdown)
-    order_matnames = set()
-    for item in order_pnx_items:
-        if item.matname:
-            order_matnames.add(item.matname)
-    order_materials = sorted(order_matnames)
-
-    return render(request, 'stock_take/order_details.html', {
-        'order': order,
-        'form': form,
-        'os_door_form': os_door_form,
-        'other_orders': other_orders,
-        'available_pos': available_pos,
-        'boards_po_list': boards_po_list,
-        'order_pnx_items': order_pnx_items,
-        'pnx_total_cost': pnx_total_cost,
-        'has_os_door_accessories': has_os_door_accessories,
-        'glass_items': glass_items,
-        'raumplus_accessories': raumplus_accessories,
-        'non_glass_accessories': non_glass_accessories,
-        'price_per_sqm': price_per_sqm,
-        'materials_cost': materials_cost,
-        'boards_cost': boards_cost,
-        'accessories_cost': accessories_cost,
-        'os_doors_cost': os_doors_cost,
-        'all_allocated': all_allocated,
-        'unallocated_count': unallocated_count,
-        'workflow_progress': workflow_progress,
-        'workflow_stages': workflow_stages,
-        'task_completions': task_completions,
-        'phases': phases,
-        'stages_by_phase': stages_by_phase,
-        'installation_timesheets': installation_timesheets,
-        'manufacturing_timesheets': manufacturing_timesheets,
-        'expenses': expenses,
-        'calculated_installation_cost': calculated_installation_cost,
-        'calculated_manufacturing_cost': calculated_manufacturing_cost,
-        'installation_fitter_cost': installation_fitter_cost,
-        'petrol_cost': petrol_cost,
-        'materials_expense_cost': materials_expense_cost,
-        'other_expense_cost': other_expense_cost,
-        'manufacturing_by_worker': dict(manufacturing_by_worker),
-        'designers': Designer.objects.all().order_by('name'),
-        'boards_purchase_order': boards_purchase_order,
-        'os_doors_purchase_order': os_doors_purchase_order,
-        'additional_os_doors_pos_list': additional_os_doors_pos_list,
-        'available_purchase_orders': available_purchase_orders,
-        'purchase_invoice_lines': purchase_invoice_lines,
-        'purchase_invoice_cost': purchase_invoice_cost,
-        'purchase_invoice_ts_cost': purchase_invoice_ts_cost,
-        'anthill_sales': anthill_sales,
-        'board_materials_json': json.dumps(unique_materials),
-        'order_materials_json': json.dumps(order_materials),
-    })
+    return render(request, 'stock_take/order_details.html', ctx)
 
 def completed_stock_takes(request):
     """Display completed stock takes with analytics and filtering"""
@@ -14290,3 +14331,93 @@ def sync_anthill_workflow(request, order_id):
         'updated': updated,
         'dates_saved': dates_saved,
     })
+
+
+@login_required
+def calendar_pdf_view(request):
+    """Generate an A4 landscape PDF fit schedule for ±2 weeks around today."""
+    from datetime import timedelta
+    from decimal import Decimal
+    from django.db.models import Sum as _Sum
+    from django.http import HttpResponse
+    from .calendar_pdf_generator import generate_calendar_pdf
+
+    today = timezone.now().date()
+    # Monday of the current week
+    current_monday = today - timedelta(days=today.weekday())
+    # Window: 2 weeks before → 2 weeks after (5 weeks total)
+    range_start = current_monday - timedelta(weeks=2)
+    # Sat of the 5th week
+    range_end = range_start + timedelta(days=34)
+
+    fitter_names = {code: name for code, name in FitAppointment.FITTER_CHOICES}
+
+    all_appointments = (
+        FitAppointment.objects
+        .filter(fit_date__gte=range_start, fit_date__lte=range_end)
+        .select_related('order', 'remedial')
+        .order_by('fit_date', 'fitter')
+    )
+
+    # Financial data lookup
+    sale_numbers = [a.order.sale_number for a in all_appointments if a.order]
+    fin_map = {}
+    if sale_numbers:
+        for row in (
+            AnthillSale.objects
+            .filter(anthill_activity_id__in=sale_numbers)
+            .annotate(payments_sum=_Sum('payments__amount'))
+            .values('anthill_activity_id', 'sale_value', 'payments_sum', 'range_name', 'door_type')
+        ):
+            sv = row['sale_value'] or Decimal('0')
+            pt = row['payments_sum'] or Decimal('0')
+            range_door = ' / '.join(filter(None, [row.get('range_name'), row.get('door_type')]))
+            fin_map[row['anthill_activity_id']] = {
+                'sale_value': sv,
+                'outstanding': sv - pt,
+                'range_name': range_door,
+            }
+
+    # Build per-week buckets
+    weeks_data = []
+    for week_offset in range(5):
+        ws = range_start + timedelta(weeks=week_offset)
+        we = ws + timedelta(days=5)  # Mon–Sat
+        week_appts = []
+        for appt in all_appointments:
+            if not (ws <= appt.fit_date <= we):
+                continue
+            if appt.order:
+                fin = fin_map.get(appt.order.sale_number, {})
+                week_appts.append({
+                    'date':          appt.fit_date,
+                    'fitter_name':   fitter_names.get(appt.fitter, appt.fitter or ''),
+                    'customer_name': f"{appt.order.first_name} {appt.order.last_name}".strip(),
+                    'sale_number':   appt.order.sale_number or '',
+                    'postcode':      appt.order.postcode or '',
+                    'range_name':    fin.get('range_name', ''),
+                    'duration':      getattr(appt, 'fit_duration', 1) or 1,
+                    'sale_value':    fin.get('sale_value'),
+                    'outstanding':   fin.get('outstanding'),
+                    'is_remedial':   False,
+                })
+            elif appt.remedial:
+                week_appts.append({
+                    'date':          appt.fit_date,
+                    'fitter_name':   fitter_names.get(appt.fitter, appt.fitter or ''),
+                    'customer_name': f"{appt.remedial.first_name} {appt.remedial.last_name}".strip(),
+                    'sale_number':   appt.remedial.remedial_number or '',
+                    'postcode':      appt.remedial.postcode or '',
+                    'range_name':    '',
+                    'duration':      getattr(appt, 'fit_duration', 1) or 1,
+                    'sale_value':    None,
+                    'outstanding':   None,
+                    'is_remedial':   True,
+                })
+        weeks_data.append({'week_start': ws, 'week_end': we, 'appointments': week_appts})
+
+    buf = generate_calendar_pdf(weeks_data)
+    filename = f"fit-schedule-{today.strftime('%Y-%m-%d')}.pdf"
+    response = HttpResponse(buf.read(), content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response

@@ -231,3 +231,31 @@ def claim_api_upload(request):
             'group_key': doc.group_key,
         }
     })
+
+
+@login_required
+def claim_search_api(request):
+    """Return claim documents matching a doc_type, optionally filtered to a group_key."""
+    doc_type = request.GET.get('doc_type', '').strip()
+    group_key = request.GET.get('group_key', '').strip()
+    if not doc_type:
+        return JsonResponse({'error': 'doc_type required'}, status=400)
+
+    qs = ClaimDocument.objects.filter(file__icontains=f'_{doc_type}.')
+    if group_key:
+        qs = qs.filter(group_key=group_key)
+    documents = qs.order_by('-uploaded_at')[:100]
+
+    results = []
+    for doc in documents:
+        results.append({
+            'id': doc.id,
+            'title': doc.title,
+            'filename': doc.filename,
+            'doc_type': doc.doc_type,
+            'group_key': doc.group_key,
+            'uploaded_at': doc.uploaded_at.strftime('%d %b %Y'),
+            'download_url': f'/claims/{doc.id}/download/',
+        })
+
+    return JsonResponse({'documents': results, 'count': len(results)})

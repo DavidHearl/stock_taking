@@ -1,0 +1,529 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}{{ po.reference }} – Overhead PO{% endblock %}
+{% block page_title %}{{ po.reference }}{% endblock %}
+
+{% block nav_overhead_po_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+<style>
+/* ── Detail page layout ─────────────────────────────────────── */
+.opo-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+@media (max-width: 768px) { .opo-detail-grid { grid-template-columns: 1fr; } }
+
+.detail-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 6px);
+    overflow: hidden;
+}
+.detail-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-primary);
+}
+.detail-card-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.detail-card-body { padding: 14px 16px; }
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border-color);
+    gap: 12px;
+}
+.info-row:last-child { border-bottom: none; }
+.info-label { font-size: 0.83rem; color: var(--text-muted); font-weight: 500; flex-shrink: 0; }
+.info-value { font-size: 0.9rem; color: var(--text-primary); font-weight: 500; text-align: right; }
+.info-value.mono { font-variant-numeric: tabular-nums; }
+
+.opo-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm, 4px);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+.opo-badge.draft      { background: #e9ecef; color: #6c757d; }
+.opo-badge.approved   { background: #d1ecf1; color: #0c5460; }
+.opo-badge.invoiced   { background: #fff3cd; color: #856404; }
+.opo-badge.paid       { background: #d4edda; color: #155724; }
+.opo-badge.cancelled  { background: #f8d7da; color: #721c24; }
+
+/* ── Invoice list ────────────────────────────────────────────── */
+.inv-link-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.inv-link-row:last-child { border-bottom: none; }
+.inv-link-ref { font-size: 0.88rem; font-weight: 600; color: var(--primary-color); flex-shrink: 0; }
+.inv-link-supplier { font-size: 0.82rem; color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-link-amount { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.inv-link-unlink { background: none; border: none; color: var(--danger-color); cursor: pointer; padding: 2px 5px; font-size: 0.9rem; opacity: 0.6; transition: opacity 0.1s; }
+.inv-link-unlink:hover { opacity: 1; }
+
+/* ── Search results ──────────────────────────────────────────── */
+.inv-search-result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.inv-search-result:hover { background: var(--bg-hover); }
+.inv-search-result .ref { font-size: 0.85rem; font-weight: 600; color: var(--primary-color); flex-shrink: 0; min-width: 110px; }
+.inv-search-result .supp { font-size: 0.82rem; color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-search-result .amt { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.inv-search-result .date { font-size: 0.78rem; color: var(--text-muted); flex-shrink: 0; }
+
+.inv-search-results-box {
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-primary);
+    margin-top: 6px;
+}
+.inv-search-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+/* ── Edit fields ─────────────────────────────────────────────── */
+.opo-edit-field { display: none; }
+.opo-edit-mode .opo-edit-field { display: block; }
+.opo-edit-mode .opo-view-field { display: none; }
+
+/* ── Breadcrumb ──────────────────────────────────────────────── */
+.opo-breadcrumb {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+.opo-breadcrumb a { color: var(--primary-color); text-decoration: none; }
+.opo-breadcrumb a:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Breadcrumb -->
+<div class="opo-breadcrumb">
+    <a href="{% url 'overhead_po_list' %}"><i class="bi bi-chevron-left"></i> Overhead Purchase Orders</a>
+</div>
+
+<!-- Page header -->
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+    <div>
+        <h2 style="margin:0;font-size:1.3rem;font-weight:700;">{{ po.reference }}</h2>
+        <div style="font-size:0.85rem;color:var(--text-muted);">{{ po.supplier_name }} &nbsp;·&nbsp; {{ po.get_category_display }}</div>
+    </div>
+    <span class="opo-badge {{ po.status }}" id="header-status-badge">{{ po.get_status_display }}</span>
+    <div style="margin-left:auto;display:flex;gap:8px;">
+        <button class="btn btn-sm btn-outline-secondary" id="btn-edit-po" onclick="toggleEditMode()">
+            <i class="bi bi-pencil"></i> Edit
+        </button>
+        <button class="btn btn-sm btn-primary" id="btn-save-po" style="display:none;" onclick="saveOPO()">
+            <i class="bi bi-check-lg"></i> Save
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btn-cancel-edit" style="display:none;" onclick="cancelEditMode()">
+            Cancel
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteOPO()" title="Delete this PO">
+            <i class="bi bi-trash"></i>
+        </button>
+    </div>
+</div>
+
+<div class="opo-detail-grid">
+
+    <!-- ── Left: PO Details ─────────────────────────────────── -->
+    <div>
+        <div class="detail-card" id="po-detail-card">
+            <div class="detail-card-header">
+                <h4><i class="bi bi-file-text"></i> PO Details</h4>
+            </div>
+            <div class="detail-card-body">
+                <!-- Supplier -->
+                <div class="info-row">
+                    <span class="info-label">Supplier</span>
+                    <span class="info-value opo-view-field" id="view-supplier">{{ po.supplier_name }}</span>
+                    <input type="text" class="form-control form-control-sm opo-edit-field" id="edit-supplier" value="{{ po.supplier_name }}">
+                </div>
+                <!-- Category -->
+                <div class="info-row">
+                    <span class="info-label">Category</span>
+                    <span class="info-value opo-view-field" id="view-category">{{ po.get_category_display }}</span>
+                    <select class="form-control form-control-sm opo-edit-field" id="edit-category">
+                        {% for val, label in category_choices %}
+                        <option value="{{ val }}" {% if po.category == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- Status -->
+                <div class="info-row">
+                    <span class="info-label">Status</span>
+                    <span class="info-value opo-view-field" id="view-status">
+                        <span class="opo-badge {{ po.status }}">{{ po.get_status_display }}</span>
+                    </span>
+                    <select class="form-control form-control-sm opo-edit-field" id="edit-status">
+                        {% for val, label in status_choices %}
+                        <option value="{{ val }}" {% if po.status == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- PO Date -->
+                <div class="info-row">
+                    <span class="info-label">PO Date</span>
+                    <span class="info-value opo-view-field" id="view-date">{{ po.date|date:"d M Y"|default:"—" }}</span>
+                    <input type="date" class="form-control form-control-sm opo-edit-field" id="edit-date" value="{{ po.date|date:'Y-m-d'|default:'' }}">
+                </div>
+                <!-- Expected Date -->
+                <div class="info-row">
+                    <span class="info-label">Expected Date</span>
+                    <span class="info-value opo-view-field" id="view-expected-date">{{ po.expected_date|date:"d M Y"|default:"—" }}</span>
+                    <input type="date" class="form-control form-control-sm opo-edit-field" id="edit-expected-date" value="{{ po.expected_date|date:'Y-m-d'|default:'' }}">
+                </div>
+                <!-- Description -->
+                <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;">
+                    <span class="info-label">Description</span>
+                    <span class="info-value opo-view-field" id="view-description" style="text-align:left;">{{ po.description|default:"—" }}</span>
+                    <textarea class="form-control form-control-sm opo-edit-field" id="edit-description" rows="2">{{ po.description }}</textarea>
+                </div>
+                <!-- Notes -->
+                <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;">
+                    <span class="info-label">Notes</span>
+                    <span class="info-value opo-view-field" id="view-notes" style="text-align:left;color:var(--text-muted);">{{ po.notes|default:"—" }}</span>
+                    <textarea class="form-control form-control-sm opo-edit-field" id="edit-notes" rows="2">{{ po.notes }}</textarea>
+                </div>
+                <!-- Created -->
+                <div class="info-row">
+                    <span class="info-label">Created</span>
+                    <span class="info-value" style="color:var(--text-muted);">{{ po.created_at|date:"d M Y H:i" }}{% if po.created_by %} by {{ po.created_by }}{% endif %}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Amounts card -->
+        <div class="detail-card" style="margin-top:14px;">
+            <div class="detail-card-header">
+                <h4><i class="bi bi-currency-pound"></i> Amounts</h4>
+            </div>
+            <div class="detail-card-body">
+                <div class="info-row">
+                    <span class="info-label">Net</span>
+                    <span class="info-value mono opo-view-field" id="view-amount-net">£{{ po.amount_net|floatformat:2|intcomma }}</span>
+                    <div class="opo-edit-field" style="position:relative;">
+                        <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:0.8rem;">£</span>
+                        <input type="number" class="form-control form-control-sm" id="edit-amount-net" style="padding-left:18px;" step="0.01" min="0" value="{{ po.amount_net }}" oninput="calcGross()">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">VAT</span>
+                    <span class="info-value mono opo-view-field" id="view-amount-vat">£{{ po.amount_vat|floatformat:2|intcomma }}</span>
+                    <div class="opo-edit-field" style="position:relative;">
+                        <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:0.8rem;">£</span>
+                        <input type="number" class="form-control form-control-sm" id="edit-amount-vat" style="padding-left:18px;" step="0.01" min="0" value="{{ po.amount_vat }}" oninput="calcGross()">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <span class="info-label" style="font-weight:700;color:var(--text-primary);">Gross</span>
+                    <span class="info-value mono opo-view-field" id="view-amount-gross" style="font-weight:700;font-size:1rem;">£{{ po.amount_gross|floatformat:2|intcomma }}</span>
+                    <div class="opo-edit-field" style="position:relative;">
+                        <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:0.8rem;">£</span>
+                        <input type="number" class="form-control form-control-sm" id="edit-amount-gross" style="padding-left:18px;" step="0.01" min="0" value="{{ po.amount_gross }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Right: Linked Invoices ───────────────────────────── -->
+    <div>
+        <div class="detail-card">
+            <div class="detail-card-header">
+                <h4><i class="bi bi-receipt"></i> Linked Accounts Payable Invoices</h4>
+                <button class="btn btn-sm btn-outline-primary" onclick="openLinkInvoicePanel()">
+                    <i class="bi bi-link-45deg"></i> Link Invoice
+                </button>
+            </div>
+            <div class="detail-card-body" id="linked-invoices-container">
+                {% if linked_invoices %}
+                {% for invoice in linked_invoices %}
+                <div class="inv-link-row" id="inv-row-{{ invoice.id }}">
+                    <a href="{% url 'purchase_invoice_detail' invoice.id %}" class="inv-link-ref" onclick="event.stopPropagation()">{{ invoice.invoice_number }}</a>
+                    <span class="inv-link-supplier" title="{{ invoice.supplier_name }}">{{ invoice.supplier_name }}</span>
+                    <span class="inv-link-amount">£{{ invoice.total|floatformat:2|intcomma }}</span>
+                    <span style="font-size:0.78rem;color:var(--text-muted);">{{ invoice.date|date:"d M Y"|default:"" }}</span>
+                    <button class="inv-link-unlink" title="Unlink" onclick="unlinkInvoice({{ invoice.id }}, this)"><i class="bi bi-x-lg"></i></button>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div id="no-invoices-msg" style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.85rem;">
+                    <i class="bi bi-receipt" style="font-size:2rem;display:block;margin-bottom:8px;"></i>
+                    No invoices linked yet. Click <strong>Link Invoice</strong> to search and attach an accounts payable invoice.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Link Invoice Search Panel -->
+        <div class="detail-card" id="link-invoice-panel" style="margin-top:14px;display:none;">
+            <div class="detail-card-header">
+                <h4><i class="bi bi-search"></i> Search Invoices to Link</h4>
+                <button type="button" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;" onclick="closeLinkInvoicePanel()">&times;</button>
+            </div>
+            <div class="detail-card-body">
+                <input type="text" id="invoice-search-input" class="form-control form-control-sm"
+                       placeholder="Search by invoice number or supplier…" autocomplete="off"
+                       oninput="searchInvoices(this.value)">
+                <div class="inv-search-results-box" id="invoice-search-results">
+                    <div class="inv-search-empty">Type to search accounts payable invoices…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const PO_ID = {{ po.id }};
+const CSRF = '{{ csrf_token }}';
+
+// ── Edit mode ─────────────────────────────────────────────────
+
+let editModeActive = false;
+
+function toggleEditMode() {
+    editModeActive = true;
+    document.getElementById('po-detail-card').classList.add('opo-edit-mode');
+    document.getElementById('btn-edit-po').style.display = 'none';
+    document.getElementById('btn-save-po').style.display = '';
+    document.getElementById('btn-cancel-edit').style.display = '';
+}
+
+function cancelEditMode() {
+    editModeActive = false;
+    document.getElementById('po-detail-card').classList.remove('opo-edit-mode');
+    document.getElementById('btn-edit-po').style.display = '';
+    document.getElementById('btn-save-po').style.display = 'none';
+    document.getElementById('btn-cancel-edit').style.display = 'none';
+}
+
+function calcGross() {
+    const net = parseFloat(document.getElementById('edit-amount-net').value) || 0;
+    const vat = parseFloat(document.getElementById('edit-amount-vat').value) || 0;
+    document.getElementById('edit-amount-gross').value = (net + vat).toFixed(2);
+}
+
+function saveOPO() {
+    const payload = {
+        supplier_name:  document.getElementById('edit-supplier').value.trim(),
+        category:       document.getElementById('edit-category').value,
+        status:         document.getElementById('edit-status').value,
+        date:           document.getElementById('edit-date').value || null,
+        expected_date:  document.getElementById('edit-expected-date').value || null,
+        description:    document.getElementById('edit-description').value.trim(),
+        notes:          document.getElementById('edit-notes').value.trim(),
+        amount_net:     document.getElementById('edit-amount-net').value || '0',
+        amount_vat:     document.getElementById('edit-amount-vat').value || '0',
+        amount_gross:   document.getElementById('edit-amount-gross').value || '0',
+    };
+
+    fetch(`/overhead-purchase-orders/${PO_ID}/update/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const po = data.po;
+            // Update view fields
+            document.getElementById('view-supplier').textContent = po.supplier_name;
+            document.getElementById('view-category').textContent = po.category_display;
+            document.getElementById('view-description').textContent = po.description || '—';
+            document.getElementById('view-notes').textContent = po.notes || '—';
+            document.getElementById('view-date').textContent = po.date ? formatDate(po.date) : '—';
+            document.getElementById('view-expected-date').textContent = po.expected_date ? formatDate(po.expected_date) : '—';
+            document.getElementById('view-amount-net').textContent = '£' + fmtMoney(po.amount_net);
+            document.getElementById('view-amount-vat').textContent = '£' + fmtMoney(po.amount_vat);
+            document.getElementById('view-amount-gross').textContent = '£' + fmtMoney(po.amount_gross);
+            // Update status badge
+            const badgeClasses = ['draft','approved','invoiced','paid','cancelled'];
+            ['view-status', 'header-status-badge'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    const inner = id === 'view-status' ? el.querySelector('.opo-badge') : el;
+                    if (inner) {
+                        inner.className = 'opo-badge ' + po.status;
+                        inner.textContent = po.status_display;
+                    }
+                }
+            });
+            cancelEditMode();
+        } else {
+            alert(data.error || 'Failed to save');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+
+function deleteOPO() {
+    if (!confirm('Delete this overhead PO? This cannot be undone.')) return;
+    fetch(`/overhead-purchase-orders/${PO_ID}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) window.location = '{% url "overhead_po_list" %}';
+        else alert(data.error || 'Failed to delete');
+    })
+    .catch(() => alert('Network error'));
+}
+
+// ── Invoice linking ───────────────────────────────────────────
+
+function openLinkInvoicePanel() {
+    const panel = document.getElementById('link-invoice-panel');
+    panel.style.display = '';
+    document.getElementById('invoice-search-input').value = '';
+    loadInvoiceSearchResults('');
+    setTimeout(() => document.getElementById('invoice-search-input').focus(), 50);
+}
+
+function closeLinkInvoicePanel() {
+    document.getElementById('link-invoice-panel').style.display = 'none';
+}
+
+let searchTimer;
+function searchInvoices(q) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadInvoiceSearchResults(q), 250);
+}
+
+function loadInvoiceSearchResults(q) {
+    const url = `/overhead-purchase-orders/${PO_ID}/search-invoices/?q=${encodeURIComponent(q)}`;
+    fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        const box = document.getElementById('invoice-search-results');
+        if (!data.results || data.results.length === 0) {
+            box.innerHTML = '<div class="inv-search-empty">No matching invoices found.</div>';
+            return;
+        }
+        box.innerHTML = data.results.map(inv => `
+            <div class="inv-search-result" onclick="linkInvoice(${inv.id}, this)">
+                <span class="ref">${inv.invoice_number}</span>
+                <span class="supp" title="${inv.supplier_name}">${inv.supplier_name}</span>
+                <span class="amt">£${fmtMoney(inv.total)}</span>
+                <span class="date">${inv.date || ''}</span>
+            </div>
+        `).join('');
+    })
+    .catch(() => {});
+}
+
+function linkInvoice(invoiceId, el) {
+    fetch(`/overhead-purchase-orders/${PO_ID}/link-invoice/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ invoice_id: invoiceId }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const inv = data.invoice;
+            // Remove the "no invoices" message if present
+            const noMsg = document.getElementById('no-invoices-msg');
+            if (noMsg) noMsg.remove();
+            // Add row to linked invoices
+            const container = document.getElementById('linked-invoices-container');
+            const row = document.createElement('div');
+            row.className = 'inv-link-row';
+            row.id = `inv-row-${inv.id}`;
+            row.innerHTML = `
+                <a href="/purchase-invoices/${inv.id}/" class="inv-link-ref">${inv.invoice_number}</a>
+                <span class="inv-link-supplier" title="${inv.supplier_name}">${inv.supplier_name}</span>
+                <span class="inv-link-amount">£${fmtMoney(inv.total)}</span>
+                <span style="font-size:0.78rem;color:var(--text-muted);">${inv.date || ''}</span>
+                <button class="inv-link-unlink" title="Unlink" onclick="unlinkInvoice(${inv.id}, this)"><i class="bi bi-x-lg"></i></button>
+            `;
+            container.appendChild(row);
+            // Remove from search results
+            if (el) el.remove();
+        } else {
+            alert(data.error || 'Failed to link invoice');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+
+function unlinkInvoice(invoiceId, btn) {
+    fetch(`/overhead-purchase-orders/${PO_ID}/unlink-invoice/${invoiceId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById(`inv-row-${invoiceId}`);
+            if (row) row.remove();
+            // Show "no invoices" message if container is now empty
+            const container = document.getElementById('linked-invoices-container');
+            if (!container.querySelector('.inv-link-row')) {
+                container.innerHTML = `
+                    <div id="no-invoices-msg" style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.85rem;">
+                        <i class="bi bi-receipt" style="font-size:2rem;display:block;margin-bottom:8px;"></i>
+                        No invoices linked yet. Click <strong>Link Invoice</strong> to attach an accounts payable invoice.
+                    </div>`;
+            }
+        } else {
+            alert(data.error || 'Failed to unlink');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+
+// ── Utilities ─────────────────────────────────────────────────
+
+function fmtMoney(n) {
+    return parseFloat(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDate(iso) {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${parseInt(d)} ${months[parseInt(m)-1]} ${y}`;
+}
+</script>
+{% endblock %}

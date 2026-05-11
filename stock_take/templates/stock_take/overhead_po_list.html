@@ -1,0 +1,402 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Overhead Purchase Orders{% endblock %}
+{% block page_title %}Overhead Purchase Orders{% endblock %}
+
+{% block nav_overhead_po_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+<style>
+/* ── Overhead PO overrides ───────────────────────────────────── */
+.opo-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm, 4px);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+.opo-badge.draft      { background: #e9ecef; color: #6c757d; }
+.opo-badge.approved   { background: #d1ecf1; color: #0c5460; }
+.opo-badge.invoiced   { background: #fff3cd; color: #856404; }
+.opo-badge.paid       { background: #d4edda; color: #155724; }
+.opo-badge.cancelled  { background: #f8d7da; color: #721c24; }
+
+.opo-cat {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.opo-filter-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.opo-filter-row select {
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+/* Match search box background to page */
+.pinv-search-box {
+    background: var(--bg-primary) !important;
+}
+.pinv-search-box input {
+    background: transparent !important;
+}
+.pinv-search-box input:-webkit-autofill,
+.pinv-search-box input:-webkit-autofill:hover,
+.pinv-search-box input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0px 1000px var(--bg-primary) inset !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Stats -->
+<div class="stats-grid" style="margin-bottom:16px;">
+    <div class="stats-card">
+        <div class="stats-label">Total POs</div>
+        <div class="stats-number">{{ total_count|intcomma }}</div>
+    </div>
+    <div class="stats-card">
+        <div class="stats-label">Total Net</div>
+        <div class="stats-number" style="font-size:1.5rem;">£{{ total_net|floatformat:2|intcomma }}</div>
+    </div>
+    <div class="stats-card">
+        <div class="stats-label">Total Gross</div>
+        <div class="stats-number" style="font-size:1.5rem;">£{{ total_gross|floatformat:2|intcomma }}</div>
+    </div>
+    <div class="stats-card">
+        <div class="stats-label">Draft</div>
+        <div class="stats-number" {% if status_counts.draft > 0 %}style="color:var(--text-muted);"{% endif %}>{{ status_counts.draft }}</div>
+    </div>
+    <div class="stats-card">
+        <div class="stats-label">Approved</div>
+        <div class="stats-number" style="color:var(--primary-color);">{{ status_counts.approved }}</div>
+    </div>
+    <div class="stats-card">
+        <div class="stats-label">Paid</div>
+        <div class="stats-number" style="color:var(--success-color);">{{ status_counts.paid }}</div>
+    </div>
+</div>
+
+<!-- Toolbar -->
+<div class="pinv-toolbar">
+    <form method="get" action="" class="pinv-search-box" id="opo-search-form">
+        <i class="bi bi-search"></i>
+        <input type="text" name="q" id="opo-search" value="{{ search_query }}"
+               placeholder="Search reference, supplier, description…" autocomplete="off">
+        {% if search_query %}<a href="?" class="pinv-search-clear">&times;</a>{% endif %}
+    </form>
+    <button class="pinv-btn" onclick="openCreateOPOModal()">
+        <i class="bi bi-plus-lg"></i>
+        <span>New Overhead PO</span>
+    </button>
+</div>
+
+<!-- Filter row -->
+<form method="get" action="" class="opo-filter-row" id="opo-filter-form">
+    {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
+    <select name="status" onchange="this.form.submit()">
+        <option value="">All Statuses</option>
+        {% for val, label in status_choices %}
+        <option value="{{ val }}" {% if status_filter == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+    </select>
+    <select name="category" onchange="this.form.submit()">
+        <option value="">All Categories</option>
+        {% for val, label in category_choices %}
+        <option value="{{ val }}" {% if category_filter == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+    </select>
+    {% if status_filter or category_filter %}
+    <a href="?{% if search_query %}q={{ search_query }}{% endif %}" style="font-size:0.85rem;color:var(--text-muted);text-decoration:none;">
+        <i class="bi bi-x-circle"></i> Clear filters
+    </a>
+    {% endif %}
+</form>
+
+<!-- Table -->
+<div class="pinv-table-container">
+    {% if overhead_pos %}
+    <table class="pinv-table" id="opo-table">
+        <thead>
+            <tr>
+                <th>Reference</th>
+                <th>Supplier</th>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th style="text-align:right;">Net</th>
+                <th style="text-align:right;">Gross</th>
+                <th style="text-align:center;" title="Linked Invoices"><i class="bi bi-receipt"></i></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for po in overhead_pos %}
+            <tr onclick="window.location='{% url 'overhead_po_detail' po.id %}'" style="cursor:pointer;">
+                <td>
+                    <a href="{% url 'overhead_po_detail' po.id %}" class="pinv-number" onclick="event.stopPropagation()">{{ po.reference }}</a>
+                </td>
+                <td>
+                    <span class="pinv-supplier" title="{{ po.supplier_name }}">{{ po.supplier_name|default:"—" }}</span>
+                </td>
+                <td><span class="opo-cat">{{ po.get_category_display }}</span></td>
+                <td>{{ po.description|truncatechars:60|default:"—" }}</td>
+                <td>{{ po.date|date:"d M Y"|default:"—" }}</td>
+                <td><span class="opo-badge {{ po.status }}">{{ po.get_status_display }}</span></td>
+                <td class="number-cell">£{{ po.amount_net|floatformat:2|intcomma }}</td>
+                <td class="number-cell">£{{ po.amount_gross|floatformat:2|intcomma }}</td>
+                <td style="text-align:center;">
+                    {% with cnt=po.purchase_invoices.count %}
+                    {% if cnt > 0 %}
+                    <span style="font-weight:600;color:var(--primary-color);">{{ cnt }}</span>
+                    {% else %}
+                    <span style="color:var(--text-muted);">—</span>
+                    {% endif %}
+                    {% endwith %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="pinv-empty">
+        <i class="bi bi-bag-check"></i>
+        <p>No overhead purchase orders yet — click <strong>New Overhead PO</strong> to get started.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── Create Overhead PO Modal ─────────────────────────────── -->
+<div class="pinv-modal-overlay" id="create-opo-modal" onclick="closeCreateOPOModal(event)">
+    <div class="pinv-modal-box" style="max-width:560px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 style="margin:0;font-size:1rem;"><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
+            <button type="button" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;" onclick="closeCreateOPOModal()">&times;</button>
+        </div>
+        <div class="pinv-modal-body">
+            <div class="pinv-form-rows">
+                <!-- Supplier -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Supplier <span style="color:var(--danger-color);">*</span></label>
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <div class="order-search-wrap" style="flex:1;min-width:0;">
+                            <input type="text" id="opo-supplier-name" class="pinv-input" style="width:100%;"
+                                   placeholder="Type to search…" autocomplete="off"
+                                   oninput="filterSupplierDd(this.value)"
+                                   onfocus="filterSupplierDd(this.value)"
+                                   onblur="setTimeout(closeSupplierDd,150)">
+                            <div class="order-search-dropdown modal-order-dd" id="opo-supplier-dd"></div>
+                        </div>
+                        <a href="{% url 'suppliers_list' %}" target="_blank"
+                           class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                           title="Go to Suppliers page (opens in new tab)">
+                            <i class="bi bi-plus-lg"></i>
+                        </a>
+                    </div>
+                </div>
+                <!-- Category -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Category</label>
+                    <select id="opo-category" class="pinv-input">
+                        {% for val, label in category_choices %}
+                        <option value="{{ val }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- Status -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Status</label>
+                    <select id="opo-status" class="pinv-input">
+                        {% for val, label in status_choices %}
+                        <option value="{{ val }}" {% if val == 'draft' %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- PO Date -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">PO Date</label>
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <input type="date" id="opo-date" class="pinv-input" style="flex:1;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="document.getElementById('opo-date').value=todayISO()">Today</button>
+                    </div>
+                </div>
+                <!-- Expected Date -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Expected Date</label>
+                    <input type="date" id="opo-expected-date" class="pinv-input">
+                </div>
+                <!-- Net -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Net (£)</label>
+                    <input type="number" id="opo-amount-net" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="calcOPOGross()" onchange="roundTo2(this)">
+                </div>
+                <!-- VAT -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">VAT (£)</label>
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <input type="number" id="opo-amount-vat" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="calcOPOGross()" onchange="roundTo2(this)" style="flex:1;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="calcOPOVAT()">20%</button>
+                    </div>
+                </div>
+                <!-- Gross -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Gross (£)</label>
+                    <input type="number" id="opo-amount-gross" class="pinv-input" step="0.01" min="0" placeholder="0.00" onchange="roundTo2(this)">
+                </div>
+                <!-- GL Code -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">GL Code</label>
+                    <select id="opo-gl-code" class="pinv-input">
+                        <option value="">— Select GL code —</option>
+                        {% for gl in gl_codes %}
+                        <option value="{{ gl.code }}">{{ gl.code }} – {{ gl.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- Description -->
+                <div class="pinv-form-row" style="align-items:flex-start;">
+                    <label class="pinv-label" style="padding-top:6px;">Description</label>
+                    <textarea id="opo-description" class="pinv-input" rows="2" placeholder="Brief description of the purchase…"></textarea>
+                </div>
+                <!-- Notes -->
+                <div class="pinv-form-row" style="align-items:flex-start;">
+                    <label class="pinv-label" style="padding-top:6px;">Notes</label>
+                    <textarea id="opo-notes" class="pinv-input" rows="2" placeholder="Internal notes…"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="pinv-modal-footer" style="justify-content:flex-end;">
+            <button type="button" class="btn btn-outline-secondary" onclick="closeCreateOPOModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="submitCreateOPO()">
+                <i class="bi bi-check-lg"></i> Create
+            </button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openCreateOPOModal() {
+    document.getElementById('opo-supplier-name').value = '';
+    document.getElementById('opo-category').value = 'other';
+    document.getElementById('opo-status').value = 'draft';
+    document.getElementById('opo-date').value = '';
+    document.getElementById('opo-expected-date').value = '';
+    document.getElementById('opo-amount-net').value = '';
+    document.getElementById('opo-amount-vat').value = '';
+    document.getElementById('opo-amount-gross').value = '';
+    document.getElementById('opo-gl-code').value = '';
+    document.getElementById('opo-description').value = '';
+    document.getElementById('opo-notes').value = '';
+    document.getElementById('create-opo-modal').classList.add('open');
+}
+function closeCreateOPOModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('create-opo-modal').classList.remove('open');
+}
+function calcOPOGross() {
+    const net = parseFloat(document.getElementById('opo-amount-net').value) || 0;
+    const vat = parseFloat(document.getElementById('opo-amount-vat').value) || 0;
+    document.getElementById('opo-amount-gross').value = (net + vat).toFixed(2);
+}
+function calcOPOVAT() {
+    const net = parseFloat(document.getElementById('opo-amount-net').value) || 0;
+    document.getElementById('opo-amount-vat').value = (net * 0.20).toFixed(2);
+    calcOPOGross();
+}
+function roundTo2(el) {
+    const v = parseFloat(el.value);
+    if (!isNaN(v)) el.value = v.toFixed(2);
+}
+function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+// ── Supplier autocomplete ─────────────────────────────────────
+const OPO_SUPPLIERS = [{% for s in suppliers %}"{{ s.name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}];
+
+function filterSupplierDd(q) {
+    const dd = document.getElementById('opo-supplier-dd');
+    const matches = q.trim() === ''
+        ? OPO_SUPPLIERS.slice(0, 20)
+        : OPO_SUPPLIERS.filter(s => s.toLowerCase().includes(q.toLowerCase())).slice(0, 20);
+    if (!matches.length) { dd.style.display = 'none'; return; }
+    dd.innerHTML = matches.map(s =>
+        `<div class="order-search-item" onmousedown="pickSupplier('${s.replace(/'/g, "\\'")}')">` +
+        s.replace(/</g,'&lt;') + '</div>'
+    ).join('');
+    dd.style.display = 'block';
+}
+function pickSupplier(name) {
+    document.getElementById('opo-supplier-name').value = name;
+    closeSupplierDd();
+}
+function closeSupplierDd() {
+    const dd = document.getElementById('opo-supplier-dd');
+    if (dd) dd.style.display = 'none';
+}
+function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function submitCreateOPO() {
+    const supplier = document.getElementById('opo-supplier-name').value.trim();
+    if (!supplier) { alert('Supplier name is required'); return; }
+
+    const payload = {
+        supplier_name:  supplier,
+        category:       document.getElementById('opo-category').value,
+        status:         document.getElementById('opo-status').value,
+        date:           document.getElementById('opo-date').value || null,
+        expected_date:  document.getElementById('opo-expected-date').value || null,
+        amount_net:     document.getElementById('opo-amount-net').value || '0',
+        amount_vat:     document.getElementById('opo-amount-vat').value || '0',
+        amount_gross:   document.getElementById('opo-amount-gross').value || '0',
+        gl_code:        document.getElementById('opo-gl-code').value || '',
+        description:    document.getElementById('opo-description').value.trim(),
+        notes:          document.getElementById('opo-notes').value.trim(),
+    };
+
+    fetch('{% url "overhead_po_create" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location = '/overhead-purchase-orders/' + data.po.id + '/';
+        } else {
+            alert(data.error || 'Failed to create PO');
+        }
+    })
+    .catch(() => alert('Network error — please try again'));
+}
+
+// Allow search on Enter in the search box
+document.getElementById('opo-search').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('opo-search-form').submit();
+});
+</script>
+{% endblock %}

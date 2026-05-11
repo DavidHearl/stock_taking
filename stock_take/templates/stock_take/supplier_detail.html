@@ -151,6 +151,22 @@
                 <input class="customer-edit-input edit-val" data-field="estimate_lead_time" type="number" value="{{ supplier.estimate_lead_time|default:'' }}" style="display:none;">
             </div>
             <div class="supplier-info-row">
+                <span class="supplier-info-label">Xero GL Code</span>
+                <span class="supplier-info-value view-val" id="gl-code-view">
+                    {% if supplier.xero_default_account_code %}<code>{{ supplier.xero_default_account_code }}</code>{% else %}-{% endif %}
+                </span>
+                <div id="gl-code-edit-row" style="display:none; flex:1; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <select id="gl-code-select" class="customer-edit-input" style="flex:1; min-width:160px;">
+                        <option value="{{ supplier.xero_default_account_code|default:'' }}">
+                            {% if supplier.xero_default_account_code %}{{ supplier.xero_default_account_code }} — current{% else %}— select a GL code —{% endif %}
+                        </option>
+                    </select>
+                    <button type="button" class="btn-contact-action secondary" onclick="loadXeroGLCodes()" style="white-space:nowrap; flex-shrink:0;">
+                        <i class="bi bi-arrow-clockwise"></i> Load from Xero
+                    </button>
+                </div>
+            </div>
+            <div class="supplier-info-row">
                 <span class="supplier-info-label">Total Spend</span>
                 <span class="supplier-info-value supplier-total-spend">£{{ total_spend|floatformat:2 }}</span>
             </div>
@@ -332,6 +348,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function toggleEditMode() {
     document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
+    document.getElementById('gl-code-edit-row').style.display = 'flex';
     document.getElementById('btn-edit').style.display = 'none';
     document.getElementById('btn-save').style.display = 'inline-flex';
     document.getElementById('btn-cancel').style.display = 'inline-flex';
@@ -340,6 +357,7 @@ function toggleEditMode() {
 function cancelEdit() {
     document.querySelectorAll('.view-val').forEach(el => el.style.display = '');
     document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'none');
+    document.getElementById('gl-code-edit-row').style.display = 'none';
     document.getElementById('btn-edit').style.display = 'inline-flex';
     document.getElementById('btn-save').style.display = 'none';
     document.getElementById('btn-cancel').style.display = 'none';
@@ -355,6 +373,8 @@ function saveSupplier() {
     document.querySelectorAll('.edit-val[data-field]').forEach(input => {
         data[input.dataset.field] = input.value;
     });
+    // Include the GL code from the standalone select
+    data['xero_default_account_code'] = document.getElementById('gl-code-select').value;
 
     fetch("{% url 'supplier_save' supplier.workguru_id %}", {
         method: 'POST',
@@ -392,6 +412,10 @@ function saveSupplier() {
             if (nameInput) {
                 document.querySelector('.supplier-detail-title h1').textContent = nameInput.value;
             }
+            // Update GL code view
+            const glCode = document.getElementById('gl-code-select').value;
+            const glView = document.getElementById('gl-code-view');
+            glView.innerHTML = glCode ? '<code>' + glCode + '</code>' : '-';
             cancelEdit();
         } else {
             showNotification('Error: ' + result.error, 'error');
@@ -400,6 +424,53 @@ function saveSupplier() {
     .catch(error => {
         showNotification('Error saving supplier details.', 'error');
     });
+}
+
+let _glCodesLoaded = false;
+function loadXeroGLCodes() {
+    const select = document.getElementById('gl-code-select');
+    const btn = select.nextElementSibling;
+    const currentVal = select.value;
+
+    if (_glCodesLoaded) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Loading…';
+
+    fetch('/api/xero-gl-codes/')
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                showNotification('Xero: ' + data.error, 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Load from Xero';
+                return;
+            }
+            select.innerHTML = '<option value="">— select a GL code —</option>';
+            data.accounts.forEach(acc => {
+                const opt = document.createElement('option');
+                opt.value = acc.code;
+                opt.textContent = acc.code + ' — ' + acc.name;
+                if (acc.code === currentVal) opt.selected = true;
+                select.appendChild(opt);
+            });
+            if (currentVal && !select.value) {
+                // Current value not in list, keep it as a custom option
+                const opt = document.createElement('option');
+                opt.value = currentVal;
+                opt.textContent = currentVal + ' — (current)';
+                opt.selected = true;
+                select.insertBefore(opt, select.options[1]);
+            }
+            _glCodesLoaded = true;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Loaded';
+        })
+        .catch(() => {
+            showNotification('Could not reach Xero to load GL codes.', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Load from Xero';
+        });
 }
 
 function showNotification(message, type) {

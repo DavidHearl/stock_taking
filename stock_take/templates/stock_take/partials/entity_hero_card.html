@@ -1,0 +1,81 @@
+{# ─── Shared entity hero card ─────────────────────────────────────────────────── #}
+{# Displays a person-info banner at the top of sale, order, and customer pages.    #}
+{#                                                                                  #}
+{# Context variables (pass via {% include ... with %} or a parent {% with %} block): #}
+{#   hero_name          – display name string (required)                            #}
+{#   hero_customer_pk   – if set, the name becomes a link to customer_detail        #}
+{#   hero_phone         – optional phone string                                     #}
+{#   hero_email         – optional email string                                     #}
+{#   hero_address_1     – optional first address line                               #}
+{#   hero_address_2     – optional second address line                              #}
+{#   hero_city          – optional city                                             #}
+{#   hero_postcode      – optional postcode                                         #}
+{#   hero_created_at    – optional date/datetime; shows as "Created DD Mon YYYY"    #}
+{#   hero_updated_at    – optional date/datetime; shows as "Updated DD Mon YYYY"    #}
+{#   hero_created_label – label before created date (default "Created")             #}
+{#   hero_updated_label – label before updated date (default "Updated")             #}
+{#   hero_badge_text    – optional badge text (e.g. "Active", "Inactive")           #}
+{#   hero_badge_class   – CSS modifier for badge (e.g. "active", "inactive")        #}
+{#   hero_save_fn       – JS call for Save button (e.g. "saveSale()"); omit to      #}
+{#                        hide the Edit / Save / Cancel actions entirely             #}
+{# ─────────────────────────────────────────────────────────────────────────────── #}
+
+<div class="card entity-hero-card">
+    <div class="card-header entity-hero-header">
+        <div class="entity-hero-layout">
+            <div class="entity-hero-avatar">
+                <i class="bi bi-person-fill"></i>
+            </div>
+            <div>
+                <h3 class="entity-hero-name">
+                    {% if hero_customer_pk %}
+                    <a href="{% url 'customer_detail' hero_customer_pk %}">{{ hero_name|default:"Unknown" }}</a>
+                    {% else %}
+                    {{ hero_name|default:"Unknown" }}
+                    {% endif %}
+                    {% if hero_badge_text %}
+                    <span class="customer-active-badge {{ hero_badge_class }} entity-hero-badge">{{ hero_badge_text }}</span>
+                    {% endif %}
+                </h3>
+                <div class="entity-hero-meta">
+                    {% if hero_phone %}<span><i class="bi bi-telephone"></i> {{ hero_phone }}</span>{% endif %}
+                    {% if hero_email %}<span><i class="bi bi-envelope"></i> {{ hero_email }}</span>{% endif %}
+                    {% if hero_address_1 or hero_city or hero_postcode %}
+                    <span><i class="bi bi-geo-alt"></i>
+                        {{ hero_address_1 }}{% if hero_address_2 %}, {{ hero_address_2 }}{% endif %}{% if hero_city %}, {{ hero_city }}{% endif %}{% if hero_postcode %}, {{ hero_postcode }}{% endif %}
+                    </span>
+                    {% endif %}
+                    {% if hero_created_at %}<span><i class="bi bi-clock"></i> {{ hero_created_label|default:"Created" }} {{ hero_created_at|date:"d M Y" }}</span>{% endif %}
+                    {% if hero_updated_at %}<span><i class="bi bi-arrow-repeat"></i> {{ hero_updated_label|default:"Updated" }} {{ hero_updated_at|date:"d M Y" }}</span>{% endif %}
+                </div>
+            </div>
+        </div>
+        {% if hero_save_fn %}
+        <div class="entity-hero-actions">
+            <button class="btn btn-md btn-outline-primary" id="btn-edit" onclick="toggleEditMode()">
+                <i class="bi bi-pencil"></i> Edit</button>
+            <button class="btn btn-md btn-outline-success" id="btn-save" onclick="{{ hero_save_fn }}">
+                <i class="bi bi-check-lg"></i> Save</button>
+            <button class="btn btn-md btn-outline-secondary" id="btn-cancel" onclick="cancelEdit()">
+                <i class="bi bi-x-lg"></i> Cancel</button>
+        </div>
+        {% endif %}
+        {% if hero_show_sale_links %}
+        <div class="entity-hero-links">
+            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success">
+                <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
+            </a>
+            {% if sale.anthill_customer_id %}
+            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success">
+                <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
+            </a>
+            {% endif %}
+            {% if sale.customer %}
+            <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-person"></i> Customer Profile
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>

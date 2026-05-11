@@ -1,131 +1,6 @@
-{% extends 'base.html' %}
-{% load static %}
-{% load custom_filters %}
-
-{% block title %}Order Details - {{ order.sale_number }}{% endblock %}
-
-{% block page_title %}
-<span class="page-title-row">
-    <a href="{% url 'ordering' %}" class="back-link" title="Back to Orders"><i class="bi bi-arrow-left"></i></a>
-    Order Details: {{ order.first_name }} {{ order.last_name }}{% if order.sale_number %} <span class="sale-number-suffix">({{ order.sale_number }})</span>{% endif %}
-</span>
-{% endblock %}
-
-{% block extra_css %}
-<link href="{% static 'css/order_details.css' %}" rel="stylesheet">
-{% endblock %}
-
-{% block content %}
-<div class="page-content">
-
-    <!-- ===== CUSTOMER HERO CARD ===== -->
-    {% if order.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=order.customer.name hero_customer_pk=order.customer.pk hero_phone=order.customer.phone hero_email=order.customer.email hero_address_1=order.customer.address_1 hero_address_2=order.customer.address_2 hero_city=order.customer.city hero_postcode=order.customer.postcode hero_created_at=order.order_date hero_updated_at=order.fit_date hero_created_label="Order" hero_updated_label="Fit" %}
-    {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=order.first_name|add:" "|add:order.last_name hero_address_1=order.address hero_postcode=order.postcode hero_created_at=order.order_date hero_updated_at=order.fit_date hero_created_label="Order" hero_updated_label="Fit" %}
-    {% endif %}
-
+{% load static custom_filters %}
     <div class="order-details-grid">
         <div class="main-column">
-            <!-- Compact Workflow Stage -->
-            <div class="card workflow-compact">
-                <div class="workflow-compact-row">
-                    <!-- Stage + Category -->
-                    <div class="workflow-compact-info">
-                        {% if workflow_progress.current_stage %}
-                        <span class="wf-badge wf-phase">{{ workflow_progress.current_stage.get_phase_display }}</span>
-                        <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
-                        {% if workflow_progress.current_stage.expected_days %}
-                        <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
-                        {% endif %}
-                        {% else %}
-                        <span class="wf-badge wf-none">No stage set</span>
-                        {% endif %}
-                    </div>
-                    <!-- Navigation -->
-                    <div class="workflow-compact-nav">
-                        <button class="wf-nav-btn wf-workflow" onclick="openWorkflowModal()" title="Full Workflow">
-                            <i class="bi bi-diagram-3"></i> Workflow
-                        </button>
-                        <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
-                            <i class="bi bi-chevron-left"></i> Previous
-                        </button>
-                        <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
-                            Next <i class="bi bi-chevron-right"></i>
-                        </button>
-                        <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
-                            <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Expandable detail panel -->
-                <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
-                    {% if workflow_progress.current_stage %}
-                    {% if workflow_progress.current_stage.description %}
-                    <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
-                    {% endif %}
-                    
-                    {% if workflow_progress.current_stage.tasks.all %}
-                    <div class="wf-tasks">
-                        {% for task in workflow_progress.current_stage.tasks.all %}
-                        {% with completion=task_completions|get_item:task.id %}
-                        <div class="wf-task-item">
-                            {% if task.task_type == 'decision_matrix' %}
-                                <span class="wf-task-label">{{ task.description }}</span>
-                                <div class="wf-decision-btns">
-                                    <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}" 
-                                            onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
-                                    <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
-                                            onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
-                                    <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
-                                            onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
-                                </div>
-                            {% elif task.task_type == 'radio' %}
-                                <span class="wf-task-label">{{ task.description }}</span>
-                                <div class="wf-radio-group">
-                                    {% if task.options %}{% for option in task.options|split_options %}
-                                    <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
-                                           {% if completion.selected_option == option %}checked{% endif %}
-                                           onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/> {{ option }}</label>
-                                    {% endfor %}{% endif %}
-                                </div>
-                            {% elif task.task_type == 'dropdown' %}
-                                <label class="wf-task-label">{{ task.description }}
-                                    <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
-                                        <option value="">Select...</option>
-                                        {% if task.options %}{% for option in task.options|split_options %}
-                                        <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
-                                        {% endfor %}{% endif %}
-                                    </select>
-                                </label>
-                            {% elif task.task_type == 'attachment' %}
-                                <label class="wf-check">
-                                    <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                           onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                                    {{ task.description }} <i class="bi bi-paperclip" style="opacity:0.5;"></i>
-                                    {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
-                                </label>
-                                <input type="file" id="attachment_{{ task.id }}" class="attachment-input" 
-                                       onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
-                            {% else %}
-                                <label class="wf-check">
-                                    <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                           onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                                    {{ task.description }}
-                                    {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
-                                </label>
-                            {% endif %}
-                        </div>
-                        {% endwith %}
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-                    {% endif %}
-
-                </div>
-            </div>
-            
             <!-- Form Errors Display -->
             {% if form.errors %}
             <div class="alert alert-danger mb-3">
@@ -144,77 +19,7 @@
             {% endif %}
 
             <div class="order-info-grid">
-                <!-- Card 1: Customer Info -->
-                <div class="card order-info-card">
-                    <div class="card-header card-header-customer">
-                        <h3>Customer Info</h3>
-                        <div class="card-header-actions">
-                            <button type="button" class="btn btn-sm btn-outline-primary edit-btn-spacing" id="edit-customer-btn" onclick="toggleCustomerEdit()">
-                                <i class="bi bi-pencil"></i> Edit
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body padded">
-                        <div id="customer-display" class="info-display">
-                            <div class="field-row-sb">
-                                <span class="field-label">Customer Name</span>
-                                <span class="field-value-large" id="customer-name-display">
-                                    {% if order.customer %}
-                                        <a href="{% url 'customer_detail' order.customer.id %}" class="customer-name-link">{{ order.first_name }} {{ order.last_name }}</a>
-                                    {% else %}
-                                        {{ order.first_name }} {{ order.last_name }}
-                                    {% endif %}
-                                </span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Anthill Customer ID</span>
-                                <span class="field-value" id="anthill-id-display">
-                                    {{ order.anthill_id|default:"Not specified" }}
-                                    {% if order.anthill_id %}
-                                        <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ order.anthill_id }}" target="_blank" class="external-link-btn-inline" title="Open in Anthill">
-                                            <i class="bi bi-box-arrow-up-right"></i>
-                                        </a>
-                                    {% endif %}
-                                </span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Address</span>
-                                <span class="field-value" id="address-display">{{ order.address|default:"Not set" }}</span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Postcode</span>
-                                <span class="field-value" id="postcode-display">{{ order.postcode|default:"Not set" }}</span>
-                            </div>
-                        </div>
-                        <div id="customer-edit" class="info-edit">
-                            <div>
-                                <label class="form-label">First Name</label>
-                                <input type="text" class="form-input" id="first-name-input" value="{{ order.first_name }}">
-                            </div>
-                            <div>
-                                <label class="form-label">Last Name</label>
-                                <input type="text" class="form-input" id="last-name-input" value="{{ order.last_name }}">
-                            </div>
-                            <div>
-                                <label class="form-label">Anthill Customer ID</label>
-                                <input type="text" class="form-input" id="anthill-id-input" value="{{ order.anthill_id }}">
-                            </div>
-                            <div>
-                                <label class="form-label">Address</label>
-                                <input type="text" class="form-input" id="address-input" value="{{ order.address }}">
-                            </div>
-                            <div>
-                                <label class="form-label">Postcode</label>
-                                <input type="text" class="form-input" id="postcode-input" value="{{ order.postcode }}">
-                            </div>
-                            <button type="button" class="btn btn-outline-success btn-sm" onclick="saveCustomerInfo({{ order.id }})">
-                                <i class="bi bi-check-lg"></i> Save Customer Info
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Card 2: Sale Info (merged with Anthill) -->
+                <!-- Card 1: Sale Info (merged with Anthill) -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
                         <h3>Sale Info</h3>
@@ -267,11 +72,6 @@
                                     {% endif %}
                                 </span>
                             </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Total Value (Inc VAT)</span>
-                                <span class="field-value field-value-total" id="total-value-display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</span>
-                            </div>
-
                             {% if anthill_sales %}
                             {% for sale in anthill_sales %}
                             {% if sale.range_name %}
@@ -363,10 +163,6 @@
                                     </button>
                                 </div>
                             </div>
-                            <div>
-                                <label class="form-label">Total Value (Inc VAT)</label>
-                                <input type="number" step="0.01" class="form-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" oninput="calculateExcVat()">
-                            </div>
                             <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
                                 <i class="bi bi-check-lg"></i> Save Sale Info
                             </button>
@@ -378,237 +174,129 @@
                 <div class="card order-info-card">
                     <div class="card-header card-header-job">
                         <h3>Job Info</h3>
+                        <div class="job-info-menu-wrapper" id="job-info-menu-wrapper">
+                            <button class="job-info-menu-btn" onclick="toggleJobInfoMenu(event)" title="Job status options">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="job-info-dropdown" id="job-info-dropdown">
+                                <div class="job-dropdown-header">Job Status</div>
+                                <label class="job-dropdown-item" for="boardsNotRequired">
+                                    <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
+                                           {% if order.boards_not_required %}checked{% endif %}
+                                           onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
+                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required
+                                </label>
+                                <label class="job-dropdown-item" for="accessoriesNotRequired">
+                                    <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
+                                           {% if order.accessories_not_required %}checked{% endif %}
+                                           onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
+                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required
+                                </label>
+                                <label class="job-dropdown-item" for="allItemsOrdered">
+                                    <input class="job-checkbox" type="checkbox" id="allItemsOrdered"
+                                           {% if order.all_items_ordered %}checked{% endif %}
+                                           onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
+                                    <i class="bi bi-box-seam"></i> All Items Ordered
+                                </label>
+                                <label class="job-dropdown-item" for="jobFinished">
+                                    <input class="job-checkbox" type="checkbox" id="jobFinished"
+                                           {% if order.job_finished %}checked{% endif %}
+                                           onchange="onJobFinishedChange(this, {{ order.id }})">
+                                    <i class="bi bi-check2-circle"></i> Job Finished
+                                </label>
+                                {% if order.accessories.exists %}
+                                <label class="job-dropdown-item" for="materialsAllocated">
+                                    <input class="job-checkbox" type="checkbox" id="materialsAllocated"
+                                           {% if all_allocated %}checked{% endif %}
+                                           onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
+                                    <i class="bi bi-box-arrow-in-down"></i> Materials Allocated
+                                </label>
+                                {% endif %}
+                            </div>
+                        </div>
                     </div>
                     <div class="card-body padded">
                         <div class="job-info-column">
-                            <!-- Boards PO (Editable Dropdown) -->
-                            <div>
-                                <label class="form-label-uppercase">Boards PO</label>
-                                <div class="boards-po-combo" style="position:relative;">
-                                    <div class="flex-row-gap">
-                                        <div style="flex:1;position:relative;">
-                                            <input type="text" class="form-input" id="boards-po-search"
-                                                   placeholder="Search PO number..."
-                                                   value="{% if order.boards_po %}{{ order.boards_po.po_number }}{% endif %}"
-                                                   autocomplete="off"
-                                                   oninput="searchBoardsPO(this.value)"
-                                                   onfocus="this.select(); searchBoardsPO(this.value);">
-                                            <div class="boards-po-results" id="boards-po-results" style="display:none;"></div>
+                            <!-- Documents Section -->
+                            <div class="job-info-docs">
+
+                                <!-- Coversheet -->
+                                <div class="job-doc-coversheet">
+                                    <div class="job-doc-coversheet-header">
+                                        <div class="job-doc-coversheet-icon">
+                                            <i class="bi bi-file-earmark-text"></i>
                                         </div>
-                                        {% if order.boards_po %}
-                                        <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="clearBoardsPOLink({{ order.id }})" title="Remove PO link">
-                                            <i class="bi bi-x-lg"></i>
-                                        </button>
-                                        {% else %}
-                                        <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="createNextBoardsPO({{ order.id }})" title="Create new PO with next available number">
-                                            <i class="bi bi-plus-lg"></i>
-                                        </button>
-                                        {% endif %}
+                                        <div class="job-doc-coversheet-title">
+                                            <span>Coversheet</span>
+                                            {% if coversheet.is_final %}
+                                            <span class="job-doc-badge job-doc-badge-final">Final</span>
+                                            {% else %}
+                                            <span class="job-doc-badge job-doc-badge-draft">Draft</span>
+                                            {% endif %}
+                                        </div>
                                     </div>
-                                    {% if order.boards_po and boards_purchase_order %}
-                                    <div style="margin-top:4px;">
-                                        <a href="{% url 'purchase_order_detail' boards_purchase_order.workguru_id %}" class="btn-link-sm" style="font-size:0.8rem;">
-                                            <i class="bi bi-eye"></i> View Purchase Order
+                                    <div class="job-doc-coversheet-meta">
+                                        {% if coversheet.prepared_by %}<span><i class="bi bi-person"></i> {{ coversheet.prepared_by }}</span>{% endif %}
+                                        <span><i class="bi bi-clock"></i> {{ coversheet.updated_at|date:'d M Y' }}</span>
+                                    </div>
+                                    <div class="job-doc-coversheet-actions">
+                                        <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-file-earmark-pdf"></i> PDF
                                         </a>
+                                        <button type="button" class="btn btn-sm btn-outline-success" onclick="openCoversheetModal()">
+                                            <i class="bi bi-pencil-square"></i> Edit
+                                        </button>
                                     </div>
-                                    {% endif %}
                                 </div>
-                            </div>
-                            
-                            <!-- Boards Not Required Checkbox -->
-                            <div class="job-checkbox-container">
-                                <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
-                                       {% if order.boards_not_required %}checked{% endif %}
-                                       onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
-                                <label class="job-checkbox-label" for="boardsNotRequired">
-                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required
-                                </label>
-                            </div>
 
-                            <!-- Accessories Not Required Checkbox -->
-                            <div class="job-checkbox-container">
-                                <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
-                                       {% if order.accessories_not_required %}checked{% endif %}
-                                       onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
-                                <label class="job-checkbox-label" for="accessoriesNotRequired">
-                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required
-                                </label>
-                            </div>
+                                <!-- Claim Service Docs -->
+                                <div class="job-doc-list">
+                                    {% for item in important_documents %}
+                                    <div class="job-doc-item">
+                                        <div class="job-doc-item-left">
+                                            {% if item.doc %}
+                                            <i class="bi bi-file-earmark-check job-doc-item-icon job-doc-item-icon-ok"></i>
+                                            {% else %}
+                                            <i class="bi bi-file-earmark job-doc-item-icon job-doc-item-icon-empty"></i>
+                                            {% endif %}
+                                            <div>
+                                                <div class="job-doc-item-name">{{ item.doc_type }}</div>
+                                                {% if item.doc %}
+                                                <div class="job-doc-item-date">{{ item.doc.uploaded_at|date:'d M Y' }}</div>
+                                                {% else %}
+                                                <div class="job-doc-item-date">Not uploaded</div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <div class="job-doc-item-right">
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.doc_type }}">
+                                                <i class="bi bi-search"></i>
+                                            </button>
+                                            {% if item.doc %}
+                                            <a href="{{ item.doc.file.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                            {% endif %}
+                                            <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="job-doc-upload-form">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
+                                                <label class="btn btn-sm {% if item.doc %}btn-outline-secondary{% else %}btn-outline-primary{% endif %}" title="Upload {{ item.doc_type }}">
+                                                    <i class="bi bi-upload"></i>
+                                                    <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" class="job-doc-file-hidden" onchange="this.closest('form').submit()">
+                                                </label>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
 
-                            <!-- All Items Ordered Checkbox -->
-                            <div class="job-checkbox-container">
-                                <input class="job-checkbox" type="checkbox" id="allItemsOrdered" 
-                                       {% if order.all_items_ordered %}checked{% endif %}
-                                       onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
-                                <label class="job-checkbox-label" for="allItemsOrdered">
-                                    <i class="bi bi-box-seam"></i> All Items Ordered
-                                </label>
                             </div>
-                            
-                            <!-- Job Finished Checkbox -->
-                            <div class="job-checkbox-container">
-                                <input class="job-checkbox" type="checkbox" id="jobFinished" 
-                                       {% if order.job_finished %}checked{% endif %}
-                                       onchange="onJobFinishedChange(this, {{ order.id }})">
-                                <label class="job-checkbox-label" for="jobFinished">
-                                    <i class="bi bi-check2-circle"></i> Job Finished
-                                </label>
-                            </div>
-
-                            <!-- Materials Allocated Checkbox -->
-                            {% if order.accessories.exists %}
-                            <div class="job-checkbox-container">
-                                <input class="job-checkbox" type="checkbox" id="materialsAllocated" 
-                                       {% if all_allocated %}checked{% endif %}
-                                       onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
-                                <label class="job-checkbox-label" for="materialsAllocated">
-                                    <i class="bi bi-box-arrow-in-down"></i> Materials Allocated
-                                </label>
-                            </div>
-                            {% endif %}
-
-                            <!-- Add Additional Boards PO -->
-                            {% if order.boards_po %}
-                            <div class="section-add-row">
-                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="openModal('addAdditionalPOModal')" title="Create an additional boards PO for this order">
-                                    <i class="bi bi-plus-circle"></i> Add Additional Boards PO
-                                </button>
-                            </div>
-                            {% endif %}
                         </div>
                     </div>
                 </div>
             </div>
         </div>
         
-        <div class="sidebar-column">
-            <!-- Financial Summary Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h3>Financial Summary</h3>
-                    <button class="btn btn-sm btn-save-financials" onclick="saveFinancials({{ order.id }})" title="Save financial data">
-                        <i class="bi bi-arrow-clockwise"></i> Update
-                    </button>
-                </div>
-                <div class="financial-card-body">
-                    <div class="financial-cards-vertical">
-                        <!-- Total Value Inc VAT (Display only) -->
-                        <div class="vertical card-total-inc">
-                            <div class="content">
-                                <span class="financial-card-label">Total Value (Inc VAT)</span>
-                                <div class="financial-display" id="total_value_inc_vat_display">£{{ order.total_value_inc_vat|default:'0.00'|floatformat:2 }}</div>
-                            </div>
-                        </div>
-
-                        <!-- Total Value Exc VAT (Auto-calculated) -->
-                        <div class="financial-card-vertical card-total-exc">
-                            <div class="financial-card-content">
-                                <span class="financial-card-label">Total Value (Exc VAT)</span>
-                                <div class="financial-display" id="total_value_exc_vat_display">£{{ order.total_value_exc_vat|default:'0.00'|floatformat:2 }}</div>
-                            </div>
-                        </div>
-
-                        <!-- Materials Cost (Auto-calculated from boards, accessories, OS doors) -->
-                        <div class="financial-card-vertical card-materials">
-                            <div class="financial-card-content">
-                                <span class="financial-card-label">Materials Cost (Auto)</span>
-                                <div class="financial-display" id="materials_cost_display">£{{ materials_cost|default:'0.00'|floatformat:2 }}</div>
-                                {% if order.total_value_exc_vat > 0 %}
-                                <div class="financial-progress-wrapper">
-                                    <div class="financial-progress">
-                                        {% if boards_cost > 0 %}
-                                        <div class="financial-progress-bar-segment boards-segment" 
-                                             style="width: {% widthratio boards_cost order.total_value_exc_vat 100 %}%"
-                                             title="Boards: £{{ boards_cost|floatformat:2 }} ({% widthratio boards_cost materials_cost 100 %}% of materials)"></div>
-                                        {% endif %}
-                                        {% if accessories_cost > 0 %}
-                                        <div class="financial-progress-bar-segment accessories-segment" 
-                                             style="width: {% widthratio accessories_cost order.total_value_exc_vat 100 %}%"
-                                             title="Accessories: £{{ accessories_cost|floatformat:2 }} ({% widthratio accessories_cost materials_cost 100 %}% of materials)"></div>
-                                        {% endif %}
-                                        {% if os_doors_cost > 0 %}
-                                        <div class="financial-progress-bar-segment os-doors-segment" 
-                                             style="width: {% widthratio os_doors_cost order.total_value_exc_vat 100 %}%"
-                                             title="OS Doors: £{{ os_doors_cost|floatformat:2 }} ({% widthratio os_doors_cost materials_cost 100 %}% of materials)"></div>
-                                        {% endif %}
-                                    </div>
-                                    <span class="financial-percentage">{% widthratio materials_cost order.total_value_exc_vat 100 %}%</span>
-                                </div>
-                                <div class="cost-breakdown-legend">
-                                    {% if boards_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color boards-color"></span>
-                                        Boards: £{{ boards_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if accessories_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color accessories-color"></span>
-                                        Accessories: £{{ accessories_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                    {% if os_doors_cost > 0 %}
-                                    <span class="legend-item">
-                                        <span class="legend-color os-doors-color"></span>
-                                        OS Doors: £{{ os_doors_cost|floatformat:2 }}
-                                    </span>
-                                    {% endif %}
-                                </div>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                        <!-- Installation Cost -->
-                        <div class="financial-card-vertical card-installation">
-                            <div class="financial-card-content">
-                                <span class="financial-card-label">
-                                    Installation Cost
-                                    <button type="button" class="btn-add-icon" onclick="openTimesheetModal('installation')" title="Add Installation Cost">
-                                        <i class="bi bi-plus-lg"></i>
-                                    </button>
-                                </span>
-                                <div class="financial-display-value" id="installation_cost_display">
-                                    £{{ calculated_installation_cost|floatformat:2 }}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Manufacturing Cost -->
-                        <div class="financial-card-vertical card-manufacturing">
-                            <div class="financial-card-content">
-                                <span class="financial-card-label">
-                                    Manufacturing Cost
-                                    <button type="button" class="btn-add-icon" onclick="openTimesheetModal('manufacturing')" title="Add Manufacturing Cost">
-                                        <i class="bi bi-plus-lg"></i>
-                                    </button>
-                                </span>
-                                <div class="financial-display-value" id="manufacturing_cost_display">
-                                    £{{ calculated_manufacturing_cost|floatformat:2 }}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Profit (Auto-calculated) -->
-                        <div class="financial-card-vertical card-profit">
-                            <div class="financial-card-content">
-                                <span class="financial-card-label">Profit</span>
-                                <div class="financial-display" id="profit_display">£{{ order.profit|default:'0.00'|floatformat:2 }}</div>
-                                {% if order.total_value_exc_vat > 0 %}
-                                <div class="financial-progress-wrapper">
-                                    <div class="financial-progress">
-                                        <div class="financial-progress-bar" id="profit_progress_bar" style="width: {% if order.profit > 0 %}{% widthratio order.profit order.total_value_exc_vat 100 %}{% else %}0{% endif %}%"></div>
-                                    </div>
-                                    <span class="financial-percentage" id="profit_percentage">{% if order.profit > 0 %}{% widthratio order.profit order.total_value_exc_vat 100 %}{% else %}0{% endif %}%</span>
-                                </div>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-    </div>
-
     <div class="full-width-section">
         {% for bpo_data in boards_po_list %}
         <div class="card">
@@ -1843,8 +1531,6 @@
         </div>
     </div>
     </div>
-</div>
-
 <!-- Modal for Confirming Additional OS Doors PO -->
 <div class="modal" id="confirmAdditionalOSDoorsModal" style="display:none;">
     <div class="modal-overlay" onclick="document.getElementById('confirmAdditionalOSDoorsModal').style.display='none'"></div>
@@ -3366,12 +3052,72 @@ function clearBoardsPOLink(orderId) {
     .catch(err => showAlert('Error updating Boards PO', 'danger'));
 }
 
+// Toggle Job Info kebab menu
+function toggleJobInfoMenu(e) {
+    e.stopPropagation();
+    const dd = document.getElementById('job-info-dropdown');
+    if (dd) dd.classList.toggle('open');
+}
+
+// Search Claim Service for a given doc type
+const CLAIM_GROUP_KEY = '{{ claim_group_key|escapejs }}';
+
+function searchClaimDocs(docType) {
+    const modal = document.getElementById('claimSearchModal');
+    const docTypeLabel = document.getElementById('claimSearchDocType');
+    const resultsEl = document.getElementById('claimSearchResults');
+    if (!modal) return;
+
+    if (docTypeLabel) docTypeLabel.textContent = docType;
+    resultsEl.innerHTML = '<div class="claim-search-loading"><i class="bi bi-arrow-repeat claim-search-spin"></i> Searching...</div>';
+    modal.showModal();
+
+    const params = new URLSearchParams({ doc_type: docType });
+    if (CLAIM_GROUP_KEY) params.set('group_key', CLAIM_GROUP_KEY);
+    fetch('/claims/api/search/?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            if (!data.documents || data.documents.length === 0) {
+                resultsEl.innerHTML = '<div class="claim-search-empty"><i class="bi bi-file-earmark-x"></i><p>No documents found for <strong>' + _escHtml(docType) + '</strong>.</p></div>';
+                return;
+            }
+            let html = '<div class="claim-search-list">';
+            for (const doc of data.documents) {
+                html += '<div class="claim-search-item">'
+                      + '<div class="claim-search-item-left">'
+                      + '<i class="bi bi-file-earmark-pdf claim-search-icon"></i>'
+                      + '<div>'
+                      + '<div class="claim-search-item-name">' + _escHtml(doc.filename) + '</div>'
+                      + '<div class="claim-search-item-meta">' + _escHtml(doc.group_key) + ' &middot; ' + _escHtml(doc.uploaded_at) + '</div>'
+                      + '</div></div>'
+                      + '<div class="claim-search-item-right">'
+                      + '<a href="' + _escHtml(doc.download_url) + '" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> View</a>'
+                      + '</div></div>';
+            }
+            html += '</div>';
+            resultsEl.innerHTML = html;
+        })
+        .catch(() => {
+            resultsEl.innerHTML = '<div class="claim-search-empty"><i class="bi bi-exclamation-circle"></i><p>Failed to load results.</p></div>';
+        });
+}
+
+function _escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // Close results dropdown when clicking outside
 document.addEventListener('click', function(e) {
     const combo = document.querySelector('.boards-po-combo');
     const results = document.getElementById('boards-po-results');
     if (combo && results && !combo.contains(e.target)) {
         results.style.display = 'none';
+    }
+    // Close job info kebab menu when clicking outside
+    const jobMenu = document.getElementById('job-info-dropdown');
+    const jobWrapper = document.getElementById('job-info-menu-wrapper');
+    if (jobMenu && jobWrapper && !jobWrapper.contains(e.target)) {
+        jobMenu.classList.remove('open');
     }
 });
 
@@ -5953,12 +5699,14 @@ function calculateExcVat() {
 function calculateProfit() {
     let incVat = 0;
     const incVatInput = document.getElementById('total-value-input');
-    const incVatDisplay = document.getElementById('total-value-display');
     
-    if (incVatInput) {
+    if (incVatInput && incVatInput.style.display !== 'none') {
         incVat = parseFloat(incVatInput.value) || 0;
-    } else if (incVatDisplay) {
-        incVat = parseFloat(incVatDisplay.textContent.replace('£', '').replace(',', '')) || 0;
+    } else {
+        const summaryDisplay = document.getElementById('total_value_inc_vat_display');
+        if (summaryDisplay) {
+            incVat = parseFloat(summaryDisplay.textContent.replace('£', '').replace(',', '')) || 0;
+        }
     }
     
     const excVat = incVat / 1.2;
@@ -5975,7 +5723,8 @@ function calculateProfit() {
     const profit = excVat - materials - installation - manufacturing;
     const profitElement = document.getElementById('profit_display');
     if (profitElement) {
-        profitElement.textContent = '£' + profit.toFixed(2);
+        const formatted = profit.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        profitElement.innerHTML = '<span class="fin-currency">£</span><span class="fin-amount">' + formatted + '</span>';
     }
     
     // Update progress bar and percentage
@@ -5991,12 +5740,14 @@ function calculateProfit() {
 function saveFinancials(orderId) {
     let incVat = 0;
     const incVatInput = document.getElementById('total-value-input');
-    const incVatDisplay = document.getElementById('total-value-display');
     
-    if (incVatInput) {
+    if (incVatInput && incVatInput.style.display !== 'none') {
         incVat = parseFloat(incVatInput.value) || 0;
-    } else if (incVatDisplay) {
-        incVat = parseFloat(incVatDisplay.textContent.replace('£', '').replace(',', '')) || 0;
+    } else {
+        const summaryDisplay = document.getElementById('total_value_inc_vat_display');
+        if (summaryDisplay) {
+            incVat = parseFloat(summaryDisplay.textContent.replace('£', '').replace(',', '')) || 0;
+        }
     }
     
     const excVat = incVat / 1.2;
@@ -7727,6 +7478,20 @@ function closeBoardEggerLightbox() {
 }
 </script>
 
+<!-- Claim Document Search Modal -->
+<dialog id="claimSearchModal">
+    <div class="manual-modal-header">
+        <div class="manual-modal-title">
+            <i class="bi bi-search sale-modal-icon-blue"></i>
+            <span>Claim Service — <span id="claimSearchDocType"></span></span>
+        </div>
+        <button class="manual-modal-close" onclick="document.getElementById('claimSearchModal').close()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="manual-modal-body">
+        <div id="claimSearchResults"></div>
+    </div>
+</dialog>
+
 <!-- Delete Order Confirmation Modal -->
 <div id="deleteOrderModal" class="delete-order-modal" onclick="if(event.target===this)closeDeleteModal()">
     <div class="delete-order-dialog">
@@ -7765,4 +7530,3 @@ function closeBoardEggerLightbox() {
         </div>
     </div>
 </div>
-{% endblock %}

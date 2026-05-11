@@ -1890,6 +1890,7 @@ def supplier_save(request, supplier_id):
         'address_1', 'address_2', 'city', 'state', 'postcode', 'country',
         'currency', 'credit_limit', 'credit_days', 'credit_terms_type',
         'price_tier', 'supplier_tax_rate', 'estimate_lead_time', 'vat_rate',
+        'xero_default_account_code',
     ]
 
     update_fields = []

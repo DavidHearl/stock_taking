@@ -15,17 +15,9 @@
 
 {% block content %}
 <div class="admin-page">
-    <div class="page-header">
-        <h1><i class="bi bi-plug"></i> Xero Integration</h1>
-        <p class="page-subtitle">Connect to Xero for read-only access to accounting data</p>
-    </div>
-
     {% if messages %}
     {% for message in messages %}
-    <div class="alert alert-{{ message.tags }}" style="padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem;
-        {% if message.tags == 'success' %}background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: var(--success-color, #10b981);
-        {% elif message.tags == 'error' %}background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--danger-color, #ef4444);
-        {% else %}background: rgba(90,159,212,0.1); border: 1px solid rgba(90,159,212,0.3); color: var(--primary-color);{% endif %}">
+    <div class="xero-alert {% if message.tags == 'success' %}xero-alert-success{% elif message.tags == 'error' %}xero-alert-error{% else %}xero-alert-info{% endif %}">
         {{ message }}
     </div>
     {% endfor %}
@@ -50,7 +42,7 @@
                     </div>
                     <div class="xero-info-item">
                         <span class="xero-info-label">Tenant ID</span>
-                        <span class="xero-info-value" style="font-family: monospace; font-size: 0.8rem;">{{ token.tenant_id|default:"-" }}</span>
+                        <span class="xero-info-value xero-info-value--mono">{{ token.tenant_id|default:"-" }}</span>
                     </div>
                     <div class="xero-info-item">
                         <span class="xero-info-label">Connected By</span>
@@ -60,9 +52,9 @@
                         <span class="xero-info-label">Token Status</span>
                         <span class="xero-info-value">
                             {% if token.is_expired %}
-                                <span style="color: var(--warning-color, #f59e0b);">Expired (will auto-refresh)</span>
+                                <span class="xero-info-value--warning">Expired (will auto-refresh)</span>
                             {% else %}
-                                <span style="color: var(--success-color, #10b981);">Valid</span>
+                                <span class="xero-info-value--success">Valid</span>
                             {% endif %}
                         </span>
                     </div>
@@ -76,11 +68,11 @@
                     </div>
                 </div>
 
-                <div class="xero-actions" style="margin-top: 20px;">
+                <div class="xero-actions xero-actions--top">
                     <button class="btn-xero-test" id="testConnectionBtn" onclick="testXeroConnection()">
                         <i class="bi bi-lightning"></i> Test Connection
                     </button>
-                    <form method="post" action="{% url 'xero_disconnect' %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to disconnect from Xero?');">
+                    <form method="post" action="{% url 'xero_disconnect' %}" class="xero-disconnect-form" onsubmit="return confirm('Are you sure you want to disconnect from Xero?');">
                         {% csrf_token %}
                         <button type="submit" class="btn-xero-disconnect">
                             <i class="bi bi-plug"></i> Disconnect
@@ -91,7 +83,7 @@
                 <div class="xero-test-result" id="testResult"></div>
 
             {% else %}
-                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                <p class="xero-body-text">
                     No Xero account is currently connected. Click the button below to authorize read-only access to your Xero organisation.
                 </p>
                 <div class="xero-actions">
@@ -109,13 +101,13 @@
             <h2>Permissions</h2>
         </div>
         <div class="admin-card-body">
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+            <p class="xero-body-text">
                 This integration requests <strong>read-only</strong> access to most Xero data, with <strong>write access</strong> for contacts (customers/suppliers).
             </p>
             <div class="scope-list">
                 <span class="scope-tag readonly">accounting.transactions.read</span>
                 <span class="scope-tag readonly">accounting.contacts.read</span>
-                <span class="scope-tag" style="background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.2); color: var(--warning-color, #f59e0b);">accounting.contacts (write)</span>
+                <span class="scope-tag scope-tag--write">accounting.contacts (write)</span>
                 <span class="scope-tag readonly">accounting.settings.read</span>
                 <span class="scope-tag readonly">accounting.reports.read</span>
                 <span class="scope-tag">openid</span>
@@ -144,7 +136,7 @@
                 </div>
                 <div class="xero-info-item">
                     <span class="xero-info-label">Short Code</span>
-                    <span class="xero-info-value" style="font-family: monospace;">{{ organisation.ShortCode|default:"-" }}</span>
+                    <span class="xero-info-value xero-info-value--mono-lg">{{ organisation.ShortCode|default:"-" }}</span>
                 </div>
                 <div class="xero-info-item">
                     <span class="xero-info-label">Base Currency</span>
@@ -164,7 +156,7 @@
                 </div>
                 <div class="xero-info-item">
                     <span class="xero-info-label">Tax Number</span>
-                    <span class="xero-info-value" style="font-family: monospace;">{{ organisation.TaxNumber|default:"-" }}</span>
+                    <span class="xero-info-value xero-info-value--mono-lg">{{ organisation.TaxNumber|default:"-" }}</span>
                 </div>
             </div>
         </div>
@@ -178,30 +170,27 @@
             <h2>Export Customer to Xero</h2>
         </div>
         <div class="admin-card-body" style="overflow: visible;">
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+            <p class="xero-body-text">
                 Search for a customer in the database and export them to Xero as a new contact.
             </p>
 
             <!-- Customer Search -->
-            <div style="max-width: 600px; position: relative;">
-                <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">Search Customer</label>
+            <div class="xero-customer-search-wrap">
+                <label class="xero-search-label">Search Customer</label>
                 <input type="text" id="xeroCustomerSearch" placeholder="Type a name or email to search..." autocomplete="off"
-                    style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); color: var(--text-primary); font-size: 0.9rem;">
-                <div id="xeroSearchResults" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 1000;
-                    background: var(--bg-secondary); border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 8px 8px;
-                    max-height: 280px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.3);"></div>
+                    class="xero-customer-search-input">
+                <div id="xeroSearchResults" class="xero-search-dropdown"></div>
             </div>
 
             <!-- Selected Customer Preview -->
-            <div id="selectedCustomerCard" style="display: none; margin-top: 16px; max-width: 600px; padding: 16px;
-                background: rgba(90,159,212,0.06); border: 1px solid rgba(90,159,212,0.2); border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
-                    <h3 style="margin: 0; font-size: 1rem; color: var(--text-primary);" id="selectedName"></h3>
-                    <button onclick="clearSelectedCustomer()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; padding: 0;" title="Clear selection">
+            <div id="selectedCustomerCard" class="xero-selected-customer">
+                <div class="xero-selected-header">
+                    <h3 class="xero-selected-name" id="selectedName"></h3>
+                    <button onclick="clearSelectedCustomer()" class="xero-clear-btn" title="Clear selection">
                         <i class="bi bi-x-lg"></i>
                     </button>
                 </div>
-                <div class="xero-info-grid" style="grid-template-columns: 1fr 1fr;">
+                <div class="xero-info-grid xero-selected-info-grid">
                     <div class="xero-info-item">
                         <span class="xero-info-label">Email</span>
                         <span class="xero-info-value" id="selectedEmail">-</span>
@@ -210,13 +199,13 @@
                         <span class="xero-info-label">Phone</span>
                         <span class="xero-info-value" id="selectedPhone">-</span>
                     </div>
-                    <div class="xero-info-item" style="grid-column: 1 / -1;">
+                    <div class="xero-info-item xero-selected-info-full">
                         <span class="xero-info-label">Address</span>
                         <span class="xero-info-value" id="selectedAddress">-</span>
                     </div>
                 </div>
                 <input type="hidden" id="selectedCustomerId" value="">
-                <div style="margin-top: 14px;">
+                <div class="xero-selected-actions">
                     <button class="btn-xero-connect" id="createCustomerBtn" onclick="createXeroCustomer()">
                         <i class="bi bi-person-plus"></i> Export to Xero
                     </button>
@@ -224,6 +213,29 @@
             </div>
 
             <div class="xero-test-result" id="createCustomerResult"></div>
+        </div>
+    </div>
+
+    <!-- GL Codes -->
+    <div class="admin-card">
+        <div class="admin-card-header">
+            <h2>Available GL Codes</h2>
+            <span id="glSaveStatus" class="xero-gl-save-status"></span>
+        </div>
+        <div class="admin-card-body">
+            <p class="xero-body-text--sm-gap">
+                Tick the GL codes you want available when creating Overhead Purchase Orders.
+            </p>
+            <div class="xero-gl-actions">
+                <button class="btn-xero-test" onclick="loadGLCodes()" id="loadGLBtn">
+                    <i class="bi bi-arrow-repeat"></i> Load from Xero
+                </button>
+                <button class="btn-xero-connect" onclick="saveGLCodes()" id="saveGLBtn" style="display:none;">
+                    <i class="bi bi-floppy"></i> Save Selection
+                </button>
+                <span class="xero-gl-select-count" id="glSelectCount"></span>
+            </div>
+            <div class="gl-code-grid" id="glCodeGrid" style="display:none;"></div>
         </div>
     </div>
     {% endif %}
@@ -287,18 +299,16 @@ if (searchInput) {
                 .then(r => r.json())
                 .then(data => {
                     if (!data.results.length) {
-                        searchResults.innerHTML = '<div style="padding: 12px 14px; color: var(--text-muted); font-size: 0.85rem;">No customers found</div>';
+                        searchResults.innerHTML = '<div class="xero-search-item" style="cursor:default;">No customers found</div>';
                         searchResults.style.display = 'block';
                         return;
                     }
                     searchResults.innerHTML = data.results.map(c => {
-                        const linked = c.xero_id ? ' <span style="font-size:0.7rem; color:var(--success-color);"><i class="bi bi-check-circle-fill"></i> In Xero</span>' : '';
-                        return '<div class="xero-search-item" data-id="' + c.id + '" data-name="' + escapeHtml(c.name) + '" data-email="' + escapeHtml(c.email) + '" data-phone="' + escapeHtml(c.phone) + '" data-address="' + escapeHtml(c.address) + '" data-xero-id="' + c.xero_id + '"' +
-                            ' style="padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border-color); transition: background 0.15s; background: var(--bg-secondary);"' +
-                            ' onmouseenter="this.style.background=\'rgba(90,159,212,0.12)\'" onmouseleave="this.style.background=\'var(--bg-secondary)\'">' +
-                            '<div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">' + escapeHtml(c.name) + linked + '</div>' +
-                            (c.email ? '<div style="font-size: 0.8rem; color: var(--text-muted);">' + escapeHtml(c.email) + '</div>' : '') +
-                            (c.address ? '<div style="font-size: 0.8rem; color: var(--text-muted);">' + escapeHtml(c.address) + '</div>' : '') +
+                        const linked = c.xero_id ? ' <span class="xero-search-item-badge"><i class="bi bi-check-circle-fill"></i> In Xero</span>' : '';
+                        return '<div class="xero-search-item" data-id="' + c.id + '" data-name="' + escapeHtml(c.name) + '" data-email="' + escapeHtml(c.email) + '" data-phone="' + escapeHtml(c.phone) + '" data-address="' + escapeHtml(c.address) + '" data-xero-id="' + c.xero_id + '">' +
+                            '<div class="xero-search-item-name">' + escapeHtml(c.name) + linked + '</div>' +
+                            (c.email ? '<div class="xero-search-item-sub">' + escapeHtml(c.email) + '</div>' : '') +
+                            (c.address ? '<div class="xero-search-item-sub">' + escapeHtml(c.address) + '</div>' : '') +
                             '</div>';
                     }).join('');
                     searchResults.style.display = 'block';
@@ -394,8 +404,7 @@ function clearSelectedCustomer() {
 
 function createXeroCustomer() {
     const btn = document.getElementById('createCustomerBtn');
-    const resultDiv = document.getElementById('createCustomerResult');
-    const customerId = document.getElementById('selectedCustomerId').value;
+    const resultDiv = document.getElementById('createCustomerResult');    const customerId = document.getElementById('selectedCustomerId').value;
 
     if (!customerId) {
         resultDiv.className = 'xero-test-result error';
@@ -439,6 +448,118 @@ function createXeroCustomer() {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-person-plus"></i> Export to Xero';
         });
+}
+
+// ─── GL Codes ─────────────────────────────────────────
+const ENABLED_GL_CODES = new Set({{ enabled_gl_codes_json|safe }});
+let glAccountData = {{ stored_gl_codes_json|safe }};
+
+function loadGLCodes() {
+    const btn = document.getElementById('loadGLBtn');
+    const grid = document.getElementById('glCodeGrid');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Loading...';
+
+    fetch('{% url "xero_gl_codes" %}')
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { alert('Error: ' + data.error); return; }
+            glAccountData = data.accounts.map(a => ({
+                code: a.code, name: a.name,
+                type: a.type || '',
+                enabled: ENABLED_GL_CODES.has(a.code),
+            }));
+            renderGLGrid(glAccountData);
+            grid.style.display = 'grid';
+            document.getElementById('saveGLBtn').style.display = 'inline-flex';
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Reload';
+            btn.disabled = false;
+        })
+        .catch(err => {
+            alert('Failed to load GL codes: ' + err.message);
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Load from Xero';
+            btn.disabled = false;
+        });
+}
+
+function renderGLGrid(accounts) {
+    const grid = document.getElementById('glCodeGrid');
+    grid.innerHTML = accounts.map((a, i) => {
+        const checked = ENABLED_GL_CODES.has(a.code);
+        return `<label class="gl-code-item${checked ? ' checked' : ''}" onclick="toggleGL(this)">
+            <input type="checkbox" value="${i}" ${checked ? 'checked' : ''} onchange="updateGLCount()">
+            <span class="gl-code">${escapeHtml(a.code)}</span>
+            <span class="gl-name">${escapeHtml(a.name)}</span>
+        </label>`;
+    }).join('');
+    updateGLCount();
+}
+
+function toggleGL(label) {
+    const cb = label.querySelector('input');
+    cb.checked = !cb.checked;
+    label.classList.toggle('checked', cb.checked);
+    updateGLCount();
+}
+
+function updateGLCount() {
+    const ticked = document.querySelectorAll('#glCodeGrid input:checked').length;
+    document.getElementById('glSelectCount').textContent = ticked + ' selected';
+}
+
+function saveGLCodes() {
+    const btn = document.getElementById('saveGLBtn');
+    const statusEl = document.getElementById('glSaveStatus');
+    const checkboxes = document.querySelectorAll('#glCodeGrid input[type=checkbox]');
+    const payload = glAccountData.map((a, i) => ({
+        code: a.code,
+        name: a.name,
+        type: a.type,
+        enabled: checkboxes[i] ? checkboxes[i].checked : false,
+    }));
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
+
+    fetch('{% url "xero_save_gl_codes" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ accounts: payload }),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                statusEl.textContent = '✓ Saved — ' + data.enabled_count + ' codes enabled';
+                statusEl.className = 'xero-gl-save-status xero-info-value--success';
+                payload.forEach(a => {
+                    if (a.enabled) ENABLED_GL_CODES.add(a.code);
+                    else ENABLED_GL_CODES.delete(a.code);
+                });
+            } else {
+                statusEl.textContent = 'Error: ' + (data.error || 'Unknown');
+                statusEl.className = 'xero-gl-save-status xero-info-value--warning';
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-floppy"></i> Save Selection';
+        })
+        .catch(err => {
+            statusEl.textContent = 'Request failed: ' + err.message;
+            statusEl.className = 'xero-gl-save-status xero-info-value--warning';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-floppy"></i> Save Selection';
+        });
+}
+
+// Auto-render stored GL codes once all functions are defined
+if (glAccountData.length) {
+    glAccountData = glAccountData.map(a => ({
+        code: a.code, name: a.name,
+        type: a.account_type || a.type || '',
+        enabled: a.enabled,
+    }));
+    renderGLGrid(glAccountData);
+    document.getElementById('glCodeGrid').style.display = 'grid';
+    document.getElementById('saveGLBtn').style.display = 'inline-flex';
 }
 </script>
 {% endblock %}

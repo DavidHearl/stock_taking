@@ -1,141 +1,4 @@
-﻿{% extends 'base.html' %}
-{% load static humanize custom_filters %}
-
-{% block title %}Sale {{ sale.contract_number|default:sale.anthill_activity_id }} - Detail{% endblock %}
-
-{% block nav_sales_active %}active{% endblock %}
-
-{% block page_title %}
-<span class="page-title-row">
-    <a href="{% url 'sales_list' %}" class="back-link" title="Back to Sales"><i class="bi bi-arrow-left"></i></a>
-    Sale Detail{% if sale.contract_number %}: <span class="sale-number-suffix">{{ sale.contract_number }}</span>{% else %}: {{ sale.anthill_activity_id }}{% endif %}
-</span>
-{% endblock %}
-
-{% block extra_css %}
-<link href="{% static 'css/order_details.css' %}" rel="stylesheet">
-<link href="{% static 'css/customer_detail.css' %}" rel="stylesheet">
-<link href="{% static 'css/sale_detail.css' %}" rel="stylesheet">
-<link rel="stylesheet" href="{% static 'css/customers.css' %}">
-{% endblock %}
-
-{% block content %}
-<div class="page-content">
-
-    <!-- ===== CUSTOMER HERO CARD ===== -->
-    {% if sale.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_show_sale_links=True %}
-    {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_show_sale_links=True %}
-    {% endif %}
-
-    <div class="sale-page-layout">
-    <div class="sale-page-main">
-
-    <!-- ===== WORKFLOW STAGE (persistent, shown when order exists) ===== -->
-    {% if order %}
-    <div class="card workflow-compact">
-        <div class="workflow-compact-row">
-            <div class="workflow-compact-info">
-                {% if workflow_progress.current_stage %}
-                <span class="wf-badge wf-phase">{{ workflow_progress.current_stage.get_phase_display }}</span>
-                <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
-                {% if workflow_progress.current_stage.expected_days %}
-                <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
-                {% endif %}
-                {% else %}
-                <span class="wf-badge wf-none">No stage set</span>
-                {% endif %}
-            </div>
-            <div class="workflow-compact-nav">
-                <button class="wf-nav-btn wf-workflow" onclick="openWorkflowModal()" title="Full Workflow">
-                    <i class="bi bi-diagram-3"></i> Workflow
-                </button>
-                <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
-                    <i class="bi bi-chevron-left"></i> Previous
-                </button>
-                <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
-                    Next <i class="bi bi-chevron-right"></i>
-                </button>
-                <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
-                    <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
-                </button>
-            </div>
-        </div>
-        <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
-            {% if workflow_progress.current_stage %}
-            {% if workflow_progress.current_stage.description %}
-            <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
-            {% endif %}
-            {% if workflow_progress.current_stage.tasks.all %}
-            <div class="wf-tasks">
-                {% for task in workflow_progress.current_stage.tasks.all %}
-                {% with completion=task_completions|get_item:task.id %}
-                <div class="wf-task-item">
-                    {% if task.task_type == 'decision_matrix' %}
-                        <span class="wf-task-label">{{ task.description }}</span>
-                        <div class="wf-decision-btns">
-                            <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}"
-                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
-                            <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
-                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
-                            <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
-                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
-                        </div>
-                    {% elif task.task_type == 'radio' %}
-                        <span class="wf-task-label">{{ task.description }}</span>
-                        <div class="wf-radio-group">
-                            {% if task.options %}{% for option in task.options|split_options %}
-                            <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
-                                   {% if completion.selected_option == option %}checked{% endif %}
-                                   onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/> {{ option }}</label>
-                            {% endfor %}{% endif %}
-                        </div>
-                    {% elif task.task_type == 'dropdown' %}
-                        <label class="wf-task-label">{{ task.description }}
-                            <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
-                                <option value="">Select...</option>
-                                {% if task.options %}{% for option in task.options|split_options %}
-                                <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
-                                {% endfor %}{% endif %}
-                            </select>
-                        </label>
-                    {% elif task.task_type == 'attachment' %}
-                        <label class="wf-check">
-                            <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                   onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                            {{ task.description }} <i class="bi bi-paperclip" style="opacity:0.5;"></i>
-                            {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
-                        </label>
-                        <input type="file" id="attachment_{{ task.id }}" class="attachment-input"
-                               onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
-                    {% else %}
-                        <label class="wf-check">
-                            <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                   onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                            {{ task.description }}
-                            {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
-                        </label>
-                    {% endif %}
-                </div>
-                {% endwith %}
-                {% endfor %}
-            </div>
-            {% endif %}
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- ===== TAB BAR ===== -->
-    <div class="detail-tab-bar">
-        <button class="detail-tab {% if active_tab != 'order' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale"><i class="bi bi-bag"></i> Sale</button>
-        <button class="detail-tab {% if active_tab == 'order' %}active{% endif %}" onclick="switchDetailTab('order')" data-tab="order"><i class="bi bi-tools"></i> Order</button>
-    </div>
-
-    <!-- ===== SALE TAB PANEL ===== -->
-    <div id="tab-panel-sale" class="detail-tab-panel {% if active_tab != 'order' %}active{% endif %}">
-
+{% load static humanize %}
     <div class="order-details-grid">
 
         <!-- ===== MAIN COLUMN ===== -->
@@ -152,6 +15,9 @@
                             <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
                                 {{ sale.status|default:"Unknown" }}
                             </span>
+                            <button class="btn btn-sm btn-outline-primary" id="btn-edit" onclick="toggleEditMode()"><i class="bi bi-pencil"></i> Edit</button>
+                            <button class="btn btn-sm btn-outline-success" id="btn-save" style="display:none;" onclick="saveSale()"><i class="bi bi-check-lg"></i> Save</button>
+                            <button class="btn btn-sm btn-outline-secondary" id="btn-cancel" style="display:none;" onclick="cancelEdit()"><i class="bi bi-x-lg"></i> Cancel</button>
                         </div>
                     </div>
                     <div class="card-body padded">
@@ -195,6 +61,76 @@
                                     <option value="dead" {% if sale.status == 'dead' %}selected{% endif %}>Dead</option>
                                     <option value="cancelled" {% if sale.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
                                 </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Financial -->
+                <div class="card order-info-card">
+                    <div class="card-header card-header-customer">
+                        <h3>Financial</h3>
+                    </div>
+                    <div class="financial-card-body">
+                        <div class="financial-cards-vertical">
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Sale Value (Inc VAT)</span>
+                                    <div class="financial-display view-val">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2 }}{% else %}-{% endif %}</div>
+                                    <input class="customer-edit-input edit-val sale-value-edit" data-field="sale_value" value="{{ sale.sale_value|default:'' }}" placeholder="0.00" style="display:none;">
+                                </div>
+                            </div>
+                            {% if discount %}
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Sliderobes Credit</span>
+                                    <div class="financial-display sale-financial-warning">-£{{ discount|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Sale Value (Adjusted)</span>
+                                    <div class="financial-display">£{{ effective_value|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% if adjusted_profit %}
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Profit{% if discount %} (adjusted){% endif %}</span>
+                                    <div class="financial-display">£{{ adjusted_profit|floatformat:2 }}</div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            <div class="financial-card-vertical">
+                                <div class="financial-card-content">
+                                    <span class="financial-card-label">Payment Progress</span>
+                                    {% if effective_value %}
+                                    <div class="financial-progress-wrapper sale-progress-row">
+                                        <div class="financial-progress">
+                                            <div class="financial-progress-bar" style="width: {{ payment_pct }}%;"></div>
+                                        </div>
+                                        <span class="financial-percentage">{{ payment_pct }}%</span>
+                                    </div>
+                                    <div class="sale-payment-summary">
+                                        <span class="financial-display sale-financial-success">£{{ payments_total|floatformat:2 }} of £{{ effective_value|floatformat:2 }} paid</span>
+                                        <span class="financial-display {% if outstanding > 0 %}sale-financial-danger{% else %}sale-financial-success{% endif %}">£{{ outstanding|floatformat:2 }} remaining</span>
+                                    </div>
+                                    {% if overpayment %}
+                                    <div class="financial-progress-wrapper sale-progress-row">
+                                        <div class="financial-progress">
+                                            <div class="financial-progress-bar sale-overpayment-bar" style="width: {{ overpayment_pct }}%;"></div>
+                                        </div>
+                                        <span class="financial-percentage">+{{ overpayment_pct }}%</span>
+                                    </div>
+                                    <div class="sale-overpayment-row">
+                                        <span class="financial-display sale-financial-warning-sm">£{{ overpayment|floatformat:2 }} overpaid</span>
+                                    </div>
+                                    {% endif %}
+                                    {% else %}
+                                    <div class="financial-display sale-financial-muted">-</div>
+                                    {% endif %}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -682,6 +618,7 @@
             </dialog>
 
             <script>
+            const SALE_PK = {{ sale.pk }};
             const ADD_MANUAL_URL = "{% url 'add_manual_payment' sale.pk %}";
             const SCRAPE_ANTHILL_URL = "{% url 'scrape_anthill_payments' sale.pk %}";
             const XERO_SEARCH_URL = "{% url 'xero_search_invoices' sale.pk %}";
@@ -737,7 +674,6 @@
                 importBtn.style.display = 'none';
                 msg.textContent = '';
                 msg.className = 'sale-modal-msg';
-                document.body.appendChild(modal);
                 modal.showModal();
 
                 // Fire both requests in parallel
@@ -909,9 +845,7 @@
             // ── End combined search modal ────────────────────────────────────
 
             function openCoversheetModal() {
-                const _csModal = document.getElementById('coversheetModal');
-                document.body.appendChild(_csModal);
-                _csModal.showModal();
+                document.getElementById('coversheetModal').showModal();
                 updateFitDaysValue();
                 toggleElectricsNotes();
                 toggleRemeasureDate();
@@ -922,9 +856,7 @@
             }
 
             function openCoversheetHistoryModal() {
-                const _cshModal = document.getElementById('coversheetHistoryModal');
-                document.body.appendChild(_cshModal);
-                _cshModal.showModal();
+                document.getElementById('coversheetHistoryModal').showModal();
             }
 
             function closeCoversheetHistoryModal() {
@@ -979,7 +911,6 @@
             function openCoversheetEggerModal(targetInputId) {
                 coversheetEggerTargetInputId = targetInputId;
                 const modal = document.getElementById('coversheetEggerModal');
-                document.body.appendChild(modal);
                 const grid = document.getElementById('coversheetEggerGrid');
                 grid.innerHTML = '<div class="cs-egger-empty">Loading colours...</div>';
                 modal.showModal();
@@ -1061,7 +992,6 @@
 
             function openAddManualModal() {
                 const modal = document.getElementById('addManualPaymentModal');
-                document.body.appendChild(modal);
                 if (document.getElementById('manualEntryBody').children.length === 0) {
                     addManualRow();
                 }
@@ -1283,9 +1213,7 @@
                 document.getElementById('splitKeepAmount').textContent = '—';
                 document.getElementById('splitMsg').textContent = '';
                 document.getElementById('splitTargetSale').value = '';
-                const _splitModal = document.getElementById('splitPaymentModal');
-                document.body.appendChild(_splitModal);
-                _splitModal.showModal();
+                document.getElementById('splitPaymentModal').showModal();
             }
 
             document.getElementById('splitAmount').addEventListener('input', function() {
@@ -1594,279 +1522,209 @@
 
         </div>
 
-    </div>
+        <!-- ===== SIDEBAR COLUMN ===== -->
+        <div class="sidebar-column">
 
-    </div>
-
-    <!-- ===== ORDER TAB PANEL ===== -->
-    <div id="tab-panel-order" class="detail-tab-panel {% if active_tab == 'order' %}active{% endif %}">
-        {% if order %}
-        {% include 'stock_take/partials/order_tab_content.html' %}
-        {% else %}
-        <div class="detail-tab-empty">
-            <i class="bi bi-clipboard-x"></i>
-            <p>No order has been created for this sale yet.</p>
-        </div>
-        {% endif %}
-    </div>
-
-    </div><!-- /.sale-page-main -->
-    <div class="sale-page-summary-col">
-
-        <!-- ===== FINANCIAL SUMMARY (PERSISTENT) ===== -->
-        {% if order %}
-        <div class="card">
-            <div class="fin-summary-header">
-                <h3>Financial Summary</h3>
-                <div class="fin-summary-actions">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="openFinancialChartModal()" title="Cost breakdown chart">
-                        <i class="bi bi-bar-chart-line"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-primary" onclick="toggleFinancialEdit()" id="btn-financial-edit" title="Edit financial values">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-sm btn-save-financials" onclick="saveFinancials({{ order.id }})" id="btn-financial-save" title="Update financial data">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
+            <!-- Quick Links Card -->
+            <div class="card sale-sidebar-card">
+                <div class="card-header">
+                    <h3>Quick Links</h3>
+                </div>
+                <div class="card-body padded sale-sidebar-links">
+                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
+                    </a>
+                    {% if sale.anthill_customer_id %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
+                    </a>
+                    {% endif %}
+                    {% if sale.customer %}
+                    <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
+                        <i class="bi bi-person"></i> Customer Profile
+                    </a>
+                    {% endif %}
                 </div>
             </div>
-            <div class="fin-summary-body">
-                <div class="fin-row fin-row-primary">
-                    <span class="fin-label">Total (Inc VAT)</span>
-                    <div class="fin-value-wrap">
-                        <span class="fin-value fin-value-large" id="total_value_inc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_inc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                        <input type="text" inputmode="decimal" class="fin-edit-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" style="display:none;">
-                    </div>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Total (Exc VAT)</span>
-                    <span class="fin-value" id="total_value_exc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_exc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Materials</span>
-                    <span class="fin-value" id="materials_cost_display"><span class="fin-currency">£</span><span class="fin-amount">{{ materials_cost|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Installation</span>
-                    <span class="fin-value" id="installation_cost_display"><span class="fin-currency">£</span><span class="fin-amount">{{ calculated_installation_cost|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Manufacturing</span>
-                    <span class="fin-value" id="manufacturing_cost_display"><span class="fin-currency">£</span><span class="fin-amount">{{ calculated_manufacturing_cost|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row fin-row-profit">
-                    <span class="fin-label">Profit</span>
-                    <span class="fin-value" id="profit_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.profit|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                </div>
-            </div>
-        </div>
 
-        <!-- Financial Chart Modal -->
-        <dialog id="financialChartModal"
-            data-boards="{{ boards_cost|default:'0'|floatformat:2 }}"
-            data-accessories="{{ accessories_cost|default:'0'|floatformat:2 }}"
-            data-os-doors="{{ os_doors_cost|default:'0'|floatformat:2 }}"
-            data-installation="{{ calculated_installation_cost|default:'0'|floatformat:2 }}"
-            data-manufacturing="{{ calculated_manufacturing_cost|default:'0'|floatformat:2 }}"
-            data-profit="{{ order.profit|default:'0'|floatformat:2 }}">
-            <div class="manual-modal-header">
-                <div class="manual-modal-title"><span>Cost Breakdown</span></div>
-                <button class="manual-modal-close" onclick="document.getElementById('financialChartModal').close()"><i class="bi bi-x-lg"></i></button>
-            </div>
-            <div class="manual-modal-body" style="padding:24px; width:380px; max-width:90vw;">
-                <canvas id="financialChartCanvas" style="max-width:100%;"></canvas>
-                <div id="financialChartLegend" style="margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:13px;"></div>
-            </div>
-        </dialog>
-        {% endif %}
-
-        <!-- Quick Actions Card -->
-        <div class="card sale-sidebar-card">
-            <div class="card-header">
-                <h3><i class="bi bi-lightning-charge"></i> Quick Actions</h3>
-            </div>
-            <div class="card-body padded">
-                <div class="sale-quick-actions">
-                    {% if order %}
-                    {% if order.boards_po %}
-                    <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="openModal('addAdditionalPOModal')" title="Create an additional boards PO for this order">
-                        <i class="bi bi-plus-circle"></i> Add Additional Boards PO
-                    </button>
-                    {% else %}
-                    <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="switchDetailTab('order'); createNextBoardsPO({{ order.id }})" title="Create the first boards PO for this order">
-                        <i class="bi bi-plus-circle"></i> Create Boards PO
+            <!-- Linked Order Card -->
+            <div class="card sale-sidebar-card">
+                <div class="card-header">
+                    <h3><i class="bi bi-folder"></i> Linked Order</h3>
+                    {% if sale.order %}
+                    <button class="btn btn-sm btn-outline-danger" onclick="unlinkSaleOrder()" title="Remove order link" style="padding:2px 8px; font-size:0.75rem;">
+                        <i class="bi bi-x-lg"></i>
                     </button>
                     {% endif %}
-                    <div class="sale-quick-action-divider"></div>
-                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-sm btn-outline-secondary sale-sidebar-btn" title="Download Summary Document PDF">
-                        <i class="bi bi-file-earmark-pdf"></i> Summary Document
-                    </a>
+                </div>
+                <div class="card-body padded">
+                    {% if sale.order %}
+                    <div class="info-display">
+                        <div>
+                            <div class="field-label">Sale Number</div>
+                            <div class="field-value field-value-medium">
+                                <a href="{% url 'order_details' sale.order.id %}">{{ sale.order.sale_number }}</a>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="field-label">Order Date</div>
+                            <div class="field-value">{{ sale.order.order_date|date:"d M Y"|default:"-" }}</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Status</div>
+                            <div class="field-value">
+                                {% if sale.order.job_finished %}
+                                <span class="customer-active-badge active">Finished</span>
+                                {% else %}
+                                <span class="customer-active-badge inactive">Active</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="sale-order-view-btn">
+                            <a href="{% url 'order_details' sale.order.id %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
+                                <i class="bi bi-eye"></i> View Full Order
+                            </a>
+                        </div>
+                    </div>
                     {% else %}
                     <div class="sale-no-order">
-                        <i class="bi bi-clipboard-x"></i>
-                        <p>No order linked to this sale yet.</p>
+                        <i class="bi bi-folder"></i>
+                        <p>No local order linked to this sale.</p>
+                        <div class="sale-link-order-combo" style="position:relative; width:100%; margin-top:8px;">
+                            <input type="text" class="form-input" id="sale-order-search"
+                                   placeholder="Search order by name or sale number..."
+                                   autocomplete="off"
+                                   style="width:100%; font-size:0.8rem;"
+                                   oninput="searchOrderForSale(this.value)"
+                                   onfocus="this.select(); searchOrderForSale(this.value);">
+                            <div class="boards-po-results" id="sale-order-results" style="display:none;"></div>
+                        </div>
                     </div>
                     {% endif %}
                 </div>
             </div>
-        </div>
 
-        <!-- Photos Card -->
-        {% if gallery_images %}
-        <div class="card sale-sidebar-card">
-            <div class="card-header">
-                <h3><i class="bi bi-images"></i> Photos ({{ gallery_images|length }})</h3>
-            </div>
-            <div class="card-body padded">
-                <div class="sale-photos-grid">
-                    {% for img in gallery_images %}
-                    <div class="sale-photo-thumb" onclick="openSalePhotoLightbox({{ forloop.counter0 }})">
-                        <img src="{% if img.thumbnail %}{{ img.thumbnail.url }}{% else %}{{ img.image.url }}{% endif %}" alt="{{ img.caption }}" loading="lazy">
+            <!-- Documents Card -->
+            <div class="card sale-sidebar-card">
+                <div class="card-header">
+                    <h3><i class="bi bi-files"></i> Documents</h3>
+                </div>
+                <div class="card-body padded sale-docs-card-body">
+                    <div class="sale-docs-section">
+                        <div class="sale-docs-section-head">Coversheet</div>
+                        <div class="sale-docs-coversheet-meta">
+                            <div><strong>Prepared By:</strong> {{ coversheet.prepared_by|default:'-' }}</div>
+                            <div><strong>Final:</strong> {% if coversheet.is_final %}Yes{% else %}No{% endif %}</div>
+                            <div><strong>Updated:</strong> {{ coversheet.updated_at|date:'d M Y H:i' }}</div>
+                        </div>
+                        <div class="sale-docs-actions">
+                            <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
+                                <i class="bi bi-file-earmark-pdf"></i> Coversheet PDF
+                            </a>
+                            <button type="button" class="btn btn-sm btn-outline-success sale-sidebar-btn" onclick="openCoversheetModal()">
+                                <i class="bi bi-window"></i> Open Coversheet
+                            </button>
+                        </div>
                     </div>
-                    {% endfor %}
+
+                    <div class="sale-docs-section">
+                        <div class="sale-docs-section-head">Claim Service Documents</div>
+                        {% for item in important_documents %}
+                        <div class="sale-doc-row">
+                            <div class="sale-doc-label">{{ item.doc_type }}</div>
+                            <div class="sale-doc-current">
+                                {% if item.doc %}
+                                <a href="{{ item.doc.file.url }}" target="_blank" class="sale-doc-link">View</a>
+                                <span class="sale-doc-date">{{ item.doc.uploaded_at|date:'d M Y' }}</span>
+                                {% else %}
+                                <span class="text-muted">Not uploaded</span>
+                                {% endif %}
+                            </div>
+                            <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="sale-doc-upload-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
+                                <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" required class="sale-doc-file-input">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
+
+            <!-- Photos Card -->
+            {% if gallery_images %}
+            <div class="card sale-sidebar-card">
+                <div class="card-header">
+                    <h3><i class="bi bi-images"></i> Photos ({{ gallery_images|length }})</h3>
+                </div>
+                <div class="card-body padded">
+                    <div class="sale-photos-grid">
+                        {% for img in gallery_images %}
+                        <div class="sale-photo-thumb" onclick="openSalePhotoLightbox({{ forloop.counter0 }})">
+                            <img src="{% if img.thumbnail %}{{ img.thumbnail.url }}{% else %}{{ img.image.url }}{% endif %}" alt="{{ img.caption }}" loading="lazy">
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Photo Lightbox -->
+            <div class="sale-photo-lightbox" id="salePhotoLightbox" onclick="closeSalePhotoLightbox(event)">
+                <button class="lightbox-close" onclick="closeSalePhotoLightbox(event)">&times;</button>
+                <button class="lightbox-arrow lightbox-prev" id="salePhotoPrev" onclick="event.stopPropagation(); navigateSalePhoto(-1)"><i class="bi bi-chevron-left"></i></button>
+                <img id="salePhotoImg" src="" alt="">
+                <button class="lightbox-arrow lightbox-next" id="salePhotoNext" onclick="event.stopPropagation(); navigateSalePhoto(1)"><i class="bi bi-chevron-right"></i></button>
+                <div class="lightbox-footer" id="salePhotoFooter"></div>
+            </div>
+
+            <script>
+            (function() {
+                const photos = [
+                    {% for img in gallery_images %}
+                    { url: "{{ img.image.url }}", caption: "{{ img.caption|escapejs }}" },
+                    {% endfor %}
+                ];
+                let currentIdx = 0;
+
+                function show(idx) {
+                    currentIdx = idx;
+                    document.getElementById('salePhotoImg').src = photos[idx].url;
+                    document.getElementById('salePhotoPrev').style.display = idx > 0 ? '' : 'none';
+                    document.getElementById('salePhotoNext').style.display = idx < photos.length - 1 ? '' : 'none';
+                    const footer = photos[idx].caption ? `<span>${photos[idx].caption}</span>` : '';
+                    const counter = photos.length > 1 ? `<span style="opacity:0.6;font-size:0.8rem">${idx + 1} / ${photos.length}</span>` : '';
+                    document.getElementById('salePhotoFooter').innerHTML = footer + counter;
+                }
+
+                window.openSalePhotoLightbox = function(idx) {
+                    show(idx);
+                    document.getElementById('salePhotoLightbox').classList.add('active');
+                };
+                window.closeSalePhotoLightbox = function(e) {
+                    if (e && e.target && e.target.tagName === 'IMG') return;
+                    document.getElementById('salePhotoLightbox').classList.remove('active');
+                };
+                window.navigateSalePhoto = function(dir) {
+                    const newIdx = currentIdx + dir;
+                    if (newIdx >= 0 && newIdx < photos.length) show(newIdx);
+                };
+
+                document.addEventListener('keydown', function(e) {
+                    const lb = document.getElementById('salePhotoLightbox');
+                    if (!lb.classList.contains('active')) return;
+                    if (e.key === 'Escape') lb.classList.remove('active');
+                    if (e.key === 'ArrowLeft') navigateSalePhoto(-1);
+                    if (e.key === 'ArrowRight') navigateSalePhoto(1);
+                });
+            })();
+            </script>
+            {% endif %}
+
+
+
         </div>
-
-        <!-- Photo Lightbox -->
-        <div class="sale-photo-lightbox" id="salePhotoLightbox" onclick="closeSalePhotoLightbox(event)">
-            <button class="lightbox-close" onclick="closeSalePhotoLightbox(event)">&times;</button>
-            <button class="lightbox-arrow lightbox-prev" id="salePhotoPrev" onclick="event.stopPropagation(); navigateSalePhoto(-1)"><i class="bi bi-chevron-left"></i></button>
-            <img id="salePhotoImg" src="" alt="">
-            <button class="lightbox-arrow lightbox-next" id="salePhotoNext" onclick="event.stopPropagation(); navigateSalePhoto(1)"><i class="bi bi-chevron-right"></i></button>
-            <div class="lightbox-footer" id="salePhotoFooter"></div>
-        </div>
-
-        <script>
-        (function() {
-            const photos = [
-                {% for img in gallery_images %}
-                { url: "{{ img.image.url }}", caption: "{{ img.caption|escapejs }}" },
-                {% endfor %}
-            ];
-            let currentIdx = 0;
-
-            function show(idx) {
-                currentIdx = idx;
-                document.getElementById('salePhotoImg').src = photos[idx].url;
-                document.getElementById('salePhotoPrev').style.display = idx > 0 ? '' : 'none';
-                document.getElementById('salePhotoNext').style.display = idx < photos.length - 1 ? '' : 'none';
-                const footer = photos[idx].caption ? `<span>${photos[idx].caption}</span>` : '';
-                const counter = photos.length > 1 ? `<span style="opacity:0.6;font-size:0.8rem">${idx + 1} / ${photos.length}</span>` : '';
-                document.getElementById('salePhotoFooter').innerHTML = footer + counter;
-            }
-
-            window.openSalePhotoLightbox = function(idx) {
-                show(idx);
-                document.getElementById('salePhotoLightbox').classList.add('active');
-            };
-            window.closeSalePhotoLightbox = function(e) {
-                if (e && e.target && e.target.tagName === 'IMG') return;
-                document.getElementById('salePhotoLightbox').classList.remove('active');
-            };
-            window.navigateSalePhoto = function(dir) {
-                const newIdx = currentIdx + dir;
-                if (newIdx >= 0 && newIdx < photos.length) show(newIdx);
-            };
-
-            document.addEventListener('keydown', function(e) {
-                const lb = document.getElementById('salePhotoLightbox');
-                if (!lb.classList.contains('active')) return;
-                if (e.key === 'Escape') lb.classList.remove('active');
-                if (e.key === 'ArrowLeft') navigateSalePhoto(-1);
-                if (e.key === 'ArrowRight') navigateSalePhoto(1);
-            });
-        })();
-        </script>
-        {% endif %}
-
-    </div><!-- /.sale-page-summary-col -->
-    </div><!-- /.sale-page-layout -->
-
-</div>
-
-<script>
-function switchDetailTab(tab) {
-    document.querySelectorAll('.detail-tab-panel').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('[data-tab]').forEach(t => t.classList.remove('active'));
-    document.getElementById('tab-panel-' + tab).classList.add('active');
-    document.querySelector('[data-tab="' + tab + '"]').classList.add('active');
-    history.replaceState(null, '', '?tab=' + tab);
-}
-</script>
-
-<script>
-function toggleFinancialEdit() {
-    const display = document.getElementById('total_value_inc_vat_display');
-    const input = document.getElementById('total-value-input');
-    const editBtn = document.getElementById('btn-financial-edit');
-    const isEditing = input.style.display !== 'none';
-    if (isEditing) {
-        input.style.display = 'none';
-        display.style.display = '';
-        editBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
-    } else {
-        input.value = parseFloat(display.textContent.replace('£', '').replace(',', '')) || 0;
-        display.style.display = 'none';
-        input.style.display = 'block';
-        input.focus();
-        editBtn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel';
-    }
-}
-
-function openFinancialChartModal() {
-    const modal = document.getElementById('financialChartModal');
-    document.body.appendChild(modal);
-
-    const d = modal.dataset;
-    const boards       = parseFloat(d.boards)       || 0;
-    const accessories  = parseFloat(d.accessories)  || 0;
-    const osDoors      = parseFloat(d.osDoors)      || 0;
-    const installation = parseFloat(d.installation) || 0;
-    const manufacturing= parseFloat(d.manufacturing)|| 0;
-    const profit       = parseFloat(d.profit)       || 0;
-
-    const entries = [
-        { label: 'Boards',        value: boards,        color: '#3b82f6' },
-        { label: 'Accessories',   value: accessories,   color: '#60a5fa' },
-        { label: 'OS Doors',      value: osDoors,       color: '#93c5fd' },
-        { label: 'Installation',  value: installation,  color: '#f59e0b' },
-        { label: 'Manufacturing', value: manufacturing, color: '#8b5cf6' },
-        { label: 'Profit',        value: profit,        color: '#10b981' },
-    ].filter(e => e.value > 0);
-
-    if (window._finChart) window._finChart.destroy();
-    window._finChart = new Chart(document.getElementById('financialChartCanvas'), {
-        type: 'doughnut',
-        data: {
-            labels: entries.map(e => e.label),
-            datasets: [{ data: entries.map(e => e.value), backgroundColor: entries.map(e => e.color), borderWidth: 0, hoverOffset: 8 }]
-        },
-        options: {
-            responsive: true,
-            cutout: '65%',
-            plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: ctx => '  £' + ctx.parsed.toFixed(2) } }
-            }
-        }
-    });
-
-    const total = entries.reduce((a, e) => a + e.value, 0);
-    document.getElementById('financialChartLegend').innerHTML = entries.map(e => {
-        const pct = total > 0 ? ((e.value / total) * 100).toFixed(1) : '0.0';
-        return `<div style="display:flex;align-items:center;gap:10px;">
-            <span style="width:12px;height:12px;border-radius:3px;background:${e.color};flex-shrink:0;"></span>
-            <span style="flex:1;color:var(--text-secondary);">${e.label}</span>
-            <span style="font-weight:600;min-width:72px;text-align:right;">£${e.value.toFixed(2)}</span>
-            <span style="color:var(--text-muted);min-width:40px;text-align:right;">${pct}%</span>
-        </div>`;
-    }).join('');
-
-    modal.showModal();
-}
-</script>
-
+    </div>
 <script>
 // ─── Link / Unlink Order to Sale ────────────────────────────────────────
 let _saleOrderSearchTimer = null;
@@ -1976,5 +1834,3 @@ function toggleInvoiceDetail(invoiceId) {
     }
 }
 </script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-{% endblock %}

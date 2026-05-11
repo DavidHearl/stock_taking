@@ -317,7 +317,7 @@ def customer_save(request, pk):
         'billing_client',
     ]
 
-    old_activity_id = sale.anthill_activity_id
+    old_activity_id = None
     update_fields = []
     for field in editable_fields:
         if field in data:
@@ -1205,11 +1205,11 @@ def sale_claim_document_upload(request, pk):
     return redirect('sale_detail', pk=pk)
 
 
-@login_required
-def sale_detail(request, pk):
-    """Display detailed view of a single Anthill event."""
-    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
-    coversheet = _get_or_create_sale_coversheet(sale, request.user)
+def _build_sale_context(sale, request_user):
+    """Compute context dict for a single AnthillSale. Used by both
+    sale_detail (standalone) and order_details (sale tab)."""
+    from decimal import Decimal
+    coversheet = _get_or_create_sale_coversheet(sale, request_user)
     claim_group_key = _sale_claim_group_key(sale)
     claim_docs = list(ClaimDocument.objects.filter(group_key=claim_group_key).order_by('-uploaded_at'))
     docs_by_type = {}
@@ -1231,7 +1231,6 @@ def sale_detail(request, pk):
                 break
     cad_mismatch = bool(cad) and not cad_matches_claim_docs
 
-    # Get gallery images for this sale's order
     gallery_images = []
     if sale.order:
         from .models import GalleryImage
@@ -1240,7 +1239,6 @@ def sale_detail(request, pk):
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
 
-    # Get invoices matching this sale's contract number
     sale_invoices = []
     if sale.contract_number:
         sale_invoices = list(
@@ -1249,23 +1247,17 @@ def sale_detail(request, pk):
             .order_by('-date')
         )
 
-    # Get payment history for this sale, split by source
     all_payments = list(sale.payments.all().order_by('date'))
     xero_payments = [p for p in all_payments if p.source != 'manual']
     manual_payments = [p for p in all_payments if p.source == 'manual']
-
-    # Table footer totals (include all amounts as shown in table)
     xero_payments_total = sum(p.amount for p in xero_payments if p.amount) or None
     manual_payments_total = sum(p.amount for p in manual_payments if p.amount) or None
 
-    # Financial summary using credit-payment matching (exclude ignored)
-    from decimal import Decimal
     active_payments = [p for p in all_payments if not p.ignored]
     total_paid, discount = _match_credits_to_payments(active_payments)
     sale_value = sale.sale_value or Decimal('0')
     effective_value = sale_value - discount
 
-    # Cancelled / dead sales owe nothing
     is_cancelled = sale.status in ('dead', 'cancelled')
     if is_cancelled:
         outstanding = Decimal('0')
@@ -1278,7 +1270,7 @@ def sale_detail(request, pk):
     overpayment_pct = int(overpayment / effective_value * 100) if effective_value > 0 and overpayment > 0 else 0
     adjusted_profit = (sale.profit or Decimal('0')) - discount if sale.profit else None
 
-    context = {
+    return {
         'sale': sale,
         'coversheet': coversheet,
         'designers': Designer.objects.order_by('name'),
@@ -1305,7 +1297,28 @@ def sale_detail(request, pk):
         'sale_invoices': sale_invoices,
     }
 
+
+@login_required
+def sale_detail(request, pk):
+    """Display detailed view of a single Anthill event. Sale is the anchor page —
+    the combined sale+order tabbed view always lives here."""
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+    active_tab = request.GET.get('tab', 'sale')
+
+    context = _build_sale_context(sale, request.user)
+    context['active_tab'] = active_tab
+
+    # Load order context into the combined page when an order is linked
+    if sale.order:
+        from .views import _build_order_context
+        order_ctx = _build_order_context(sale.order, request)
+        # Merge order context but don't overwrite sale keys (sale, coversheet, etc.)
+        for key, val in order_ctx.items():
+            if key not in context:
+                context[key] = val
+
     return render(request, 'stock_take/sale_detail.html', context)
+
 
 
 def _match_credits_to_payments(payments_list):
