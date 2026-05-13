@@ -112,6 +112,11 @@
                         <i class="bi bi-arrow-counterclockwise"></i> Revert to Draft
                     </button>
                     {% endif %}
+                    {% if purchase_order.status == 'Received' or purchase_order.status == 'Partially Received' %}
+                    <button class="po-more-item" onclick="unreceivePO()">
+                        <i class="bi bi-arrow-counterclockwise"></i> Unreceive
+                    </button>
+                    {% endif %}
                     {% if purchase_order.status != 'Cancelled' and purchase_order.status != 'Received' %}
                     <button class="po-more-item danger" onclick="cancelPO()">
                         <i class="bi bi-x-octagon"></i> Cancel PO
@@ -1291,6 +1296,46 @@
 <!-- Product search dropdown (outside table container to avoid overflow clipping) -->
 <div class="product-search-results" id="product-search-results" style="display:none;"></div>
 
+<!-- Unreceive PO Modal -->
+<div class="modal-overlay" id="unreceive-modal" style="display:none;" onclick="closeUnreceiveModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-arrow-counterclockwise"></i> Unreceive Purchase Order</h3>
+            <button class="modal-close" onclick="closeUnreceiveModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 14px; color: var(--text-secondary);">You are about to unreceive:</p>
+            <div class="approve-summary">
+                <div class="approve-summary-row">
+                    <span class="approve-label">PO Number</span>
+                    <span class="approve-value" style="font-weight:600;">{{ purchase_order.display_number }}</span>
+                </div>
+                <div class="approve-summary-row">
+                    <span class="approve-label">Supplier</span>
+                    <span class="approve-value">{{ purchase_order.supplier_name|default:"Not set" }}</span>
+                </div>
+                <div class="approve-summary-row">
+                    <span class="approve-label">Current Status</span>
+                    <span class="approve-value">{{ purchase_order.status }}</span>
+                </div>
+                <div class="approve-summary-row">
+                    <span class="approve-label">Received Date</span>
+                    <span class="approve-value">{{ purchase_order.received_date|default:"—" }}</span>
+                </div>
+            </div>
+            <p style="margin-top: 14px; font-size: 0.82rem; color: var(--text-muted);">
+                <i class="bi bi-exclamation-triangle"></i> This will reset all received quantities to zero, reverse any stock adjustments, and revert the status to <strong>Approved</strong>.
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-md btn-secondary" onclick="closeUnreceiveModal()">Cancel</button>
+            <button class="btn btn-md btn-cancel-po" id="confirm-unreceive-btn" onclick="confirmUnreceivePO()">
+                <i class="bi bi-arrow-counterclockwise"></i> Unreceive
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Approve PO Modal -->
 <div class="modal-overlay" id="approve-modal" style="display:none;" onclick="closeApproveModal(event)">
     <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 480px;">
@@ -2437,6 +2482,50 @@ document.addEventListener('keydown', function(e) {
 function cancelPO() {
     if (!confirm('Are you sure you want to cancel this purchase order? It will no longer count as incoming stock.')) return;
     updatePOStatus('Cancelled', true);
+}
+
+function unreceivePO() {
+    document.getElementById('po-more-dropdown').classList.remove('open');
+    document.getElementById('unreceive-modal').style.display = 'flex';
+}
+
+function closeUnreceiveModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('unreceive-modal').style.display = 'none';
+}
+
+function confirmUnreceivePO() {
+    const btn = document.getElementById('confirm-unreceive-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+    fetch('{% url "purchase_order_unreceive" purchase_order.workguru_id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+    })
+    .then(res => {
+        if (!res.ok && !res.headers.get('content-type')?.includes('application/json')) {
+            throw new Error(`Server error ${res.status}: ${res.statusText}`);
+        }
+        return res.json();
+    })
+    .then(result => {
+        if (result.success) {
+            showNotification('Purchase order unreceived successfully.', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification('Error: ' + (result.error || 'Failed'), 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Unreceive';
+        }
+    })
+    .catch(err => {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Unreceive';
+    });
 }
 
 function openApproveModal() {

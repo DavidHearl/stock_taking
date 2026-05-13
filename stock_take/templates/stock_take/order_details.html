@@ -745,6 +745,7 @@
                                     <th>Status</th>
                                     <th>Cost</th>
                                     {% if bpo_data.po.is_angled %}<th style="width:36px;"></th>{% endif %}
+                                    <th style="width:36px;"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -901,11 +902,18 @@
                                         {% endif %}
                                     </td>
                                     {% endif %}
+                                    <td style="text-align:center;">
+                                        <button type="button" class="btn-board-copy" title="Duplicate row"
+                                                onclick="copyBoardRow({{ item.id }}, {{ bpo_data.po.id }})">
+                                            <i class="bi bi-copy"></i>
+                                        </button>
+                                    </td>
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
                                     <td colspan="{% if bpo_data.po.is_angled %}15{% else %}12{% endif %}"><strong>Total Cost:</strong></td>
                                     <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
+                                    <td></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -4939,6 +4947,16 @@ function openAddBoardModal(boardsPoId) {
         }
     }
     openModal('addBoardModal');
+}
+
+function copyBoardRow(itemId, boardsPoId) {
+    // Uncheck all checkboxes for this PO, then mark the source row and open the add modal pre-filled
+    document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`).forEach(cb => {
+        cb.checked = false;
+    });
+    const cb = document.querySelector(`.pnx-item-checkbox[data-item-id="${itemId}"][data-boards-po-id="${boardsPoId}"]`);
+    if (cb) cb.checked = true;
+    openAddBoardModal(boardsPoId);
 }
 
 function updateAddBoardButtonState(boardsPoId) {

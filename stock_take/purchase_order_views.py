@@ -1131,6 +1131,69 @@ def purchase_order_receive(request, po_id):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
+@login_required
+def purchase_order_unreceive(request, po_id):
+    """Reverse a received PO: reset all received quantities to 0 and revert status to Approved."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    if po.status not in ('Received', 'Partially Received'):
+        return JsonResponse({'error': 'PO is not in a received state'}, status=400)
+
+    try:
+        # ── Regular product lines — reverse stock and reset quantities ──────
+        for product in po.products.select_related('stock_item').all():
+            if product.received_quantity > 0:
+                delta = int(product.received_quantity)
+                if product.stock_item and delta > 0:
+                    product.stock_item.quantity = max(0, product.stock_item.quantity - delta)
+                    product.stock_item.save(update_fields=['quantity'])
+                    StockHistory.objects.create(
+                        stock_item=product.stock_item,
+                        quantity=product.stock_item.quantity,
+                        change_amount=-delta,
+                        change_type='adjustment',
+                        reference=po.display_number,
+                        notes=f'Unreceive: reversed {delta} via {po.display_number} ({product.sku})',
+                        created_by=request.user,
+                    )
+                product.received_quantity = 0
+                product.save(update_fields=['received_quantity'])
+
+        # ── Boards PO PNX items ─────────────────────────────────────────────
+        boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+        if boards_po:
+            boards_po.pnx_items.filter(received=True).update(received=False, received_quantity=0)
+
+        # ── OS Doors ────────────────────────────────────────────────────────
+        for order in Order.objects.filter(os_doors_po=po.display_number):
+            order.os_doors.filter(received=True).update(received=False, received_quantity=0)
+
+        # ── Revert PO status ────────────────────────────────────────────────
+        po.status = 'Approved'
+        po.received_date = None
+        po.save(update_fields=['status', 'received_date'])
+
+        from .models import ActivityLog
+        ActivityLog.objects.create(
+            user=request.user,
+            action='po_status_change',
+            description=(
+                f'{request.user.get_full_name() or request.user.username} unreceived purchase order '
+                f'{po.display_number}.'
+            ),
+        )
+
+        return JsonResponse({'success': True, 'status': po.status})
+
+    except Exception as exc:
+        import traceback
+        logger.error('purchase_order_unreceive error for po_id=%s: %s', po_id, traceback.format_exc())
+        return JsonResponse({'error': str(exc)}, status=500)
+
+
 def _do_receive_po(request, po, data):
     from django.utils import timezone
 

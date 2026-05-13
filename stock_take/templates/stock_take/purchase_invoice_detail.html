@@ -58,6 +58,10 @@
                     <button class="pinv-kebab-item" onclick="openManualLinkModal()">
                         <i class="bi bi-link-45deg"></i> Manually link Xero ID
                     </button>
+                    <div class="pinv-kebab-divider"></div>
+                    <button class="pinv-kebab-item" onclick="generateTimesheets()" title="Create/update timesheet entries for each allocated line">
+                        <i class="bi bi-clock-history"></i> Generate Timesheets
+                    </button>
                 </div>
             </div>
         </div>
@@ -220,6 +224,10 @@
                                    autocomplete="off"
                                    oninput="searchOrders(this, {{ line.id }})"
                                    onfocus="searchOrders(this, {{ line.id }})">
+                            <small class="pinv-order-name" id="order-name-{{ line.id }}"
+                                   {% if not line.order %}style="display:none;"{% endif %}>
+                                {% if line.order %}{{ line.order.first_name }} {{ line.order.last_name }}{% endif %}
+                            </small>
                             <div class="order-search-dropdown" id="order-dd-{{ line.id }}"></div>
                         </div>
                     </td>
@@ -497,12 +505,14 @@ function insertLineRow(line) {
 }
 
 function buildLineHTML(line) {
-    const hasOrder    = line.order_id && line.order_label;
-    const ordValue    = hasOrder ? escHtml(line.order_label) : '';
+    const hasOrder    = !!(line.order_id && line.sale_number);
+    const ordValue    = hasOrder ? escHtml(line.sale_number) : '';
     const ordDataId   = line.order_id || '';
+    const custName    = hasOrder ? escHtml(line.customer_name || '') : '';
+    const nameDisplay = custName ? '' : 'none';
     const linkDisplay = hasOrder ? 'inline-flex' : 'none';
     const linkHref    = hasOrder ? `/order/${line.order_id}/` : '#';
-    const linkText    = hasOrder ? `<i class="bi bi-box-arrow-up-right"></i> ${escHtml(line.order_label)}` : '';
+    const linkText    = hasOrder ? `<i class="bi bi-box-arrow-up-right"></i> ${escHtml(line.sale_number)}` : '';
     return `
         <td><input type="text" class="pinv-cell-input line-desc" value="${escHtml(line.description)}" onblur="updateLine(${line.id})"></td>
         <td><input type="number" class="pinv-cell-input line-qty" value="${line.quantity}" step="0.01" min="0" style="text-align:right;" onblur="updateLine(${line.id})"></td>
@@ -513,6 +523,7 @@ function buildLineHTML(line) {
                 <input type="text" class="pinv-cell-input order-search-input" id="order-input-${line.id}"
                        data-order-id="${ordDataId}" value="${ordValue}" placeholder="Search order…" autocomplete="off"
                        oninput="searchOrders(this,${line.id})" onfocus="searchOrders(this,${line.id})">
+                <small class="pinv-order-name" id="order-name-${line.id}" style="display:${nameDisplay};">${custName}</small>
                 <div class="order-search-dropdown" id="order-dd-${line.id}"></div>
             </div>
         </td>
@@ -603,7 +614,7 @@ function searchOrders(input, lineId) {
                     const item = document.createElement('div');
                     item.className = 'order-search-item';
                     item.textContent = o.sale_number + (o.customer_name ? ' – ' + o.customer_name : '');
-                    item.onclick = () => selectOrder(lineId, o.id, o.sale_number, `/order/${o.id}/`);
+                    item.onclick = () => selectOrder(lineId, o.id, o.sale_number, `/order/${o.id}/`, o.customer_name);
                     dd.appendChild(item);
                 });
                 // Option to clear
@@ -619,7 +630,7 @@ function searchOrders(input, lineId) {
     }, 250);
 }
 
-function selectOrder(lineId, orderId, orderNumber, orderUrl) {
+function selectOrder(lineId, orderId, orderNumber, orderUrl, customerName) {
     const input = document.getElementById('order-input-' + lineId);
     input.value = orderNumber;
     input.dataset.orderId = orderId;
@@ -628,6 +639,11 @@ function selectOrder(lineId, orderId, orderNumber, orderUrl) {
     link.innerHTML = '<i class="bi bi-box-arrow-up-right"></i> ' + orderNumber;
     link.style.display = 'inline-flex';
     document.getElementById('order-dd-' + lineId).style.display = 'none';
+    const nameEl = document.getElementById('order-name-' + lineId);
+    if (nameEl) {
+        nameEl.textContent = customerName || '';
+        nameEl.style.display = customerName ? '' : 'none';
+    }
     updateLine(lineId);
 }
 
@@ -639,6 +655,8 @@ function clearOrderForLine(lineId) {
     const link = document.getElementById('order-link-' + lineId);
     if (link) link.style.display = 'none';
     document.getElementById('order-dd-' + lineId).style.display = 'none';
+    const nameEl = document.getElementById('order-name-' + lineId);
+    if (nameEl) { nameEl.textContent = ''; nameEl.style.display = 'none'; }
     updateLine(lineId);
 }
 
@@ -1055,6 +1073,29 @@ function openManualLinkModal() {
     document.getElementById('manual-xero-input').value = '';
     document.getElementById('manual-link-error').style.display = 'none';
     document.getElementById('manual-link-modal').style.display = 'flex';
+}
+
+function generateTimesheets() {
+    document.getElementById('kebab-menu').style.display = 'none';
+    if (!confirm('Generate or update timesheet entries from all allocated line items?\n\nThis will create a timesheet per line (where an order is assigned), parse the date from each line description, and match the fitter by invoice supplier name.')) return;
+    fetch('{% url "resync_invoice_timesheets" invoice.id %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value }
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            const parts = [];
+            if (result.created) parts.push(`${result.created} created`);
+            if (result.updated) parts.push(`${result.updated} updated`);
+            if (result.skipped) parts.push(`${result.skipped} skipped (no order)`);
+            const fitterMsg = result.fitter ? ` Fitter: ${result.fitter}.` : ' No matching fitter found — check supplier name matches a fitter record.';
+            showAlert(`Timesheets: ${parts.join(', ') || 'nothing to do'}.${fitterMsg}`, result.fitter ? 'success' : 'warning');
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown error'), 'danger');
+        }
+    })
+    .catch(() => showAlert('Error generating timesheets', 'danger'));
 }
 
 function doManualLink() {

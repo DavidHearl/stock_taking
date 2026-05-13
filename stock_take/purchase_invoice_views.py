@@ -19,32 +19,104 @@ from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrd
 logger = logging.getLogger(__name__)
 
 
+def _parse_description_date(description, fallback_date=None):
+    """Extract a date from a line description such as 'Wednesday 6th May'.
+
+    Falls back to *fallback_date* (usually the invoice date) when nothing
+    useful can be parsed.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+
+    if not description:
+        return fallback_date
+
+    # Strip leading day-of-week names
+    desc = _re.sub(
+        r'\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|'
+        r'Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b',
+        '', description, flags=_re.IGNORECASE,
+    ).strip()
+
+    # Strip ordinal suffixes: 6th → 6
+    desc = _re.sub(r'(\d+)(?:st|nd|rd|th)\b', r'\1', desc).strip()
+
+    year = fallback_date.year if fallback_date else _dt.now().year
+
+    # Try "DD Month YYYY" first
+    for fmt in ('%d %B %Y', '%d %b %Y'):
+        m = _re.search(r'\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b', desc)
+        if m:
+            try:
+                return _dt.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", fmt.replace('%Y', '%Y')).date()
+            except ValueError:
+                pass
+
+    # Try "DD Month" (no year) – use fallback year
+    m = _re.search(r'\b(\d{1,2})\s+([A-Za-z]{3,9})\b', desc)
+    if m:
+        for fmt in ('%d %B %Y', '%d %b %Y'):
+            try:
+                return _dt.strptime(f"{m.group(1)} {m.group(2)} {year}", fmt).date()
+            except ValueError:
+                pass
+
+    return fallback_date
+
+
+def _match_fitter_for_invoice(invoice):
+    """Return the best matching Fitter for the given PurchaseInvoice, or None."""
+    from .models import Fitter
+    supplier = (invoice.supplier_name or '').strip()
+    if not supplier:
+        return None
+    # Exact match first
+    fitter = Fitter.objects.filter(name__iexact=supplier).first()
+    if fitter:
+        return fitter
+    # Substring match either way
+    fitter = Fitter.objects.filter(name__icontains=supplier).first()
+    if fitter:
+        return fitter
+    return Fitter.objects.filter(
+        **{'name__icontains': supplier.split()[0]}
+    ).first() if supplier.split() else None
+
+
 def _sync_timesheet_for_pi_line(line):
     """Create or update the installation timesheet linked to a purchase invoice line.
 
-    * If the line is allocated to an order, ensure exactly one timesheet exists.
+    * If the line is allocated to an order, ensure exactly one timesheet exists
+      with fitter matched from the invoice supplier and date parsed from the
+      line description.
     * If the line has no order, delete any linked timesheet.
     """
     from django.utils import timezone
 
     if line.order_id:
+        fitter = _match_fitter_for_invoice(line.invoice)
+        date = _parse_description_date(line.description, line.invoice.date) or timezone.now().date()
+
         ts, created = Timesheet.objects.get_or_create(
             purchase_invoice_line=line,
             defaults={
                 'order': line.order,
                 'timesheet_type': 'installation',
-                'date': line.invoice.date or timezone.now().date(),
+                'fitter': fitter,
+                'date': date,
                 'description': line.description,
             },
         )
         if not created:
-            # Keep in sync if order or cost changed
             changed = False
             if ts.order_id != line.order_id:
                 ts.order = line.order
                 changed = True
             if ts.description != line.description:
                 ts.description = line.description
+                changed = True
+            if fitter and ts.fitter_id != fitter.id:
+                ts.fitter = fitter
                 changed = True
             if changed:
                 ts.save()
@@ -501,7 +573,10 @@ def purchase_invoices_list(request):
 @login_required
 def purchase_invoice_detail(request, invoice_id):
     invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
-    line_items = invoice.line_items.select_related('order').all()
+    from django.db.models import F
+    line_items = invoice.line_items.select_related('order').order_by(
+        F('order__sale_number').asc(nulls_last=True), 'sort_order', 'id'
+    )
 
     # Build per-order allocation summary
     order_allocations = {}
@@ -927,6 +1002,9 @@ def _recalc_invoice_total(invoice):
 
 
 def _line_to_dict(line):
+    customer_name = ''
+    if line.order:
+        customer_name = f"{line.order.first_name} {line.order.last_name}".strip()
     return {
         'id': line.id,
         'description': line.description,
@@ -934,8 +1012,10 @@ def _line_to_dict(line):
         'rate': str(line.rate),
         'line_total': str(line.line_total),
         'order_id': line.order_id,
+        'sale_number': line.order.sale_number if line.order else '',
+        'customer_name': customer_name,
         'order_label': (
-            f"{line.order.sale_number} – {line.order.first_name} {line.order.last_name}".strip(' –')
+            f"{line.order.sale_number} – {customer_name}".strip(' –')
             if line.order else ''
         ),
     }
@@ -1329,4 +1409,47 @@ def push_purchase_invoice_to_xero(request, invoice_id):
         'xero_id': xero_invoice_id,
         'xero_url': xero_url,
         'message': f'Invoice pushed to Xero as a draft bill (ID: {xero_invoice_id})',
+    })
+
+
+# ── Generate / re-sync timesheets from invoice lines ─────────────
+@login_required
+def resync_invoice_timesheets(request, invoice_id):
+    """Re-run _sync_timesheet_for_pi_line for every line on this invoice.
+
+    Creates missing timesheets, updates fitter/date on existing ones.
+    Returns a summary of what was created/updated/skipped.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    lines = invoice.line_items.select_related('order', 'invoice').all()
+
+    created_count = 0
+    updated_count = 0
+    skipped_count = 0
+    fitter_name = ''
+
+    fitter = _match_fitter_for_invoice(invoice)
+    if fitter:
+        fitter_name = fitter.name
+
+    for line in lines:
+        if not line.order_id:
+            skipped_count += 1
+            continue
+        existing = Timesheet.objects.filter(purchase_invoice_line=line).first()
+        _sync_timesheet_for_pi_line(line)
+        if existing:
+            updated_count += 1
+        else:
+            created_count += 1
+
+    return JsonResponse({
+        'success': True,
+        'created': created_count,
+        'updated': updated_count,
+        'skipped': skipped_count,
+        'fitter': fitter_name,
     })
