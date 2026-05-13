@@ -1319,54 +1319,10 @@ def sale_create_order(request, pk):
         return redirect(_reverse('sale_detail', kwargs={'pk': pk}) + '?tab=order')
 
     if request.method == 'POST':
-        customer = sale.customer
-
-        # Derive customer_number: must be 6 digits starting with '0'.
-        # Try customer.code first, then pad anthill_customer_id.
-        customer_number = ''
-        raw_cnum = (
-            (customer.code if customer else None)
-            or sale.anthill_customer_id
-            or ''
-        ).strip()
-        if len(raw_cnum) == 5 and raw_cnum.isdigit():
-            raw_cnum = '0' + raw_cnum
-        if len(raw_cnum) == 6 and raw_cnum.isdigit() and raw_cnum.startswith('0'):
-            customer_number = raw_cnum
-
-        # Derive name / address
-        first_name = (customer.first_name if customer else '') or ''
-        last_name = (customer.last_name if customer else '') or ''
-        if not first_name and not last_name and sale.customer_name:
-            parts = sale.customer_name.strip().split(' ', 1)
-            first_name = parts[0]
-            last_name = parts[1] if len(parts) > 1 else ''
-
-        anthill_id = (customer.anthill_customer_id if customer else '') or sale.anthill_customer_id or ''
-        address = (customer.address_1 or customer.address if customer else '') or ''
-        postcode = (customer.postcode if customer else '') or ''
-        order_date = sale.activity_date.date() if sale.activity_date else None
-        sale_number = (sale.anthill_activity_id or '').strip()
-
-        # Build POST-like data dict and use OrderForm so all logic runs
-        form_data = {
-            'customer': customer.pk if customer else '',
-            'first_name': first_name,
-            'last_name': last_name,
-            'sale_number': sale_number,
-            'customer_number': customer_number,
-            'order_date': order_date.isoformat() if order_date else '',
-            'fit_date': sale.fit_date.isoformat() if sale.fit_date else '',
-            'address': address,
-            'postcode': postcode,
-            'anthill_id': anthill_id,
-            'total_value_inc_vat': str(sale.sale_value or '0'),
-            'order_type': 'sale',
-            'os_doors_required': '',
-            'all_items_ordered': '',
-            'job_finished': '',
-        }
-        form = OrderForm(form_data)
+        # Use the submitted POST data directly — the template already rendered all
+        # fields (visible or hidden) with the correct pre-filled values, so the
+        # browser sends everything we need.
+        form = OrderForm(request.POST)
         if form.is_valid():
             order = form.save()
             sale.order = order

@@ -471,7 +471,7 @@ function autoPopulateFromFilename(filename) {
 
 let iopoSupplierTimer = null;
 
-function openInlineOPOModal() {
+function openInlineOPOModal(prefill) {
     // Pre-fill supplier from the invoice modal if one is set
     const invSupplier = document.getElementById('new-pinv-supplier');
     const iopoSupplier = document.getElementById('iopo-supplier');
@@ -481,6 +481,23 @@ function openInlineOPOModal() {
     // Default date to today
     const dateEl = document.getElementById('iopo-date');
     if (dateEl && !dateEl.value) dateEl.value = todayISO();
+    // Apply any extra pre-fill data (gross, description)
+    if (prefill) {
+        if (prefill.gross != null) {
+            const grossEl = document.getElementById('iopo-gross');
+            const netEl   = document.getElementById('iopo-net');
+            if (grossEl) grossEl.value = prefill.gross.toFixed(2);
+            if (netEl)   netEl.value   = prefill.gross.toFixed(2); // net = gross (labour invoice, no VAT assumed)
+            document.getElementById('iopo-vat').value = '0.00';
+        }
+        if (prefill.description) {
+            document.getElementById('iopo-description').value = prefill.description;
+        }
+        if (prefill.date) {
+            const d = document.getElementById('iopo-date');
+            if (d) d.value = prefill.date;
+        }
+    }
     // Clear any previous error
     const err = document.getElementById('iopo-error');
     if (err) { err.style.display = 'none'; err.textContent = ''; }
@@ -488,6 +505,27 @@ function openInlineOPOModal() {
     const btn = document.getElementById('iopo-submit-btn');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> Create OPO'; }
     document.getElementById('inline-opo-modal').classList.add('open');
+}
+
+function openInlineOPOFromLines() {
+    // Collect current line items from the invoice modal
+    const lines = [];
+    let total = 0;
+    document.querySelectorAll('#modal-lines .pinv-line-row').forEach(row => {
+        const desc = (row.querySelector('.pinv-line-desc')?.value || '').trim();
+        const amount = parseFloat(row.querySelector('.pinv-line-rate')?.value) || 0;
+        if (desc || amount) {
+            lines.push({ desc, amount });
+            total += amount;
+        }
+    });
+    if (!lines.length) {
+        alert('Add some line items first.');
+        return;
+    }
+    const description = lines.map(l => l.amount ? `${l.desc || '(no description)'}  £${l.amount.toFixed(2)}` : l.desc).join('\n');
+    const invoiceDate = document.getElementById('new-pinv-date')?.value || '';
+    openInlineOPOModal({ gross: total, description, date: invoiceDate });
 }
 
 function closeInlineOPOModal(evt) {
