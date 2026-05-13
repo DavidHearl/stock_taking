@@ -217,22 +217,20 @@ body.light-mode .badge-acc-added {
 <div class="card">
     <table class="table orders-table" id="order-table">
         <colgroup>
-            <col style="width:4%">   <!-- Atlas Sale -->
-            <col style="width:7%">   <!-- First Name -->
+            <col style="width:9%">   <!-- First Name -->
             <col style="width:9%">   <!-- Last Name -->
-            <col style="width:6%">   <!-- Sale # -->
+            <col style="width:7%">   <!-- Sale # -->
             <col style="width:8%">   <!-- Fit Date -->
-            <col style="width:9%">   <!-- Boards PO -->
-            <col style="width:9%">   <!-- OS Doors -->
-            <col style="width:12%">  <!-- Accessories -->
+            <col style="width:10%">  <!-- Boards PO -->
+            <col style="width:10%">  <!-- OS Doors -->
+            <col style="width:13%">  <!-- Accessories -->
             <col style="width:7%">   <!-- Ordered -->
-            <col style="width:8%">   <!-- Payment -->
+            <col style="width:9%">   <!-- Payment -->
             <col style="width:10%">  <!-- Anthill Links -->
-            <col style="width:11%">  <!-- Actions -->
+            <col style="width:8%">   <!-- Actions -->
         </colgroup>
         <thead>
             <tr>
-                <th>Sale</th>
                 <th class="sortable" data-sort="first_name">
                     First Name 
                     {% if current_sort == 'first_name' %}
@@ -279,17 +277,6 @@ body.light-mode .badge-acc-added {
                 id="main-{{ order.sale_number }}"
                 data-sale-number="{{ order.sale_number }}"
             >
-                <td onclick="event.stopPropagation();" style="text-align:center;">
-                    {% with local_sale_pk=sale_pk_map|get_item:order.sale_number %}
-                        {% if local_sale_pk %}
-                            <a href="{% url 'sale_detail' local_sale_pk %}" class="local-sale-link" title="Open local sale">
-                                <i class="bi bi-box-arrow-up-right"></i>
-                            </a>
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    {% endwith %}
-                </td>
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
                 <td>{{ order.sale_number }}</td>
@@ -302,7 +289,7 @@ body.light-mode .badge-acc-added {
                             <span class="status-icon warning" title="Boards Not Required">&ndash;</span>
                         {% elif order.boards_po %}
                             <div class="status-cell">
-                                <a class="po-link" href="{% url 'order_details' order.id %}">
+                                <a class="po-link" href="{{ order_href_map|get_item:order.id }}">
                                     {{ order.boards_po.po_number }}
                                 </a>
                                 {% if order.boards_po.boards_ordered %}
@@ -312,7 +299,7 @@ body.light-mode .badge-acc-added {
                                 {% endif %}
                             </div>
                         {% else %}
-                            <a href="{% url 'order_details' order.id %}" class="text-muted">
+                            <a href="{{ order_href_map|get_item:order.id }}" class="text-muted">
                                 Not assigned
                             </a>
                         {% endif %}
@@ -324,7 +311,7 @@ body.light-mode .badge-acc-added {
                 <td>
                     {% if order.os_doors.exists or order.os_doors_required %}
                         <div class="status-cell">
-                            <a class="po-link" href="{% url 'order_details' order.id %}">
+                            <a class="po-link" href="{{ order_href_map|get_item:order.id }}">
                                 {% if order.os_doors_po %}
                                     {{ order.os_doors_po }}
                                 {% elif order.os_doors_required %}
@@ -386,18 +373,18 @@ body.light-mode .badge-acc-added {
                     {% with rem_pk=remedials_map|get_item:order.id %}
                     {% if rem_pk %}
                     <div style="display:flex; gap:4px;">
-                        <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="flex:1; display:block; text-align:center;">Details</a>
-                        <a href="{% url 'remedial_detail' rem_pk %}" class="btn btn-sm btn-remedial" style="flex:1; text-align:center;" title="View remedial">Remedial</a>
+                        <a href="{{ order_href_map|get_item:order.id }}" class="btn btn-sm btn-outline-primary" style="flex:1;">Details</a>
+                        <a href="{% url 'remedial_detail' rem_pk %}" class="btn btn-sm btn-remedial" style="flex:1;" title="View remedial">Remedial</a>
                     </div>
                     {% else %}
-                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="width: 100%; display: block; text-align: center;">Details</a>
+                    <a href="{{ order_href_map|get_item:order.id }}" class="btn btn-sm btn-outline-primary" style="width: 100%;">Details</a>
                     {% endif %}
                     {% endwith %}
                 </td>
             </tr>
 
             <tr class="detail-row hidden pfp-row" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="12" class="detail-cell">
+                <td colspan="11" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>
@@ -405,7 +392,7 @@ body.light-mode .badge-acc-added {
 
             {% if pfp_orders %}
             <tr id="pfp-divider" class="pfp-divider-row">
-                <td colspan="12" class="pfp-divider-cell">
+                <td colspan="11" class="pfp-divider-cell">
                     <i class="bi bi-clock"></i>
                     PFP &mdash; Pending Fit Planning &nbsp;&middot;&nbsp; {{ pfp_orders|length }} order{{ pfp_orders|length|pluralize }} with no dates &nbsp;|&nbsp; dated orders below &darr;
                 </td>
@@ -420,17 +407,6 @@ body.light-mode .badge-acc-added {
                 data-sale-number="{{ order.sale_number }}"
                 data-fit-date="{{ order.fit_date|date:'Y-m-d'|default:'' }}"
             >
-                <td onclick="event.stopPropagation();" style="text-align:center;">
-                    {% with local_sale_pk=sale_pk_map|get_item:order.sale_number %}
-                        {% if local_sale_pk %}
-                            <a href="{% url 'sale_detail' local_sale_pk %}" class="local-sale-link" title="Open local sale">
-                                <i class="bi bi-box-arrow-up-right"></i>
-                            </a>
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    {% endwith %}
-                </td>
                 <td>{{ order.first_name }}</td>
                 <td>{{ order.last_name }}</td>
                 <td>{{ order.sale_number }}</td>
@@ -443,7 +419,7 @@ body.light-mode .badge-acc-added {
                             <span class="status-icon warning" title="Boards Not Required">&ndash;</span>
                         {% elif order.boards_po %}
                             <div class="status-cell">
-                                <a class="po-link" href="{% url 'order_details' order.id %}">
+                                <a class="po-link" href="{{ order_href_map|get_item:order.id }}">
                                     {{ order.boards_po.po_number }}
                                 </a>
                                 {% if order.boards_po.boards_ordered %}
@@ -453,7 +429,7 @@ body.light-mode .badge-acc-added {
                                 {% endif %}
                             </div>
                         {% else %}
-                            <a href="{% url 'order_details' order.id %}" class="text-muted">
+                            <a href="{{ order_href_map|get_item:order.id }}" class="text-muted">
                                 Not assigned
                             </a>
                         {% endif %}
@@ -465,7 +441,7 @@ body.light-mode .badge-acc-added {
                 <td>
                     {% if order.os_doors.exists or order.os_doors_required %}
                         <div class="status-cell">
-                            <a class="po-link" href="{% url 'order_details' order.id %}">
+                            <a class="po-link" href="{{ order_href_map|get_item:order.id }}">
                                 {% if order.os_doors_po %}
                                     {{ order.os_doors_po }}
                                 {% elif order.os_doors_required %}
@@ -527,18 +503,18 @@ body.light-mode .badge-acc-added {
                     {% with rem_pk=remedials_map|get_item:order.id %}
                     {% if rem_pk %}
                     <div style="display:flex; gap:4px;">
-                        <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="flex:1; display:block; text-align:center;">Details</a>
-                        <a href="{% url 'remedial_detail' rem_pk %}" class="btn btn-sm btn-remedial" style="flex:1; text-align:center;" title="View remedial">Remedial</a>
+                        <a href="{{ order_href_map|get_item:order.id }}" class="btn btn-sm btn-outline-primary" style="flex:1;">Details</a>
+                        <a href="{% url 'remedial_detail' rem_pk %}" class="btn btn-sm btn-remedial" style="flex:1;" title="View remedial">Remedial</a>
                     </div>
                     {% else %}
-                    <a href="{% url 'order_details' order.id %}" class="btn btn-sm btn-outline-primary" style="width: 100%; display: block; text-align: center;">Details</a>
+                    <a href="{{ order_href_map|get_item:order.id }}" class="btn btn-sm btn-outline-primary" style="width: 100%;">Details</a>
                     {% endif %}
                     {% endwith %}
                 </td>
             </tr>
 
             <tr class="detail-row hidden" id="details-{{ order.sale_number }}" data-sale-number="{{ order.sale_number }}">
-                <td colspan="12" class="detail-cell">
+                <td colspan="11" class="detail-cell">
                     <div class="loading-spinner">Loading order details...</div>
                 </td>
             </tr>

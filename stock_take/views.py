@@ -150,7 +150,8 @@ def ordering(request):
     
     # Build financial map: sale_number -> {sale_value, payments_total, outstanding}
     # Looks up AnthillSale by anthill_activity_id matching the order's sale_number
-    all_sale_numbers = list(orders.values_list('sale_number', flat=True))
+    order_data = list(orders.values_list('id', 'sale_number'))
+    all_sale_numbers = [sn for _, sn in order_data]
     fin_rows = (
         AnthillSale.objects
         .filter(anthill_activity_id__in=all_sale_numbers)
@@ -179,6 +180,17 @@ def ordering(request):
         sale_number = row['anthill_activity_id']
         if sale_number not in sale_pk_map:
             sale_pk_map[sale_number] = row['pk']
+
+    # Build href map: order_id -> URL to use for the "Details" link.
+    # Orders with a matched AnthillSale go to sale_detail (combined view), others fall back.
+    from django.urls import reverse as _reverse
+    order_href_map = {}
+    for order_id, sale_number in order_data:
+        sale_pk = sale_pk_map.get(sale_number)
+        if sale_pk:
+            order_href_map[order_id] = _reverse('sale_detail', kwargs={'pk': sale_pk}) + '?tab=order'
+        else:
+            order_href_map[order_id] = _reverse('order_details', kwargs={'order_id': order_id})
 
     # Build remedials map: original_order_id -> remedial.pk (only non-completed)
     remedials_map = {
@@ -214,6 +226,7 @@ def ordering(request):
         'wip_orders': wip_orders,
         'financial_map': financial_map,
         'sale_pk_map': sale_pk_map,
+        'order_href_map': order_href_map,
         'remedials_map': remedials_map,
         'anthill_orders_to_place_count': anthill_orders_to_place_count,
         'all_existing_sale_numbers': all_existing_sale_numbers,
@@ -6084,7 +6097,16 @@ def _build_order_context(order, request):
 def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
-    
+
+    # If this order is linked to an AnthillSale, redirect to the combined sale+order view.
+    # First check the FK relation, then fall back to matching via sale_number.
+    linked_sale = order.anthill_sale.first()
+    if not linked_sale and order.sale_number:
+        from .models import AnthillSale as _AnthillSale
+        linked_sale = _AnthillSale.objects.filter(anthill_activity_id=order.sale_number).first()
+    if linked_sale:
+        return redirect('sale_detail', pk=linked_sale.pk)
+
     # Get or create workflow progress for this order
     from .models import OrderWorkflowProgress, WorkflowStage, TaskCompletion
     workflow_progress, created = OrderWorkflowProgress.objects.get_or_create(

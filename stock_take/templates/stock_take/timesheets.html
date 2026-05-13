@@ -105,6 +105,7 @@
                     <span style="font-size:0.75rem;color:var(--text-secondary);" id="manufacturing-legend">
                         <span class="legend-break"></span> Break
                     </span>
+                    <button type="button" class="btn btn-secondary btn-sm" id="gavin-toggle-btn" onclick="toggleGavin()" title="Show/Hide Gavin"><i class="bi bi-three-dots"></i></button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllAssignments()"><i class="bi bi-x-circle"></i> Clear</button>
                     <button type="button" class="btn btn-primary btn-sm" id="save-week-btn" onclick="saveWeek()"><i class="bi bi-floppy"></i> Save Week</button>
                 </div>
@@ -283,7 +284,7 @@
 {% endif %}
 
 <!-- Slot assignment popover -->
-<div id="slot-popover" style="display:none;position:fixed;z-index:900;min-width:300px;max-width:340px;">
+<div id="slot-popover" style="display:none;position:fixed;z-index:900;min-width:400px;max-width:400px;">
     <div class="slot-popover-inner">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
             <strong style="font-size:0.82rem;line-height:1.3;" id="popover-title">Assign Slot</strong>
@@ -311,16 +312,15 @@
             <div id="popover-po-results" class="autocomplete-dropdown" style="display:none;"></div>
         </div>
         <div class="form-group" style="margin-bottom:8px;">
-            <label style="font-size:0.78rem;color:var(--text-secondary);">Duration</label>
-            <select class="form-input" id="popover-duration" style="font-size:0.82rem;">
-                <option value="1">30 min</option>
-                <option value="2">1 hour</option>
-                <option value="3">1.5 hours</option>
-                <option value="4">2 hours</option>
-                <option value="6">3 hours</option>
-                <option value="8">4 hours</option>
-                <option value="10">5 hours</option>
-            </select>
+            <label style="font-size:0.78rem;color:var(--text-secondary);">Duration
+                <span id="popover-duration-label" style="font-weight:600;color:var(--text-primary);margin-left:6px;">30 min</span>
+            </label>
+            <input type="range" id="popover-duration" min="1" max="16" step="1" value="1"
+                   style="width:100%;accent-color:var(--primary-color);cursor:pointer;margin-top:4px;"
+                   oninput="updateDurationLabel(this.value)">
+            <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:var(--text-muted);margin-top:2px;">
+                <span>30m</span><span>1h</span><span>1.5h</span><span>2h</span><span>2.5h</span><span>3h</span><span>3.5h</span><span>4h</span><span>4.5h</span><span>5h</span><span>5.5h</span><span>6h</span><span>6.5h</span><span>7h</span><span>7.5h</span><span>8h</span>
+            </div>
         </div>
         <div class="form-group" style="margin-bottom:8px;">
             <label style="font-size:0.78rem;color:var(--text-secondary);">Description <span id="popover-desc-hint" style="color:var(--text-secondary);">(optional)</span></label>
@@ -351,6 +351,36 @@
 <div id="popover-backdrop" style="display:none;position:fixed;inset:0;z-index:899;" onclick="closePopover()"></div>
    
 <script>
+// ── Gavin toggle ─────────────────────────────────────────────────────────────
+let _gavinHidden = false;
+function toggleGavin() {
+    const gavinIdx = WORKERS.findIndex(w => w.name.toLowerCase().includes('gavin'));
+    if (gavinIdx === -1) return;
+    _gavinHidden = !_gavinHidden;
+    // Collapse cells rather than hiding the row — the date cell has rowspan and
+    // must stay in the DOM or the dates column collapses.
+    document.querySelectorAll('#grid-body tr').forEach(tr => {
+        const workerCell = tr.querySelector('td.cell-worker');
+        if (workerCell && workerCell.title.toLowerCase().includes('gavin')) {
+            tr.classList.toggle('worker-row-hidden', _gavinHidden);
+        }
+    });
+    const btn = document.getElementById('gavin-toggle-btn');
+    if (btn) {
+        btn.classList.toggle('active', _gavinHidden);
+        btn.title = _gavinHidden ? 'Show Gavin' : 'Hide Gavin';
+    }
+}
+
+function updateDurationLabel(val) {
+    const mins = parseInt(val) * 30;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const text = h && m ? `${h}h ${m}m` : h ? `${h} hour${h !== 1 ? 's' : ''}` : `${m} min`;
+    const lbl = document.getElementById('popover-duration-label');
+    if (lbl) lbl.textContent = text;
+}
+
 // 
 // Tabs
 // 
@@ -560,6 +590,21 @@ function buildManufacturingLegend(){
     ).join(' &nbsp; ')+' &nbsp; <span class="legend-break"></span> Break';
 }
 
+// Split an array of span slots into contiguous segments separated by break slots in GRID_SLOTS
+function getBreakSegments(spanSlots){
+    if(!spanSlots.length) return [];
+    const segs=[[spanSlots[0]]];
+    for(let i=1;i<spanSlots.length;i++){
+        const prevIdx=GRID_SLOTS.indexOf(spanSlots[i-1]);
+        const currIdx=GRID_SLOTS.indexOf(spanSlots[i]);
+        let gapHasBreak=false;
+        for(let j=prevIdx+1;j<currIdx;j++){ if(BREAK_SLOTS.has(GRID_SLOTS[j])){ gapHasBreak=true; break; } }
+        if(gapHasBreak) segs.push([spanSlots[i]]);
+        else segs[segs.length-1].push(spanSlots[i]);
+    }
+    return segs;
+}
+
 // Get consecutive non-break slots starting from startSlot (inclusive), up to maxN
 function getSpanSlots(startSlot, maxN){
     const idx=GRID_SLOTS.indexOf(startSlot);
@@ -586,100 +631,115 @@ function getCellEl(wid,di,slot){
 
 function renderSpan(wid,di,startSlot,data){
     const spanSlots=getSpanSlots(startSlot,data.span_len);
+    const segments=getBreakSegments(spanSlots);
+    const fullLabel=data.order_label+(data.description?' \u2014 '+data.description:'');
 
-    spanSlots.forEach((slot,i)=>{
+    // First pass: set base class + re-attach events + clear innerHTML on every slot cell
+    spanSlots.forEach(slot=>{
         const td=getCellEl(wid,di,slot);
         if(!td)return;
         const wi=data.workerIdx;
         td.className=`grid-slot assigned-${wi}`;
         td.dataset.workerId=wid; td.dataset.workerIdx=wi; td.dataset.dayIdx=di; td.dataset.slot=slot;
-        // Re-attach events (lost when className was replaced)
         td.addEventListener('click',    onSlotClick);
         td.addEventListener('dragover',  onDragOver);
         td.addEventListener('dragleave', onDragLeave);
         td.addEventListener('drop',      onDrop);
-
-        const isStart  =i===0;
-        const isEnd    =i===spanSlots.length-1;
-        const isMid    =!isStart&&!isEnd;
-
-        if(spanSlots.length>1){
-            if(isStart)     td.classList.add('span-start');
-            else if(isEnd)  td.classList.add('span-end');
-            else             td.classList.add('span-mid');
-        }
-
         td.innerHTML='';
-        if(isStart){
-            const pill=document.createElement('span');
-            const isMulti = spanSlots.length > 1;
-            pill.className=`slot-pill slot-pill-${wi}`+(isMulti?' pill-span':'');
-            const fullLabel = data.order_label+(data.description?' \u2014 '+data.description:'');
-            pill.title = fullLabel;
-            if(isMulti){
-                // Initial rough width; corrected in rAF once cells are in the DOM
-                const roughW = spanSlots.length * 57 - 8;
-                pill.style.cssText = `position:absolute; top:4px; bottom:4px; left:4px;
-                    width:${roughW}px; max-width:none; z-index:3;
-                    box-sizing:border-box; border-radius:4px;`;
-                pill.textContent = fullLabel;
-                // Precise width from actual bounding rects
-                requestAnimationFrame(()=>{
-                    const firstTd=getCellEl(wid,di,startSlot);
-                    const lastTd =getCellEl(wid,di,spanSlots[spanSlots.length-1]);
-                    if(firstTd&&lastTd&&pill.parentNode){
-                        const fr=firstTd.getBoundingClientRect(), lr=lastTd.getBoundingClientRect();
-                        pill.style.width=(lr.right - fr.left - 4 - 10)+'px'; // 4px left inset, 10px resize handle
-                    }
-                });
-            } else {
-                pill.textContent = data.order_label;
+    });
+
+    // Second pass: per-segment span classes, pills, and resize handle
+    segments.forEach((segSlots,segIdx)=>{
+        const isFirstSeg=segIdx===0;
+        const isLastSeg =segIdx===segments.length-1;
+        segSlots.forEach((slot,i)=>{
+            const td=getCellEl(wid,di,slot);
+            if(!td)return;
+            const wi=data.workerIdx;
+            const isSegStart=i===0;
+            const isSegEnd  =i===segSlots.length-1;
+            if(segSlots.length>1){
+                if(isSegStart)     td.classList.add('span-start');
+                else if(isSegEnd)  td.classList.add('span-end');
+                else               td.classList.add('span-mid');
             }
-            pill.draggable=true;
-            pill.addEventListener('dragstart',e=>{
-                _dragSourceKey=slotKey(wid,di,startSlot);
-                _dragSourceIsFitter=false;
-                e.dataTransfer.effectAllowed='move';
-                e.dataTransfer.setData('text/plain',_dragSourceKey);
-                setTimeout(()=>spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.add('dragging');}),0);
-            });
-            pill.addEventListener('dragend',()=>{
-                spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.remove('dragging');});
-                _dragSourceKey=null;
-            });
-            td.appendChild(pill);
-        }
-        // continuation cells: background colour only (pill from start cell covers them)
-        // Resize handle on the last cell of every span (and single-slot assignments)
-        if(isEnd){
-            const handle=document.createElement('div');
-            handle.className='resize-handle';
-            handle.title='Drag to resize';
-            handle.addEventListener('mousedown',e=>{
-                e.preventDefault(); e.stopPropagation();
-                startResize(wid, di, startSlot, { ...data });
-            });
-            td.appendChild(handle);
-        }
+            // Pill in the first cell of each segment
+            if(isSegStart){
+                const pill=document.createElement('span');
+                const isMulti=segSlots.length>1;
+                pill.className=`slot-pill slot-pill-${wi}`+(isMulti?' pill-span':'');
+                pill.title=fullLabel;
+                if(isMulti){
+                    const roughW=segSlots.length*57-8;
+                    pill.style.cssText=`position:absolute; top:4px; bottom:4px; left:4px;
+                        width:${roughW}px; max-width:none; z-index:3;
+                        box-sizing:border-box; border-radius:4px;`;
+                    // Only show the label text in the very first segment
+                    pill.textContent=isFirstSeg?fullLabel:'';
+                    requestAnimationFrame(()=>{
+                        const firstTd=getCellEl(wid,di,segSlots[0]);
+                        const lastTd =getCellEl(wid,di,segSlots[segSlots.length-1]);
+                        if(firstTd&&lastTd&&pill.parentNode){
+                            const fr=firstTd.getBoundingClientRect(), lr=lastTd.getBoundingClientRect();
+                            // Leave room for resize handle only on the very last segment
+                            const rightPad=isLastSeg?10:4;
+                            pill.style.width=(lr.right-fr.left-4-rightPad)+'px';
+                        }
+                    });
+                } else {
+                    pill.textContent=isFirstSeg?data.order_label:'';
+                }
+                pill.draggable=true;
+                pill.addEventListener('dragstart',e=>{
+                    _dragSourceKey=slotKey(wid,di,startSlot);
+                    _dragSourceIsFitter=false;
+                    e.dataTransfer.effectAllowed='move';
+                    e.dataTransfer.setData('text/plain',_dragSourceKey);
+                    setTimeout(()=>spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.add('dragging');}),0);
+                });
+                pill.addEventListener('dragend',()=>{
+                    spanSlots.forEach(s=>{const el=getCellEl(wid,di,s);if(el)el.classList.remove('dragging');});
+                    _dragSourceKey=null;
+                });
+                td.appendChild(pill);
+            }
+            // Resize handle only on the last cell of the last segment
+            if(isLastSeg&&isSegEnd){
+                const handle=document.createElement('div');
+                handle.className='resize-handle';
+                handle.title='Drag to resize';
+                handle.addEventListener('mousedown',e=>{
+                    e.preventDefault(); e.stopPropagation();
+                    startResize(wid, di, startSlot, { ...data });
+                });
+                td.appendChild(handle);
+            }
+        });
     });
 }
 
 function writeAssignment(wid,di,startSlot,data){
     const spanSlots=getSpanSlots(startSlot,data.span_len);
-    // Clear any previously assigned slots for this span range first
+    // Clear any previously assigned slots for this span range first — both data dict AND DOM cells
     spanSlots.forEach(slot=>{
         const key=slotKey(wid,di,slot);
         if(assignments[key]){
-            // If this was a span start, also clear its continuation slots
             if(assignments[key].is_start){
                 const old=assignments[key];
-                getSpanSlots(slot,old.span_len).forEach(s=>{delete assignments[slotKey(wid,di,s)];});
+                getSpanSlots(slot,old.span_len).forEach(s=>{
+                    delete assignments[slotKey(wid,di,s)];
+                    const td=getCellEl(wid,di,s);
+                    if(td){ td.className='grid-slot worker-row-'+td.dataset.workerIdx; td.innerHTML=''; }
+                });
             } else if(assignments[key].is_cont){
-                // find the start of this continuation and clear it
                 const startKey=assignments[key].span_start_key;
                 if(startKey&&assignments[startKey]){
                     const [sw,sd,ss]=startKey.split('__');
-                    getSpanSlots(ss,assignments[startKey].span_len).forEach(s=>{delete assignments[slotKey(sw,sd,s)];});
+                    getSpanSlots(ss,assignments[startKey].span_len).forEach(s=>{
+                        delete assignments[slotKey(sw,sd,s)];
+                        const td=getCellEl(sw,sd,s);
+                        if(td){ td.className='grid-slot worker-row-'+td.dataset.workerIdx; td.innerHTML=''; }
+                    });
                 }
             }
         }
@@ -899,7 +959,9 @@ function onSlotClick(e){
         document.getElementById('popover-po-id').value     = existing?.po_id   || '';
     }
     document.getElementById('popover-description').value = existing ? existing.description : '';
-    document.getElementById('popover-duration').value    = existing ? String(existing.span_len||1) : '1';
+    const durVal = existing ? String(existing.span_len||1) : '1';
+    document.getElementById('popover-duration').value    = durVal;
+    updateDurationLabel(durVal);
     document.getElementById('popover-order-results').style.display='none';
     document.getElementById('popover-po-results').style.display='none';
     document.getElementById('popover-clear-btn').style.display = existing ? 'inline-block':'none';
@@ -1244,7 +1306,12 @@ function buildFitterLegend(){
 
 function renderFitterSpan(wid, di, startSlot, data){
     const spanSlots=getSpanSlots(startSlot,data.span_len);
-    spanSlots.forEach((slot,i)=>{
+    const segments=getBreakSegments(spanSlots);
+    const isCalendar=!!data.is_calendar;
+    const fullLabel=data.order_label+(data.description?' \u2014 '+data.description:'');
+
+    // First pass: base class, events, clear innerHTML
+    spanSlots.forEach(slot=>{
         const td=getCellElFitter(wid,di,slot);
         if(!td)return;
         const wi=data.workerIdx;
@@ -1254,74 +1321,91 @@ function renderFitterSpan(wid, di, startSlot, data){
         td.addEventListener('dragover',  onDragOver);
         td.addEventListener('dragleave', onDragLeave);
         td.addEventListener('drop',      onDrop);
-
-        const isStart=i===0, isEnd=i===spanSlots.length-1;
-        if(spanSlots.length>1){
-            if(isStart)     td.classList.add('span-start');
-            else if(isEnd)  td.classList.add('span-end');
-            else             td.classList.add('span-mid');
-        }
-
         td.innerHTML='';
-        if(isStart){
-            const pill=document.createElement('span');
-            const isMulti=spanSlots.length>1;
-            const isCalendar=!!data.is_calendar;
-            pill.className=`slot-pill fitter-pill-${wi}`+(isMulti?' pill-span':'')+(isCalendar?' calendar-pill':'');
-            const fullLabel=data.order_label+(data.description?' \u2014 '+data.description:'');
-            pill.title=isCalendar ? '\uD83D\uDCC5 '+fullLabel : fullLabel;
-            if(isMulti){
-                const roughW=spanSlots.length*57-8;
-                pill.style.cssText=`position:absolute; top:4px; bottom:4px; left:4px; width:${roughW}px; max-width:none; z-index:3; box-sizing:border-box; border-radius:4px;`;
-                pill.textContent=fullLabel;
-                requestAnimationFrame(()=>{
-                    const firstTd=getCellElFitter(wid,di,startSlot);
-                    const lastTd =getCellElFitter(wid,di,spanSlots[spanSlots.length-1]);
-                    if(firstTd&&lastTd&&pill.parentNode){
-                        const fr=firstTd.getBoundingClientRect(), lr=lastTd.getBoundingClientRect();
-                        pill.style.width=(lr.right-fr.left-4-10)+'px';
-                    }
+    });
+
+    // Second pass: per-segment span classes, pills, resize handle
+    segments.forEach((segSlots,segIdx)=>{
+        const isFirstSeg=segIdx===0;
+        const isLastSeg =segIdx===segments.length-1;
+        segSlots.forEach((slot,i)=>{
+            const td=getCellElFitter(wid,di,slot);
+            if(!td)return;
+            const wi=data.workerIdx;
+            const isSegStart=i===0, isSegEnd=i===segSlots.length-1;
+            if(segSlots.length>1){
+                if(isSegStart)    td.classList.add('span-start');
+                else if(isSegEnd) td.classList.add('span-end');
+                else              td.classList.add('span-mid');
+            }
+            if(isSegStart){
+                const pill=document.createElement('span');
+                const isMulti=segSlots.length>1;
+                pill.className=`slot-pill fitter-pill-${wi}`+(isMulti?' pill-span':'')+(isCalendar?' calendar-pill':'');
+                pill.title=isCalendar?'\uD83D\uDCC5 '+fullLabel:fullLabel;
+                if(isMulti){
+                    const roughW=segSlots.length*57-8;
+                    pill.style.cssText=`position:absolute; top:4px; bottom:4px; left:4px; width:${roughW}px; max-width:none; z-index:3; box-sizing:border-box; border-radius:4px;`;
+                    pill.textContent=isFirstSeg?fullLabel:'';
+                    requestAnimationFrame(()=>{
+                        const firstTd=getCellElFitter(wid,di,segSlots[0]);
+                        const lastTd =getCellElFitter(wid,di,segSlots[segSlots.length-1]);
+                        if(firstTd&&lastTd&&pill.parentNode){
+                            const fr=firstTd.getBoundingClientRect(), lr=lastTd.getBoundingClientRect();
+                            const rightPad=isLastSeg?10:4;
+                            pill.style.width=(lr.right-fr.left-4-rightPad)+'px';
+                        }
+                    });
+                } else { pill.textContent=isFirstSeg?data.order_label:''; }
+                pill.draggable=true;
+                pill.addEventListener('dragstart',e=>{
+                    _dragSourceKey=slotKey(wid,di,startSlot);
+                    _dragSourceIsFitter=true;
+                    e.dataTransfer.effectAllowed='move';
+                    e.dataTransfer.setData('text/plain',_dragSourceKey);
+                    setTimeout(()=>spanSlots.forEach(s=>{const el=getCellElFitter(wid,di,s);if(el)el.classList.add('dragging');}),0);
                 });
-            } else { pill.textContent=data.order_label; }
-            pill.draggable=true;
-            pill.addEventListener('dragstart',e=>{
-                _dragSourceKey=slotKey(wid,di,startSlot);
-                _dragSourceIsFitter=true;
-                e.dataTransfer.effectAllowed='move';
-                e.dataTransfer.setData('text/plain',_dragSourceKey);
-                setTimeout(()=>spanSlots.forEach(s=>{const el=getCellElFitter(wid,di,s);if(el)el.classList.add('dragging');}),0);
-            });
-            pill.addEventListener('dragend',()=>{
-                spanSlots.forEach(s=>{const el=getCellElFitter(wid,di,s);if(el)el.classList.remove('dragging');});
-                _dragSourceKey=null; _dragSourceIsFitter=false;
-            });
-            td.appendChild(pill);
-        }
-        if(isEnd){
-            const handle=document.createElement('div');
-            handle.className='resize-handle'; handle.title='Drag to resize';
-            handle.addEventListener('mousedown',e=>{
-                e.preventDefault(); e.stopPropagation();
-                startResize(wid, di, startSlot, { ...data }, true);
-            });
-            td.appendChild(handle);
-        }
+                pill.addEventListener('dragend',()=>{
+                    spanSlots.forEach(s=>{const el=getCellElFitter(wid,di,s);if(el)el.classList.remove('dragging');});
+                    _dragSourceKey=null; _dragSourceIsFitter=false;
+                });
+                td.appendChild(pill);
+            }
+            if(isLastSeg&&isSegEnd){
+                const handle=document.createElement('div');
+                handle.className='resize-handle'; handle.title='Drag to resize';
+                handle.addEventListener('mousedown',e=>{
+                    e.preventDefault(); e.stopPropagation();
+                    startResize(wid, di, startSlot, { ...data }, true);
+                });
+                td.appendChild(handle);
+            }
+        });
     });
 }
 
 function writeFitterAssignment(wid, di, startSlot, data){
     const spanSlots=getSpanSlots(startSlot,data.span_len);
+    // Clear previously assigned slots — both data dict AND DOM cells
     spanSlots.forEach(slot=>{
         const key=slotKey(wid,di,slot);
         if(fitterAssignments[key]){
             if(fitterAssignments[key].is_start){
                 const old=fitterAssignments[key];
-                getSpanSlots(slot,old.span_len).forEach(s=>{delete fitterAssignments[slotKey(wid,di,s)];});
+                getSpanSlots(slot,old.span_len).forEach(s=>{
+                    delete fitterAssignments[slotKey(wid,di,s)];
+                    const td=getCellElFitter(wid,di,s);
+                    if(td){ td.className='grid-slot fitter-row-'+td.dataset.workerIdx; td.innerHTML=''; }
+                });
             } else if(fitterAssignments[key].is_cont){
                 const startKey=fitterAssignments[key].span_start_key;
                 if(startKey&&fitterAssignments[startKey]){
                     const [sw,sd,ss]=startKey.split('__');
-                    getSpanSlots(ss,fitterAssignments[startKey].span_len).forEach(s=>{delete fitterAssignments[slotKey(sw,sd,s)];});
+                    getSpanSlots(ss,fitterAssignments[startKey].span_len).forEach(s=>{
+                        delete fitterAssignments[slotKey(sw,sd,s)];
+                        const td=getCellElFitter(sw,sd,s);
+                        if(td){ td.className='grid-slot fitter-row-'+td.dataset.workerIdx; td.innerHTML=''; }
+                    });
                 }
             }
         }

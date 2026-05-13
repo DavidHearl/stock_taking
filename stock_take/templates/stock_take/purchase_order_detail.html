@@ -315,6 +315,9 @@
                 {% endif %}
             </h3>
             <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn btn-sm btn-save" id="products-save-btn" onclick="savePO()" style="display:none;">
+                    <i class="bi bi-floppy"></i> Save Changes
+                </button>
                 <button class="btn btn-sm btn-add-freight" onclick="toggleFreightEdit()">
                     <i class="bi bi-truck"></i> Freight{% if purchase_order.freight_cost %} · £{{ purchase_order.freight_cost|floatformat:2 }}{% endif %}
                 </button>
@@ -410,19 +413,19 @@
                             <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price|floatformat:2 }}" oninput="recalcRowLineTotal(this)">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price|floatformat:2 }}" oninput="recalcRowLineTotal(this);markProductsDirty()">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="{{ product.stock_item.pack_size|default:1 }}" min="{{ product.stock_item.pack_size|default:1 }}" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this)">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="{{ product.stock_item.pack_size|default:1 }}" min="{{ product.stock_item.pack_size|default:1 }}" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this);markProductsDirty()">
                         </td>
                         <td class="text-center">
                             {% if product.stock_item and product.stock_item.pack_size > 1 %}<span class="po-pack-badge">Pack: {{ product.stock_item.pack_size }}</span>{% else %}-{% endif %}
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="1" value="{{ product.received_quantity|floatformat:0 }}">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="1" value="{{ product.received_quantity|floatformat:0 }}" oninput="markProductsDirty()">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price|floatformat:2 }}">
+                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price|floatformat:2 }}" oninput="markProductsDirty()">
                         </td>
                         <td class="text-right">
                             <span class="po-line-total-display">£{{ product.line_total|floatformat:2 }}</span>
@@ -1834,8 +1837,10 @@ function cancelEdit() {
 
 function savePO() {
     const saveBtn = document.getElementById('save-btn');
+    const productsSaveBtn = document.getElementById('products-save-btn');
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
+    if (productsSaveBtn) { productsSaveBtn.disabled = true; productsSaveBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...'; }
     
     // Gather header fields
     const data = {};
@@ -1877,12 +1882,14 @@ function savePO() {
             showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
             saveBtn.disabled = false;
             saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+            if (productsSaveBtn) { productsSaveBtn.disabled = false; productsSaveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Changes'; }
         }
     })
     .catch(err => {
         showNotification('Network error: ' + err.message, 'error');
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+        if (productsSaveBtn) { productsSaveBtn.disabled = false; productsSaveBtn.innerHTML = '<i class="bi bi-floppy"></i> Save Changes'; }
     });
 }
 
@@ -2139,6 +2146,11 @@ function recalcRowLineTotal(input) {
     const total = (price * qty).toFixed(2);
     const display = row.querySelector('.po-line-total-display');
     if (display) display.textContent = '£' + total;
+}
+
+function markProductsDirty() {
+    const btn = document.getElementById('products-save-btn');
+    if (btn) btn.style.display = 'inline-flex';
 }
 
 /* ── Product Search ─────────────────────────────── */

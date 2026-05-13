@@ -14,7 +14,7 @@ from django.db.models import Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, Supplier, Timesheet, log_activity
+from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, Supplier, Timesheet, log_activity, EnabledGLCode, OverheadPurchaseOrder
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,7 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
             return extracted
 
         text_lines: list[str] = []
+        all_tables: list = []
 
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
@@ -141,6 +142,12 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
                         page_text = None
                     if page_text:
                         text_lines.extend(page_text.split('\n'))
+                    try:
+                        page_tables = page.extract_tables()
+                        if page_tables:
+                            all_tables.extend(page_tables)
+                    except Exception:
+                        pass
 
         full_text = '\n'.join(text_lines)
 
@@ -307,6 +314,7 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
             r'[£\$€]?\s*([\d,]+\.\d{2})\s*$',        # line total (required)
             re.MULTILINE,
         )
+        _MONEY_CELL_RE = re.compile(r'^[£\$€\s]*[\d,]+\.\d{2}$')
 
         line_items_found = []
         seen_descriptions = set()
@@ -324,41 +332,90 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
         if known_total:
             summary_amounts.add(known_total)
 
-        for line in text_lines:
-            line = line.strip()
-            if not line:
+        # ── Strategy 1: table extraction (reliable for tabular PDFs) ────────
+        for table in all_tables:
+            if not table or len(table) < 2:
                 continue
-            if _SKIP_LINE_WORDS.match(line):
+            # Skip rows that are entirely empty
+            data_rows = [r for r in table[1:] if r and any((c or '').strip() for c in r)]
+            if not data_rows:
                 continue
-            m = _LINE_ITEM_RE.match(line)
-            if not m:
+            max_cols = max((len(r) for r in data_rows), default=0)
+            if max_cols < 2:
                 continue
-            desc = m.group(1).strip().rstrip('.')
-            qty_str = m.group(2) or '1'
-            amount_str = m.group(3).replace(',', '')
+            # Find the rightmost column where the majority of rows look like money amounts
+            amount_col = None
+            for ci in range(max_cols - 1, 0, -1):
+                money_count = sum(
+                    1 for r in data_rows
+                    if ci < len(r) and _MONEY_CELL_RE.match((r[ci] or '').strip())
+                )
+                if money_count >= max(1, len(data_rows) // 2):
+                    amount_col = ci
+                    break
+            if amount_col is None:
+                continue
+            for row in data_rows:
+                if not row:
+                    continue
+                desc = (row[0] or '').strip()
+                if not desc or len(desc) < 2:
+                    continue
+                if _SKIP_LINE_WORDS.match(desc):
+                    continue
+                if amount_col >= len(row):
+                    continue
+                amount_raw = re.sub(r'[£\$€,\s]', '', (row[amount_col] or '').strip())
+                if not amount_raw:
+                    continue
+                try:
+                    amount = round(float(amount_raw), 2)
+                except ValueError:
+                    continue
+                if amount_raw in summary_amounts:
+                    continue
+                if desc.lower() in seen_descriptions:
+                    continue
+                seen_descriptions.add(desc.lower())
+                line_items_found.append({'description': desc, 'quantity': 1, 'amount': amount})
 
-            # Skip if the amount matches any summary/footer amount
-            if amount_str in summary_amounts:
-                continue
-            # Skip duplicate descriptions
-            if desc.lower() in seen_descriptions:
-                continue
-            # Skip very short descriptions (likely header noise)
-            if len(desc) < 3:
-                continue
+        # ── Strategy 2: regex on raw text lines (fallback) ──────────────────
+        if not line_items_found:
+            for line in text_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if _SKIP_LINE_WORDS.match(line):
+                    continue
+                m = _LINE_ITEM_RE.match(line)
+                if not m:
+                    continue
+                desc = m.group(1).strip().rstrip('.')
+                qty_str = m.group(2) or '1'
+                amount_str = m.group(3).replace(',', '')
 
-            try:
-                amount = float(amount_str)
-                qty = float(qty_str)
-            except ValueError:
-                continue
+                # Skip if the amount matches any summary/footer amount
+                if amount_str in summary_amounts:
+                    continue
+                # Skip duplicate descriptions
+                if desc.lower() in seen_descriptions:
+                    continue
+                # Skip very short descriptions (likely header noise)
+                if len(desc) < 3:
+                    continue
 
-            seen_descriptions.add(desc.lower())
-            line_items_found.append({
-                'description': desc,
-                'quantity': qty if qty != 1.0 else 1,
-                'amount': round(amount, 2),
-            })
+                try:
+                    amount = float(amount_str)
+                    qty = float(qty_str)
+                except ValueError:
+                    continue
+
+                seen_descriptions.add(desc.lower())
+                line_items_found.append({
+                    'description': desc,
+                    'quantity': qty if qty != 1.0 else 1,
+                    'amount': round(amount, 2),
+                })
 
         if line_items_found:
             extracted['line_items'] = line_items_found
@@ -434,6 +491,8 @@ def purchase_invoices_list(request):
         'status_filter': status_filter,
         'search_query': search_query,
         'suppliers': suppliers,
+        'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
+        'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
     }
     return render(request, 'stock_take/purchase_invoices.html', context)
 

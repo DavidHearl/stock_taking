@@ -95,6 +95,9 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
             <button class="apay-kebab-item" onclick="openExemptionModal(); closeKebab();">
                 <i class="bi bi-funnel"></i> Manage Exemption List
             </button>
+            <button class="apay-kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
+                <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
+            </button>
         </div>
     </div>
 </div>
@@ -129,7 +132,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
         </thead>
         <tbody>
             {% for email in emails %}
-            <tr class="apay-row {% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% elif email.po_match_class %}{{ email.po_match_class }}{% endif %}" id="email-row-{{ email.id }}">
+            <tr class="apay-row {% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% elif email.po_match_class %}{{ email.po_match_class }}{% endif %}" id="email-row-{{ email.id }}" data-matched="{% if email.purchase_invoice %}1{% else %}0{% endif %}">
                 <td style="text-align:center;">
                     <input type="checkbox" class="apay-row-check" value="{{ email.id }}" onchange="updateBulkBar()">
                 </td>
@@ -815,6 +818,30 @@ function closeKebab() {
     document.getElementById('kebab-menu').style.display = 'none';
 }
 document.addEventListener('click', () => closeKebab());
+
+// ── Hide unmatched rows ───────────────────────────────────────────────────────
+let _hideUnmatched = {{ matched_only|yesno:'true,false' }};
+
+// Sync button appearance on page load
+(function() {
+    if (_hideUnmatched) {
+        const icon  = document.getElementById('hide-unmatched-icon');
+        const label = document.getElementById('hide-unmatched-label');
+        if (icon)  icon.className  = 'bi bi-eye';
+        if (label) label.textContent = 'Show Unmatched';
+    }
+})();
+
+function toggleHideUnmatched() {
+    const params = new URLSearchParams(window.location.search);
+    if (_hideUnmatched) {
+        params.delete('matched_only');
+    } else {
+        params.set('matched_only', '1');
+    }
+    params.delete('page');
+    window.location.search = params.toString();
+}
 
 // ── Checkbox / bulk selection ─────────────────────────────────────────────────
 function toggleSelectAll(master) {

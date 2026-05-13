@@ -96,12 +96,15 @@
                     <div style="flex:1;min-width:0;position:relative;">
                         <input type="text" id="new-pinv-supplier" placeholder="Search suppliers…"
                                class="pinv-input" style="width:100%;box-sizing:border-box;"
-                               autocomplete="off" oninput="modalSearchSupplier(this.value)">
+                               autocomplete="off" oninput="modalSearchSupplier(this.value)"
+                               onblur="setTimeout(validateModalSupplier, 200)"
+                               data-supplier-id="">
                         <div id="new-pinv-supplier-dropdown"
                              style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
                                     background:var(--bg-primary);border:1px solid var(--border-color);
                                     border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
                                     max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                        <div id="new-pinv-supplier-warning" style="display:none;margin-top:4px;font-size:0.75rem;color:var(--danger-color);"><i class="bi bi-exclamation-triangle-fill"></i> Supplier not found — invoice will be saved without a linked supplier record.</div>
                     </div>
                 </div>
                 <div class="pinv-form-row">
@@ -110,24 +113,43 @@
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Purchase Order</label>
-                    <div style="flex:1;min-width:0;position:relative;">
-                        <input type="text" id="new-pinv-po-search" placeholder="Search order number…"
-                               class="pinv-input" style="width:100%;box-sizing:border-box;"
-                               autocomplete="off" oninput="modalSearchPO(this.value)" data-po-id="">
-                        <div id="new-pinv-po-dropdown"
-                             style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
-                                    background:var(--bg-primary);border:1px solid var(--border-color);
-                                    border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
-                                    max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                    <div style="flex:1;min-width:0;display:flex;gap:6px;">
+                        <div style="flex:1;min-width:0;position:relative;">
+                            <input type="text" id="new-pinv-po-search" placeholder="Search order number…"
+                                   class="pinv-input" style="width:100%;box-sizing:border-box;"
+                                   autocomplete="off" oninput="modalSearchPO(this.value)" data-po-id="">
+                            <div id="new-pinv-po-dropdown"
+                                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                                        background:var(--bg-primary);border:1px solid var(--border-color);
+                                        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
+                                        max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                        </div>
+                        <a href="{% url 'purchase_orders_list' %}?new=1" target="_blank"
+                           class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                           title="Create a new Purchase Order (opens in new tab)">
+                            <i class="bi bi-plus-lg"></i> New PO
+                        </a>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                                onclick="openInlineOPOModal()" title="Create a new Overhead PO">
+                            <i class="bi bi-plus-lg"></i> New OPO
+                        </button>
                     </div>
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Invoice Date</label>
-                    <input type="date" id="new-pinv-date" class="pinv-input">
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <input type="date" id="new-pinv-date" class="pinv-input" style="flex:1;min-width:0;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                                onclick="document.getElementById('new-pinv-date').value=todayISO()">Today</button>
+                    </div>
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Due Date</label>
-                    <input type="date" id="new-pinv-due-date" class="pinv-input">
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <input type="date" id="new-pinv-due-date" class="pinv-input" style="flex:1;min-width:0;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                                onclick="document.getElementById('new-pinv-due-date').value=todayISO()">Today</button>
+                    </div>
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Status</label>
@@ -168,6 +190,83 @@
             <button type="button" class="btn-cancel" onclick="closeCreateModal()">Cancel</button>
             <button type="button" class="btn-save" id="modal-confirm-btn" onclick="submitCreateInvoice()">
                 <i class="bi bi-check-lg"></i> Create Invoice
+            </button>
+        </div>
+    </div>
+</div>
+
+{# ─── Inline OPO Quick-Create Modal ────────────────────────────────────────── #}
+<div class="pinv-modal-overlay" id="inline-opo-modal" style="z-index:2500;" onclick="closeInlineOPOModal(event)">
+    <div class="pinv-modal-box" style="max-width:520px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 style="margin:0;font-size:1rem;"><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
+            <button type="button" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;" onclick="closeInlineOPOModal()">&times;</button>
+        </div>
+        <div class="pinv-modal-body">
+            <div class="pinv-form-rows">
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Supplier <span style="color:var(--danger-color);">*</span></label>
+                    <div style="position:relative;flex:1;min-width:0;">
+                        <input type="text" id="iopo-supplier" class="pinv-input" style="width:100%;box-sizing:border-box;"
+                               placeholder="Type to search…" autocomplete="off"
+                               oninput="iopoSearchSupplier(this.value)">
+                        <div id="iopo-supplier-dd"
+                             style="display:none;position:absolute;top:100%;left:0;right:0;z-index:2600;
+                                    background:var(--bg-primary);border:1px solid var(--border-color);
+                                    border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
+                                    max-height:180px;overflow-y:auto;margin-top:2px;"></div>
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Category</label>
+                    <select id="iopo-category" class="pinv-input">
+                        {% for val, label in opo_category_choices %}
+                        <option value="{{ val }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">PO Date</label>
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <input type="date" id="iopo-date" class="pinv-input" style="flex:1;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="document.getElementById('iopo-date').value=todayISO()">Today</button>
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Net (£)</label>
+                    <input type="number" id="iopo-net" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="iopoCalcGross()">
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">VAT (£)</label>
+                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
+                        <input type="number" id="iopo-vat" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="iopoCalcGross()" style="flex:1;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="iopoCalcVAT()">20%</button>
+                    </div>
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Gross (£)</label>
+                    <input type="number" id="iopo-gross" class="pinv-input" step="0.01" min="0" placeholder="0.00">
+                </div>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">GL Code</label>
+                    <select id="iopo-gl-code" class="pinv-input">
+                        <option value="">— Select GL code —</option>
+                        {% for gl in opo_gl_codes %}
+                        <option value="{{ gl.code }}">{{ gl.code }} – {{ gl.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="pinv-form-row" style="align-items:flex-start;">
+                    <label class="pinv-label" style="padding-top:6px;">Description</label>
+                    <textarea id="iopo-description" class="pinv-input" rows="2" placeholder="Brief description…"></textarea>
+                </div>
+            </div>
+            <div id="iopo-error" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(220,53,69,.08);border:1px solid rgba(220,53,69,.35);border-radius:6px;font-size:0.82rem;color:#dc3545;"></div>
+        </div>
+        <div class="pinv-modal-footer" style="justify-content:flex-end;">
+            <button type="button" class="btn-cancel" onclick="closeInlineOPOModal()">Cancel</button>
+            <button type="button" class="btn-save" id="iopo-submit-btn" onclick="submitInlineOPO()">
+                <i class="bi bi-check-lg"></i> Create OPO
             </button>
         </div>
     </div>

@@ -19,7 +19,7 @@ from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
-from .models import MailboxEmail, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder
+from .models import MailboxEmail, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, EnabledGLCode, OverheadPurchaseOrder
 from .permissions import page_permission_required
 from .purchase_invoice_views import _extract_pdf_fields, _parse_date, _parse_decimal
 from .services import graph_api
@@ -127,6 +127,18 @@ def accounts_payable_inbox(request):
             | db_models.Q(sender_email__icontains=search)
         )
 
+    matched_only = request.GET.get('matched_only', '') == '1'
+    if matched_only:
+        # Use a fresh queryset (no select_related) so .only() doesn't conflict
+        # with the deferred traversal restriction on processed_by.
+        lightweight = list(
+            MailboxEmail.objects.filter(is_processed=False, is_ignored=False)
+            .only('id', 'subject', 'sender_name', 'sender_email')
+        )
+        email_po_matches_all = _find_po_matches(lightweight)
+        matched_ids = list(email_po_matches_all.keys())
+        emails = emails.filter(id__in=matched_ids)
+
     total = MailboxEmail.objects.filter(is_ignored=False).count()
     unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False).count()
     processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True).count()
@@ -136,7 +148,7 @@ def accounts_payable_inbox(request):
         last=db_models.Max('synced_at')
     )['last']
 
-    paginator = Paginator(emails, 100)
+    paginator = Paginator(emails, 50)
     page_number = request.GET.get('page', 1)
     page_obj = paginator.get_page(page_number)
 
@@ -164,9 +176,12 @@ def accounts_payable_inbox(request):
         'is_configured': graph_api.is_configured(),
         'status_filter': status_filter,
         'search_query': search,
+        'matched_only': matched_only,
         'mailbox': mailbox,
         'last_synced': last_synced,
         'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
+        'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
+        'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
     })
 
 

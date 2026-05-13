@@ -335,7 +335,11 @@ def customer_save(request, pk):
                 elif not val:
                     val = None
             else:
-                val = val or None
+                # For non-nullable fields (no null=True), keep empty string rather than
+                # setting None, which would raise an IntegrityError on save.
+                field_instance = Customer._meta.get_field(field)
+                allows_null = getattr(field_instance, 'null', False)
+                val = (val or None) if allows_null else (val or '')
             setattr(customer, field, val)
             update_fields.append(field)
 
@@ -345,7 +349,11 @@ def customer_save(request, pk):
         update_fields.append('is_active')
 
     if update_fields:
-        customer.save(update_fields=update_fields)
+        try:
+            customer.save(update_fields=update_fields)
+        except Exception as e:
+            logger.error('Error saving customer %s: %s', pk, e)
+            return JsonResponse({'error': str(e)}, status=400)
 
     return JsonResponse({'success': True, 'url_name': customer.url_name})
 
@@ -1299,6 +1307,84 @@ def _build_sale_context(sale, request_user):
 
 
 @login_required
+def sale_create_order(request, pk):
+    """Create a new Order pre-filled from an AnthillSale, link it, then redirect to the order tab."""
+    from django.urls import reverse as _reverse
+    from .forms import OrderForm
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+
+    # Already has an order — just redirect
+    if sale.order:
+        return redirect(_reverse('sale_detail', kwargs={'pk': pk}) + '?tab=order')
+
+    if request.method == 'POST':
+        customer = sale.customer
+
+        # Derive customer_number: must be 6 digits starting with '0'.
+        # Try customer.code first, then pad anthill_customer_id.
+        customer_number = ''
+        raw_cnum = (
+            (customer.code if customer else None)
+            or sale.anthill_customer_id
+            or ''
+        ).strip()
+        if len(raw_cnum) == 5 and raw_cnum.isdigit():
+            raw_cnum = '0' + raw_cnum
+        if len(raw_cnum) == 6 and raw_cnum.isdigit() and raw_cnum.startswith('0'):
+            customer_number = raw_cnum
+
+        # Derive name / address
+        first_name = (customer.first_name if customer else '') or ''
+        last_name = (customer.last_name if customer else '') or ''
+        if not first_name and not last_name and sale.customer_name:
+            parts = sale.customer_name.strip().split(' ', 1)
+            first_name = parts[0]
+            last_name = parts[1] if len(parts) > 1 else ''
+
+        anthill_id = (customer.anthill_customer_id if customer else '') or sale.anthill_customer_id or ''
+        address = (customer.address_1 or customer.address if customer else '') or ''
+        postcode = (customer.postcode if customer else '') or ''
+        order_date = sale.activity_date.date() if sale.activity_date else None
+        sale_number = (sale.anthill_activity_id or '').strip()
+
+        # Build POST-like data dict and use OrderForm so all logic runs
+        form_data = {
+            'customer': customer.pk if customer else '',
+            'first_name': first_name,
+            'last_name': last_name,
+            'sale_number': sale_number,
+            'customer_number': customer_number,
+            'order_date': order_date.isoformat() if order_date else '',
+            'fit_date': sale.fit_date.isoformat() if sale.fit_date else '',
+            'address': address,
+            'postcode': postcode,
+            'anthill_id': anthill_id,
+            'total_value_inc_vat': str(sale.sale_value or '0'),
+            'order_type': 'sale',
+            'os_doors_required': '',
+            'all_items_ordered': '',
+            'job_finished': '',
+        }
+        form = OrderForm(form_data)
+        if form.is_valid():
+            order = form.save()
+            sale.order = order
+            sale.save(update_fields=['order'])
+            return redirect(_reverse('sale_detail', kwargs={'pk': pk}) + '?tab=order')
+        else:
+            # Pass form errors back through sale_detail context
+            context = _build_sale_context(sale, request.user)
+            context['active_tab'] = 'order'
+            context['create_order_form'] = form
+            # Surface all fields that have errors, plus always show designer
+            context['missing_order_fields'] = set(form.errors.keys()) | {'designer'}
+            return render(request, 'stock_take/sale_detail.html', context)
+
+    return redirect(_reverse('sale_detail', kwargs={'pk': pk}) + '?tab=order')
+
+
+@login_required
 def sale_detail(request, pk):
     """Display detailed view of a single Anthill event. Sale is the anchor page —
     the combined sale+order tabbed view always lives here."""
@@ -1316,6 +1402,53 @@ def sale_detail(request, pk):
         for key, val in order_ctx.items():
             if key not in context:
                 context[key] = val
+    else:
+        # No order yet — supply a pre-filled OrderForm so the order tab can render a create form
+        from .forms import OrderForm
+        customer = sale.customer
+        raw_cnum = (
+            (customer.code if customer else None)
+            or sale.anthill_customer_id
+            or ''
+        ).strip()
+        if len(raw_cnum) == 5 and raw_cnum.isdigit():
+            raw_cnum = '0' + raw_cnum
+        customer_number = raw_cnum if (len(raw_cnum) == 6 and raw_cnum.startswith('0')) else ''
+
+        first_name = (customer.first_name if customer else '') or ''
+        last_name = (customer.last_name if customer else '') or ''
+        if not first_name and not last_name and sale.customer_name:
+            parts = sale.customer_name.strip().split(' ', 1)
+            first_name = parts[0]
+            last_name = parts[1] if len(parts) > 1 else ''
+
+        initial_data = {
+            'customer': customer.pk if customer else '',
+            'first_name': first_name,
+            'last_name': last_name,
+            'sale_number': sale.anthill_activity_id or '',
+            'customer_number': customer_number,
+            'order_date': sale.activity_date.date() if sale.activity_date else None,
+            'fit_date': sale.fit_date,
+            'address': (customer.address_1 or customer.address if customer else '') or '',
+            'postcode': (customer.postcode if customer else '') or '',
+            'anthill_id': (customer.anthill_customer_id if customer else '') or sale.anthill_customer_id or '',
+            'total_value_inc_vat': sale.sale_value or '',
+            'order_type': 'sale',
+        }
+        context['create_order_form'] = context.get('create_order_form') or OrderForm(initial=initial_data)
+
+        # Fields the user must fill in: always show designer; show any field where we have no data
+        _never_visible = {'order_type', 'customer', 'anthill_id', 'postcode', 'os_doors_required', 'all_items_ordered', 'job_finished'}
+        missing = {'designer'}  # designer is never derivable from sale data
+        for field_name, value in initial_data.items():
+            if field_name not in _never_visible and not value:
+                missing.add(field_name)
+        # If the form is bound (POST validation failed), also surface all errored fields
+        bound_form = context['create_order_form']
+        if bound_form.is_bound:
+            missing.update(bound_form.errors.keys())
+        context['missing_order_fields'] = missing
 
     return render(request, 'stock_take/sale_detail.html', context)
 

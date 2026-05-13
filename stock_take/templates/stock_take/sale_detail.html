@@ -24,9 +24,9 @@
 
     <!-- ===== CUSTOMER HERO CARD ===== -->
     {% if sale.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_show_sale_links=True %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" %}
     {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_show_sale_links=True %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" %}
     {% endif %}
 
     <div class="sale-page-layout">
@@ -166,6 +166,11 @@
                                 <div class="field-label">Activity ID</div>
                                 <div class="field-value view-val">{{ sale.anthill_activity_id }}</div>
                                 <input class="customer-edit-input edit-val" data-field="anthill_activity_id" value="{{ sale.anthill_activity_id|default:'' }}" style="display:none;">
+                            </div>
+                            <div class="field-row-sb">
+                                <div class="field-label">Sale Value</div>
+                                <div class="field-value field-value-large view-val">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2|intcomma }}{% else %}-{% endif %}</div>
+                                <input class="customer-edit-input edit-val" data-field="sale_value" value="{{ sale.sale_value|default:'' }}" style="display:none;">
                             </div>
                             <div class="field-row-sb">
                                 <div class="field-label">Date</div>
@@ -1603,9 +1608,45 @@
         {% if order %}
         {% include 'stock_take/partials/order_tab_content.html' %}
         {% else %}
-        <div class="detail-tab-empty">
-            <i class="bi bi-clipboard-x"></i>
-            <p>No order has been created for this sale yet.</p>
+        <!-- Create order form -->
+        <div class="card" style="max-width:480px;margin:24px auto;">
+            <div class="card-header card-header-sale">
+                <h3><i class="bi bi-plus-circle"></i> Create Order for this Sale</h3>
+            </div>
+            <div class="card-body padded">
+                {% if create_order_form.errors %}
+                <div class="alert alert-danger mb-3">
+                    <h6>Please correct the following errors:</h6>
+                    <ul class="mb-0">
+                        {% for field in create_order_form %}{% for error in field.errors %}<li><strong>{{ field.label }}:</strong> {{ error }}</li>{% endfor %}{% endfor %}
+                        {% for error in create_order_form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                <form method="POST" action="{% url 'sale_create_order' sale.pk %}">
+                    {% csrf_token %}
+                    <div class="info-display">
+                    {% for field in create_order_form %}
+                        {% if field.name in missing_order_fields %}
+                        <div class="field-row-sb" style="padding:6px 0;">
+                            <div class="field-label">{{ field.label }}</div>
+                            <div style="flex:1;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                                {{ field }}
+                                {% if field.errors %}<div class="text-danger small">{{ field.errors|join:", " }}</div>{% endif %}
+                            </div>
+                        </div>
+                        {% else %}
+                        {{ field.as_hidden }}
+                        {% endif %}
+                    {% endfor %}
+                    </div>
+                    <div style="text-align:right;margin-top:12px;">
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-plus-circle"></i> Create Order
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
         {% endif %}
     </div>
@@ -1678,6 +1719,45 @@
                 <div id="financialChartLegend" style="margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:13px;"></div>
             </div>
         </dialog>
+        {% else %}
+        <!-- Sale-based financial summary (no order linked yet) -->
+        <div class="card">
+            <div class="fin-summary-header">
+                <h3>Financial Summary</h3>
+            </div>
+            <div class="fin-summary-body">
+                <div class="fin-row fin-row-primary">
+                    <span class="fin-label">Total Value (Inc VAT)</span>
+                    <span class="fin-value fin-value-large"><span class="fin-currency">£</span><span class="fin-amount">{{ sale.sale_value|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                </div>
+                {% if discount %}
+                <div class="fin-row">
+                    <span class="fin-label">Discount</span>
+                    <span class="fin-value"><span class="fin-currency">£</span><span class="fin-amount">{{ discount|floatformat:2|intcomma }}</span></span>
+                </div>
+                {% endif %}
+                <div class="fin-row">
+                    <span class="fin-label">Payments Received</span>
+                    <span class="fin-value"><span class="fin-currency">£</span><span class="fin-amount">{{ payments_total|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                </div>
+                <div class="fin-row fin-row-profit">
+                    <span class="fin-label">Outstanding</span>
+                    <span class="fin-value"><span class="fin-currency">£</span><span class="fin-amount">{{ outstanding|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                </div>
+                <div class="fin-row">
+                    <span class="fin-label">Materials</span>
+                    <span class="fin-value fin-muted">&mdash;</span>
+                </div>
+                <div class="fin-row">
+                    <span class="fin-label">Installation</span>
+                    <span class="fin-value fin-muted">&mdash;</span>
+                </div>
+                <div class="fin-row">
+                    <span class="fin-label">Manufacturing</span>
+                    <span class="fin-value fin-muted">&mdash;</span>
+                </div>
+            </div>
+        </div>
         {% endif %}
 
         <!-- Quick Actions Card -->
@@ -1687,6 +1767,22 @@
             </div>
             <div class="card-body padded">
                 <div class="sale-quick-actions">
+                    {% if sale.anthill_activity_id or sale.anthill_customer_id or sale.customer %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
+                    </a>
+                    {% if sale.anthill_customer_id %}
+                    <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ sale.anthill_customer_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Anthill Customer
+                    </a>
+                    {% endif %}
+                    {% if sale.customer %}
+                    <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
+                        <i class="bi bi-person"></i> Customer Profile
+                    </a>
+                    {% endif %}
+                    <div class="sale-quick-action-divider"></div>
+                    {% endif %}
                     {% if order %}
                     {% if order.boards_po %}
                     <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="openModal('addAdditionalPOModal')" title="Create an additional boards PO for this order">
@@ -1702,10 +1798,12 @@
                         <i class="bi bi-file-earmark-pdf"></i> Summary Document
                     </a>
                     {% else %}
-                    <div class="sale-no-order">
-                        <i class="bi bi-clipboard-x"></i>
-                        <p>No order linked to this sale yet.</p>
-                    </div>
+                    <form method="POST" action="{% url 'sale_create_order' sale.pk %}" style="width:100%;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-success sale-sidebar-btn" style="width:100%;">
+                            <i class="bi bi-plus-circle"></i> Create Order
+                        </button>
+                    </form>
                     {% endif %}
                 </div>
             </div>

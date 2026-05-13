@@ -181,35 +181,35 @@
                             <div class="job-info-dropdown" id="job-info-dropdown">
                                 <div class="job-dropdown-header">Job Status</div>
                                 <label class="job-dropdown-item" for="boardsNotRequired">
+                                    <span><i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required</span>
                                     <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
                                            {% if order.boards_not_required %}checked{% endif %}
                                            onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
-                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required
                                 </label>
                                 <label class="job-dropdown-item" for="accessoriesNotRequired">
+                                    <span><i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required</span>
                                     <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
                                            {% if order.accessories_not_required %}checked{% endif %}
                                            onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
-                                    <i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required
                                 </label>
                                 <label class="job-dropdown-item" for="allItemsOrdered">
+                                    <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
                                     <input class="job-checkbox" type="checkbox" id="allItemsOrdered"
                                            {% if order.all_items_ordered %}checked{% endif %}
                                            onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
-                                    <i class="bi bi-box-seam"></i> All Items Ordered
                                 </label>
                                 <label class="job-dropdown-item" for="jobFinished">
+                                    <span><i class="bi bi-check2-circle"></i> Job Finished</span>
                                     <input class="job-checkbox" type="checkbox" id="jobFinished"
                                            {% if order.job_finished %}checked{% endif %}
                                            onchange="onJobFinishedChange(this, {{ order.id }})">
-                                    <i class="bi bi-check2-circle"></i> Job Finished
                                 </label>
                                 {% if order.accessories.exists %}
                                 <label class="job-dropdown-item" for="materialsAllocated">
+                                    <span><i class="bi bi-box-arrow-in-down"></i> Materials Allocated</span>
                                     <input class="job-checkbox" type="checkbox" id="materialsAllocated"
                                            {% if all_allocated %}checked{% endif %}
                                            onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
-                                    <i class="bi bi-box-arrow-in-down"></i> Materials Allocated
                                 </label>
                                 {% endif %}
                             </div>
@@ -222,22 +222,24 @@
 
                                 <!-- Coversheet -->
                                 <div class="job-doc-coversheet">
-                                    <div class="job-doc-coversheet-header">
-                                        <div class="job-doc-coversheet-icon">
-                                            <i class="bi bi-file-earmark-text"></i>
+                                    <div class="job-doc-coversheet-left">
+                                        <div class="job-doc-coversheet-header">
+                                            <div class="job-doc-coversheet-icon">
+                                                <i class="bi bi-file-earmark-text"></i>
+                                            </div>
+                                            <div class="job-doc-coversheet-title">
+                                                <span>Coversheet</span>
+                                                {% if coversheet.is_final %}
+                                                <span class="job-doc-badge job-doc-badge-final">Final</span>
+                                                {% else %}
+                                                <span class="job-doc-badge job-doc-badge-draft">Draft</span>
+                                                {% endif %}
+                                            </div>
                                         </div>
-                                        <div class="job-doc-coversheet-title">
-                                            <span>Coversheet</span>
-                                            {% if coversheet.is_final %}
-                                            <span class="job-doc-badge job-doc-badge-final">Final</span>
-                                            {% else %}
-                                            <span class="job-doc-badge job-doc-badge-draft">Draft</span>
-                                            {% endif %}
+                                        <div class="job-doc-coversheet-meta">
+                                            {% if coversheet.prepared_by %}<span><i class="bi bi-person"></i> {{ coversheet.prepared_by }}</span>{% endif %}
+                                            <span><i class="bi bi-clock"></i> {{ coversheet.updated_at|date:'d M Y' }}</span>
                                         </div>
-                                    </div>
-                                    <div class="job-doc-coversheet-meta">
-                                        {% if coversheet.prepared_by %}<span><i class="bi bi-person"></i> {{ coversheet.prepared_by }}</span>{% endif %}
-                                        <span><i class="bi bi-clock"></i> {{ coversheet.updated_at|date:'d M Y' }}</span>
                                     </div>
                                     <div class="job-doc-coversheet-actions">
                                         <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary">
@@ -2843,39 +2845,38 @@ function saveSaleInfo(orderId) {
     .then(response => response.json())
     .then(result => {
         if (result.success) {
-            // Update display values
-            document.getElementById('sale-number-display').textContent = data.sale_number;
-            document.getElementById('customer-number-display').textContent = data.customer_number;
-            document.getElementById('designer-display').textContent = designerId ? designerName : 'Not assigned';
+            // Update display values (guard each — some IDs only exist in the full page)
+            const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+            setEl('sale-number-display', data.sale_number);
+            setEl('customer-number-display', data.customer_number);
+            setEl('designer-display', designerId ? designerName : 'Not assigned');
             
             // Format dates for display
             const orderDateVal = data.order_date;
             const fitDateVal = data.fit_date;
-            document.getElementById('order-date-display').textContent = orderDateVal
+            setEl('order-date-display', orderDateVal
                 ? new Date(orderDateVal).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})
-                : 'Not set';
-            document.getElementById('fit-date-display').textContent = fitDateVal
+                : 'Not set');
+            setEl('fit-date-display', fitDateVal
                 ? new Date(fitDateVal).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})
-                : 'Not set';
+                : 'Not set');
             
             // Update total value displays
             const totalValue = parseFloat(data.total_value_inc_vat) || 0;
-            document.getElementById('total-value-display').textContent = '£' + totalValue.toFixed(2);
-            
-            // Update financial summary displays
-            document.getElementById('total_value_inc_vat_display').textContent = '£' + totalValue.toFixed(2);
             const excVat = totalValue / 1.2;
-            document.getElementById('total_value_exc_vat_display').textContent = '£' + excVat.toFixed(2);
+            setEl('total-value-display', '£' + totalValue.toFixed(2));
+            setEl('total_value_inc_vat_display', '£' + totalValue.toFixed(2));
+            setEl('total_value_exc_vat_display', '£' + excVat.toFixed(2));
             
             // Toggle back to display mode
             toggleSaleEdit();
             showAlert('Sale information updated successfully!', 'success');
         } else {
-            showAlert('Error updating sale information', 'danger');
+            showAlert('Error updating sale information: ' + (result.error || 'Unknown error'), 'danger');
         }
     })
     .catch(error => {
-        showAlert('Error updating sale information', 'danger');
+        showAlert('Error updating sale information: ' + error.message, 'danger');
     });
 }
 
