@@ -5,7 +5,7 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
-from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES, SyncLog, ActivityLog
+from .models import Role, PagePermission, PAGE_SECTIONS, PAGE_CHOICES, SyncLog, ActivityLog, UserSiteRole
 import subprocess
 import threading
 import time
@@ -125,9 +125,37 @@ def admin_users(request):
             except User.DoesNotExist:
                 messages.error(request, "User not found.")
 
+        elif action == 'assign_site_role':
+            site = request.POST.get('site', '').strip()
+            site_role = request.POST.get('site_role', '').strip()
+            try:
+                target_user = User.objects.get(id=user_id)
+                if site and site_role:
+                    UserSiteRole.objects.get_or_create(user=target_user, site=site, role_name=site_role)
+                    messages.success(request, f"Added {site_role} role for {target_user.username} at {site}.")
+                else:
+                    messages.error(request, "Site and role are required.")
+            except User.DoesNotExist:
+                messages.error(request, "User not found.")
+
+        elif action == 'remove_site_role':
+            site_role_id = request.POST.get('site_role_id')
+            try:
+                usr = UserSiteRole.objects.get(id=site_role_id)
+                usr.delete()
+                messages.success(request, "Site role removed.")
+            except UserSiteRole.DoesNotExist:
+                messages.error(request, "Site role not found.")
+
         return redirect('admin_users')
 
     users = User.objects.all().select_related('profile', 'profile__role').order_by('username')
+
+    # Build site roles map: user_id -> list of UserSiteRole
+    site_roles_qs = UserSiteRole.objects.select_related('user').all()
+    user_site_roles_map = {}
+    for sr in site_roles_qs:
+        user_site_roles_map.setdefault(sr.user_id, []).append(sr)
 
     # Group users by role
     from collections import OrderedDict
@@ -154,6 +182,8 @@ def admin_users(request):
         'users': users,
         'roles': roles,
         'role_groups': list(role_groups.values()),
+        'user_site_roles_map': user_site_roles_map,
+        'site_role_choices': UserSiteRole.SITE_ROLE_CHOICES,
     }
     return render(request, 'stock_take/admin_users.html', context)
 

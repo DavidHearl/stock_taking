@@ -2597,6 +2597,40 @@ def save_user_profile(sender, instance, **kwargs):
         instance.profile.save()
 
 
+class UserSiteRole(models.Model):
+    """Supplementary per-site role assignments for users (e.g. Validator for Belfast)."""
+    SITE_ROLE_CHOICES = [
+        ('validator', 'Validator'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='site_roles')
+    site = models.CharField(max_length=100)
+    role_name = models.CharField(max_length=20, choices=SITE_ROLE_CHOICES)
+
+    class Meta:
+        unique_together = ('user', 'site', 'role_name')
+        ordering = ['site', 'user__username']
+
+    def __str__(self):
+        return f"{self.user.username} — {self.get_role_name_display()} ({self.site})"
+
+
+class OrderValidationRequest(models.Model):
+    """Notification sent to Validators when all_items_ordered is checked on an Order."""
+    order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='validation_requests')
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='validation_requests')
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_validation_requests')
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_dismissed = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ('order', 'recipient')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Validation request for order {self.order_id} → {self.recipient.username}"
+
+
 class Ticket(models.Model):
     """Support ticket for reporting issues"""
     PRIORITY_CHOICES = [

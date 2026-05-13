@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static custom_filters %}
 
 {% block title %}Users - Admin{% endblock %}
 
@@ -25,6 +25,7 @@
                         <th>Email</th>
                         <th>Name</th>
                         <th>Role</th>
+                        <th>Site Roles</th>
                         <th style="text-align:center;">Staff</th>
                         <th style="text-align:center;">Active</th>
                         <th>Last Login</th>
@@ -35,7 +36,7 @@
                 {% for group in role_groups %}
                 {% if group.users %}
                     <tr class="users-group-header">
-                        <td colspan="8">
+                        <td colspan="9">
                             {% if group.role %}
                             <span class="role-tag {{ group.role.name }}">{{ group.role.get_name_display }}</span>
                             {% else %}
@@ -68,6 +69,26 @@
                                     {% endfor %}
                                 </select>
                             </form>
+                        </td>
+                        <td class="col-site-roles">
+                            {% with site_roles=user_site_roles_map|get_item:u.id %}
+                            {% if site_roles %}
+                                {% for sr in site_roles %}
+                                <span class="site-role-tag">
+                                    {{ sr.site }}: {{ sr.get_role_name_display }}
+                                    <form method="post" style="display:inline;margin:0;">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="remove_site_role">
+                                        <input type="hidden" name="site_role_id" value="{{ sr.id }}">
+                                        <button type="submit" class="site-role-remove" title="Remove">✕</button>
+                                    </form>
+                                </span>
+                                {% endfor %}
+                            {% endif %}
+                            <button type="button" class="btn-add-site-role" onclick="openAddSiteRole({{ u.id }}, '{{ u.username|escapejs }}')" title="Add site role">
+                                <i class="bi bi-plus"></i>
+                            </button>
+                            {% endwith %}
                         </td>
                         <td style="text-align:center;">
                             {% if u.is_staff %}
@@ -131,7 +152,50 @@
     </div>
 </div>
 
-<!-- Edit User Modal -->
+<!-- Add Site Role Modal -->
+<div class="modal" id="addSiteRoleModal">
+    <div class="modal-overlay" onclick="closeModal('addSiteRoleModal')"></div>
+    <div class="modal-dialog" style="width: 400px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-geo-alt"></i> Add Site Role</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addSiteRoleModal')">✕</button>
+            </div>
+            <form method="POST" id="addSiteRoleForm">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="assign_site_role">
+                <input type="hidden" name="user_id" id="addSiteRoleUserId">
+                <div class="modal-body">
+                    <p id="addSiteRoleSubtitle" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;"></p>
+                    <div style="display:flex; flex-direction:column; gap:12px;">
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">Site</label>
+                            <select name="site" class="form-control" id="addSiteRoleSite">
+                                <option value="">— Select Site —</option>
+                                {% for s in available_locations %}
+                                <option value="{{ s }}">{{ s }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">Role</label>
+                            <select name="site_role" class="form-control">
+                                {% for value, label in site_role_choices %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-modal-cancel" onclick="closeModal('addSiteRoleModal')">Cancel</button>
+                    <button type="submit" class="btn-modal-confirm">Add Role</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="editUserModal">
     <div class="modal-overlay" onclick="closeModal('editUserModal')"></div>
     <div class="modal-dialog" style="width: 480px;">
@@ -178,6 +242,13 @@ function openEditUser(userId, username, firstName, lastName, email) {
     document.getElementById('edit_email').value = email;
     document.getElementById('editUserSubtitle').textContent = 'Editing: ' + username;
     openModal('editUserModal');
+}
+
+function openAddSiteRole(userId, username) {
+    document.getElementById('addSiteRoleUserId').value = userId;
+    document.getElementById('addSiteRoleSubtitle').textContent = 'Adding site role for: ' + username;
+    document.getElementById('addSiteRoleSite').value = '';
+    openModal('addSiteRoleModal');
 }
 </script>
 {% endblock %}

@@ -110,6 +110,71 @@ body.light-mode .badge-acc-added {
     color: #10b981;
     white-space: nowrap;
 }
+/* Validator needs-check badge */
+.badge-needs-check {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: rgba(245,158,11,0.18);
+    border: 1px solid rgba(245,158,11,0.55);
+    color: #f59e0b;
+    white-space: nowrap;
+    margin-left: 4px;
+}
+/* Validator check toolbar button */
+.btn-validator-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: rgba(245,158,11,0.15);
+    border: 1px solid rgba(245,158,11,0.55);
+    border-radius: 16px;
+    color: #f59e0b;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.btn-validator-check:hover {
+    background: rgba(245,158,11,0.30);
+    color: #d97706;
+}
+body.light-mode .btn-validator-check {
+    background: rgba(180,120,30,0.12);
+    border-color: rgba(180,120,30,0.45);
+    color: #9a6a1e;
+}
+body.light-mode .btn-validator-check:hover {
+    background: rgba(180,120,30,0.25);
+}
+.btn-validator-empty {
+    opacity: 0.45;
+    cursor: default;
+}
+.btn-validator-empty:hover {
+    background: rgba(245,158,11,0.15) !important;
+    color: #f59e0b !important;
+}
+.btn-validator-view {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 100px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid var(--text-secondary);
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-validator-view:hover {
+    background: var(--text-secondary);
+    color: var(--bg-primary);
+}
 .payment-partial {
     font-size: 12px;
     line-height: 16px;
@@ -185,6 +250,12 @@ body.light-mode .badge-acc-added {
         <button type="button" id="togglePfpBtn" class="btn btn-sm btn-outline-warning" onclick="togglePfp()" title="Toggle PFP orders" style="padding:8px 14px;">
             <i class="bi bi-clock"></i> Hide PFP
         </button>
+        {% if is_validator %}
+        <button type="button" class="btn btn-validator-check {% if not validation_requests %}btn-validator-empty{% endif %}" onclick="{% if validation_requests %}openModal('validatorCheckModal'){% endif %}" title="{% if validation_requests %}{{ validation_requests|length }} order{{ validation_requests|length|pluralize }} ready to check{% else %}No orders to check{% endif %}">
+            <i class="bi bi-clipboard2-check"></i>
+            {% if validation_requests %}<strong>{{ validation_requests|length }}</strong> to check{% else %}All checked{% endif %}
+        </button>
+        {% endif %}
         <button type="button" id="anthillOrdersBtn" class="btn btn-orders-to-place" onclick="openAnthillOrdersModal()" title="Orders awaiting placement in Anthill">
             <i class="bi bi-arrow-repeat"></i>
             {% if anthill_orders_to_place_count %}<strong>{{ anthill_orders_to_place_count }}</strong>{% endif %}
@@ -339,6 +410,9 @@ body.light-mode .badge-acc-added {
                     {% if order.all_items_ordered %}
                         <span class="status-icon success" title="All Materials Ordered">✓</span>
                     {% endif %}
+                    {% if order.id in validation_order_ids %}
+                        <span class="badge-needs-check" title="This order is ready to be checked">Check</span>
+                    {% endif %}
                 </td>
                 <!-- Payment -->
                 {% with fin=financial_map|get_item:order.sale_number %}
@@ -469,6 +543,9 @@ body.light-mode .badge-acc-added {
                     {% if order.all_items_ordered %}
                         <span class="status-icon success" title="All Materials Ordered">✓</span>
                     {% endif %}
+                    {% if order.id in validation_order_ids %}
+                        <span class="badge-needs-check" title="This order is ready to be checked">Check</span>
+                    {% endif %}
                 </td>
                 <!-- Payment -->
                 {% with fin=financial_map|get_item:order.sale_number %}
@@ -575,6 +652,48 @@ body.light-mode .badge-acc-added {
         </div>
     </div>
 </div>
+
+<!-- Validator Check Modal -->
+{% if validation_requests %}
+<div class="modal" id="validatorCheckModal">
+    <div class="modal-overlay" onclick="closeModal('validatorCheckModal')"></div>
+    <div class="modal-dialog" style="width:560px; max-width:95vw;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Orders to Check</h3>
+                <button type="button" class="modal-close" onclick="closeModal('validatorCheckModal')">✕</button>
+            </div>
+            <div class="modal-body" style="padding:0;">
+                <table class="table" style="margin:0;">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Sale #</th>
+                            <th>Fit Date</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for vr in validation_requests %}
+                        <tr>
+                            <td>{{ vr.order.first_name }} {{ vr.order.last_name }}</td>
+                            <td>{{ vr.order.sale_number }}</td>
+                            <td>{{ vr.order.fit_date|default:"—" }}</td>
+                            <td style="white-space:nowrap;">
+                                <a href="{{ order_href_map|get_item:vr.order.id }}" class="btn-validator-view">View</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('validatorCheckModal')">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- Modal for Creating New Boards PO -->
 <!-- Modal for Adding New Order -->

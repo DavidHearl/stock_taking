@@ -3,7 +3,7 @@ Context processors for role-based access control.
 Adds user permissions and navigation visibility to every template context.
 """
 
-from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket, AnthillSale
+from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket, AnthillSale, OrderValidationRequest
 from .permissions import get_user_permissions
 from django.core.cache import cache
 
@@ -73,6 +73,11 @@ def user_permissions(request):
         }
         cache.set('nav_counts', nav_counts, 120)
 
+    # Unread validation requests for the current user
+    unread_validation_count = OrderValidationRequest.objects.filter(
+        recipient=request.user, is_dismissed=False
+    ).count()
+
     return {
         'role_perms': perms,
         'user_role': role.name if role else None,
@@ -87,6 +92,8 @@ def user_permissions(request):
         # Sales & remedials counts for nav
         'open_sales_count': nav_counts['open_sales_count'],
         'open_remedials_count': nav_counts['open_remedials_count'],
+        # Validation notifications for validators
+        'unread_validation_count': unread_validation_count,
         # Impersonation context
         'is_impersonating': getattr(request, 'is_impersonating', False),
         'real_user': getattr(request, 'real_user', request.user),

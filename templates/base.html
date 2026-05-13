@@ -335,6 +335,18 @@
             <button class="theme-toggle" id="themeToggle" onclick="toggleDarkMode()" title="Toggle theme">
                 <i class="bi bi-sun-fill" id="themeIcon"></i>
             </button>
+            {% if unread_validation_count > 0 %}
+            <div class="validation-bell-wrapper" id="validationBellWrapper">
+                <button class="validation-bell-btn" id="validationBellBtn" onclick="toggleValidationDropdown()" title="Orders to check">
+                    <i class="bi bi-bell-fill"></i>
+                    <span class="validation-bell-badge" id="validationBellBadge">{{ unread_validation_count }}</span>
+                </button>
+                <div class="validation-bell-dropdown" id="validationBellDropdown" style="display:none;">
+                    <div class="validation-bell-header">Orders to Check</div>
+                    <div id="validationBellList"><div class="validation-bell-loading">Loading…</div></div>
+                </div>
+            </div>
+            {% endif %}
             <a href="{% url 'user_profile' %}" class="top-user" title="My Profile">
                 <i class="bi bi-person-circle"></i>
                 <span>{{ user.username }}</span>
@@ -571,6 +583,74 @@
                 }
             }
             {% endif %}
+        });
+
+        // Validation notifications bell
+        function toggleValidationDropdown() {
+            const dropdown = document.getElementById('validationBellDropdown');
+            if (!dropdown) return;
+            if (dropdown.style.display === 'none') {
+                dropdown.style.display = 'block';
+                loadValidationNotifications();
+            } else {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        function loadValidationNotifications() {
+            const list = document.getElementById('validationBellList');
+            fetch("{% url 'get_validation_notifications' %}")
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.notifications.length) {
+                        list.innerHTML = '<div class="validation-bell-empty">No pending orders.</div>';
+                        return;
+                    }
+                    list.innerHTML = data.notifications.map(n => `
+                        <div class="validation-bell-item" id="vn-${n.id}">
+                            <a href="${n.order_url}" class="validation-bell-link">
+                                <span class="validation-bell-sale">${n.sale_number || '#' + n.order_id}</span>
+                                <span class="validation-bell-name">${n.customer_name}</span>
+                            </a>
+                            <span class="validation-bell-meta">${n.created_at}</span>
+                            <button class="validation-bell-dismiss" onclick="dismissValidationNotification(${n.id})" title="Dismiss">✕</button>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => { list.innerHTML = '<div class="validation-bell-empty">Failed to load.</div>'; });
+        }
+
+        function dismissValidationNotification(id) {
+            fetch(`/validation-request/${id}/dismiss/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const el = document.getElementById(`vn-${id}`);
+                    if (el) el.remove();
+                    // Update badge
+                    const badge = document.getElementById('validationBellBadge');
+                    if (badge) {
+                        const current = parseInt(badge.textContent) - 1;
+                        if (current <= 0) {
+                            document.getElementById('validationBellWrapper').remove();
+                        } else {
+                            badge.textContent = current;
+                        }
+                    }
+                }
+            });
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            const wrapper = document.getElementById('validationBellWrapper');
+            if (wrapper && !wrapper.contains(e.target)) {
+                const dropdown = document.getElementById('validationBellDropdown');
+                if (dropdown) dropdown.style.display = 'none';
+            }
         });
     </script>
     

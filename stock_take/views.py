@@ -208,6 +208,15 @@ def ordering(request):
         .values_list('sale_number', 'id')
     )
 
+    # Build set of order IDs that have a pending validation request for this user
+    from .models import OrderValidationRequest, UserSiteRole
+    is_validator = UserSiteRole.objects.filter(user=request.user, role_name='validator').exists()
+    validation_requests_qs = OrderValidationRequest.objects.filter(
+        recipient=request.user, is_dismissed=False
+    ).select_related('order')
+    validation_order_ids = set(vr.order_id for vr in validation_requests_qs)
+    validation_requests = list(validation_requests_qs)
+
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'pfp_orders': orders.filter(order_date__isnull=True, fit_date__isnull=True),
@@ -230,6 +239,9 @@ def ordering(request):
         'remedials_map': remedials_map,
         'anthill_orders_to_place_count': anthill_orders_to_place_count,
         'all_existing_sale_numbers': all_existing_sale_numbers,
+        'is_validator': is_validator,
+        'validation_order_ids': validation_order_ids,
+        'validation_requests': validation_requests,
     })
 
 @login_required
@@ -5764,6 +5776,24 @@ def remove_additional_boards_po(request, order_id):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
+def _notify_validators_all_items_ordered(order, triggered_by):
+    """Create OrderValidationRequest notifications for all site Validators when all items are ordered."""
+    from .models import UserSiteRole, OrderValidationRequest
+    sale = order.anthill_sale.first()
+    site = (sale.location or '').strip() if sale else ''
+    if not site:
+        return
+    validator_user_ids = UserSiteRole.objects.filter(
+        site=site, role_name='validator'
+    ).values_list('user_id', flat=True)
+    for uid in validator_user_ids:
+        OrderValidationRequest.objects.get_or_create(
+            order=order,
+            recipient_id=uid,
+            defaults={'created_by': triggered_by, 'is_dismissed': False},
+        )
+
+
 @login_required
 def update_job_checkbox(request, order_id):
     """Update job checkbox fields (all_items_ordered, job_finished)"""
@@ -5776,7 +5806,11 @@ def update_job_checkbox(request, order_id):
         data = json.loads(request.body)
         
         if 'all_items_ordered' in data:
+            was_all_ordered = order.all_items_ordered
             order.all_items_ordered = bool(data['all_items_ordered'])
+            # Notify validators when all_items_ordered first becomes True
+            if order.all_items_ordered and not was_all_ordered:
+                _notify_validators_all_items_ordered(order, request.user)
         if 'boards_not_required' in data:
             order.boards_not_required = bool(data['boards_not_required'])
         if 'accessories_not_required' in data:
@@ -5809,6 +5843,41 @@ def update_job_checkbox(request, order_id):
         return JsonResponse({'success': True})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def dismiss_validation_request(request, request_id):
+    """Mark an OrderValidationRequest as dismissed for the current user."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    from .models import OrderValidationRequest
+    vr = get_object_or_404(OrderValidationRequest, id=request_id, recipient=request.user)
+    vr.is_dismissed = True
+    vr.save(update_fields=['is_dismissed'])
+    return JsonResponse({'success': True})
+
+
+@login_required
+def get_validation_notifications(request):
+    """Return JSON list of undismissed validation requests for the current user."""
+    from .models import OrderValidationRequest
+    requests_qs = OrderValidationRequest.objects.filter(
+        recipient=request.user, is_dismissed=False
+    ).select_related('order', 'created_by').order_by('-created_at')[:20]
+    data = []
+    for vr in requests_qs:
+        order = vr.order
+        data.append({
+            'id': vr.id,
+            'order_id': order.id,
+            'sale_number': order.sale_number or '',
+            'customer_name': f"{order.first_name} {order.last_name}".strip(),
+            'created_by': vr.created_by.get_full_name() or vr.created_by.username if vr.created_by else '',
+            'created_at': vr.created_at.strftime('%d %b %Y %H:%M'),
+            'order_url': f"/order/{order.id}/",
+        })
+    return JsonResponse({'notifications': data})
+
 
 @login_required
 def order_delete(request, order_id):
@@ -6098,6 +6167,24 @@ def order_details(request, order_id):
     """Display and edit order details, including boards PO assignment"""
     order = get_object_or_404(Order, id=order_id)
 
+    # Handle POST actions before any redirect so that form submissions
+    # (e.g. adding an OS door) from the combined sale+order page work correctly.
+    if request.method == 'POST':
+        if 'door_style' in request.POST:
+            os_door_form = OSDoorForm(request.POST)
+            if os_door_form.is_valid():
+                os_door = os_door_form.save(commit=False)
+                os_door.customer = order
+                os_door.save()
+                messages.success(request, 'OS Door added successfully.')
+            else:
+                messages.error(request, 'Failed to add OS Door: ' + str(os_door_form.errors))
+            # Redirect back to wherever the user came from (sale_detail or order_details)
+            referer = request.META.get('HTTP_REFERER', '')
+            if referer:
+                return redirect(referer)
+            return redirect('order_details', order_id=order_id)
+
     # If this order is linked to an AnthillSale, redirect to the combined sale+order view.
     # First check the FK relation, then fall back to matching via sale_number.
     linked_sale = order.anthill_sale.first()
@@ -6142,21 +6229,13 @@ def order_details(request, order_id):
     price_per_sqm = float(price_per_sqm_str)
     
     if request.method == 'POST':
-        # Check if this is an OS door form submission
-        if 'door_style' in request.POST:
-            os_door_form = OSDoorForm(request.POST)
-            if os_door_form.is_valid():
-                os_door = os_door_form.save(commit=False)
-                os_door.customer = order
-                os_door.save()
-                messages.success(request, 'OS Door added successfully.')
-                return redirect('order_details', order_id=order_id)
-        else:
-            form = OrderForm(request.POST, instance=order)
-            if form.is_valid():
-                form.save()
-                messages.success(request, f'Order {order.sale_number} updated successfully.')
-                return redirect('order_details', order_id=order_id)
+        # OS door POST is handled before the linked_sale redirect above.
+        # Any remaining POST here is an OrderForm update.
+        form = OrderForm(request.POST, instance=order)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Order {order.sale_number} updated successfully.')
+            return redirect('order_details', order_id=order_id)
     else:
         form = OrderForm(instance=order)
     
