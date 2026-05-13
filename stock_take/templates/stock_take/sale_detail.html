@@ -1788,9 +1788,15 @@
                     <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="openModal('addAdditionalPOModal')" title="Create an additional boards PO for this order">
                         <i class="bi bi-plus-circle"></i> Add Additional Boards PO
                     </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger sale-sidebar-btn" onclick="clearBoardsPOLink({{ order.id }})" title="Remove the linked boards PO from this order">
+                        <i class="bi bi-link-45deg"></i> Unlink Boards PO
+                    </button>
                     {% else %}
                     <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="switchDetailTab('order'); createNextBoardsPO({{ order.id }})" title="Create the first boards PO for this order">
                         <i class="bi bi-plus-circle"></i> Create Boards PO
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary sale-sidebar-btn" onclick="openModal('linkBoardsPOModal')" title="Link an existing boards PO to this order">
+                        <i class="bi bi-link-45deg"></i> Link Existing Boards PO
                     </button>
                     {% endif %}
                     <div class="sale-quick-action-divider"></div>
@@ -2057,7 +2063,74 @@ document.addEventListener('click', function(e) {
     if (combo && results && !combo.contains(e.target)) {
         results.style.display = 'none';
     }
+    // Close boards PO results if clicking outside
+    const bpoInput = document.getElementById('link-boards-po-search');
+    const bpoResults = document.getElementById('link-boards-po-results');
+    if (bpoInput && bpoResults && !bpoInput.contains(e.target) && !bpoResults.contains(e.target)) {
+        bpoResults.style.display = 'none';
+    }
 });
+
+// ── Link Existing Boards PO ──────────────────────────────────────
+let _linkBoardsPOTimer = null;
+
+function searchLinkBoardsPO(query) {
+    clearTimeout(_linkBoardsPOTimer);
+    const resultsDiv = document.getElementById('link-boards-po-results');
+    if (query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+    _linkBoardsPOTimer = setTimeout(() => {
+        fetch(`{% url 'purchase_order_search' %}?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                resultsDiv.innerHTML = '';
+                if (!data.results || data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No purchase orders found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                data.results.forEach(po => {
+                    const item = document.createElement('div');
+                    item.className = 'boards-po-result-item';
+                    item.innerHTML = `
+                        <span class="boards-po-result-number">${po.display_number}</span>
+                        <span class="boards-po-result-meta">${po.supplier_name}${po.project_number ? ' · ' + po.project_number : ''}</span>
+                        <span class="boards-po-result-status badge-${(po.status || 'draft').toLowerCase()}">${po.status}</span>
+                    `;
+                    item.addEventListener('click', () => confirmLinkBoardsPO({{ order.id }}, po));
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = 'block';
+            })
+            .catch(() => { resultsDiv.style.display = 'none'; });
+    }, 250);
+}
+
+function confirmLinkBoardsPO(orderId, po) {
+    document.getElementById('link-boards-po-search').value = po.display_number;
+    document.getElementById('link-boards-po-results').style.display = 'none';
+    fetch(`/order/${orderId}/update-boards-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ purchase_order_id: po.id })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            closeModal('linkBoardsPOModal');
+            showAlert(`Boards PO ${po.display_number} linked`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown error'), 'danger');
+        }
+    })
+    .catch(() => showAlert('Error linking Boards PO', 'danger'));
+}
 
 // ── Invoice detail toggle ────────────────────────────────────────
 function toggleInvoiceDetail(invoiceId) {
@@ -2074,5 +2147,38 @@ function toggleInvoiceDetail(invoiceId) {
     }
 }
 </script>
+
+<!-- Modal: Link Existing Boards PO -->
+{% if order and not order.boards_po %}
+<div class="modal" id="linkBoardsPOModal">
+    <div class="modal-overlay" onclick="closeModal('linkBoardsPOModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Link Existing Boards PO</h3>
+                <button type="button" class="modal-close" onclick="closeModal('linkBoardsPOModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="link-boards-po-search">Search Purchase Orders</label>
+                    <div style="position:relative;">
+                        <input type="text" id="link-boards-po-search" class="form-input"
+                               placeholder="Type a PO number or supplier name..."
+                               autocomplete="off"
+                               oninput="searchLinkBoardsPO(this.value)"
+                               onfocus="if(this.value.length>=2) searchLinkBoardsPO(this.value)">
+                        <div class="boards-po-results" id="link-boards-po-results" style="display:none;"></div>
+                    </div>
+                    <small class="form-help">Click a result to link it to this order.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('linkBoardsPOModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
