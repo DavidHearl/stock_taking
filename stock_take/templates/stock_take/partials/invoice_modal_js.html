@@ -656,4 +656,49 @@ function submitInlineOPO() {
         btn.innerHTML = '<i class="bi bi-check-lg"></i> Create OPO';
     });
 }
+
+// ── Invoice modal PO kebab ────────────────────────────────────
+function toggleInvoicePoKebab(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('invoice-po-kebab-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+function closeInvoicePoKebab() {
+    const menu = document.getElementById('invoice-po-kebab-menu');
+    if (menu) menu.style.display = 'none';
+}
+function openInlinePoFromLines() {
+    const lines = [];
+    let total = 0;
+    document.querySelectorAll('#modal-lines .pinv-line-row').forEach(row => {
+        const desc = (row.querySelector('.pinv-line-desc')?.value || '').trim();
+        const amount = parseFloat(row.querySelector('.pinv-line-rate')?.value) || 0;
+        if (desc || amount) {
+            lines.push({ desc, amount });
+            total += amount;
+        }
+    });
+    const description = lines.map(l => l.amount ? `${l.desc || '(no description)'}  £${l.amount.toFixed(2)}` : l.desc).join('\n');
+    // Pre-fill the PO search with description as a hint, and show a confirm
+    const supplier = document.getElementById('new-pinv-supplier')?.value?.trim() || '';
+    if (!confirm(`Create a new Purchase Order${supplier ? ' for ' + supplier : ''}?\nA local PO will be created and linked to this invoice.`)) return;
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+    fetch('/purchase-invoices/create-po-standalone/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplier_name: supplier, description }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const input = document.getElementById('new-pinv-po-search');
+            input.value = data.po.display_number;
+            input.dataset.poId = data.po.workguru_id;
+        } else {
+            alert(data.error || 'Failed to create PO');
+        }
+    })
+    .catch(() => alert('Network error'));
+}
+document.addEventListener('click', () => closeInvoicePoKebab());
 </script>

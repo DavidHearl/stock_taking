@@ -27,63 +27,70 @@
     <!-- ===================== TAB: OVERVIEW ===================== -->
     <div id="tab-overview">
         <div class="card" style="margin-bottom:16px;">
-            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-                <h3><i class="bi bi-table"></i> All Timesheets</h3>
+            <div class="card-header ts-overview-header">
+                <h3>All Timesheets</h3>
+                <div class="ts-overview-controls">
+                    <input type="search" id="ts-search" class="form-input ts-search-input" placeholder="Search order, worker…"
+                           oninput="tsSearchDebounce()" autocomplete="off">
+                    <div class="ts-type-tabs" id="ts-type-tabs">
+                        <button class="ts-type-tab active" data-type="all"          onclick="tsSetType('all',this)">All</button>
+                        <button class="ts-type-tab"        data-type="installation"  onclick="tsSetType('installation',this)">Installation</button>
+                        <button class="ts-type-tab"        data-type="manufacturing" onclick="tsSetType('manufacturing',this)">Manufacturing</button>
+                    </div>
+                </div>
             </div>
             <div class="card-body" style="padding:0;">
-                {% if timesheets %}
-                <div class="table-container" style="max-height:75vh;overflow-y:auto;">
+                <!-- Bulk action bar (visible when rows are checked) -->
+                <div class="ts-bulk-bar" id="ts-bulk-bar">
+                    <span><span class="ts-bulk-count" id="ts-bulk-count">0</span> selected</span>
+                    <div class="ts-linked-row">
+                        <div class="ts-form-field">
+                            <label>Rate (£/hr)</label>
+                            <input type="number" id="ts-bulk-rate"  class="form-input ts-bulk-field" step="0.01" min="0" placeholder="Rate" oninput="tsBulkCalcTotal()">
+                        </div>
+                        <span class="ts-linked-sep">×</span>
+                        <div class="ts-form-field">
+                            <label>Hours</label>
+                            <input type="number" id="ts-bulk-hours" class="form-input ts-bulk-field" step="0.5"  min="0" placeholder="Hours" oninput="tsBulkCalcTotal()">
+                        </div>
+                        <span class="ts-linked-sep">=</span>
+                        <div class="ts-form-field">
+                            <label>Total (£)</label>
+                            <input type="number" id="ts-bulk-total" class="form-input ts-bulk-field" step="0.01" min="0" placeholder="Total" oninput="tsBulkCalcRate()">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="tsBulkApply()"><i class="bi bi-floppy"></i> Apply to selected</button>
+                    <button class="btn btn-secondary btn-sm" onclick="tsBulkClear()">Clear selection</button>
+                </div>
+                <div class="table-container">
                     <table class="table ts-table">
-                        <thead style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
+                        <thead>
                             <tr>
+                                <th class="ts-th-cb"><input type="checkbox" id="ts-select-all" onchange="tsToggleAll(this)"></th>
                                 <th>Date</th><th>Order</th><th>Type</th><th>Worker</th>
-                                <th>Hours</th><th>Rate/Price</th><th>Total</th><th>Description</th>
+                                <th>Hours</th><th>Rate</th><th>Total</th><th>Description</th>
+                                <th class="ts-th-actions"></th>
                             </tr>
                         </thead>
-                        <tbody>
-                        {% for ts in timesheets %}
-                        <tr>
-                            <td>{{ ts.date|date:"d/m/Y" }}</td>
-                            <td>
-                                {% if ts.order %}
-                                <a class="job-info-link" href="{% url 'order_details' ts.order.id %}">{{ ts.order.sale_number }} - {{ ts.order.last_name }}</a>
-                                {% else %}-{% endif %}
-                            </td>
-                            <td>
-                                {% if ts.timesheet_type == 'installation' %}
-                                <span class="badge badge-installation">Installation</span>
-                                {% else %}
-                                <span class="badge badge-manufacturing">Manufacturing</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ ts.worker_name }}</td>
-                            <td>{% if ts.hours %}{{ ts.hours }}h{% else %}-{% endif %}</td>
-                            <td>
-                                {% if ts.timesheet_type == 'installation' %}
-                                {{ ts.purchase_order.display_number|default:"-" }}
-                                {% else %}
-                                £{{ ts.hourly_rate|floatformat:2 }}/hr
-                                {% endif %}
-                            </td>
-                            <td><strong>£{{ ts.total_cost|floatformat:2 }}</strong></td>
-                            <td>{{ ts.display_description|default:"-"|truncatewords:10 }}</td>
-                        </tr>
-                        {% endfor %}
+                        <tbody id="ts-tbody">
+                            <tr><td colspan="10" class="ts-table-msg">Loading…</td></tr>
                         </tbody>
                     </table>
                 </div>
-                <p class="text-muted" style="margin:8px 12px;font-size:0.8rem;">Showing latest 100 timesheets.</p>
-                {% else %}
-                <div class="empty-state">
-                    <i class="bi bi-clock" style="font-size:2.5rem;color:#6c757d;"></i>
-                    <p>No timesheets recorded yet.</p>
+                <!-- Pagination bar -->
+                <div class="ts-overview-footer">
+                    <span id="ts-page-info"></span>
+                    <div class="ts-pagination-nav">
+                        <button class="btn btn-secondary btn-sm" id="ts-prev-btn" onclick="tsChangePage(-1)" disabled><i class="bi bi-chevron-left"></i></button>
+                        <span id="ts-page-btns" class="ts-pagination-btns"></span>
+                        <button class="btn btn-secondary btn-sm" id="ts-next-btn" onclick="tsChangePage(1)"  disabled><i class="bi bi-chevron-right"></i></button>
+                    </div>
                 </div>
-                {% endif %}
             </div>
         </div>
 
         {% if is_role_admin or user_role == 'director' or user_role == 'accounting' %}
-        <div style="display:flex;gap:8px;margin-top:12px;">
+        <div class="ts-manager-actions">
             <button type="button" class="btn btn-secondary btn-sm" onclick="openModal('manageWorkersModal')"><i class="bi bi-person-gear"></i> Manage Factory Workers</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="openModal('manageFittersModal')"><i class="bi bi-people"></i> Manage Fitters</button>
         </div>
@@ -205,6 +212,75 @@
             <div class="modal-header"><h3>Confirm Delete</h3><button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">&#x2715;</button></div>
             <div class="modal-body"><p>Are you sure you want to delete <strong id="delete-worker-name"></strong>?</p><p class="text-muted" style="font-size:0.85rem;">This action cannot be undone.</p></div>
             <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button><button type="button" class="btn btn-danger" onclick="deleteWorker()">Delete</button></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Delete Confirm Modal ──────────────────────────────────── -->
+<div class="ts-modal-overlay z-high" id="ts-delete-modal" onclick="closeTsDeleteModal(event)">
+    <div class="ts-modal-box ts-modal-sm" onclick="event.stopPropagation()">
+        <div class="ts-modal-delete-header">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <h3>Delete Timesheet?</h3>
+        </div>
+        <p class="text-muted" style="margin:0;">This action cannot be undone.</p>
+        <div id="ts-delete-error" class="ts-modal-error"></div>
+        <div class="ts-modal-footer">
+            <button class="btn-cancel" onclick="closeTsDeleteModal()">Cancel</button>
+            <button class="btn btn-danger btn-sm" id="ts-delete-confirm-btn" onclick="executeTsDelete()"><i class="bi bi-trash"></i> Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Edit Timesheet Modal ─────────────────────────────────── -->
+<div class="ts-modal-overlay" id="ts-edit-modal" onclick="closeTsEditModal(event)">
+    <div class="ts-modal-box ts-modal-md" onclick="event.stopPropagation()">
+        <div class="ts-modal-header">
+            <h3><i class="bi bi-pencil-square"></i> Edit Timesheet</h3>
+            <button class="ts-modal-close" onclick="closeTsEditModal()">&times;</button>
+        </div>
+        <div class="ts-form-grid-2">
+            <div class="ts-form-field">
+                <label>Date</label>
+                <input type="date" id="ts-edit-date" class="form-input">
+            </div>
+            <div class="ts-form-field">
+                <label>Worker</label>
+                <select id="ts-edit-worker" class="form-input">
+                    <optgroup label="Fitters">
+                        {% for f in fitters %}<option data-worker-type="fitter" value="fitter-{{ f.id }}">{{ f.name }}</option>{% endfor %}
+                    </optgroup>
+                    <optgroup label="Factory Workers">
+                        {% for fw in factory_workers %}<option data-worker-type="factory" value="factory-{{ fw.id }}">{{ fw.name }}</option>{% endfor %}
+                    </optgroup>
+                </select>
+            </div>
+        </div>
+        <!-- Linked rate × hours = total row -->
+        <div class="ts-linked-row">
+            <div class="ts-form-field">
+                <label>Rate (£/hr)</label>
+                <input type="number" id="ts-edit-rate"  class="form-input" step="0.01" min="0" oninput="tsEditCalcTotal()">
+            </div>
+            <span class="ts-linked-sep">×</span>
+            <div class="ts-form-field">
+                <label>Hours</label>
+                <input type="number" id="ts-edit-hours" class="form-input" step="0.5"  min="0" oninput="tsEditCalcTotal()">
+            </div>
+            <span class="ts-linked-sep">=</span>
+            <div class="ts-form-field">
+                <label>Total (£)</label>
+                <input type="number" id="ts-edit-total" class="form-input" step="0.01" min="0" oninput="tsEditCalcRate()" placeholder="auto">
+            </div>
+        </div>
+        <div class="ts-form-field">
+            <label>Description</label>
+            <textarea id="ts-edit-desc" class="form-input" rows="2"></textarea>
+        </div>
+        <div id="ts-edit-error" class="ts-modal-error"></div>
+        <div class="ts-modal-footer">
+            <button class="btn-cancel" onclick="closeTsEditModal()">Cancel</button>
+            <button class="btn-save" onclick="saveTsEdit()"><i class="bi bi-floppy"></i> Save</button>
         </div>
     </div>
 </div>
@@ -379,6 +455,302 @@ function updateDurationLabel(val) {
     const text = h && m ? `${h}h ${m}m` : h ? `${h} hour${h !== 1 ? 's' : ''}` : `${m} min`;
     const lbl = document.getElementById('popover-duration-label');
     if (lbl) lbl.textContent = text;
+}
+
+// ── Overview table: paginated AJAX ────────────────────────────
+let _tsPage    = 1;
+let _tsType    = 'all';
+let _tsSearch  = '';
+let _tsTotal   = 0;
+let _tsPages   = 1;
+let _tsSearchTimer = null;
+let _tsCurrentRows = [];   // cache of current page rows for edit modal
+
+function tsSetType(type, btn) {
+    document.querySelectorAll('#ts-type-tabs .ts-type-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _tsType = type;
+    _tsPage = 1;
+    tsLoad();
+}
+
+function tsSearchDebounce() {
+    clearTimeout(_tsSearchTimer);
+    _tsSearchTimer = setTimeout(() => {
+        _tsSearch = document.getElementById('ts-search').value.trim();
+        _tsPage   = 1;
+        tsLoad();
+    }, 350);
+}
+
+function tsChangePage(delta) {
+    const newPage = _tsPage + delta;
+    if (newPage < 1 || newPage > _tsPages) return;
+    _tsPage = newPage;
+    tsLoad();
+}
+
+function tsLoad() {
+    const tbody = document.getElementById('ts-tbody');
+    tbody.innerHTML = '<tr><td colspan="10" class="ts-table-msg">Loading\u2026</td></tr>';
+    const params = new URLSearchParams({ page: _tsPage, type: _tsType, q: _tsSearch });
+    fetch(`/api/timesheets/?${params}`)
+        .then(r => r.json())
+        .then(data => {
+            _tsTotal      = data.total;
+            _tsPages      = data.num_pages;
+            _tsCurrentRows = data.rows;
+            tsRenderRows(data.rows);
+            tsRenderPagination(data.page, data.num_pages, data.total);
+            tsUpdateBulkBar();
+        })
+        .catch(() => {
+            tbody.innerHTML = '<tr><td colspan="10" class="ts-table-msg ts-table-msg-err">Failed to load timesheets.</td></tr>';
+        });
+}
+
+function tsRenderRows(rows) {
+    const tbody = document.getElementById('ts-tbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="ts-table-msg">No timesheets found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(ts => {
+        const orderCell = ts.order_id
+            ? `<a class="job-info-link" href="/order/${ts.order_id}/">${escHtml(ts.order_sale_number)} \u2013 ${escHtml(ts.order_last_name)}</a>`
+            : '\u2013';
+        const typeBadge  = ts.timesheet_type === 'installation'
+            ? '<span class="badge badge-installation">Installation</span>'
+            : '<span class="badge badge-manufacturing">Manufacturing</span>';
+        const hoursCell  = ts.hours ? `${ts.hours}h` : '\u2013';
+        const rateCell   = ts.hourly_rate ? `\u00a3${parseFloat(ts.hourly_rate).toFixed(2)}/hr` : '\u2013';
+        const totalCell  = `\u00a3${parseFloat(ts.total_cost).toFixed(2)}`;
+        const descCell   = escHtml(ts.display_description || '\u2013');
+        return `<tr data-ts-id="${ts.id}">
+            <td class="ts-td-cb"><input type="checkbox" class="ts-row-cb" onchange="tsRowCheck(this)"></td>
+            <td>${ts.date_display}</td>
+            <td>${orderCell}</td>
+            <td>${typeBadge}</td>
+            <td>${escHtml(ts.worker_name)}</td>
+            <td>${hoursCell}</td>
+            <td>${rateCell}</td>
+            <td><strong>${totalCell}</strong></td>
+            <td title="${escHtml(ts.display_description || '')}">${descCell}</td>
+            <td class="ts-td-actions">
+                <button class="btn-inline-edit"  onclick="openTsEdit(${ts.id})" title="Edit"><i class="bi bi-pencil"></i></button>
+                <button class="btn-inline-delete" onclick="confirmTsDelete(${ts.id})" title="Delete"><i class="bi bi-trash"></i></button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function tsRenderPagination(page, numPages, total) {
+    document.getElementById('ts-page-info').textContent = `${total} record${total !== 1 ? 's' : ''} \u00b7 page ${page} of ${numPages}`;
+    document.getElementById('ts-prev-btn').disabled = page <= 1;
+    document.getElementById('ts-next-btn').disabled = page >= numPages;
+    const btns = document.getElementById('ts-page-btns');
+    let start = Math.max(1, page - 2);
+    let end   = Math.min(numPages, start + 4);
+    start     = Math.max(1, end - 4);
+    btns.innerHTML = '';
+    for (let p = start; p <= end; p++) {
+        const b = document.createElement('button');
+        b.className = 'btn btn-secondary btn-sm' + (p === page ? ' active' : '');
+        b.textContent = p;
+        b.style.minWidth = '30px';
+        const pp = p;
+        b.onclick = () => { _tsPage = pp; tsLoad(); };
+        btns.appendChild(b);
+    }
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Checkbox / bulk selection ──────────────────────────────────
+function tsToggleAll(cb) {
+    document.querySelectorAll('.ts-row-cb').forEach(c => {
+        c.checked = cb.checked;
+        c.closest('tr').classList.toggle('ts-row-selected', cb.checked);
+    });
+    tsUpdateBulkBar();
+}
+
+function tsRowCheck(cb) {
+    cb.closest('tr').classList.toggle('ts-row-selected', cb.checked);
+    const all  = document.querySelectorAll('.ts-row-cb');
+    const chk  = document.querySelectorAll('.ts-row-cb:checked');
+    const selAll = document.getElementById('ts-select-all');
+    if (selAll) { selAll.checked = chk.length === all.length && all.length > 0; selAll.indeterminate = chk.length > 0 && chk.length < all.length; }
+    tsUpdateBulkBar();
+}
+
+function tsSelectedIds() {
+    return [...document.querySelectorAll('.ts-row-cb:checked')].map(c => parseInt(c.closest('tr').dataset.tsId));
+}
+
+function tsUpdateBulkBar() {
+    const ids = tsSelectedIds();
+    const bar = document.getElementById('ts-bulk-bar');
+    document.getElementById('ts-bulk-count').textContent = ids.length;
+    bar.classList.toggle('visible', ids.length > 0);
+}
+
+function tsBulkClear() {
+    document.querySelectorAll('.ts-row-cb').forEach(c => { c.checked = false; c.closest('tr').classList.remove('ts-row-selected'); });
+    const sa = document.getElementById('ts-select-all'); if (sa) { sa.checked = false; sa.indeterminate = false; }
+    tsUpdateBulkBar();
+}
+
+// Linked calc: rate × hours → total
+function tsBulkCalcTotal() {
+    const r = parseFloat(document.getElementById('ts-bulk-rate').value);
+    const h = parseFloat(document.getElementById('ts-bulk-hours').value);
+    if (!isNaN(r) && !isNaN(h)) document.getElementById('ts-bulk-total').value = (r * h).toFixed(2);
+}
+// Linked calc: total / hours → rate
+function tsBulkCalcRate() {
+    const t = parseFloat(document.getElementById('ts-bulk-total').value);
+    const h = parseFloat(document.getElementById('ts-bulk-hours').value);
+    if (!isNaN(t) && !isNaN(h) && h > 0) document.getElementById('ts-bulk-rate').value = (t / h).toFixed(2);
+}
+
+function tsBulkApply() {
+    const ids   = tsSelectedIds();
+    if (!ids.length) return;
+    const rate  = document.getElementById('ts-bulk-rate').value  || null;
+    const hours = document.getElementById('ts-bulk-hours').value || null;
+    const payload = {};
+    if (rate)  payload.hourly_rate = rate;
+    if (hours) payload.hours       = hours;
+    if (!Object.keys(payload).length) { alert('Enter a rate and/or hours to apply.'); return; }
+    const btn = document.querySelector('#ts-bulk-bar .btn-primary');
+    btn.disabled = true;
+    Promise.all(ids.map(id => fetch(`/api/timesheets/${id}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(r => r.json())))
+    .then(() => { btn.disabled = false; tsBulkClear(); tsLoad(); })
+    .catch(() => { btn.disabled = false; alert('Some updates failed.'); tsLoad(); });
+}
+
+// ── Edit timesheet ─────────────────────────────────────────────
+let _tsEditId = null;
+
+function openTsEdit(id) {
+    const ts = _tsCurrentRows.find(r => r.id === id);
+    if (!ts) return;
+    _tsEditId = id;
+    document.getElementById('ts-edit-date').value  = ts.date;
+    document.getElementById('ts-edit-hours').value = ts.hours || '';
+    document.getElementById('ts-edit-rate').value  = ts.hourly_rate || '';
+    document.getElementById('ts-edit-total').value = ts.total_cost ? parseFloat(ts.total_cost).toFixed(2) : '';
+    document.getElementById('ts-edit-desc').value  = ts.display_description || '';
+    const sel = document.getElementById('ts-edit-worker');
+    const workerVal = ts.fitter_id ? `fitter-${ts.fitter_id}` : ts.factory_worker_id ? `factory-${ts.factory_worker_id}` : '';
+    for (const opt of sel.options) { if (opt.value === workerVal) { opt.selected = true; break; } }
+    document.getElementById('ts-edit-error').style.display = 'none';
+    document.getElementById('ts-edit-modal').classList.add('visible');
+}
+
+function closeTsEditModal(e) {
+    if (e && e.target !== document.getElementById('ts-edit-modal')) return;
+    document.getElementById('ts-edit-modal').classList.remove('visible');
+    _tsEditId = null;
+}
+
+// Linked calc in edit modal
+function tsEditCalcTotal() {
+    const r = parseFloat(document.getElementById('ts-edit-rate').value);
+    const h = parseFloat(document.getElementById('ts-edit-hours').value);
+    if (!isNaN(r) && !isNaN(h)) document.getElementById('ts-edit-total').value = (r * h).toFixed(2);
+}
+function tsEditCalcRate() {
+    const t = parseFloat(document.getElementById('ts-edit-total').value);
+    const h = parseFloat(document.getElementById('ts-edit-hours').value);
+    if (!isNaN(t) && !isNaN(h) && h > 0) document.getElementById('ts-edit-rate').value = (t / h).toFixed(2);
+}
+
+function saveTsEdit() {
+    if (!_tsEditId) return;
+    const errEl  = document.getElementById('ts-edit-error');
+    errEl.style.display = 'none';
+    const selVal = document.getElementById('ts-edit-worker').value;
+    const payload = {
+        date:        document.getElementById('ts-edit-date').value,
+        hours:       document.getElementById('ts-edit-hours').value || null,
+        hourly_rate: document.getElementById('ts-edit-rate').value  || null,
+        description: document.getElementById('ts-edit-desc').value,
+    };
+    if (selVal.startsWith('fitter-'))  payload.fitter_id          = selVal.replace('fitter-', '');
+    else if (selVal.startsWith('factory-')) payload.factory_worker_id = selVal.replace('factory-', '');
+    fetch(`/api/timesheets/${_tsEditId}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('ts-edit-modal').classList.remove('visible');
+            _tsEditId = null;
+            tsLoad();
+        } else {
+            errEl.textContent = data.error || 'Failed to save';
+            errEl.style.display = 'block';
+        }
+    });
+}
+
+let _tsDeleteId = null;
+
+function confirmTsDelete(id) {
+    _tsDeleteId = id;
+    document.getElementById('ts-delete-error').style.display = 'none';
+    document.getElementById('ts-delete-modal').classList.add('visible');
+}
+
+function closeTsDeleteModal(e) {
+    if (e && e.target !== document.getElementById('ts-delete-modal')) return;
+    document.getElementById('ts-delete-modal').classList.remove('visible');
+    _tsDeleteId = null;
+}
+
+function executeTsDelete() {
+    if (!_tsDeleteId) return;
+    const errEl = document.getElementById('ts-delete-error');
+    const btn   = document.getElementById('ts-delete-confirm-btn');
+    btn.disabled = true;
+    fetch(`/api/timesheets/${_tsDeleteId}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken() },
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        if (data.success) {
+            document.getElementById('ts-delete-modal').classList.remove('visible');
+            _tsDeleteId = null;
+            tsLoad();
+        } else {
+            errEl.textContent = data.error || 'Failed to delete';
+            errEl.style.display = 'block';
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        errEl.textContent = 'Network error \u2014 please try again.';
+        errEl.style.display = 'block';
+    });
+}
+
+// Load on page-ready
+document.addEventListener('DOMContentLoaded', () => tsLoad());
+
+function filterTimesheetType(type, btn) {
+    // Legacy no-op (now handled by tsSetType)
 }
 
 // 

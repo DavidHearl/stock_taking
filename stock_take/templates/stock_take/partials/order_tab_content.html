@@ -853,8 +853,8 @@
                                 <th>Height</th>
                                 <th>Width</th>
                                 <th>Colour</th>
-                                <th>Qty</th>
-                                <th>Cost Price</th>
+                                <th style="width: 64px;">Qty</th>
+                                <th style="width: 110px;">Cost Price</th>
                                 <th>Total Cost</th>
                                 <th>Ordered</th>
                                 <th>Received</th>
@@ -939,8 +939,8 @@
                             <th>Height</th>
                             <th>Width</th>
                             <th>Colour</th>
-                            <th>Qty</th>
-                            <th>Cost Price</th>
+                            <th style="width: 64px;">Qty</th>
+                            <th style="width: 110px;">Cost Price</th>
                             <th>Total Cost</th>
                             <th>Ordered</th>
                             <th>Received</th>
@@ -988,11 +988,6 @@
             </div>
         </div>
         {% endfor %}
-        <div class="section-add-row-top">
-            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addAdditionalOSDoorsPO({{ order.id }})">
-                <i class="bi bi-plus-lg"></i> Add Additional OS Doors PO
-            </button>
-        </div>
         {% endif %}
         {% else %}
         <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
@@ -1099,7 +1094,16 @@
                                            data-original-quantity="{{ glass.quantity|floatformat:0 }}"
                                            min="0" step="1">
                                 </td>
-                                <td>£{{ glass.cost_price|floatformat:2 }}</td>
+                                <td>
+                                    {% if glass.is_cut_to_size and glass.stock_item and glass.stock_item.price_per_sqm %}
+                                    <div style="display:flex;flex-direction:column;gap:2px;">
+                                        <span id="glass-cost-{{ glass.id }}" style="font-weight:500;">£{{ glass.cost_price|floatformat:2 }}</span>
+                                        <span style="font-size:0.75rem;opacity:0.6;">£{{ glass.stock_item.price_per_sqm|floatformat:2 }}/m²</span>
+                                    </div>
+                                    {% else %}
+                                    <span id="glass-cost-{{ glass.id }}">£{{ glass.cost_price|floatformat:2 }}</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     {% if glass.stock_item %}
                                         {% with remaining=glass|calculate_remaining %}
@@ -5490,6 +5494,13 @@ function saveCutSize(accessoryId) {
                     setTimeout(() => inp.style.borderColor = '', 1500);
                 }
             });
+            // Update cost cell if price was recalculated from SQM
+            if (data.cost_price !== null && data.cost_price !== undefined) {
+                const costSpan = document.getElementById('glass-cost-' + accessoryId);
+                if (costSpan) {
+                    costSpan.textContent = '£' + data.cost_price.toFixed(2);
+                }
+            }
         } else {
             showAlert('Error saving dimensions: ' + (data.error || ''), 'danger');
         }

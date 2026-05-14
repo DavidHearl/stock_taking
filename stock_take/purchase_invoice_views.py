@@ -7,6 +7,7 @@ flows through into job-level costing.
 import json
 import logging
 import re
+from datetime import date as date_type
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
@@ -86,16 +87,32 @@ def _match_fitter_for_invoice(invoice):
 def _sync_timesheet_for_pi_line(line):
     """Create or update the installation timesheet linked to a purchase invoice line.
 
-    * If the line is allocated to an order, ensure exactly one timesheet exists
-      with fitter matched from the invoice supplier and date parsed from the
-      line description.
-    * If the line has no order, delete any linked timesheet.
+    A timesheet is created when either:
+    * The line is allocated to an order, OR
+    * The line is marked as is_fit_day
+
+    Date resolution order:
+      1. Parse date from the line description (e.g. "Fitting 5th May")
+      2. Fall back to line.line_date if set
+      3. Fall back to the invoice date
     """
     from django.utils import timezone
 
-    if line.order_id:
+    should_create = line.order_id or line.is_fit_day
+
+    if should_create:
         fitter = _match_fitter_for_invoice(line.invoice)
-        date = _parse_description_date(line.description, line.invoice.date) or timezone.now().date()
+
+        # Always try description-based date first; line_date is the fallback
+        fallback = line.line_date or line.invoice.date or timezone.now().date()
+        date = _parse_description_date(line.description, fallback) or fallback
+
+        # Build the display description: prefer customer name over raw line text
+        if line.order_id and line.order:
+            customer = f"{line.order.first_name or ''} {line.order.last_name or ''}".strip()
+            display_desc = customer or line.description
+        else:
+            display_desc = line.description
 
         ts, created = Timesheet.objects.get_or_create(
             purchase_invoice_line=line,
@@ -104,7 +121,8 @@ def _sync_timesheet_for_pi_line(line):
                 'timesheet_type': 'installation',
                 'fitter': fitter,
                 'date': date,
-                'description': line.description,
+                'hours': 8,
+                'description': display_desc,
             },
         )
         if not created:
@@ -112,16 +130,22 @@ def _sync_timesheet_for_pi_line(line):
             if ts.order_id != line.order_id:
                 ts.order = line.order
                 changed = True
-            if ts.description != line.description:
-                ts.description = line.description
+            if ts.description != display_desc:
+                ts.description = display_desc
                 changed = True
             if fitter and ts.fitter_id != fitter.id:
                 ts.fitter = fitter
                 changed = True
+            if ts.date != date:
+                ts.date = date
+                changed = True
+            if ts.hours != 8:
+                ts.hours = 8
+                changed = True
             if changed:
                 ts.save()
     else:
-        # No order – remove any linked timesheet
+        # Not a fit day and no order – remove any linked timesheet
         Timesheet.objects.filter(purchase_invoice_line=line).delete()
 
 def _parse_date(val):
@@ -597,6 +621,9 @@ def purchase_invoice_detail(request, invoice_id):
         'lines': line_items,
         'order_allocations': list(order_allocations.values()),
         'linked_pos': invoice.purchase_orders.all().order_by('-workguru_id'),
+        'linked_opos': invoice.overhead_pos.all().order_by('-created_at'),
+        'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
+        'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
     }
     return render(request, 'stock_take/purchase_invoice_detail.html', context)
 
@@ -798,11 +825,21 @@ def add_purchase_invoice_line(request, invoice_id):
     qty        = _parse_decimal(data.get('quantity', '1'), '1')
     rate       = _parse_decimal(data.get('rate', '0'))
     order_id   = data.get('order_id')
+    raw_date   = data.get('line_date') or ''
     sort_order = invoice.line_items.count()
+
+    line_date = None
+    if raw_date:
+        try:
+            line_date = date_type.fromisoformat(raw_date)
+        except (ValueError, TypeError):
+            pass
 
     line = PurchaseInvoiceLineItem.objects.create(
         invoice     = invoice,
         description = desc,
+        line_date   = line_date,
+        is_fit_day  = bool(data.get('is_fit_day')),
         quantity    = qty,
         rate        = rate,
         line_total  = qty * rate,
@@ -846,6 +883,17 @@ def update_purchase_invoice_line(request, invoice_id, line_id):
 
     if 'description' in data:
         line.description = data['description'].strip()
+    if 'line_date' in data:
+        raw_date = data['line_date']
+        if raw_date:
+            try:
+                line.line_date = date_type.fromisoformat(raw_date)
+            except (ValueError, TypeError):
+                pass
+        else:
+            line.line_date = None
+    if 'is_fit_day' in data:
+        line.is_fit_day = bool(data['is_fit_day'])
     if 'quantity' in data:
         line.quantity = _parse_decimal(data['quantity'], '1')
     if 'rate' in data:
@@ -891,6 +939,97 @@ def delete_purchase_invoice_line(request, invoice_id, line_id):
 
     return JsonResponse({
         'success': True,
+        'invoice_total': str(invoice.total),
+        'amount_paid': str(invoice.amount_paid),
+        'amount_outstanding': str(invoice.amount_outstanding),
+    })
+
+
+@login_required
+def copy_purchase_invoice_line(request, invoice_id, line_id):
+    """Duplicate a line item, inserting it immediately after the original."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    line    = get_object_or_404(PurchaseInvoiceLineItem, id=line_id, invoice=invoice)
+
+    new_line = PurchaseInvoiceLineItem.objects.create(
+        invoice     = invoice,
+        description = line.description,
+        line_date   = line.line_date,
+        quantity    = line.quantity,
+        rate        = line.rate,
+        line_total  = line.line_total,
+        order       = line.order,
+        sort_order  = line.sort_order + 1,
+    )
+    _recalc_invoice_total(invoice)
+
+    return JsonResponse({
+        'success': True,
+        'line': _line_to_dict(new_line),
+        'after_line_id': line.id,
+        'invoice_total': str(invoice.total),
+        'amount_paid': str(invoice.amount_paid),
+        'amount_outstanding': str(invoice.amount_outstanding),
+    })
+
+
+@login_required
+def split_purchase_invoice_line(request, invoice_id, line_id):
+    """Split a line into N equal parts: qty stays 1 on each, rate is divided evenly."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    line    = get_object_or_404(PurchaseInvoiceLineItem, id=line_id, invoice=invoice)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    try:
+        parts = int(data.get('parts', 2))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid number of parts'}, status=400)
+
+    if parts < 2 or parts > 100:
+        return JsonResponse({'error': 'Parts must be between 2 and 100'}, status=400)
+
+    # Divide rate evenly; any penny rounding goes on the first line
+    split_rate    = (line.rate / parts).quantize(Decimal('0.01'))
+    first_rate    = line.rate - split_rate * (parts - 1)  # absorbs rounding
+
+    # Update original line
+    line.quantity   = Decimal('1')
+    line.rate       = first_rate
+    line.line_total = first_rate
+    line.save(update_fields=['quantity', 'rate', 'line_total'])
+
+    # Create the remaining N-1 lines
+    new_lines = []
+    for _ in range(parts - 1):
+        new_line = PurchaseInvoiceLineItem.objects.create(
+            invoice     = invoice,
+            description = line.description,
+            line_date   = line.line_date,
+            quantity    = Decimal('1'),
+            rate        = split_rate,
+            line_total  = split_rate,
+            order       = line.order,
+            sort_order  = line.sort_order + 1,
+        )
+        new_lines.append(_line_to_dict(new_line))
+
+    _recalc_invoice_total(invoice)
+
+    return JsonResponse({
+        'success': True,
+        'original': _line_to_dict(line),
+        'new_lines': new_lines,
+        'after_line_id': line.id,
         'invoice_total': str(invoice.total),
         'amount_paid': str(invoice.amount_paid),
         'amount_outstanding': str(invoice.amount_outstanding),
@@ -1008,6 +1147,8 @@ def _line_to_dict(line):
     return {
         'id': line.id,
         'description': line.description,
+        'line_date': line.line_date.isoformat() if line.line_date else '',
+        'is_fit_day': line.is_fit_day,
         'quantity': str(line.quantity),
         'rate': str(line.rate),
         'line_total': str(line.line_total),
@@ -1436,7 +1577,7 @@ def resync_invoice_timesheets(request, invoice_id):
         fitter_name = fitter.name
 
     for line in lines:
-        if not line.order_id:
+        if not line.order_id and not line.is_fit_day:
             skipped_count += 1
             continue
         existing = Timesheet.objects.filter(purchase_invoice_line=line).first()
@@ -1453,3 +1594,186 @@ def resync_invoice_timesheets(request, invoice_id):
         'skipped': skipped_count,
         'fitter': fitter_name,
     })
+
+
+# ── OPO / PO creation & linking from invoice side ────────────────
+
+@login_required
+def create_opo_from_invoice(request, invoice_id):
+    """Create a new OverheadPurchaseOrder pre-filled from this invoice and link it."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    def _dec(key, default='0'):
+        try:
+            return Decimal(str(data.get(key) or default))
+        except (InvalidOperation, ValueError):
+            return Decimal(default)
+
+    supplier_name = (data.get('supplier_name') or invoice.supplier_name or '').strip()
+    if not supplier_name:
+        return JsonResponse({'error': 'supplier_name is required'}, status=400)
+
+    po = OverheadPurchaseOrder(
+        supplier_name=supplier_name,
+        category=data.get('category', 'other'),
+        description=data.get('description', ''),
+        status='draft',
+        date=invoice.date,
+        amount_net=_dec('amount_net'),
+        amount_vat=_dec('amount_vat'),
+        amount_gross=_dec('amount_gross', str(invoice.total)),
+        gl_code=data.get('gl_code', ''),
+        notes=data.get('notes', ''),
+        created_by=request.user.get_full_name() or request.user.username,
+    )
+    po.save()
+    po.purchase_invoices.add(invoice)
+
+    return JsonResponse({
+        'success': True,
+        'opo': {'id': po.id, 'reference': po.reference, 'supplier_name': po.supplier_name, 'amount_gross': str(po.amount_gross), 'status': po.status},
+    }, status=201)
+
+
+@login_required
+def link_opo_to_invoice(request, invoice_id):
+    """Link an existing OverheadPurchaseOrder to this invoice."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    opo_id = data.get('opo_id')
+    if not opo_id:
+        return JsonResponse({'error': 'opo_id required'}, status=400)
+
+    opo = get_object_or_404(OverheadPurchaseOrder, pk=opo_id)
+    opo.purchase_invoices.add(invoice)
+
+    return JsonResponse({
+        'success': True,
+        'opo': {'id': opo.id, 'reference': opo.reference, 'supplier_name': opo.supplier_name, 'amount_gross': str(opo.amount_gross), 'status': opo.status},
+    })
+
+
+@login_required
+def unlink_opo_from_invoice(request, invoice_id, opo_id):
+    """Remove the link between an OverheadPurchaseOrder and this invoice."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    opo = get_object_or_404(OverheadPurchaseOrder, pk=opo_id)
+    opo.purchase_invoices.remove(invoice)
+    return JsonResponse({'success': True})
+
+
+@login_required
+def search_opos_for_invoice(request, invoice_id):
+    """Return OPOs not already linked to this invoice, matching the search query."""
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    q = request.GET.get('q', '').strip()
+
+    already_linked = invoice.overhead_pos.values_list('id', flat=True)
+    qs = OverheadPurchaseOrder.objects.exclude(id__in=already_linked)
+
+    if q:
+        qs = qs.filter(
+            Q(reference__icontains=q) | Q(supplier_name__icontains=q) | Q(description__icontains=q)
+        )
+    else:
+        qs = qs.order_by('-created_at')[:20]
+
+    results = [
+        {'id': po.id, 'reference': po.reference, 'supplier_name': po.supplier_name, 'amount_gross': str(po.amount_gross), 'status': po.status}
+        for po in qs
+    ]
+    return JsonResponse({'results': results})
+
+
+@login_required
+def create_po_from_invoice(request, invoice_id):
+    """Create a new local PurchaseOrder pre-filled from this invoice and link it."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    supplier_name = (data.get('supplier_name') or invoice.supplier_name or '').strip()
+    description = (data.get('description') or invoice.invoice_number or '').strip()
+
+    # Generate a unique workguru_id in the 800000+ range for manual/local POs
+    max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 800000)
+
+    # Generate display number: PO<n+1>
+    last_num = 0
+    for po_obj in PurchaseOrder.objects.filter(display_number__startswith='PO').order_by('-display_number'):
+        m = re.match(r'^PO(\d+)$', po_obj.display_number or '')
+        if m:
+            last_num = max(last_num, int(m.group(1)))
+    display_number = f'PO{last_num + 1}'
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_id,
+        number=display_number,
+        display_number=display_number,
+        description=description or None,
+        supplier_name=supplier_name or None,
+        total=invoice.total,
+        status='Draft',
+    )
+    invoice.purchase_orders.add(po)
+
+    return JsonResponse({'success': True, 'po': _po_to_dict(po)}, status=201)
+
+
+@login_required
+def create_po_standalone(request):
+    """Create a new local PurchaseOrder without a pre-existing invoice (used in the Create Invoice modal)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    supplier_name = (data.get('supplier_name') or '').strip()
+    description = (data.get('description') or '').strip()
+
+    max_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    manual_id = max(max_id + 1, 800000)
+
+    last_num = 0
+    for po_obj in PurchaseOrder.objects.filter(display_number__startswith='PO').order_by('-display_number'):
+        m = re.match(r'^PO(\d+)$', po_obj.display_number or '')
+        if m:
+            last_num = max(last_num, int(m.group(1)))
+    display_number = f'PO{last_num + 1}'
+
+    po = PurchaseOrder.objects.create(
+        workguru_id=manual_id,
+        number=display_number,
+        display_number=display_number,
+        description=description or None,
+        supplier_name=supplier_name or None,
+        status='Draft',
+    )
+    return JsonResponse({'success': True, 'po': _po_to_dict(po)}, status=201)
+
+

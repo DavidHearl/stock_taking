@@ -107,8 +107,8 @@
             <tr>
                 <td class="info-label">Order Source</td>
                 <td class="info-value" data-field="order_source" data-value="{{ product.order_source }}">{{ product.get_order_source_display }}</td>
-                <td class="info-label">Average Landed Cost</td>
-                <td class="info-value">£{{ product.average_landed_price|default:product.cost|floatformat:2 }}</td>
+                <td class="info-label">Price per SQM</td>
+                <td class="info-value" data-field="price_per_sqm" data-value="{{ product.price_per_sqm|default:'' }}">{% if product.price_per_sqm %}£{{ product.price_per_sqm|floatformat:2 }}/m²{% else %}-{% endif %}</td>
             </tr>
             <tr>
                 <td class="info-label">Description</td>
@@ -1009,7 +1009,7 @@ function toggleEditMode() {
     if (overlay) overlay.style.display = 'flex';
     
     // Numeric fields that use step 0.01
-    const decimalFields = ['cost', 'pack_cost_price', 'length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'];
+    const decimalFields = ['cost', 'pack_cost_price', 'price_per_sqm', 'length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'];
     const integerFields = ['quantity', 'min_order_qty', 'par_level', 'box_quantity', 'pack_size'];
     
     // Make all fields editable
@@ -1094,6 +1094,8 @@ function cancelEdit() {
             displayValue = '£' + parseFloat(displayValue).toFixed(3);
         } else if (fieldName === 'pack_cost_price') {
             displayValue = displayValue ? ('£' + parseFloat(displayValue).toFixed(3)) : '-';
+        } else if (fieldName === 'price_per_sqm') {
+            displayValue = displayValue ? ('£' + parseFloat(displayValue).toFixed(2) + '/m²') : '-';
         } else if (fieldName === 'category_id') {
             const cat = categoriesData.find(c => c.id == displayValue);
             displayValue = cat ? cat.name : 'Not Set';
@@ -1115,6 +1117,7 @@ function cancelEdit() {
 async function saveProduct() {
     const fieldLabels = {
         sku: 'SKU', name: 'Name', description: 'Description', cost: 'Cost Price', pack_cost_price: 'Pack Cost Price',
+        price_per_sqm: 'Price per SQM',
         category_id: 'Category', tracking_type: 'Tracking Type', order_source: 'Order Source', location: 'Location',
         min_order_qty: 'Min Order Qty', par_level: 'Par Level', pack_size: 'Pack Size',
         supplier_id: 'Supplier', supplier_sku: 'Supplier SKU', product_url: 'Product URL',
@@ -1146,6 +1149,9 @@ async function saveProduct() {
                 } else if (fieldName === 'pack_cost_price') {
                     oldDisplay = oldVal ? ('£' + parseFloat(oldVal || 0).toFixed(3)) : '-';
                     newDisplay = newVal ? ('£' + parseFloat(newVal || 0).toFixed(3)) : '-';
+                } else if (fieldName === 'price_per_sqm') {
+                    oldDisplay = oldVal ? ('£' + parseFloat(oldVal).toFixed(2) + '/m²') : '-';
+                    newDisplay = newVal ? ('£' + parseFloat(newVal).toFixed(2) + '/m²') : '-';
                 } else if (fieldName === 'category_id') {
                     const oldCat = categoriesData.find(c => c.id == oldVal);
                     const newCat = categoriesData.find(c => c.id == newVal);

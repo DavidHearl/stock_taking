@@ -691,12 +691,21 @@ def purchase_order_detail(request, po_id):
     po_expenses_total = 0
     unlinked_timesheets = []
     if purchase_order.po_type == 'fitter':
+        _linked_pi_ids = list(purchase_order.linked_purchase_invoices.values_list('id', flat=True))
         po_timesheets = list(
-            purchase_order.timesheets.select_related('order', 'fitter')
+            Timesheet.objects.filter(
+                Q(purchase_order=purchase_order) |
+                (Q(purchase_invoice_line__isnull=False) & Q(purchase_invoice_line__invoice_id__in=_linked_pi_ids))
+            )
+            .select_related('order', 'fitter', 'purchase_invoice_line')
+            .distinct()
             .order_by('order__sale_number', 'date')
         )
         for ts in po_timesheets:
-            ts.line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
+            if ts.purchase_invoice_line_id:
+                ts.line_total = float(ts.purchase_invoice_line.line_total)
+            else:
+                ts.line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
         po_timesheets_total = sum(ts.line_total for ts in po_timesheets)
         po_expenses = list(
             purchase_order.expenses.select_related('order', 'fitter')
@@ -790,6 +799,7 @@ def purchase_order_detail(request, po_id):
         'po_expenses': po_expenses,
         'po_timesheets_total': po_timesheets_total,
         'po_expenses_total': po_expenses_total,
+        'po_fitter_total': po_timesheets_total + po_expenses_total,
         'unlinked_timesheets': unlinked_timesheets,
         'next_split_label': next_split_label,
         'parent_po': parent_po,
@@ -1422,6 +1432,25 @@ def po_save_freight(request, po_id):
 
 
 @login_required
+def set_po_type(request, po_id):
+    """Set po_type to 'supplier' or 'fitter' (AJAX POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    new_type = data.get('po_type', '')
+    if new_type not in ('supplier', 'fitter'):
+        return JsonResponse({'error': 'Invalid type'}, status=400)
+    po.po_type = new_type
+    po.save(update_fields=['po_type'])
+    label = po.get_po_type_display()
+    return JsonResponse({'success': True, 'po_type': new_type, 'label': label})
+
+
+@login_required
 def purchase_order_add_product(request, po_id):
     """Add a product line item to a purchase order (AJAX)"""
     if request.method != 'POST':
@@ -1574,7 +1603,16 @@ def po_delete_timesheet(request, po_id, timesheet_id):
         return JsonResponse({'error': 'POST required'}, status=405)
 
     po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
-    ts = get_object_or_404(Timesheet, id=timesheet_id, purchase_order=po)
+
+    # Allow deleting timesheets linked directly to this PO, or linked via a
+    # purchase invoice line that belongs to one of this PO's linked invoices.
+    linked_pi_ids = list(po.linked_purchase_invoices.values_list('id', flat=True))
+    ts = Timesheet.objects.filter(
+        Q(id=timesheet_id, purchase_order=po) |
+        Q(id=timesheet_id, purchase_invoice_line__invoice_id__in=linked_pi_ids)
+    ).first()
+    if ts is None:
+        return JsonResponse({'error': 'Timesheet not found'}, status=404)
     ts.delete()
     return JsonResponse({'success': True})
 
@@ -1721,6 +1759,78 @@ def po_delete_expense(request, po_id, expense_id):
     exp = get_object_or_404(Expense, id=expense_id, purchase_order=po)
     exp.delete()
     return JsonResponse({'success': True})
+
+
+@login_required
+def po_pull_from_invoice(request, po_id):
+    """Pull lines from linked purchase invoices into this fitter PO's timesheets/expenses (AJAX POST).
+
+    Lines whose description contains expense-related keywords are created as Expense records;
+    all other lines are created as Timesheets linked to the PI line (idempotent via the
+    purchase_invoice_line FK).
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    if po.po_type != 'fitter':
+        return JsonResponse({'error': 'Not a fitter PO'}, status=400)
+
+    from django.utils import timezone as _tz
+
+    EXPENSE_KEYWORDS = ('expense', 'expenses', 'petrol', 'materials', 'mileage', 'fuel', 'hotel', 'accommodation')
+
+    ts_created = 0
+    ts_linked = 0
+    exp_created = 0
+
+    for invoice in po.linked_purchase_invoices.prefetch_related('line_items__order').all():
+        for line in invoice.line_items.all():
+            effective_date = line.line_date or invoice.date or _tz.now().date()
+            is_expense = any(kw in line.description.lower() for kw in EXPENSE_KEYWORDS)
+
+            if is_expense:
+                already = Expense.objects.filter(
+                    purchase_order=po,
+                    description=line.description,
+                    date=effective_date,
+                ).exists()
+                if not already:
+                    Expense.objects.create(
+                        purchase_order=po,
+                        fitter=po.fitter,
+                        order=line.order,
+                        date=effective_date,
+                        amount=line.line_total,
+                        description=line.description,
+                        expense_type='other',
+                    )
+                    exp_created += 1
+            else:
+                ts, created = Timesheet.objects.get_or_create(
+                    purchase_invoice_line=line,
+                    defaults={
+                        'purchase_order': po,
+                        'order': line.order,
+                        'timesheet_type': 'installation',
+                        'fitter': po.fitter,
+                        'date': effective_date,
+                        'description': line.description,
+                    },
+                )
+                if created:
+                    ts_created += 1
+                elif ts.purchase_order_id != po.id:
+                    ts.purchase_order = po
+                    ts.save(update_fields=['purchase_order'])
+                    ts_linked += 1
+
+    return JsonResponse({
+        'success': True,
+        'timesheets_created': ts_created,
+        'timesheets_linked': ts_linked,
+        'expenses_created': exp_created,
+    })
 
 
 @login_required

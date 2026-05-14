@@ -32,6 +32,7 @@
                 <span class="po-status {% if purchase_order.status == 'Draft' %}draft{% elif purchase_order.status == 'Approved' %}approved{% elif purchase_order.status == 'Received' %}received{% elif purchase_order.status == 'Partially Received' %}partially-received{% elif purchase_order.status == 'Cancelled' %}cancelled{% endif %}">
                     {{ purchase_order.status }}
                 </span>
+                <span class="po-type-badge {{ purchase_order.po_type }}" id="po-type-badge">{% if purchase_order.po_type == 'fitter' %}<i class="bi bi-person-gear"></i> Fitter PO{% else %}<i class="bi bi-building"></i> Supplier PO{% endif %}</span>
                 {% if purchase_order.email_sent %}
                 <span class="po-email-badge sent" title="Sent {{ purchase_order.email_sent_at|date:'d/m/Y H:i' }} to {{ purchase_order.email_sent_to }}">
                     <i class="bi bi-envelope-check"></i> Emailed
@@ -135,6 +136,20 @@
                     <button class="po-more-item" onclick="openHistoryModal()">
                         <i class="bi bi-clock-history"></i> History
                     </button>
+                    <div class="po-more-separator"></div>
+                    <button class="po-more-item" id="toggle-products-btn" onclick="toggleProductsSection()">
+                        <i class="bi bi-box-seam"></i> <span id="toggle-products-label">{% if purchase_order.po_type == 'fitter' %}Show{% else %}Hide{% endif %} Products</span>
+                    </button>
+                    <div class="po-more-separator"></div>
+                    {% if purchase_order.po_type == 'supplier' %}
+                    <button class="po-more-item" onclick="convertPoType('fitter')">
+                        <i class="bi bi-person-gear"></i> Convert to Fitter PO
+                    </button>
+                    {% else %}
+                    <button class="po-more-item" onclick="convertPoType('supplier')">
+                        <i class="bi bi-building"></i> Convert to Supplier PO
+                    </button>
+                    {% endif %}
                     <div class="po-more-separator"></div>
                     <button class="po-more-item danger" onclick="deletePO()">
                         <i class="bi bi-trash"></i> Delete PO
@@ -310,7 +325,7 @@
     </div>
 
     <!-- Products Section -->
-    <div class="po-products-section">
+    <div class="po-products-section" id="po-items-section"{% if purchase_order.po_type == 'fitter' %} style="display:none;"{% endif %}>
         <div class="po-products-header-row">
             <h3><i class="bi bi-box-seam"></i> Products
                 {% if total_board_qty %}
@@ -625,11 +640,20 @@
             <button class="btn btn-sm btn-add-product" onclick="toggleAddTimesheetRow()">
                 <i class="bi bi-plus-lg"></i> Add Timesheet
             </button>
+            {% if linked_purchase_invoices %}
+            <button class="btn btn-sm btn-add-product" onclick="pullFromInvoice()" style="background: var(--info-color, #0dcaf0); color: #fff; border-color: transparent; margin-left: 8px;">
+                <i class="bi bi-cloud-download"></i> Pull from Invoice
+            </button>
+            {% endif %}
+            <button class="btn btn-sm btn-delete" id="ts-delete-selected-btn" onclick="deleteSelectedTimesheets()" style="display:none; margin-left: 8px;">
+                <i class="bi bi-trash"></i> Delete Selected
+            </button>
         </div>
         <div class="po-table-container">
             <table class="po-products-table" id="timesheets-table">
                 <thead>
                     <tr>
+                        <th style="width: 30px;"><input type="checkbox" id="ts-select-all" title="Select all" onchange="toggleSelectAllTimesheets(this)"></th>
                         <th class="text-left">Date</th>
                         <th class="text-left">Order</th>
                         <th class="text-left">Description</th>
@@ -642,6 +666,7 @@
                 <tbody>
                     <!-- Add Timesheet Row (hidden) -->
                     <tr id="add-timesheet-row" style="display:none;" class="add-product-row">
+                        <td></td>
                         <td><input type="date" class="po-inline-input" id="new-ts-date" value=""></td>
                         <td>
                             <select class="po-inline-input" id="new-ts-order">
@@ -664,6 +689,7 @@
                     </tr>
                     {% for ts in po_timesheets %}
                     <tr data-timesheet-id="{{ ts.id }}">
+                        <td><input type="checkbox" class="ts-row-check" value="{{ ts.id }}" onchange="updateTsDeleteBtn()"></td>
                         <td>{{ ts.date|date:"d/m/Y" }}</td>
                         <td>
                             {% if ts.order %}
@@ -676,7 +702,7 @@
                         <td class="text-right ts-hours-cell">{{ ts.hours|floatformat:1 }}</td>
                         <td class="text-right ts-rate-cell">£{{ ts.hourly_rate|floatformat:2 }}</td>
                         <td class="text-right ts-total-cell">£{{ ts.line_total|floatformat:2 }}</td>
-                        <td class="text-center">
+                        <td class="text-center" style="white-space: nowrap;">
                             <button class="btn-inline-edit" onclick="editTimesheet({{ ts.id }}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
                             <button class="btn-inline-link" onclick="unlinkTimesheet({{ ts.id }}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
                             <button class="btn-inline-delete" onclick="deleteTimesheet({{ ts.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
@@ -684,7 +710,7 @@
                     </tr>
                     {% empty %}
                     <tr id="no-timesheets-row">
-                        <td colspan="7" class="text-center" style="padding: 24px; color: var(--text-secondary);">
+                        <td colspan="8" class="text-center" style="padding: 24px; color: var(--text-secondary);">
                             <i class="bi bi-clock" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
                             No timesheet entries yet. Click <strong>Add Timesheet</strong> above to add one.
                         </td>
@@ -1363,14 +1389,26 @@
                 <div class="approve-summary-row">
                     <span class="approve-label">Items</span>
                     <span class="approve-value">
-                        {% if total_board_qty %}{{ total_board_items }} item{{ total_board_items|pluralize }} &middot; {{ total_board_qty|floatformat:0 }} boards
+                        {% if purchase_order.po_type == 'fitter' %}
+                            {% with ts_count=po_timesheets|length exp_count=po_expenses|length %}
+                                {% if ts_count or exp_count %}
+                                    {% if ts_count %}{{ ts_count }} timesheet{{ ts_count|pluralize }}{% endif %}{% if ts_count and exp_count %} &middot; {% endif %}{% if exp_count %}{{ exp_count }} expense{{ exp_count|pluralize }}{% endif %}
+                                {% else %}0 items{% endif %}
+                            {% endwith %}
+                        {% elif total_board_qty %}{{ total_board_items }} item{{ total_board_items|pluralize }} &middot; {{ total_board_qty|floatformat:0 }} boards
                         {% elif products.count %}{{ products.count }} item{{ products.count|pluralize }}
                         {% else %}0 items{% endif %}
                     </span>
                 </div>
                 <div class="approve-summary-row approve-summary-total">
                     <span class="approve-label">Total</span>
-                    <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ purchase_order.total|floatformat:2 }}</span>
+                    {% if purchase_order.po_type == 'fitter' %}
+                        <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ po_fitter_total|floatformat:2 }}</span>
+                    {% elif purchase_order.total %}
+                        <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ purchase_order.total|floatformat:2 }}</span>
+                    {% else %}
+                        <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ linked_pi_total|floatformat:2 }}</span>
+                    {% endif %}
                 </div>
             </div>
             <p style="margin-top: 14px; font-size: 0.8rem; color: var(--text-muted);">
@@ -2605,6 +2643,55 @@ function pushToXero() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
     });
+}
+
+// ---- Toggle Products Section ----
+function toggleProductsSection() {
+    document.getElementById('po-more-dropdown').classList.remove('open');
+    const section = document.getElementById('po-items-section');
+    const label   = document.getElementById('toggle-products-label');
+    if (!section) return;
+    const hidden = section.style.display === 'none';
+    section.style.display = hidden ? '' : 'none';
+    if (label) label.textContent = hidden ? 'Hide Products' : 'Show Products';
+}
+
+// ---- Convert PO type ----
+function convertPoType(newType) {
+    document.getElementById('po-more-dropdown').classList.remove('open');
+    const label = newType === 'fitter' ? 'Fitter PO' : 'Supplier PO';
+    if (!confirm(`Convert this purchase order to a ${label}?`)) return;
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/set-type/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ po_type: newType }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const badge = document.getElementById('po-type-badge');
+            if (badge) {
+                badge.className = `po-type-badge ${data.po_type}`;
+                badge.innerHTML = data.po_type === 'fitter'
+                    ? '<i class="bi bi-person-gear"></i> Fitter PO'
+                    : '<i class="bi bi-building"></i> Supplier PO';
+            }
+            const btn = document.querySelector('#po-more-dropdown .po-more-item[onclick^="convertPoType"]');
+            if (btn) {
+                if (data.po_type === 'fitter') {
+                    btn.setAttribute('onclick', "convertPoType('supplier')");
+                    btn.innerHTML = '<i class="bi bi-building"></i> Convert to Supplier PO';
+                } else {
+                    btn.setAttribute('onclick', "convertPoType('fitter')");
+                    btn.innerHTML = '<i class="bi bi-person-gear"></i> Convert to Fitter PO';
+                }
+            }
+            showNotification(`Converted to ${data.label}.`, 'success');
+        } else {
+            showNotification('Error: ' + (data.error || 'Failed'), 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
 }
 
 // ---- More Menu ----
@@ -3879,6 +3966,74 @@ function cancelTimesheetEdit(tsId, btn, origHours, origRate) {
         <button class="btn-inline-link" onclick="unlinkTimesheet(${tsId}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
         <button class="btn-inline-delete" onclick="deleteTimesheet(${tsId}, this)" title="Delete"><i class="bi bi-trash"></i></button>
     `;
+}
+
+function toggleSelectAllTimesheets(master) {
+    document.querySelectorAll('.ts-row-check').forEach(cb => cb.checked = master.checked);
+    updateTsDeleteBtn();
+}
+
+function updateTsDeleteBtn() {
+    const anyChecked = document.querySelectorAll('.ts-row-check:checked').length > 0;
+    document.getElementById('ts-delete-selected-btn').style.display = anyChecked ? '' : 'none';
+    const all = document.querySelectorAll('.ts-row-check');
+    const checked = document.querySelectorAll('.ts-row-check:checked');
+    const master = document.getElementById('ts-select-all');
+    if (master) {
+        master.indeterminate = checked.length > 0 && checked.length < all.length;
+        master.checked = all.length > 0 && checked.length === all.length;
+    }
+}
+
+function deleteSelectedTimesheets() {
+    const ids = Array.from(document.querySelectorAll('.ts-row-check:checked')).map(cb => parseInt(cb.value));
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} timesheet(s)? This cannot be undone.`)) return;
+
+    Promise.allSettled(ids.map(id =>
+        fetch(`/purchase-order/{{ purchase_order.workguru_id }}/delete-timesheet/${id}/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+        })
+        .then(r => r.ok ? r.json() : { success: false, error: `HTTP ${r.status}` })
+        .catch(() => ({ success: false, error: 'network' }))
+    )).then(settled => {
+        const results = settled.map(s => s.status === 'fulfilled' ? s.value : { success: false });
+        const succeeded = results.filter(r => r.success).length;
+        const failed = results.length - succeeded;
+        ids.forEach((id, i) => {
+            if (results[i] && results[i].success) {
+                const row = document.querySelector(`tr[data-timesheet-id="${id}"]`);
+                if (row) row.remove();
+            }
+        });
+        document.getElementById('ts-delete-selected-btn').style.display = 'none';
+        const master = document.getElementById('ts-select-all');
+        if (master) { master.checked = false; master.indeterminate = false; }
+        showNotification(succeeded + ' timesheet(s) deleted' + (failed ? `, ${failed} failed` : ''), failed ? 'error' : 'success');
+    });
+}
+
+function pullFromInvoice() {
+    if (!confirm('Pull all fitting lines as timesheets and expense lines as expenses from linked supplier invoices?')) return;
+    fetch("{% url 'po_pull_from_invoice' purchase_order.workguru_id %}", {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const msgs = [];
+            if (data.timesheets_created) msgs.push(data.timesheets_created + ' timesheet(s) created');
+            if (data.timesheets_linked) msgs.push(data.timesheets_linked + ' timesheet(s) linked');
+            if (data.expenses_created) msgs.push(data.expenses_created + ' expense(s) created');
+            showNotification(msgs.length ? msgs.join(', ') : 'Nothing new to import', 'success');
+            if (msgs.length) setTimeout(() => location.reload(), 800);
+        } else {
+            showNotification(data.error || 'Import failed', 'error');
+        }
+    })
+    .catch(() => showNotification('Network error', 'error'));
 }
 
 function toggleAddExpenseRow() {

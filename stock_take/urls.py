@@ -5,7 +5,7 @@ from .dark_mode_view import toggle_dark_mode
 from .location_view import set_location
 from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_monthly_stock_history, dashboard_outstanding_report, dashboard_outstanding_pdf, dashboard_outstanding_xero_check, dashboard_outstanding_xero_check_single, dashboard_week_report, dashboard_week_pdf, dashboard_monthly_report, dashboard_monthly_pdf, dashboard_avg_report, dashboard_avg_pdf, dashboard_save_layout
 from .product_view import product_detail, add_product, upload_product_image, delete_product, product_add_substitution, product_add_link, product_delete_link, product_delete_price_history
-from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_unreceive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items, purchase_order_push_to_xero, purchase_order_remove_xero_sync, purchase_order_split, po_add_timesheet, po_delete_timesheet, po_link_timesheet, po_unlink_timesheet, po_update_timesheet, po_add_expense, po_delete_expense, po_save_freight
+from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_unreceive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items, purchase_order_push_to_xero, purchase_order_remove_xero_sync, purchase_order_split, po_add_timesheet, po_delete_timesheet, po_link_timesheet, po_unlink_timesheet, po_update_timesheet, po_add_expense, po_delete_expense, po_pull_from_invoice, po_save_freight, set_po_type
 from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, sale_create_order, sale_save, sale_merge, sale_link_order, sale_coversheet_save, sale_coversheet_pdf, sale_claim_document_upload, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage, bulk_delete_payments, bulk_copy_payments, edit_payment_from_manage, xero_search_invoices, xero_link_invoice, customer_xero_search, customer_xero_link, customer_anthill_scrape, customer_distribute_payments
 from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log, resolve_error_log, error_log_history, admin_design_rules
 from .about_views import about_page
@@ -28,10 +28,13 @@ from .purchase_invoice_views import (
     purchase_invoices_list, purchase_invoice_detail, create_purchase_invoice,
     update_purchase_invoice, delete_purchase_invoice, add_purchase_invoice_line,
     update_purchase_invoice_line, delete_purchase_invoice_line,
+    copy_purchase_invoice_line, split_purchase_invoice_line,
     upload_purchase_invoice_attachment, delete_purchase_invoice_attachment,
     order_purchase_invoice_lines, parse_purchase_invoice_pdf,
     link_purchase_invoice_po, unlink_purchase_invoice_po, search_purchase_invoices,
     push_purchase_invoice_to_xero, search_purchase_invoice_in_xero, remove_xero_link,
+    create_opo_from_invoice, link_opo_to_invoice, unlink_opo_from_invoice,
+    search_opos_for_invoice, create_po_from_invoice, create_po_standalone,
     manual_link_xero, sync_xero_payment_statuses, next_invoice_number, supplier_search,
     resync_invoice_timesheets,
 )
@@ -100,6 +103,8 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/lines/add/', add_purchase_invoice_line, name='add_purchase_invoice_line'),
     path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/update/', update_purchase_invoice_line, name='update_purchase_invoice_line'),
     path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/delete/', delete_purchase_invoice_line, name='delete_purchase_invoice_line'),
+    path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/copy/', copy_purchase_invoice_line, name='copy_purchase_invoice_line'),
+    path('purchase-invoices/<int:invoice_id>/lines/<int:line_id>/split/', split_purchase_invoice_line, name='split_purchase_invoice_line'),
     path('purchase-invoices/<int:invoice_id>/upload-attachment/', upload_purchase_invoice_attachment, name='upload_purchase_invoice_attachment'),
     path('purchase-invoices/<int:invoice_id>/delete-attachment/', delete_purchase_invoice_attachment, name='delete_purchase_invoice_attachment'),
     path('purchase-invoices/<int:invoice_id>/link-po/', link_purchase_invoice_po, name='link_purchase_invoice_po'),
@@ -110,6 +115,12 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/remove-xero-link/', remove_xero_link, name='remove_xero_link'),
     path('purchase-invoices/<int:invoice_id>/manual-link-xero/', manual_link_xero, name='manual_link_xero'),
     path('purchase-invoices/<int:invoice_id>/resync-timesheets/', resync_invoice_timesheets, name='resync_invoice_timesheets'),
+    path('purchase-invoices/<int:invoice_id>/create-opo/', create_opo_from_invoice, name='create_opo_from_invoice'),
+    path('purchase-invoices/<int:invoice_id>/link-opo/', link_opo_to_invoice, name='link_opo_to_invoice'),
+    path('purchase-invoices/<int:invoice_id>/unlink-opo/<int:opo_id>/', unlink_opo_from_invoice, name='unlink_opo_from_invoice'),
+    path('purchase-invoices/<int:invoice_id>/search-opos/', search_opos_for_invoice, name='search_opos_for_invoice'),
+    path('purchase-invoices/<int:invoice_id>/create-po/', create_po_from_invoice, name='create_po_from_invoice'),
+    path('purchase-invoices/create-po-standalone/', create_po_standalone, name='create_po_standalone'),
     path('api/order/<int:order_id>/purchase-invoice-lines/', order_purchase_invoice_lines, name='order_purchase_invoice_lines'),
     path('api/purchase-invoice-search/', search_purchase_invoices, name='search_purchase_invoices'),
     path('api/next-invoice-number/', next_invoice_number, name='next_invoice_number'),
@@ -204,6 +215,8 @@ urlpatterns = [
     path('purchase-order/<int:po_id>/update-timesheet/<int:timesheet_id>/', po_update_timesheet, name='po_update_timesheet'),
     path('purchase-order/<int:po_id>/add-expense/', po_add_expense, name='po_add_expense'),
     path('purchase-order/<int:po_id>/delete-expense/<int:expense_id>/', po_delete_expense, name='po_delete_expense'),
+    path('purchase-order/<int:po_id>/pull-from-invoice/', po_pull_from_invoice, name='po_pull_from_invoice'),
+    path('purchase-order/<int:po_id>/set-type/', set_po_type, name='set_po_type'),
     
     # Suppliers
     path('suppliers/', suppliers_list, name='suppliers_list'),
@@ -467,6 +480,9 @@ urlpatterns = [
     
     # Timesheets
     path('timesheets/', views.timesheets, name='timesheets'),
+    path('api/timesheets/', views.timesheets_json, name='timesheets_json'),
+    path('api/timesheets/<int:timesheet_id>/update/', views.timesheet_update, name='timesheet_update'),
+    path('api/timesheets/<int:timesheet_id>/delete/', views.timesheet_delete, name='timesheet_delete'),
     path('api/save-manufacturing-day/', views.save_manufacturing_day, name='save_manufacturing_day'),
     path('api/get-week-timesheets/', views.get_week_timesheets, name='get_week_timesheets'),
     path('api/save-fitter-week/', views.save_fitter_week, name='save_fitter_week'),

@@ -107,7 +107,7 @@ def ordering(request):
     
     # Get all orders for statistics
     from django.db.models import Case, When, Value, BooleanField as BF
-    all_orders = Order.objects.select_related('boards_po').annotate(
+    all_orders = Order.objects.select_related('boards_po').prefetch_related('additional_boards_pos').annotate(
         boards_is_ordered=Case(
             When(boards_po__boards_ordered=True, then=Value(True)),
             default=Value(False),
@@ -217,6 +217,20 @@ def ordering(request):
     validation_order_ids = set(vr.order_id for vr in validation_requests_qs)
     validation_requests = list(validation_requests_qs)
 
+    # Build a sale_number → BoardsPO map across ALL orders so that duplicate
+    # order rows (same sale_number, one with boards_po and one without) both
+    # show the correct PO in the Boards column.
+    sale_boards_po_map = {}
+    for o in Order.objects.filter(boards_po__isnull=False).select_related('boards_po'):
+        sale_boards_po_map[o.sale_number] = o.boards_po
+    # Also cover cases where the PO is only in additional_boards_pos
+    for o in Order.objects.prefetch_related('additional_boards_pos').exclude(
+        sale_number__in=sale_boards_po_map
+    ):
+        first_extra = o.additional_boards_pos.first()
+        if first_extra:
+            sale_boards_po_map[o.sale_number] = first_extra
+
     return render(request, 'stock_take/ordering.html', {
         'orders': orders,
         'pfp_orders': orders.filter(order_date__isnull=True, fit_date__isnull=True),
@@ -242,6 +256,7 @@ def ordering(request):
         'is_validator': is_validator,
         'validation_order_ids': validation_order_ids,
         'validation_requests': validation_requests,
+        'sale_boards_po_map': sale_boards_po_map,
     })
 
 @login_required
@@ -4809,11 +4824,26 @@ def add_accessories_to_po(request):
                 desc_parts.append(f'For order {acc.order.sale_number}')
             description = ' | '.join(desc_parts)
 
-            # Use StockItem.cost as the authoritative price when available —
-            # it reflects the current cost maintained in the stock database.
-            # Fall back to Accessory.cost_price (from the Anthill CSV import)
-            # only when no stock item is linked.
-            unit_price = float(acc.stock_item.cost) if acc.stock_item and acc.stock_item.cost else float(acc.cost_price or 0)
+            # For cut-to-size items, calculate price directly from price_per_sqm
+            # + dimensions if available — this is more reliable than acc.cost_price
+            # which may not have been recalculated if price_per_sqm was set later.
+            if (acc.is_cut_to_size and acc.cut_width and acc.cut_height
+                    and acc.stock_item and acc.stock_item.price_per_sqm):
+                from decimal import Decimal
+                width_m = acc.cut_width / Decimal('1000')
+                height_m = acc.cut_height / Decimal('1000')
+                area_sqm = width_m * height_m
+                calculated = (area_sqm * acc.stock_item.price_per_sqm).quantize(Decimal('0.01'))
+                # Also keep the accessory record up to date
+                acc.cost_price = calculated
+                acc.save(update_fields=['cost_price'])
+                unit_price = float(calculated)
+            elif acc.is_cut_to_size and acc.cut_width and acc.cut_height and acc.cost_price:
+                unit_price = float(acc.cost_price)
+            elif acc.stock_item and acc.stock_item.cost:
+                unit_price = float(acc.stock_item.cost)
+            else:
+                unit_price = float(acc.cost_price or 0)
             PurchaseOrderProduct.objects.create(
                 purchase_order=po,
                 sku=acc.sku or '',
@@ -9152,6 +9182,19 @@ def save_cut_size(request, order_id, accessory_id):
         accessory.cut_height = Decimal(height_raw) if height_raw else None
         accessory.save(update_fields=['cut_width', 'cut_height'])
 
+        # ── Auto-calculate cost from price_per_sqm if set ──
+        calculated_cost = None
+        area_sqm = None
+        if (accessory.stock_item and accessory.stock_item.price_per_sqm
+                and accessory.cut_width and accessory.cut_height):
+            width_m = accessory.cut_width / Decimal('1000')
+            height_m = accessory.cut_height / Decimal('1000')
+            area_sqm = (width_m * height_m).quantize(Decimal('0.000001'))
+            unit_cost = (area_sqm * accessory.stock_item.price_per_sqm).quantize(Decimal('0.01'))
+            accessory.cost_price = unit_cost
+            accessory.save(update_fields=['cost_price'])
+            calculated_cost = float(unit_cost)
+
         # ── Propagate dimensions to any existing PO product lines ──
         # Match by stock_item + PO linked to the same order (project_number)
         if accessory.stock_item and accessory.order:
@@ -9168,12 +9211,20 @@ def save_cut_size(request, order_id, accessory_id):
                 if po_prod.purchase_order.project_name == 'Stock' and accessory.order:
                     desc_parts.append(f'For order {accessory.order.sale_number}')
                 po_prod.description = ' | '.join(desc_parts)
-                po_prod.save(update_fields=['description'])
+                update_po_fields = ['description']
+                # Update PO unit price from SQM calculation
+                if area_sqm is not None and accessory.stock_item.price_per_sqm:
+                    po_prod.order_price = (area_sqm * accessory.stock_item.price_per_sqm).quantize(Decimal('0.01'))
+                    po_prod.line_total = round(float(po_prod.order_price) * float(po_prod.order_quantity or 0), 2)
+                    update_po_fields.extend(['order_price', 'line_total'])
+                po_prod.save(update_fields=update_po_fields)
 
         return JsonResponse({
             'success': True,
             'cut_width': float(accessory.cut_width) if accessory.cut_width else None,
             'cut_height': float(accessory.cut_height) if accessory.cut_height else None,
+            'cost_price': calculated_cost,
+            'area_sqm': float(area_sqm) if area_sqm is not None else None,
         })
     except (json.JSONDecodeError, InvalidOperation) as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=400)
@@ -9908,6 +9959,9 @@ def update_stock_items_batch(request):
                         item.pack_size = int(value) if value else 1
                     if 'product_url' in item_data:
                         item.product_url = item_data['product_url']
+                    if 'price_per_sqm' in item_data:
+                        value = item_data['price_per_sqm']
+                        item.price_per_sqm = Decimal(str(value)) if value else None
 
                     # Keep unit cost synchronized with pack cost and pack size.
                     item.sync_pack_pricing()
@@ -12602,6 +12656,132 @@ def timesheets(request):
         'fitter_char_map': fitter_char_map,
         'fitter_id_to_char': fitter_id_to_char,
     })
+
+
+@login_required
+@login_required
+def timesheets_json(request):
+    from .models import Timesheet
+    PAGE_SIZE = 25
+    page      = max(1, int(request.GET.get('page', 1)))
+    ts_type   = request.GET.get('type', 'all').strip()
+    search    = request.GET.get('q', '').strip()
+
+    qs = Timesheet.objects.select_related(
+        'order', 'fitter', 'factory_worker', 'purchase_order', 'purchase_invoice_line'
+    ).order_by('-date', '-created_at')
+
+    if ts_type in ('installation', 'manufacturing'):
+        qs = qs.filter(timesheet_type=ts_type)
+
+    if search:
+        from django.db.models import Q as _Q
+        qs = qs.filter(
+            _Q(order__sale_number__icontains=search) |
+            _Q(order__last_name__icontains=search)   |
+            _Q(fitter__name__icontains=search)        |
+            _Q(factory_worker__name__icontains=search)|
+            _Q(description__icontains=search)
+        )
+
+    total   = qs.count()
+    offset  = (page - 1) * PAGE_SIZE
+    records = qs[offset: offset + PAGE_SIZE]
+
+    rows = []
+    for ts in records:
+        rows.append({
+            'id':              ts.id,
+            'date':            ts.date.isoformat() if ts.date else '',
+            'date_display':    ts.date.strftime('%d/%m/%Y') if ts.date else '',
+            'timesheet_type':  ts.timesheet_type,
+            'worker_name':     ts.worker_name,
+            'worker_type':     ts.worker_type,
+            'fitter_id':       ts.fitter_id,
+            'factory_worker_id': ts.factory_worker_id,
+            'hours':           str(ts.hours) if ts.hours else '',
+            'hourly_rate':     str(ts.hourly_rate) if ts.hourly_rate else '',
+            'total_cost':      str(ts.total_cost),
+            'description':     ts.description or '',
+            'display_description': ts.display_description or '',
+            'order_id':        ts.order_id,
+            'order_sale_number': ts.order.sale_number if ts.order else '',
+            'order_last_name': ts.order.last_name if ts.order else '',
+            'purchase_order_number': ts.purchase_order.display_number if ts.purchase_order else '',
+        })
+
+    return JsonResponse({
+        'success': True,
+        'rows':       rows,
+        'total':      total,
+        'page':       page,
+        'page_size':  PAGE_SIZE,
+        'num_pages':  (total + PAGE_SIZE - 1) // PAGE_SIZE,
+    })
+
+
+@login_required
+def timesheet_update(request, timesheet_id):
+    """Update editable fields on any timesheet (AJAX POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from .models import Timesheet, Fitter, FactoryWorker
+    import json as _json
+    from datetime import date as _date
+
+    ts = get_object_or_404(Timesheet, id=timesheet_id)
+    try:
+        data = _json.loads(request.body)
+    except _json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    if 'date' in data:
+        try:
+            ts.date = _date.fromisoformat(data['date'])
+        except (ValueError, TypeError):
+            return JsonResponse({'error': 'Invalid date'}, status=400)
+    if 'hours' in data:
+        try:
+            ts.hours = float(data['hours']) if data['hours'] not in (None, '') else None
+        except (ValueError, TypeError):
+            return JsonResponse({'error': 'Invalid hours'}, status=400)
+    if 'hourly_rate' in data:
+        try:
+            ts.hourly_rate = float(data['hourly_rate']) if data['hourly_rate'] not in (None, '') else None
+        except (ValueError, TypeError):
+            return JsonResponse({'error': 'Invalid rate'}, status=400)
+    if 'description' in data:
+        ts.description = (data['description'] or '').strip()
+    if 'fitter_id' in data:
+        fid = data['fitter_id']
+        if fid:
+            ts.fitter = get_object_or_404(Fitter, id=int(fid))
+            ts.factory_worker = None
+        else:
+            ts.fitter = None
+    if 'factory_worker_id' in data:
+        wid = data['factory_worker_id']
+        if wid:
+            ts.factory_worker = get_object_or_404(FactoryWorker, id=int(wid))
+            ts.fitter = None
+        else:
+            ts.factory_worker = None
+
+    ts.save()
+    return JsonResponse({'success': True, 'total_cost': str(ts.total_cost)})
+
+
+@login_required
+def timesheet_delete(request, timesheet_id):
+    """Delete any timesheet (AJAX POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from .models import Timesheet
+    ts = get_object_or_404(Timesheet, id=timesheet_id)
+    ts.delete()
+    return JsonResponse({'success': True})
 
 
 @require_http_methods(["POST"])

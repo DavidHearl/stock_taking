@@ -783,6 +783,17 @@ class Accessory(models.Model):
             return True
         if self.stock_item and 'cut to size' in (self.stock_item.description or '').lower():
             return True
+        # SKU ending in _CTS or containing CTS indicates cut-to-size
+        sku_upper = (self.sku or '').upper()
+        if sku_upper.endswith('_CTS') or sku_upper.endswith('CTS'):
+            return True
+        if self.stock_item:
+            stock_sku_upper = (self.stock_item.sku or '').upper()
+            if stock_sku_upper.endswith('_CTS') or stock_sku_upper.endswith('CTS'):
+                return True
+            # If the stock item has price_per_sqm set, it is explicitly a CTS item
+            if self.stock_item.price_per_sqm:
+                return True
         return False
 
     @property
@@ -942,6 +953,7 @@ class StockItem(models.Model):
     # Pricing
     pack_cost_price = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True, help_text='Supplier pack price. Unit cost is derived from pack_cost_price / pack_size')
     average_landed_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Average cost per item across POs')
+    price_per_sqm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text='Price per square metre for cut-to-size items (e.g. glass). When set, order cost is auto-calculated from cut dimensions.')
     product_url = models.URLField(max_length=500, blank=True, default='', help_text='Link to supplier product page')
     
     class Meta:
@@ -2263,6 +2275,8 @@ class PurchaseInvoiceLineItem(models.Model):
     """
     invoice      = models.ForeignKey(PurchaseInvoice, on_delete=models.CASCADE, related_name='line_items')
     description  = models.CharField(max_length=500)
+    line_date    = models.DateField(null=True, blank=True, help_text='Date of work or service')
+    is_fit_day   = models.BooleanField(default=False, help_text='Mark this line as a fit/installation day so it generates a timesheet entry')
     quantity     = models.DecimalField(max_digits=12, decimal_places=4, default=1)
     rate         = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     line_total   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
