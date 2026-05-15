@@ -13,6 +13,9 @@
 
 {% block extra_css %}
 <link href="{% static 'css/order_details.css' %}" rel="stylesheet">
+<style>
+    tr.row-selected { background-color: var(--primary-subtle) !important; }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -7647,7 +7650,11 @@ document.addEventListener('DOMContentLoaded', function() {
         selectAllCheckbox.addEventListener('change', function() {
             const boardsPoId = this.getAttribute('data-boards-po-id');
             const checkboxes = document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`);
-            checkboxes.forEach(cb => cb.checked = this.checked);
+            checkboxes.forEach(cb => {
+                cb.checked = this.checked;
+                const row = cb.closest('tr');
+                if (row) row.style.backgroundColor = cb.checked ? 'rgba(90, 157, 230, 0.2)' : '';
+            });
             updateDeleteButtonVisibility(boardsPoId);
             updateAddBoardButtonState(boardsPoId);
         });
@@ -7659,6 +7666,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const boardsPoId = this.getAttribute('data-boards-po-id');
             updateDeleteButtonVisibility(boardsPoId);
             updateAddBoardButtonState(boardsPoId);
+            const row = this.closest('tr');
+            if (row) row.style.backgroundColor = this.checked ? 'rgba(90, 157, 230, 0.2)' : '';
         });
     });
     
@@ -7764,6 +7773,48 @@ function openBoardEggerLightbox(url) {
 function closeBoardEggerLightbox() {
     document.getElementById('boardEggerLightbox').style.display = 'none';
 }
+
+// ─── Row highlight on checkbox selection ─────────────────────────────────────
+(function () {
+    const ROW_CHECKBOXES = [
+        '.pnx-item-checkbox',
+        '.accessory-select',
+        '.os-door-select',
+        '.glass-select',
+        '.raumplus-select',
+    ].join(',');
+
+    function syncRowHighlight(cb) {
+        const row = cb.closest('tr');
+        if (row) row.style.backgroundColor = cb.checked ? 'rgba(90, 157, 230, 0.2)' : '';
+    }
+
+    // Handle direct checkbox changes
+    document.addEventListener('change', function (e) {
+        if (e.target.matches(ROW_CHECKBOXES)) {
+            syncRowHighlight(e.target);
+        }
+    });
+
+    // Sync rows when a select-all fires (checked state is already set by the time
+    // each individual checkbox fires its own change event via the select-all handler,
+    // so we listen for change on select-all headers and re-sync every matching row).
+    document.addEventListener('change', function (e) {
+        const target = e.target;
+        if (
+            target.classList.contains('select-all-pnx') ||
+            target.id === 'accessory-select-all' ||
+            target.id === 'os-door-select-all' ||
+            target.id === 'glass-select-all' ||
+            target.id === 'raumplus-select-all'
+        ) {
+            // Small delay so individual checkboxes are updated first
+            setTimeout(function () {
+                document.querySelectorAll(ROW_CHECKBOXES).forEach(syncRowHighlight);
+            }, 0);
+        }
+    });
+}());
 </script>
 
 <!-- Delete Order Confirmation Modal -->

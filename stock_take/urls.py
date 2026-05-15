@@ -318,6 +318,7 @@ urlpatterns = [
     path('ordering/scrape-anthill-orders/', views.scrape_anthill_orders_to_place, name='scrape_anthill_orders_to_place'),
     path('ordering/anthill-orders-db/', views.get_anthill_orders_from_db, name='get_anthill_orders_from_db'),
     path('search-customers/', views.search_customers, name='search_customers'),
+    path('get-customer-sales/', views.get_customer_sales, name='get_customer_sales'),
     path('add-designer/', views.add_designer, name='add_designer'),
     path('search/', views.search_orders, name='search_orders'),
     path('global-search/', views.global_search, name='global_search'),

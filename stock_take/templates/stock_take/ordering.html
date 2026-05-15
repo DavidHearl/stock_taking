@@ -711,49 +711,37 @@ body.light-mode .btn-validator-check:hover {
         <div class="modal-content">
             <form method="POST" id="add-order-form">
                 {% csrf_token %}
+                {{ form.customer }}
+                {{ form.address.as_hidden }}
+                {{ form.postcode.as_hidden }}
                 <div class="modal-header">
                     <h3>Add New Order</h3>
-                    <div class="modal-header-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('addOrderModal')">Cancel</button>
-                        <button type="submit" class="btn btn-success">Add Order</button>
-                    </div>
                 </div>
                 <div class="modal-body">
                     <!-- Customer Info Section -->
                     <div class="add-order-section customer-section">
                         <h4 class="section-title customer-title">
-                            <i class="bi bi-person"></i> Customer Information
+                            <i class="bi bi-person"></i> Customer
                         </h4>
-                        {{ form.customer }}
-                        <div class="form-grid">
-                            <div class="form-group full-width">
-                                <label for="customer-search">Search Existing Customer</label>
-                                <input type="text" id="customer-search" class="form-input" placeholder="Type to search by name, email, phone..." autocomplete="off">
+                        <div class="modal-field-row">
+                            <label>Search Existing</label>
+                            <div class="field-value" style="position: relative;">
+                                <input type="text" id="customer-search" class="form-input" placeholder="Name, email, phone..." autocomplete="off">
                                 <div id="customer-results" class="search-results"></div>
                             </div>
                         </div>
                         <div class="divider-text">OR ADD NEW CUSTOMER</div>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="{{ form.first_name.id_for_label }}">First Name</label>
-                                {{ form.first_name }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.last_name.id_for_label }}">Last Name</label>
-                                {{ form.last_name }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.anthill_id.id_for_label }}">Anthill Customer ID</label>
-                                {{ form.anthill_id }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.postcode.id_for_label }}">Postcode</label>
-                                {{ form.postcode }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.address.id_for_label }}">Address</label>
-                                {{ form.address }}
-                            </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.first_name.id_for_label }}">First Name</label>
+                            <div class="field-value">{{ form.first_name }}</div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.last_name.id_for_label }}">Last Name</label>
+                            <div class="field-value">{{ form.last_name }}</div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.anthill_id.id_for_label }}">Anthill ID</label>
+                            <div class="field-value">{{ form.anthill_id }}</div>
                         </div>
                     </div>
 
@@ -767,48 +755,54 @@ body.light-mode .btn-validator-check:hover {
                                 {{ form.order_type }}
                             </div>
                         </div>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
-                                {{ form.sale_number }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.customer_number.id_for_label }}">Customer Number (CAD)</label>
-                                {{ form.customer_number }}
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.order_date.id_for_label }}">Order Date</label>
-                                <div class="date-input-wrapper">
-                                    {{ form.order_date }}
-                                    <button type="button" class="btn btn-sm btn-no-date" onclick="toggleNoDate('order_date', this)" title="No date yet">
-                                        <i class="bi bi-x-circle"></i> No date
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
-                                <div class="date-input-wrapper">
-                                    {{ form.fit_date }}
-                                    <button type="button" class="btn btn-sm btn-no-date" onclick="toggleNoDate('fit_date', this)" title="No date yet">
-                                        <i class="bi bi-x-circle"></i> No date
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.designer.id_for_label }}">Designer</label>
-                                <div class="designer-input-wrapper">
-                                    {{ form.designer }}
-                                    <button type="button" class="btn btn-sm btn-success add-designer-btn" onclick="toggleAddDesigner()" title="Add new designer">
-                                        <i class="bi bi-plus-lg"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="{{ form.total_value_inc_vat.id_for_label }}">Sale Value (Inc VAT)</label>
-                                {{ form.total_value_inc_vat }}
+                        <div class="modal-field-row" id="sale-selector-row" style="display: none;">
+                            <label>Select Sale</label>
+                            <div class="field-value">
+                                <select id="sale-selector" class="form-input">
+                                    <option value="">-- Select a sale --</option>
+                                </select>
                             </div>
                         </div>
-                        <!-- New Designer Row - outside the grid -->
+                        <div class="modal-field-row">
+                            <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
+                            <div class="field-value">{{ form.sale_number }}</div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.customer_number.id_for_label }}">Customer No. (CAD)</label>
+                            <div class="field-value">{{ form.customer_number }}</div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.order_date.id_for_label }}">Order Date</label>
+                            <div class="field-value date-input-wrapper">
+                                {{ form.order_date }}
+                                <button type="button" class="btn btn-sm btn-no-date" onclick="toggleNoDate('order_date', this)" title="No date yet">
+                                    <i class="bi bi-x-circle"></i> No date
+                                </button>
+                            </div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
+                            <div class="field-value date-input-wrapper">
+                                {{ form.fit_date }}
+                                <button type="button" class="btn btn-sm btn-no-date" onclick="toggleNoDate('fit_date', this)" title="No date yet">
+                                    <i class="bi bi-x-circle"></i> No date
+                                </button>
+                            </div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.designer.id_for_label }}">Designer</label>
+                            <div class="field-value designer-input-wrapper">
+                                {{ form.designer }}
+                                <button type="button" class="btn btn-sm btn-success add-designer-btn" onclick="toggleAddDesigner()" title="Add new designer">
+                                    <i class="bi bi-plus-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="modal-field-row">
+                            <label for="{{ form.total_value_inc_vat.id_for_label }}">Sale Value (Inc VAT)</label>
+                            <div class="field-value">{{ form.total_value_inc_vat }}</div>
+                        </div>
+                        <!-- New Designer Row -->
                         <div id="new-designer-row" class="new-designer-input" style="display: none;">
                             <input type="text" id="new-designer-name" class="form-input" placeholder="New designer name">
                             <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesigner()" title="Save designer">
@@ -819,6 +813,10 @@ body.light-mode .btn-validator-check:hover {
                             </button>
                         </div>
                     </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-pill" onclick="closeModal('addOrderModal')">Cancel</button>
+                    <button type="submit" class="btn btn-success btn-pill">Add Order</button>
                 </div>
             </form>
         </div>
@@ -1802,7 +1800,60 @@ body.light-mode .btn-validator-check:hover {
         document.getElementById('id_postcode').value = postcode;
         document.getElementById('customer-results').classList.remove('show');
         document.getElementById('customer-search').value = name;
+        // Fetch and populate sales linked to this customer
+        fetchCustomerSales(customerId);
     }
+
+    function fetchCustomerSales(customerId) {
+        const selectorRow = document.getElementById('sale-selector-row');
+        const selector = document.getElementById('sale-selector');
+        if (!selectorRow || !selector) return;
+
+        selector.innerHTML = '<option value="">Loading sales...</option>';
+        selectorRow.style.display = 'flex';
+
+        fetch(`/get-customer-sales/?customer_id=${encodeURIComponent(customerId)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.sales && data.sales.length > 0) {
+                    selector.innerHTML = '<option value="">-- Select a sale --</option>' +
+                        data.sales.map(sale => {
+                            const name = sale.contract_number || sale.anthill_activity_id;
+                            const label = [
+                                name,
+                                sale.sale_value ? '£' + parseFloat(sale.sale_value).toLocaleString('en-GB', {minimumFractionDigits: 0}) : '',
+                                sale.activity_date ? sale.activity_date : ''
+                            ].filter(Boolean).join('  ·  ');
+                            return `<option value="${sale.anthill_activity_id}" data-value="${sale.sale_value || ''}">${label}</option>`;
+                        }).join('');
+                } else {
+                    selector.innerHTML = '<option value="">No sales found for this customer</option>';
+                }
+            })
+            .catch(() => {
+                selector.innerHTML = '<option value="">Could not load sales</option>';
+            });
+    }
+
+    // Wire sale-selector to populate sale_number and total_value_inc_vat
+    document.addEventListener('DOMContentLoaded', function() {
+        const saleSelector = document.getElementById('sale-selector');
+        if (saleSelector) {
+            saleSelector.addEventListener('change', function() {
+                const rawSaleNumber = this.value;
+                const saleValue = this.options[this.selectedIndex]?.dataset?.value || '';
+                if (rawSaleNumber) {
+                    // Take only the first 6 digits (e.g. "425305" from "425305-2")
+                    const saleNumber = rawSaleNumber.replace(/[^0-9]/g, '').substring(0, 6);
+                    document.getElementById('id_sale_number').value = saleNumber;
+                }
+                if (saleValue) {
+                    const valField = document.getElementById('id_total_value_inc_vat');
+                    if (valField) valField.value = parseFloat(saleValue).toFixed(2);
+                }
+            });
+        }
+    });
     
     // Designer management functions
     function toggleAddDesigner() {

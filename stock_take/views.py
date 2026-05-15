@@ -308,6 +308,37 @@ def search_customers(request):
     
     return JsonResponse({'customers': customer_list})
 
+
+@login_required
+def get_customer_sales(request):
+    """AJAX endpoint to retrieve AnthillSale records linked to a customer."""
+    customer_id = request.GET.get('customer_id', '').strip()
+    if not customer_id:
+        return JsonResponse({'sales': []})
+
+    try:
+        customer = Customer.objects.get(pk=customer_id)
+    except Customer.DoesNotExist:
+        return JsonResponse({'sales': []})
+
+    sales = AnthillSale.objects.filter(customer=customer).order_by('-activity_date')[:100]
+
+    sales_data = []
+    for sale in sales:
+        sales_data.append({
+            'id': sale.pk,
+            'anthill_activity_id': sale.anthill_activity_id,
+            'contract_number': sale.contract_number,
+            'customer_name': sale.customer_name,
+            'sale_value': f"{sale.sale_value:.2f}" if sale.sale_value is not None else '',
+            'status': sale.status,
+            'category': sale.category,
+            'activity_date': sale.activity_date.strftime('%d/%m/%Y') if sale.activity_date else '',
+        })
+
+    return JsonResponse({'sales': sales_data})
+
+
 @login_required
 def add_designer(request):
     """AJAX endpoint to add a new designer"""

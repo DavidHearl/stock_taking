@@ -377,6 +377,9 @@
                             </button>
                         {% endif %}
                         {% if bpo_data.pnx_items %}
+                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected" data-boards-po-id="{{ bpo_data.po.id }}" style="display: none;">
+                                <i class="bi bi-trash"></i> Delete Selected
+                            </button>
                             <button type="button" class="btn btn-save-dims btn-save-changes save-pnx-btn" data-boards-po-id="{{ bpo_data.po.id }}" style="display: none;">
                                 <i class="bi bi-check-lg"></i> Save Changes
                             </button>
@@ -405,11 +408,6 @@
                                 </span>
                             </span>
                         </p>
-                        <div class="btn-row-gap">
-                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected" data-boards-po-id="{{ bpo_data.po.id }}">
-                                <i class="bi bi-trash"></i> Delete Selected
-                            </button>
-                        </div>
                     </div>
                     <div class="table-container">
                         <table class="table">
@@ -2086,6 +2084,27 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeUpdateBoardsPOModal()">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="confirmUpdateBoardsPO()">Continue</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for PNX Unsaved Changes Warning -->
+<div class="modal" id="pnxUnsavedChangesModal" style="display:none;">
+    <div class="modal-overlay" onclick="document.getElementById('pnxUnsavedChangesModal').style.display='none'"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-exclamation-triangle text-warning"></i> Unsaved Changes</h3>
+                <button type="button" class="modal-close" onclick="document.getElementById('pnxUnsavedChangesModal').style.display='none'">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>You have unsaved changes to this board table. If you delete now, those changes will be lost.</p>
+                <p>Please save your changes first using the <strong>Save Changes</strong> button, or choose <strong>Delete Anyway</strong> to discard them.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('pnxUnsavedChangesModal').style.display='none'">Cancel</button>
+                <button type="button" class="btn btn-danger" id="pnxDeleteAnywayBtn">Delete Anyway</button>
             </div>
         </div>
     </div>
@@ -4633,6 +4652,7 @@ function setPartDescField(value) {
 
 function openAddBoardModal(boardsPoId) {
     activeBoardsPoId = boardsPoId;
+    setThickness(18);
     const poSelect = document.getElementById('add-board-po-select');
     if (poSelect) poSelect.value = boardsPoId;
 
@@ -7355,11 +7375,36 @@ function deletePNXItems() {
         showAlert('No items selected', 'warning');
         return;
     }
-    
+
+    // Find the boards PO ID from the first checked checkbox
+    const firstChecked = document.querySelector('.pnx-item-checkbox:checked');
+    const boardsPoId = firstChecked ? firstChecked.getAttribute('data-boards-po-id') : null;
+    const saveBtn = boardsPoId ? document.querySelector(`.save-pnx-btn[data-boards-po-id="${boardsPoId}"]`) : null;
+    const hasUnsavedChanges = saveBtn && saveBtn.style.display !== 'none' && saveBtn.style.display !== '';
+
+    if (hasUnsavedChanges) {
+        // Show the unsaved changes warning modal
+        const modal = document.getElementById('pnxUnsavedChangesModal');
+        const deleteAnywayBtn = document.getElementById('pnxDeleteAnywayBtn');
+        // Replace the button to clear any previous listener
+        const freshBtn = deleteAnywayBtn.cloneNode(true);
+        deleteAnywayBtn.parentNode.replaceChild(freshBtn, deleteAnywayBtn);
+        freshBtn.addEventListener('click', function() {
+            document.getElementById('pnxUnsavedChangesModal').style.display = 'none';
+            executePNXDelete(itemIds);
+        });
+        modal.style.display = 'flex';
+        return;
+    }
+
     if (!confirm(`Are you sure you want to delete ${itemIds.length} item(s)?`)) {
         return;
     }
-    
+
+    executePNXDelete(itemIds);
+}
+
+function executePNXDelete(itemIds) {
     fetch('/delete-pnx-items/', {
         method: 'POST',
         headers: {
@@ -7389,7 +7434,11 @@ document.addEventListener('DOMContentLoaded', function() {
         selectAllCheckbox.addEventListener('change', function() {
             const boardsPoId = this.getAttribute('data-boards-po-id');
             const checkboxes = document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`);
-            checkboxes.forEach(cb => cb.checked = this.checked);
+            checkboxes.forEach(cb => {
+                cb.checked = this.checked;
+                const row = cb.closest('tr');
+                if (row) row.style.backgroundColor = cb.checked ? 'rgba(90, 157, 230, 0.2)' : '';
+            });
             updateDeleteButtonVisibility(boardsPoId);
             updateAddBoardButtonState(boardsPoId);
         });
@@ -7399,6 +7448,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.pnx-item-checkbox').forEach(function(cb) {
         cb.addEventListener('change', function() {
             const boardsPoId = this.getAttribute('data-boards-po-id');
+            const row = this.closest('tr');
+            if (row) row.style.backgroundColor = this.checked ? 'rgba(90, 157, 230, 0.2)' : '';
             updateDeleteButtonVisibility(boardsPoId);
             updateAddBoardButtonState(boardsPoId);
         });
