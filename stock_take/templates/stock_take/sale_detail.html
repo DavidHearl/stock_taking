@@ -129,12 +129,16 @@
 
     <!-- ===== TAB BAR ===== -->
     <div class="detail-tab-bar">
-        <button class="detail-tab {% if active_tab != 'order' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale"><i class="bi bi-bag"></i> Sale</button>
-        <button class="detail-tab {% if active_tab == 'order' %}active{% endif %}" onclick="switchDetailTab('order')" data-tab="order"><i class="bi bi-tools"></i> Order</button>
+        <button class="detail-tab {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
+        <button class="detail-tab {% if active_tab == 'order' %}active{% endif %}" onclick="switchDetailTab('order')" data-tab="order">Order</button>
+        <button class="detail-tab {% if active_tab == 'enquiry' %}active{% endif %}" onclick="switchDetailTab('enquiry')" data-tab="enquiry">Enquiry</button>
+        <button class="detail-tab {% if active_tab == 'remedials' %}active{% endif %}" onclick="switchDetailTab('remedials')" data-tab="remedials">
+            Remedials{% if remedials %} <span class="tab-count">{{ remedials|length }}</span>{% endif %}
+        </button>
     </div>
 
     <!-- ===== SALE TAB PANEL ===== -->
-    <div id="tab-panel-sale" class="detail-tab-panel {% if active_tab != 'order' %}active{% endif %}">
+    <div id="tab-panel-sale" class="detail-tab-panel {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' %}active{% endif %}">
 
     <div class="order-details-grid">
 
@@ -1651,6 +1655,124 @@
         {% endif %}
     </div>
 
+    <!-- ===== ENQUIRY TAB PANEL ===== -->
+    <div id="tab-panel-enquiry" class="detail-tab-panel {% if active_tab == 'enquiry' %}active{% endif %}">
+        <div class="card order-info-card" style="margin-top:16px;">
+            <div class="card-header card-header-sale"><h3>Enquiry Details</h3></div>
+            <div class="card-body padded">
+                <div class="info-display">
+                    <div class="field-row-sb">
+                        <span class="field-label">Lead Source</span>
+                        <span class="field-value">{{ sale.source|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Activity Type</span>
+                        <span class="field-value">{{ sale.activity_type|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Category</span>
+                        <span class="field-value">{{ sale.category|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Assigned To</span>
+                        <span class="field-value">{{ sale.assigned_to_name|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Location</span>
+                        <span class="field-value">{{ sale.location|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Enquiry Date</span>
+                        <span class="field-value">{{ sale.activity_date|date:"d M Y"|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Range</span>
+                        <span class="field-value">{{ sale.range_name|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Door Type</span>
+                        <span class="field-value">{{ sale.door_type|default:"&mdash;" }}</span>
+                    </div>
+                    <div class="field-row-sb">
+                        <span class="field-label">Products</span>
+                        <span class="field-value">{{ sale.products_included|default:"&mdash;" }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- /.tab-panel-enquiry -->
+
+    <!-- ===== REMEDIALS TAB PANEL ===== -->
+    <div id="tab-panel-remedials" class="detail-tab-panel {% if active_tab == 'remedials' %}active{% endif %}">
+        <div style="margin-top:16px;">
+        {% if remedials %}
+            {% for rem in remedials %}
+            <div class="card order-info-card" style="margin-bottom:12px;">
+                <div class="card-header card-header-sale">
+                    <h3>{{ rem.remedial_number }}</h3>
+                    <div class="header-actions">
+                        <span class="customer-active-badge {% if rem.is_completed %}active{% elif rem.is_overdue %}danger{% else %}inactive{% endif %}">
+                            {% if rem.is_completed %}Completed{% elif rem.is_overdue %}Overdue{% else %}Open{% endif %}
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body padded">
+                    <div class="info-display">
+                        <div class="field-row-sb">
+                            <span class="field-label">Reason</span>
+                            <span class="field-value">{{ rem.reason }}</span>
+                        </div>
+                        {% if rem.notes %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Notes</span>
+                            <span class="field-value">{{ rem.notes }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Created</span>
+                            <span class="field-value">{{ rem.created_date|date:"d M Y" }}</span>
+                        </div>
+                        {% if rem.scheduled_date %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Scheduled</span>
+                            <span class="field-value">{{ rem.scheduled_date|date:"d M Y" }}</span>
+                        </div>
+                        {% endif %}
+                        {% if rem.completed_date %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Completed</span>
+                            <span class="field-value">{{ rem.completed_date|date:"d M Y" }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="field-row-sb">
+                            <span class="field-label">OS Doors Required</span>
+                            <span class="field-value">{{ rem.os_doors_required|yesno:"Yes,No" }}</span>
+                        </div>
+                        {% if rem.accessories.all %}
+                        <div class="field-row-sb" style="align-items:flex-start;">
+                            <span class="field-label">Accessories</span>
+                            <span class="field-value">{{ rem.accessories.count }} item{{ rem.accessories.count|pluralize }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="card order-info-card">
+                <div class="card-body padded" style="color:var(--text-secondary);font-size:0.875rem;padding:24px;text-align:center;">
+                    {% if order %}
+                        <p style="margin-bottom:16px;">No remedials on record for this job.</p>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createRemedialModal')">
+                            <i class="bi bi-plus-circle"></i> Open Remedial
+                        </button>
+                    {% else %}No order linked &mdash; remedials are tracked against orders.{% endif %}
+                </div>
+            </div>
+        {% endif %}
+        </div>
+    </div><!-- /.tab-panel-remedials -->
+
     </div><!-- /.sale-page-main -->
     <div class="sale-page-summary-col">
 
@@ -2186,4 +2308,65 @@ function toggleInvoiceDetail(invoiceId) {
 {% endif %}
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Modal: Open Remedial -->
+{% if order %}
+<div class="modal" id="createRemedialModal">
+    <div class="modal-overlay" onclick="closeModal('createRemedialModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Open Remedial</h3>
+                <button type="button" class="modal-close" onclick="closeModal('createRemedialModal')">&#x2715;</button>
+            </div>
+            <form method="post" action="{% url 'create_remedial' order.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
+                <div class="modal-body">
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" for="rem-reason">Reason <span style="color:var(--danger-color)">*</span></label>
+                        <textarea id="rem-reason" name="reason" class="form-control" rows="4"
+                                  placeholder="Describe the issue requiring remedial work" required></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" for="rem-notes">Notes</label>
+                        <textarea id="rem-notes" name="notes" class="form-control" rows="3"
+                                  placeholder="Any additional notes (optional)"></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" for="rem-scheduled">Scheduled Date</label>
+                        <input type="date" id="rem-scheduled" name="scheduled_date" class="form-control" style="max-width:200px;">
+                    </div>
+                    <div style="border-top:1px solid var(--border-color);margin-top:8px;padding-top:16px;">
+                        <p style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary);margin-bottom:10px;font-weight:600;">Action Required</p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="rem-boards" name="order_boards_required">
+                                <label class="form-check-label" for="rem-boards">Order Boards</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="rem-accessories" name="order_accessories_required">
+                                <label class="form-check-label" for="rem-accessories">Order Accessories</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="rem-glass" name="order_glass_required">
+                                <label class="form-check-label" for="rem-glass">Order Glass</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="rem-os-doors" name="os_doors_required">
+                                <label class="form-check-label" for="rem-os-doors">Order OS Doors</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('createRemedialModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Create Remedial</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}

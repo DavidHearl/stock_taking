@@ -19,7 +19,7 @@ from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
-from .models import MailboxEmail, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, EnabledGLCode, OverheadPurchaseOrder
+from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, EnabledGLCode, OverheadPurchaseOrder
 from .permissions import page_permission_required
 from .purchase_invoice_views import _extract_pdf_fields, _parse_date, _parse_decimal
 from .services import graph_api
@@ -107,6 +107,14 @@ def accounts_payable_inbox(request):
 
     emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by').all()
 
+    # Entity tab filter (RJL / Group / All)
+    entity_tab = request.GET.get('tab', '')
+    if entity_tab in ('rjl', 'group'):
+        emails = emails.filter(tab=entity_tab)
+    else:
+        # Default 'All' tab: unrouted emails only
+        emails = emails.filter(tab='')
+
     # Tab / status filter
     status_filter = request.GET.get('status', '')
     if status_filter == 'ignored':
@@ -143,6 +151,9 @@ def accounts_payable_inbox(request):
     unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False).count()
     processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True).count()
     ignored = MailboxEmail.objects.filter(is_ignored=True).count()
+    total_count = MailboxEmail.objects.filter(tab='').count()
+    rjl_count = MailboxEmail.objects.filter(tab='rjl', is_ignored=False).count()
+    group_count = MailboxEmail.objects.filter(tab='group', is_ignored=False).count()
 
     last_synced = MailboxEmail.objects.aggregate(
         last=db_models.Max('synced_at')
@@ -179,6 +190,10 @@ def accounts_payable_inbox(request):
         'matched_only': matched_only,
         'mailbox': mailbox,
         'last_synced': last_synced,
+        'entity_tab': entity_tab,
+        'total_count': total_count,
+        'rjl_count': rjl_count,
+        'group_count': group_count,
         'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
         'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
         'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
@@ -271,6 +286,9 @@ def sync_mailbox(request):
             )
             if created:
                 new_count += 1
+                # Apply tab routing filters to newly synced emails
+                email_obj = MailboxEmail.objects.get(graph_message_id=graph_id)
+                _apply_email_tab_filter(email_obj)
 
         return JsonResponse({
             'success': True,
@@ -490,6 +508,102 @@ def link_existing_invoice_to_email(request, email_id):
         'success': True,
         'redirect': reverse('purchase_invoice_detail', args=[invoice.id]),
     })
+
+
+# ── Email tab filter helpers ──────────────────────────────────────────────────
+
+def _apply_email_tab_filter(email_obj):
+    """Assign a tab to email_obj based on MailboxEmailFilter rules."""
+    sender = (email_obj.sender_email or '').lower().strip()
+    if not sender:
+        return
+    for f in MailboxEmailFilter.objects.all():
+        pattern = (f.email_pattern or '').lower().strip()
+        if not pattern:
+            continue
+        matched = False
+        if pattern.startswith('@'):
+            matched = sender.endswith(pattern)
+        else:
+            matched = (pattern == sender)
+        if matched:
+            email_obj.tab = f.tab
+            email_obj.save(update_fields=['tab'])
+            return
+
+
+# ── Email filter management ───────────────────────────────────────────────────
+
+@login_required
+@page_permission_required('accounts_payable')
+def manage_email_filters(request):
+    """GET: return filter list. POST {action, email_pattern, tab, note}: add / remove / apply."""
+    if request.method == 'GET':
+        filters = list(
+            MailboxEmailFilter.objects
+            .values('id', 'email_pattern', 'tab', 'note')
+            .order_by('tab', 'email_pattern')
+        )
+        return JsonResponse({'filters': filters})
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    action = data.get('action', '')
+
+    if action == 'add':
+        pattern = (data.get('email_pattern') or '').strip().lower()
+        tab = (data.get('tab') or '').strip()
+        note = (data.get('note') or '').strip()
+        if not pattern:
+            return JsonResponse({'success': False, 'error': 'email_pattern required'}, status=400)
+        if tab not in ('rjl', 'group'):
+            return JsonResponse({'success': False, 'error': 'tab must be rjl or group'}, status=400)
+        f, _ = MailboxEmailFilter.objects.update_or_create(
+            email_pattern=pattern,
+            defaults={'tab': tab, 'note': note},
+        )
+        # Apply to all existing emails
+        updated = 0
+        for email_obj in MailboxEmail.objects.all():
+            sender = (email_obj.sender_email or '').lower()
+            if pattern.startswith('@'):
+                matched = sender.endswith(pattern)
+            else:
+                matched = (pattern == sender)
+            if matched:
+                email_obj.tab = tab
+                email_obj.save(update_fields=['tab'])
+                updated += 1
+        return JsonResponse({'success': True, 'id': f.id, 'applied_to': updated})
+
+    if action == 'run':
+        filter_id = data.get('id')
+        try:
+            f = MailboxEmailFilter.objects.get(id=filter_id)
+        except MailboxEmailFilter.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'Filter not found'}, status=404)
+        updated = 0
+        for email_obj in MailboxEmail.objects.all():
+            sender = (email_obj.sender_email or '').lower()
+            if f.email_pattern.startswith('@'):
+                matched = sender.endswith(f.email_pattern)
+            else:
+                matched = (f.email_pattern == sender)
+            if matched:
+                email_obj.tab = f.tab
+                email_obj.save(update_fields=['tab'])
+                updated += 1
+        return JsonResponse({'success': True, 'applied_to': updated})
+
+    if action == 'remove':
+        filter_id = data.get('id')
+        MailboxEmailFilter.objects.filter(id=filter_id).delete()
+        return JsonResponse({'success': True})
+
+    return JsonResponse({'success': False, 'error': 'Unknown action'}, status=400)
 
 
 # ── Download attachment ───────────────────────────────────────────────────────

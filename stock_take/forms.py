@@ -59,7 +59,7 @@ class OrderForm(forms.ModelForm):
     def clean_customer_number(self):
         customer_number = self.cleaned_data['customer_number']
         if len(customer_number) != 6 or not customer_number.isdigit() or not customer_number.startswith('0'):
-            raise forms.ValidationError('Customer Number must be a 6 digit number starting with 0.')
+            raise forms.ValidationError('System Number (CAD) must be a 6 digit number starting with 0.')
         return customer_number
 
 

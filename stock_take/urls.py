@@ -48,6 +48,7 @@ from .accounts_payable_views import (
     unprocess_email,
     download_mailbox_attachment,
     manage_exemptions,
+    manage_email_filters,
     bulk_email_action,
 )
 from .overhead_po_views import (
@@ -131,6 +132,7 @@ urlpatterns = [
     path('accounts-payable/', accounts_payable_inbox, name='accounts_payable_inbox'),
     path('accounts-payable/sync/', sync_mailbox, name='sync_mailbox'),
     path('accounts-payable/exemptions/', manage_exemptions, name='manage_exemptions'),
+    path('accounts-payable/email-filters/', manage_email_filters, name='manage_email_filters'),
     path('accounts-payable/bulk/', bulk_email_action, name='bulk_email_action'),
     path('accounts-payable/<int:email_id>/create-invoice/', create_invoice_from_email, name='create_invoice_from_email'),
     path('accounts-payable/<int:email_id>/link-invoice/', link_existing_invoice_to_email, name='link_existing_invoice_to_email'),
@@ -416,6 +418,7 @@ urlpatterns = [
     path('remedials/', views.remedials, name='remedials'),
     path('remedial-report/', views.remedial_report, name='remedial_report'),
     path('remedial/<int:pk>/', views.remedial_detail, name='remedial_detail'),
+    path('order/<int:order_pk>/create-remedial/', views.create_remedial, name='create_remedial'),
     
     # Stock items batch update
     path('stock-items/update-batch/', views.update_stock_items_batch, name='update_stock_items_batch'),

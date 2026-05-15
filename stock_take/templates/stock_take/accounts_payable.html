@@ -36,23 +36,32 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 </div>
 {% endif %}
 
-<!-- Stats bar -->
-<div class="stats-grid" style="margin-bottom:16px;">
-    <div class="stats-card">
-        <div class="stats-label">Total Emails</div>
-        <div class="stats-number">{{ total|intcomma }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Unprocessed</div>
-        <div class="stats-number" {% if unprocessed > 0 %}style="color:var(--warning-color);"{% endif %}>{{ unprocessed }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Processed</div>
-        <div class="stats-number" style="color:var(--success-color);">{{ processed }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Ignored</div>
-        <div class="stats-number" style="color:var(--text-muted);">{{ ignored }}</div>
+<!-- Entity tabs -->
+<div class="apay-entity-tabs">
+    <a href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}{% endif %}"
+       class="apay-entity-tab {% if not entity_tab %}active{% endif %}">
+        All
+        <span class="apay-entity-tab-count">{{ total_count|intcomma }}</span>
+    </a>
+    <a href="?tab=rjl{% if status_filter %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+       class="apay-entity-tab {% if entity_tab == 'rjl' %}active{% endif %}">
+        RJL
+        <span class="apay-entity-tab-count">{{ rjl_count }}</span>
+    </a>
+    <a href="?tab=group{% if status_filter %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+       class="apay-entity-tab {% if entity_tab == 'group' %}active{% endif %}">
+        Group
+        <span class="apay-entity-tab-count">{{ group_count }}</span>
+    </a>
+
+    <!-- Bulk action bar (shown when rows are selected) -->
+    <div class="apay-bulk-bar" id="bulk-bar" style="display:none;">
+        <span class="apay-bulk-count" id="bulk-count">0 selected</span>
+        <div class="apay-bulk-actions">
+            <button class="apay-bulk-btn ignore" onclick="bulkAction('ignore')"><i class="bi bi-slash-circle"></i> Ignore</button>
+            <button class="apay-bulk-btn danger" onclick="bulkAction('delete')"><i class="bi bi-trash3"></i> Delete</button>
+        </div>
+        <button class="apay-bulk-clear" onclick="clearSelection()"><i class="bi bi-x-lg"></i></button>
     </div>
 </div>
 
@@ -62,58 +71,55 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
         <i class="bi bi-search"></i>
         <input type="text" name="q" id="apay-search" value="{{ search_query }}"
                placeholder="Search by sender or subject..." autocomplete="off">
-        {% if search_query %}<a href="?" class="apay-search-clear">&times;</a>{% endif %}
+        {% if search_query %}<a href="?{% if entity_tab %}tab={{ entity_tab }}&{% endif %}" class="apay-search-clear">&times;</a>{% endif %}
         {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+        {% if entity_tab %}<input type="hidden" name="tab" value="{{ entity_tab }}">{% endif %}
     </form>
 
     <!-- Status filter pills -->
     <div class="apay-filter-pills">
-        <a href="{% if search_query %}?q={{ search_query }}{% else %}?{% endif %}"
+        <a href="?{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}{% endif %}"
            class="apay-pill {% if not status_filter %}active{% endif %}">All</a>
-        <a href="?status=unprocessed{% if search_query %}&q={{ search_query }}{% endif %}"
+        <a href="?status=unprocessed{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
            class="apay-pill {% if status_filter == 'unprocessed' %}active{% endif %}">Unprocessed</a>
-        <a href="?status=processed{% if search_query %}&q={{ search_query }}{% endif %}"
+        <a href="?status=processed{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
            class="apay-pill {% if status_filter == 'processed' %}active{% endif %}">Processed</a>
-        <a href="?status=ignored{% if search_query %}&q={{ search_query }}{% endif %}"
+        <a href="?status=ignored{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
            class="apay-pill ignored {% if status_filter == 'ignored' %}active{% endif %}">Ignored</a>
     </div>
 
-    <button class="apay-btn" id="sync-btn" onclick="syncMailbox()" {% if not is_configured %}disabled title="Graph API not configured"{% endif %}>
-        <i class="bi bi-arrow-repeat"></i>
-        <span>Sync Mailbox</span>
-    </button>
-    {% if last_synced %}
-    <span class="apay-last-synced">Last synced {{ last_synced|date:"d M Y H:i" }}</span>
-    {% endif %}
-
-    <!-- 3-dot settings menu -->
-    <div class="apay-kebab-wrap">
-        <button class="apay-kebab-btn" id="kebab-btn" onclick="toggleKebab(event)" title="Options">
-            <i class="bi bi-three-dots-vertical"></i>
+    <div class="apay-toolbar-right">
+        <button class="apay-btn" id="sync-btn" onclick="syncMailbox()" {% if not is_configured %}disabled title="Graph API not configured"{% endif %}>
+            <i class="bi bi-arrow-repeat"></i>
+            <span>Sync Mailbox</span>
         </button>
-        <div class="apay-kebab-menu" id="kebab-menu" style="display:none;">
-            <button class="apay-kebab-item" onclick="openExemptionModal(); closeKebab();">
-                <i class="bi bi-funnel"></i> Manage Exemption List
+        {% if last_synced %}
+        <span class="apay-last-synced">Last synced {{ last_synced|date:"d M Y H:i" }}</span>
+        {% endif %}
+
+        <!-- 3-dot settings menu -->
+        <div class="apay-kebab-wrap">
+            <button class="apay-kebab-btn" id="kebab-btn" onclick="toggleKebab(event)" title="Options">
+                <i class="bi bi-three-dots-vertical"></i>
             </button>
-            <button class="apay-kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
-                <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
-            </button>
+            <div class="apay-kebab-menu" id="kebab-menu" style="display:none;">
+                <button class="apay-kebab-item" onclick="openExemptionModal(); closeKebab();">
+                    <i class="bi bi-funnel"></i> Manage Exemption List
+                </button>
+                <button class="apay-kebab-item" onclick="openEmailFilterModal(); closeKebab();">
+                    <i class="bi bi-diagram-3"></i> Manage Email Filters
+                </button>
+                <button class="apay-kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
+                    <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
+                </button>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Bulk action bar (shown when rows are selected) -->
-<div class="apay-bulk-bar" id="bulk-bar" style="display:none;">
-    <span class="apay-bulk-count" id="bulk-count">0 selected</span>
-    <div class="apay-bulk-actions">
-        <button class="apay-bulk-btn ignore" onclick="bulkAction('ignore')"><i class="bi bi-slash-circle"></i> Ignore</button>
-        <button class="apay-bulk-btn danger" onclick="bulkAction('delete')"><i class="bi bi-trash3"></i> Delete</button>
-    </div>
-    <button class="apay-bulk-clear" onclick="clearSelection()"><i class="bi bi-x-lg"></i></button>
-</div>
-
 <!-- Email table -->
 <div class="apay-table-container">
+
     {% if emails %}
     <table class="apay-table" id="apay-table">
         <thead>
@@ -271,7 +277,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 {% if page_obj.paginator.num_pages > 1 %}
 <div class="apay-pagination">
     {% if page_obj.has_previous %}
-    <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo;</a>
+    <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo;</a>
     {% else %}
     <span class="apay-page-btn disabled">&laquo;</span>
     {% endif %}
@@ -280,20 +286,56 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
         {% if num == page_obj.number %}
         <span class="apay-page-btn active">{{ num }}</span>
         {% elif num == 1 or num == page_obj.paginator.num_pages or num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
-        <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ num }}">{{ num }}</a>
+        <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ num }}">{{ num }}</a>
         {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
         <span class="apay-page-btn disabled">&hellip;</span>
         {% endif %}
     {% endfor %}
 
     {% if page_obj.has_next %}
-    <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ page_obj.next_page_number }}">&raquo;</a>
+    <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ page_obj.next_page_number }}">&raquo;</a>
     {% else %}
     <span class="apay-page-btn disabled">&raquo;</span>
     {% endif %}
     <span class="apay-page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &mdash; {{ page_obj.paginator.count|intcomma }} emails</span>
 </div>
 {% endif %}
+
+<!-- Filter action toast -->
+<div id="filter-toast" class="apay-filter-toast">
+    <i class="bi bi-check-circle-fill"></i>
+    <span id="filter-toast-msg"></span>
+</div>
+
+<!-- Email Filter Modal -->
+<div id="email-filter-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-dialog" style="max-width:600px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-diagram-3"></i> Email Routing Filters</h3>
+            <button class="modal-close" onclick="closeEmailFilterModal()"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:0.85rem;color:var(--text-secondary);margin:0 0 var(--sp-3);">
+                Route incoming emails to the <strong>RJL</strong> or <strong>Group</strong> tab based on sender address.
+                Use <code>@domain.com</code> to match an entire domain, or a full email address for an exact match.
+                Rules are applied automatically during sync and to existing untagged emails when added.
+            </p>
+            <div class="apay-exempt-add">
+                <input type="text" id="filter-pattern-input" placeholder="e.g. @rjl.com or supplier@example.com" class="apay-exempt-input">
+                <select id="filter-tab-select" class="apay-exempt-input" style="max-width:110px;">
+                    <option value="rjl">RJL</option>
+                    <option value="group">Group</option>
+                </select>
+                <button class="apay-btn" onclick="addEmailFilter()" style="flex-shrink:0;">
+                    <i class="bi bi-plus-lg"></i> Add
+                </button>
+            </div>
+            <div id="email-filter-list" class="apay-exempt-list">
+                <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Exemption List Modal -->
 <div id="exemption-modal" class="modal-overlay" style="display:none;">
@@ -308,7 +350,6 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
             </p>
             <div class="apay-exempt-add">
                 <input type="email" id="exempt-email-input" placeholder="email@example.com" class="apay-exempt-input">
-                <input type="text" id="exempt-note-input" placeholder="Note (optional)" class="apay-exempt-input" style="max-width:180px;">
                 <button class="apay-btn" onclick="addExemption()" style="flex-shrink:0;">
                     <i class="bi bi-plus-lg"></i> Add
                 </button>
@@ -930,20 +971,18 @@ function loadExemptions() {
 
 function addExemption() {
     const emailInput = document.getElementById('exempt-email-input');
-    const noteInput = document.getElementById('exempt-note-input');
     const email = emailInput.value.trim();
     if (!email) { emailInput.focus(); return; }
 
     fetch('{% url "manage_exemptions" %}', {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'add', email, note: noteInput.value.trim() }),
+        body: JSON.stringify({ action: 'add', email }),
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
             emailInput.value = '';
-            noteInput.value = '';
             loadExemptions();
         } else {
             alert('Error: ' + (data.error || 'Unknown'));
@@ -967,6 +1006,109 @@ function removeExemption(email, rowId) {
             }
         }
     });
+}
+
+// ── Email filter modal ────────────────────────────────────────────────────────
+function openEmailFilterModal() {
+    document.getElementById('email-filter-modal').style.display = 'flex';
+    loadEmailFilters();
+}
+function closeEmailFilterModal() {
+    document.getElementById('email-filter-modal').style.display = 'none';
+}
+
+function loadEmailFilters() {
+    const list = document.getElementById('email-filter-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_email_filters" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.filters.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No filters defined yet.</div>';
+            return;
+        }
+        list.innerHTML = data.filters.map(f => `
+            <div class="apay-exempt-row" id="filter-row-${f.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${f.email_pattern}</span>
+                </div>
+                <span class="apay-tab-badge tab-${f.tab}">${f.tab.toUpperCase()}</span>
+                <button class="apay-icon-btn" title="Run filter now" onclick="runEmailFilter(${f.id})">
+                    <i class="bi bi-play-fill"></i>
+                </button>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removeEmailFilter(${f.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addEmailFilter() {
+    const patternInput = document.getElementById('filter-pattern-input');
+    const tab = document.getElementById('filter-tab-select').value;
+    const pattern = patternInput.value.trim();
+    if (!pattern) { patternInput.focus(); return; }
+
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email_pattern: pattern, tab }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            patternInput.value = '';
+            loadEmailFilters();
+            if (data.applied_to > 0) {
+                showFilterToast(`Filter saved — applied to <strong>${data.applied_to}</strong> email(s).`);
+            }
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function runEmailFilter(id) {
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showFilterToast(`Filter applied to <strong>${data.applied_to}</strong> email(s).`);
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removeEmailFilter(id) {
+    if (!confirm('Remove this email filter?')) return;
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('filter-row-' + id);
+            if (row) row.remove();
+            if (!document.querySelector('#email-filter-list .apay-exempt-row')) {
+                document.getElementById('email-filter-list').innerHTML = '<div class="apay-exempt-empty">No filters defined yet.</div>';
+            }
+        }
+    });
+}
+function showFilterToast(message) {
+    const toast = document.getElementById('filter-toast');
+    document.getElementById('filter-toast-msg').innerHTML = message;
+    toast.classList.add('visible');
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => toast.classList.remove('visible'), 4000);
 }
 </script>
 {% endblock %}

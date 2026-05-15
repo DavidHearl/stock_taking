@@ -50,7 +50,7 @@
                                 </span>
                             </div>
                             <div class="field-row-sb">
-                                <span class="field-label">Customer Number</span>
+                                <span class="field-label">System Number (CAD)</span>
                                 <span class="field-value" id="customer-number-display">{{ order.customer_number }}</span>
                             </div>
                             <div class="field-row-sb">
@@ -119,7 +119,7 @@
                                 <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
                             </div>
                             <div>
-                                <label class="form-label">Customer Number</label>
+                                <label class="form-label">System Number (CAD)</label>
                                 <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
                             </div>
                             <div>
@@ -1578,7 +1578,7 @@
                     <div class="form-group">
                         <label for="id_csv_file">CSV File</label>
                         <input type="file" class="form-input" id="id_csv_file" name="csv_file" accept=".csv" required>
-                        <small class="form-help">CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from customer number in filename.</small>
+                        <small class="form-help">CSV should have columns: Sku, Name, Description, CostPrice, SellPrice, Quantity, Billable. Order will be auto-detected from system number (CAD) in filename.</small>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -2049,6 +2049,26 @@
 </div>
 
 <!-- Confirm Swap Modal -->
+<div class="modal" id="deleteConfirmModal">
+    <div class="modal-overlay" onclick="closeModal('deleteConfirmModal')"></div>
+    <div class="modal-dialog" style="max-width:420px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Delete</h3>
+                <button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <p id="deleteConfirmMessage" style="margin:0;"></p>
+                <p style="margin-top:8px;font-size:0.82rem;color:var(--text-secondary);">This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button>
+                <button type="button" class="btn btn-danger" id="deleteConfirmOkBtn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="confirmSwapModal">
     <div class="modal-overlay" onclick="closeModal('confirmSwapModal')"></div>
     <div class="modal-dialog">
@@ -3520,7 +3540,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const checked = document.querySelectorAll('.accessory-select:checked');
             const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
             if (ids.length === 0) return;
-            if (!confirm(`Delete ${ids.length} accessory item(s)? This cannot be undone.`)) return;
+            showDeleteConfirm(`Delete ${ids.length} accessory item(s)?`, () => {
 
             this.disabled = true;
             this.innerHTML = '<i class="bi bi-hourglass-split"></i> Deleting...';
@@ -3549,6 +3569,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.disabled = false;
                 this.innerHTML = '<i class="bi bi-trash"></i> <span id="accessory-selected-count">0</span>';
             });
+
+            }); // end showDeleteConfirm
         });
     }
 
@@ -3587,7 +3609,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const checked = document.querySelectorAll('.glass-select:checked');
             const ids = Array.from(checked).map(cb => cb.getAttribute('data-accessory-id'));
             if (ids.length === 0) return;
-            if (!confirm(`Delete ${ids.length} glass item(s)? This cannot be undone.`)) return;
+            showDeleteConfirm(`Delete ${ids.length} glass item(s)?`, () => {
 
             this.disabled = true;
             this.innerHTML = '<i class="bi bi-hourglass-split"></i>';
@@ -3616,6 +3638,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.disabled = false;
                 this.innerHTML = '<i class="bi bi-trash"></i> <span id="glass-selected-count">0</span>';
             });
+
+            }); // end showDeleteConfirm
         });
     }
 
@@ -4482,6 +4506,18 @@ function closeModal(modalId) {
         modal.classList.remove('show');
         document.body.classList.remove('modal-open');
     }
+}
+
+function showDeleteConfirm(message, onConfirm) {
+    document.getElementById('deleteConfirmMessage').textContent = message;
+    const okBtn = document.getElementById('deleteConfirmOkBtn');
+    const newBtn = okBtn.cloneNode(true); // remove previous listeners
+    okBtn.parentNode.replaceChild(newBtn, okBtn);
+    newBtn.addEventListener('click', function() {
+        closeModal('deleteConfirmModal');
+        onConfirm();
+    });
+    openModal('deleteConfirmModal');
 }
 
 // ── Add / Copy Board (queue-based) ───────────────────────────────────────────

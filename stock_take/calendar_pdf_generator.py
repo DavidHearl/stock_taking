@@ -72,6 +72,12 @@ def _styles():
         alignment=TA_RIGHT)
     add('CellWarn',   fontSize=8,  leading=11, textColor=WARNING_COLOR,
         fontName='Helvetica-Bold', alignment=TA_RIGHT)
+    add('SubtotalLabel', fontSize=8, leading=11, textColor=TEXT_SECONDARY,
+        fontName='Helvetica-Bold')
+    add('SubtotalRight', fontSize=8, leading=11, textColor=TEXT_PRIMARY,
+        fontName='Helvetica-Bold', alignment=TA_RIGHT)
+    add('SubtotalWarn',  fontSize=8, leading=11, textColor=WARNING_COLOR,
+        fontName='Helvetica-Bold', alignment=TA_RIGHT)
     return ss
 
 
@@ -194,6 +200,24 @@ def generate_calendar_pdf(weeks_data):
             ]
             table_data.append(row)
 
+        # ── Subtotal row ──────────────────────────────────────────────────────
+        total_days = sum(a.get('duration') or 1 for a in appts)
+        total_value = sum(a['sale_value'] for a in appts if a.get('sale_value') is not None)
+        total_ost   = sum(a['outstanding'] for a in appts if a.get('outstanding') is not None)
+        tv_str  = f"£{total_value:,.0f}"
+        to_str  = f"£{total_ost:,.0f}"
+        ost_sub_style = ss['SubtotalWarn'] if total_ost > 0 else ss['SubtotalRight']
+        subtotal_row = [
+            Paragraph('', ss['SubtotalLabel']),
+            Paragraph('', ss['SubtotalLabel']),
+            Paragraph('Week Total', ss['SubtotalLabel']),
+            Paragraph('', ss['SubtotalLabel']),
+            Paragraph(str(total_days), ss['SubtotalRight']),
+            Paragraph(tv_str,          ss['SubtotalRight']),
+            Paragraph(to_str,          ost_sub_style),
+        ]
+        table_data.append(subtotal_row)
+
         tbl = Table(table_data, colWidths=COL_WIDTHS, repeatRows=1)
         tbl.setStyle(TableStyle([
             # Header row
@@ -208,10 +232,15 @@ def generate_calendar_pdf(weeks_data):
             ('TOPPADDING',    (0, 1), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
             ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-            # Alternating rows
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, ROW_ALT]),
+            # Alternating rows (exclude subtotal row)
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, ROW_ALT]),
             # Row separators
             ('LINEBELOW',     (0, 1), (-1, -1), 0.3, BORDER_COLOR),
+            # Subtotal row
+            ('BACKGROUND',    (0, -1), (-1, -1), HEADER_BG),
+            ('LINEABOVE',     (0, -1), (-1, -1), 0.8, BRAND_ACCENT),
+            ('TOPPADDING',    (0, -1), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 5),
         ]))
         story.append(tbl)
         story.append(Spacer(1, 6 * mm))

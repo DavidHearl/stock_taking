@@ -1425,6 +1425,9 @@ class Remedial(models.Model):
     boards_po = models.ForeignKey(BoardsPO, on_delete=models.SET_NULL, null=True, blank=True, related_name='remedials')
     os_doors_required = models.BooleanField(default=False)
     os_doors_po = models.CharField(max_length=50, blank=True)
+    order_boards_required = models.BooleanField(default=False, help_text='Boards need to be ordered for this remedial')
+    order_accessories_required = models.BooleanField(default=False, help_text='Accessories need to be ordered for this remedial')
+    order_glass_required = models.BooleanField(default=False, help_text='Glass needs to be ordered for this remedial')
     
     # Status
     is_completed = models.BooleanField(default=False)
@@ -2219,6 +2222,11 @@ class MailboxEmail(models.Model):
     )
     synced_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    tab = models.CharField(
+        max_length=20, blank=True, default='', db_index=True,
+        choices=[('', 'All'), ('rjl', 'RJL'), ('group', 'Group')],
+        help_text='Company entity tab this email is routed to',
+    )
 
     class Meta:
         ordering = ['-received_at']
@@ -2265,6 +2273,31 @@ class MailboxExemption(models.Model):
 
     def __str__(self):
         return self.email_address
+
+
+class MailboxEmailFilter(models.Model):
+    """Routing rule: emails whose sender matches a pattern are assigned to a tab."""
+
+    TAB_CHOICES = [('rjl', 'RJL'), ('group', 'Group')]
+
+    email_pattern = models.CharField(
+        max_length=254, unique=True,
+        help_text='Full email address or @domain.com to match against the sender',
+    )
+    tab = models.CharField(
+        max_length=20, choices=TAB_CHOICES,
+        help_text='Which tab matching emails are routed to',
+    )
+    note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['tab', 'email_pattern']
+        verbose_name = 'Mailbox Email Filter'
+        verbose_name_plural = 'Mailbox Email Filters'
+
+    def __str__(self):
+        return f'{self.email_pattern} → {self.get_tab_display()}'
 
 
 class PurchaseInvoiceLineItem(models.Model):

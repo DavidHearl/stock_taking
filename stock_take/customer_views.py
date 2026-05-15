@@ -1241,8 +1241,11 @@ def _build_sale_context(sale, request_user):
 
     gallery_images = []
     if sale.order:
-        from .models import GalleryImage
+        from .models import GalleryImage, Remedial
         gallery_images = GalleryImage.objects.filter(order=sale.order).order_by('-uploaded_at')
+        remedials = list(Remedial.objects.filter(original_order=sale.order).prefetch_related('accessories').order_by('-created_date'))
+    else:
+        remedials = []
     related_sales = []
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
@@ -1301,6 +1304,7 @@ def _build_sale_context(sale, request_user):
         'overpayment_pct': overpayment_pct,
         'adjusted_profit': adjusted_profit,
         'gallery_images': gallery_images,
+        'remedials': remedials,
         'is_cancelled': is_cancelled,
         'sale_invoices': sale_invoices,
     }

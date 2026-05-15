@@ -8462,7 +8462,7 @@ def upload_accessories_csv(request):
         logging.info(f"matching_orders count: {len(matching_orders)}")
         
         if not matching_orders:
-            messages.error(request, f'No orders found matching customer numbers extracted from filename "{filename}". Extracted numbers: {", ".join(potential_customer_numbers)}')
+            messages.error(request, f'No orders found matching system numbers (CAD) extracted from filename "{filename}". Extracted numbers: {", ".join(potential_customer_numbers)}')
             return redirect('ordering')
         elif len(matching_orders) > 1:
             # Multiple matches - show error with options
@@ -10135,6 +10135,55 @@ def remedial_detail(request, pk):
         'remedial': remedial,
         'accessories': accessories,
     })
+
+@login_required
+def create_remedial(request, order_pk):
+    """Create a new remedial order linked to an existing order."""
+    from django.shortcuts import get_object_or_404
+    order = get_object_or_404(Order, pk=order_pk)
+
+    if request.method != 'POST':
+        return redirect('remedials')
+
+    reason = request.POST.get('reason', '').strip()
+    notes = request.POST.get('notes', '').strip()
+    scheduled_date = request.POST.get('scheduled_date') or None
+    os_doors_required = request.POST.get('os_doors_required') == 'on'
+    order_boards_required = request.POST.get('order_boards_required') == 'on'
+    order_accessories_required = request.POST.get('order_accessories_required') == 'on'
+    order_glass_required = request.POST.get('order_glass_required') == 'on'
+    next_url = request.POST.get('next', '').strip() or None
+
+    if not reason:
+        from django.contrib import messages
+        messages.error(request, 'Reason is required.')
+        return redirect(next_url) if next_url else redirect('remedials')
+
+    # Generate a unique remedial number: {sale_number}-R{n}
+    existing_count = Remedial.objects.filter(original_order=order).count()
+    base = order.sale_number or str(order.pk)
+    candidate = f"{base}-R{existing_count + 1}"
+    while Remedial.objects.filter(remedial_number=candidate).exists():
+        existing_count += 1
+        candidate = f"{base}-R{existing_count + 1}"
+
+    remedial = Remedial.objects.create(
+        original_order=order,
+        remedial_number=candidate,
+        reason=reason,
+        notes=notes,
+        scheduled_date=scheduled_date,
+        os_doors_required=os_doors_required,
+        order_boards_required=order_boards_required,
+        order_accessories_required=order_accessories_required,
+        order_glass_required=order_glass_required,
+        first_name=order.first_name,
+        last_name=order.last_name,
+        customer_number=order.customer_number,
+        address=order.address,
+        postcode=order.postcode,
+    )
+    return redirect(next_url) if next_url else redirect('remedial_detail', pk=remedial.pk)
 
 @login_required
 def remedial_report(request):
