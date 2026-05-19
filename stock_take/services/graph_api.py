@@ -94,7 +94,7 @@ def fetch_inbox_messages(mailbox=None, page_size=100, max_pages=100, since=None)
     first_params = {
         '$top': page_size,
         '$orderby': 'receivedDateTime desc',
-        '$select': 'id,subject,from,receivedDateTime,hasAttachments,bodyPreview,isRead',
+        '$select': 'id,subject,from,receivedDateTime,hasAttachments,body,isRead',
         '$expand': 'attachments($select=id,name,contentType,size,isInline)',
     }
     if since is not None:

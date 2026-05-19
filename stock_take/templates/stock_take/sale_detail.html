@@ -129,11 +129,14 @@
 
     <!-- ===== TAB BAR ===== -->
     <div class="detail-tab-bar">
-        <button class="detail-tab {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
+        <button class="detail-tab {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' and active_tab != 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
         <button class="detail-tab {% if active_tab == 'order' %}active{% endif %}" onclick="switchDetailTab('order')" data-tab="order">Order</button>
         <button class="detail-tab {% if active_tab == 'enquiry' %}active{% endif %}" onclick="switchDetailTab('enquiry')" data-tab="enquiry">Enquiry</button>
         <button class="detail-tab {% if active_tab == 'remedials' %}active{% endif %}" onclick="switchDetailTab('remedials')" data-tab="remedials">
             Remedials{% if remedials %} <span class="tab-count">{{ remedials|length }}</span>{% endif %}
+        </button>
+        <button class="detail-tab {% if active_tab == 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('purchase_orders')" data-tab="purchase_orders">
+            Purchase Orders{% if sale_purchase_orders %} <span class="tab-count">{{ sale_purchase_orders|length }}</span>{% endif %}
         </button>
     </div>
 
@@ -1773,6 +1776,152 @@
         </div>
     </div><!-- /.tab-panel-remedials -->
 
+    <!-- ===== PURCHASE ORDERS TAB PANEL ===== -->
+    <div id="tab-panel-purchase_orders" class="detail-tab-panel {% if active_tab == 'purchase_orders' %}active{% endif %}">
+        <div style="margin-top:16px;">
+
+        {% if order %}
+        <div class="card order-info-card">
+            <div class="card-header card-header-sale"><h3>Linked Purchase Orders</h3></div>
+            <div class="card-body" style="padding:0;">
+
+                <!-- BOARDS section -->
+                <div class="po-type-section">
+                    <div class="po-type-section-header">
+                        <span class="po-type-section-title">Boards</span>
+                        <div style="display:flex;gap:6px;">
+                            {% if order.boards_po %}
+                            <button class="btn btn-sm btn-outline-secondary" onclick="togglePoLinkSearch('primary-po-search-row')"><i class="bi bi-link-45deg"></i> Change Primary</button>
+                            {% else %}
+                            <button class="btn btn-sm btn-primary" onclick="togglePoLinkSearch('primary-po-search-row')"><i class="bi bi-link-45deg"></i> Link PO</button>
+                            {% endif %}
+                            <button class="btn btn-sm btn-outline-primary" onclick="togglePoLinkSearch('additional-po-search-row')"><i class="bi bi-plus-circle"></i> Add Additional</button>
+                        </div>
+                    </div>
+                    {% if boards_po_list %}
+                    <table class="table po-sub-table">
+                        <tbody>
+                        {% for bpd in boards_po_list %}
+                        <tr>
+                            <td style="width:28px;"><span class="po-role-badge {% if bpd.is_primary %}primary{% else %}additional{% endif %}">{% if bpd.is_primary %}P{% else %}A{% endif %}</span></td>
+                            <td>
+                                {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}">{{ bpd.po.po_number }}</a>{% else %}{{ bpd.po.po_number }}{% endif %}
+                            </td>
+                            <td style="color:var(--text-secondary);">{{ bpd.purchase_order.supplier_name|default:"-" }}</td>
+                            <td>
+                                {% if bpd.purchase_order %}
+                                <span class="customer-active-badge {% if bpd.purchase_order.status == 'Approved' or bpd.purchase_order.status == 'Received' %}active{% elif bpd.purchase_order.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ bpd.purchase_order.status }}</span>
+                                {% else %}<span style="color:var(--text-muted);font-size:0.8rem;">—</span>{% endif %}
+                            </td>
+                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if bpd.purchase_order and bpd.purchase_order.total %}£{{ bpd.purchase_order.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td style="text-align:right;">
+                                {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a>{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="po-empty-section">No Boards POs linked</div>
+                    {% endif %}
+                    <div id="primary-po-search-row" class="po-search-panel" style="display:none;">
+                        <input type="text" class="form-input" id="primary-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('primary', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('primary', this.value)" style="width:100%;">
+                        <div id="primary-po-inline-results" class="boards-po-results" style="display:none;"></div>
+                    </div>
+                    <div id="additional-po-search-row" class="po-search-panel" style="display:none;">
+                        <input type="text" class="form-input" id="additional-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('additional', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('additional', this.value)" style="width:100%;">
+                        <div id="additional-po-inline-results" class="boards-po-results" style="display:none;"></div>
+                    </div>
+                </div>
+
+                <!-- OS DOORS section -->
+                <div class="po-type-section">
+                    <div class="po-type-section-header">
+                        <span class="po-type-section-title">OS Doors</span>
+                        <div style="display:flex;gap:6px;">
+                            {% if os_doors_purchase_order %}
+                            <button class="btn btn-sm btn-outline-secondary" onclick="togglePoLinkSearch('os-doors-po-search-row')"><i class="bi bi-link-45deg"></i> Change</button>
+                            {% else %}
+                            <button class="btn btn-sm btn-outline-primary" onclick="togglePoLinkSearch('os-doors-po-search-row')"><i class="bi bi-link-45deg"></i> Link PO</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if os_doors_purchase_order or additional_os_doors_pos_list %}
+                    <table class="table po-sub-table">
+                        <tbody>
+                        {% if os_doors_purchase_order %}
+                        <tr>
+                            <td style="width:28px;"><span class="po-role-badge primary">P</span></td>
+                            <td><a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}">{{ os_doors_purchase_order.display_number }}</a></td>
+                            <td style="color:var(--text-secondary);">{{ os_doors_purchase_order.supplier_name|default:"-" }}</td>
+                            <td><span class="customer-active-badge {% if os_doors_purchase_order.status == 'Approved' or os_doors_purchase_order.status == 'Received' %}active{% elif os_doors_purchase_order.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ os_doors_purchase_order.status|default:"-" }}</span></td>
+                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if os_doors_purchase_order.total %}£{{ os_doors_purchase_order.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td style="text-align:right;"><a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a></td>
+                        </tr>
+                        {% endif %}
+                        {% for apo in additional_os_doors_pos_list %}
+                        <tr>
+                            <td style="width:28px;"><span class="po-role-badge additional">A</span></td>
+                            <td><a href="{% url 'purchase_order_detail' apo.workguru_id %}">{{ apo.display_number }}</a></td>
+                            <td style="color:var(--text-secondary);">{{ apo.supplier_name|default:"-" }}</td>
+                            <td><span class="customer-active-badge {% if apo.status == 'Approved' or apo.status == 'Received' %}active{% elif apo.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ apo.status|default:"-" }}</span></td>
+                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if apo.total %}£{{ apo.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td style="text-align:right;"><a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a></td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="po-empty-section">No OS Doors POs linked</div>
+                    {% endif %}
+                    <div id="os-doors-po-search-row" class="po-search-panel" style="display:none;">
+                        <input type="text" class="form-input" id="os-doors-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('os-doors', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('os-doors', this.value)" style="width:100%;">
+                        <div id="os-doors-po-inline-results" class="boards-po-results" style="display:none;"></div>
+                    </div>
+                </div>
+
+                <!-- PROJECT POs section -->
+                {% with has_project_pos=False %}
+                {% for item in sale_purchase_orders %}{% if item.type == 'Project' %}{% with has_project_pos=True %}{% endwith %}{% endif %}{% endfor %}
+                <div class="po-type-section">
+                    <div class="po-type-section-header">
+                        <span class="po-type-section-title">Project POs</span>
+                    </div>
+                    {% with showed_any=False %}
+                    <table class="table po-sub-table" id="project-pos-table" style="display:none;">
+                        <tbody>
+                        {% for item in sale_purchase_orders %}
+                        {% if item.type == 'Project' %}
+                        <tr>
+                            <td style="width:28px;"><span class="po-role-badge additional">P</span></td>
+                            <td><a href="{% url 'purchase_order_detail' item.po.workguru_id %}">{{ item.po.display_number|default:item.po.number }}</a></td>
+                            <td style="color:var(--text-secondary);">{{ item.po.supplier_name|default:"-" }}</td>
+                            <td><span class="customer-active-badge {% if item.po.status == 'Approved' or item.po.status == 'Received' %}active{% elif item.po.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ item.po.status|default:"-" }}</span></td>
+                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if item.po.total %}£{{ item.po.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td style="text-align:right;"><a href="{% url 'purchase_order_detail' item.po.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a></td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    <div id="project-pos-empty" class="po-empty-section">No Project POs linked</div>
+                    {% endwith %}
+                </div>
+                {% endwith %}
+
+            </div>
+        </div>
+        {% else %}
+        <div class="card order-info-card">
+            <div class="card-body padded" style="color:var(--text-secondary);font-size:0.875rem;padding:24px;text-align:center;">
+                No order linked &mdash; purchase orders are tracked against orders.
+            </div>
+        </div>
+        {% endif %}
+
+        </div>
+    </div><!-- /.tab-panel-purchase_orders -->
+
     </div><!-- /.sale-page-main -->
     <div class="sale-page-summary-col">
 
@@ -2200,6 +2349,108 @@ document.addEventListener('click', function(e) {
 
 // ── Link Existing Boards PO ──────────────────────────────────────
 let _linkBoardsPOTimer = null;
+
+// ── Inline PO linking from Purchase Orders tab ───────────────────
+function togglePoLinkSearch(rowId) {
+    const row = document.getElementById(rowId);
+    const isVisible = row.style.display !== 'none';
+    row.style.display = isVisible ? 'none' : 'block';
+    if (!isVisible) row.querySelector('input').focus();
+}
+
+let _poLinkSearchTimers = {};
+function searchPoLinkInline(type, query) {
+    clearTimeout(_poLinkSearchTimers[type]);
+    const resultsId = type + '-po-inline-results';
+    const resultsDiv = document.getElementById(resultsId);
+    if (query.length < 2) { resultsDiv.style.display = 'none'; return; }
+    _poLinkSearchTimers[type] = setTimeout(() => {
+        fetch(`{% url 'purchase_order_search' %}?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                resultsDiv.innerHTML = '';
+                if (!data.results || data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No purchase orders found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                data.results.forEach(po => {
+                    const item = document.createElement('div');
+                    item.className = 'boards-po-result-item';
+                    item.innerHTML = `
+                        <span class="boards-po-result-number">${po.display_number}</span>
+                        <span class="boards-po-result-meta">${po.supplier_name || ''}${po.project_number ? ' · ' + po.project_number : ''}</span>
+                        <span class="boards-po-result-status badge-${(po.status || 'draft').toLowerCase()}">${po.status}</span>
+                    `;
+                    item.addEventListener('click', () => confirmPoLinkInline(type, po));
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = 'block';
+            })
+            .catch(() => { resultsDiv.style.display = 'none'; });
+    }, 250);
+}
+
+function confirmPoLinkInline(type, po) {
+    {% if order %}
+    const orderId = {{ order.id }};
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    if (type === 'primary') {
+        fetch(`/order/${orderId}/update-boards-po/`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify({purchase_order_id: po.id})
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (result.success) { showAlert(`Primary Boards PO set to ${po.display_number}`, 'success'); setTimeout(() => location.reload(), 800); }
+            else showAlert('Error: ' + (result.error || 'Unknown error'), 'danger');
+        });
+    } else if (type === 'additional') {
+        fetch(`/order/${orderId}/add-additional-boards-po/`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify({po_number: po.display_number})
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (result.success) { showAlert(`Additional Boards PO ${po.display_number} added`, 'success'); setTimeout(() => location.reload(), 800); }
+            else showAlert('Error: ' + (result.error || 'Unknown error'), 'danger');
+        });
+    } else if (type === 'os-doors') {
+        fetch(`/order/${orderId}/link-os-doors-po/`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify({display_number: po.display_number})
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (result.success) { showAlert(`OS Doors PO set to ${po.display_number}`, 'success'); setTimeout(() => location.reload(), 800); }
+            else showAlert('Error: ' + (result.error || 'Unknown error'), 'danger');
+        });
+    }
+    {% endif %}
+}
+
+// Close inline PO search panels when clicking outside
+document.addEventListener('click', function(e) {
+    ['primary', 'additional', 'os-doors'].forEach(type => {
+        const inp = document.getElementById(type + '-po-search-input');
+        const res = document.getElementById(type + '-po-inline-results');
+        if (inp && res && !inp.contains(e.target) && !res.contains(e.target)) {
+            res.style.display = 'none';
+        }
+    });
+});
+
+// Show/hide project POs table based on whether any rows exist
+(function() {
+    const table = document.getElementById('project-pos-table');
+    const empty = document.getElementById('project-pos-empty');
+    if (table && empty) {
+        if (table.querySelector('tbody tr')) { table.style.display = ''; empty.style.display = 'none'; }
+    }
+})();
 
 function searchLinkBoardsPO(query) {
     clearTimeout(_linkBoardsPOTimer);

@@ -6,8 +6,10 @@ directly from email attachments.
 """
 
 import json
+import html as _html
 import logging
 import re as _re
+from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
@@ -18,6 +20,8 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
+from django.utils.html import strip_tags
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, EnabledGLCode, OverheadPurchaseOrder
 from .permissions import page_permission_required
@@ -107,25 +111,24 @@ def accounts_payable_inbox(request):
 
     emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by').all()
 
-    # Entity tab filter (RJL / Group / All)
+    # Entity tab filter (All / RJL / Group / Statements)
     entity_tab = request.GET.get('tab', '')
-    if entity_tab in ('rjl', 'group'):
+    if entity_tab in ('rjl', 'group', 'statements'):
         emails = emails.filter(tab=entity_tab)
     else:
-        # Default 'All' tab: unrouted emails only
+        # Default 'All' tab: unrouted emails only (excludes statements)
         emails = emails.filter(tab='')
 
-    # Tab / status filter
-    status_filter = request.GET.get('status', '')
+    # Status filter — default to 'unprocessed'
+    status_filter = request.GET.get('status', 'unprocessed')
     if status_filter == 'ignored':
         emails = emails.filter(is_ignored=True)
-    elif status_filter == 'unprocessed':
-        emails = emails.filter(is_ignored=False, is_processed=False)
     elif status_filter == 'processed':
         emails = emails.filter(is_ignored=False, is_processed=True)
-    else:
-        # Default: all non-ignored
+    elif status_filter == 'all':
         emails = emails.filter(is_ignored=False)
+    else:  # 'unprocessed' (default)
+        emails = emails.filter(is_ignored=False, is_processed=False)
 
     search = request.GET.get('q', '').strip()
     if search:
@@ -154,6 +157,7 @@ def accounts_payable_inbox(request):
     total_count = MailboxEmail.objects.filter(tab='').count()
     rjl_count = MailboxEmail.objects.filter(tab='rjl', is_ignored=False).count()
     group_count = MailboxEmail.objects.filter(tab='group', is_ignored=False).count()
+    statements_count = MailboxEmail.objects.filter(tab='statements', is_ignored=False).count()
 
     last_synced = MailboxEmail.objects.aggregate(
         last=db_models.Max('synced_at')
@@ -165,16 +169,19 @@ def accounts_payable_inbox(request):
 
     email_po_matches = _find_po_matches(page_obj.object_list)
 
-    # Annotate each email with a CSS class based on the best matched PO status
+    # Annotate each email with the single best PO match (Received > Approved)
+    _STATUS_PRIORITY = {'Received': 0, 'Partially Received': 1, 'Approved': 2}
     for email in page_obj.object_list:
         matched = email_po_matches.get(email.id, [])
         if matched:
-            statuses = {po['status'] for po in matched}
-            if statuses & {'Received', 'Partially Received'}:
-                email.po_match_class = 'po-received'
-            else:
-                email.po_match_class = 'po-approved'
+            best = min(matched, key=lambda p: _STATUS_PRIORITY.get(p['status'], 9))
+            email.po_match = best
+            email.po_match_class = (
+                'po-received' if best['status'] in ('Received', 'Partially Received')
+                else 'po-approved'
+            )
         else:
+            email.po_match = None
             email.po_match_class = ''
 
     return render(request, 'stock_take/accounts_payable.html', {
@@ -194,6 +201,7 @@ def accounts_payable_inbox(request):
         'total_count': total_count,
         'rjl_count': rjl_count,
         'group_count': group_count,
+        'statements_count': statements_count,
         'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
         'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
         'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
@@ -216,14 +224,25 @@ def sync_mailbox(request):
 
     mailbox = graph_api._get_settings()['mailbox']
 
-    # Only fetch messages received after the most recently stored email.
-    # Falls back to fetching everything if the DB is empty.
-    last_received = MailboxEmail.objects.aggregate(
-        latest=db_models.Max('received_at')
-    )['latest']
+    # Determine the lookback window:
+    # - force=true  → full resync (no date filter, fetches entire inbox)
+    # - normal sync → always look back at least 30 days so emails that arrived
+    #   while the service was paused, or were delayed, are never silently missed.
+    #   update_or_create on graph_message_id makes this safely idempotent.
+    try:
+        req_data = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, ValueError):
+        req_data = {}
+
+    force_full = bool(req_data.get('force'))
+
+    if force_full:
+        since = None  # fetch entire inbox
+    else:
+        since = timezone.now() - timedelta(days=30)
 
     try:
-        messages, error = graph_api.fetch_inbox_messages(mailbox, since=last_received)
+        messages, error = graph_api.fetch_inbox_messages(mailbox, since=since)
         if error:
             return JsonResponse({'success': False, 'error': error})
 
@@ -272,6 +291,14 @@ def sync_mailbox(request):
             if received_str:
                 received_at = parse_datetime(received_str)
 
+            raw_body = (msg.get('body') or {}).get('content') or ''
+            body_text = strip_tags(raw_body)            # remove HTML tags
+            body_text = _html.unescape(body_text)       # &nbsp; → \xa0, &amp; → & etc.
+            body_text = body_text.replace('\xa0', ' ')  # non-breaking space → regular space
+            body_text = _re.sub(r'[ \t]+', ' ', body_text)   # collapse runs of spaces/tabs
+            body_text = _re.sub(r'\n{3,}', '\n\n', body_text)  # collapse 3+ blank lines
+            body_text = body_text.strip()
+
             _, created = MailboxEmail.objects.update_or_create(
                 graph_message_id=graph_id,
                 defaults={
@@ -279,7 +306,7 @@ def sync_mailbox(request):
                     'sender_name': (sender.get('name') or '')[:255],
                     'sender_email': (sender.get('address') or '')[:254],
                     'received_at': received_at,
-                    'body_preview': (msg.get('bodyPreview') or '')[:1000],
+                    'body_preview': body_text,
                     'is_read': msg.get('isRead', False),
                     'attachment_names': json.dumps(attachment_data),
                 },
@@ -289,6 +316,15 @@ def sync_mailbox(request):
                 # Apply tab routing filters to newly synced emails
                 email_obj = MailboxEmail.objects.get(graph_message_id=graph_id)
                 _apply_email_tab_filter(email_obj)
+                # Auto-classify as a statement if no routing rule matched
+                if not email_obj.tab:
+                    subj_lower = (msg.get('subject') or '').lower()
+                    att_names_lower = ' '.join(
+                        a.get('name', '') for a in attachment_data
+                    ).lower()
+                    if 'statement' in subj_lower or 'statement' in att_names_lower:
+                        email_obj.tab = 'statements'
+                        email_obj.save(update_fields=['tab'])
 
         return JsonResponse({
             'success': True,
@@ -402,8 +438,8 @@ def create_invoice_from_email(request, email_id):
     if po_id:
         from .models import PurchaseOrder
         try:
-            invoice.purchase_orders.add(PurchaseOrder.objects.get(id=int(po_id)))
-        except (PurchaseOrder.DoesNotExist, ValueError):
+            invoice.purchase_orders.add(PurchaseOrder.objects.get(workguru_id=po_id))
+        except PurchaseOrder.DoesNotExist:
             pass
 
     # Link email → invoice
@@ -464,6 +500,18 @@ def ignore_email(request, email_id):
     email.save(update_fields=['is_ignored'])
     return JsonResponse({'success': True, 'is_ignored': email.is_ignored})
 
+# ── Mark email as filed (statements) ─────────────────────────────────────
+
+@login_required
+def mark_email_filed(request, email_id):
+    """Mark a statement email as filed (processed without a purchase invoice)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    email = get_object_or_404(MailboxEmail, id=email_id)
+    email.is_processed = True
+    email.processed_by = request.user
+    email.save(update_fields=['is_processed', 'processed_by'])
+    return JsonResponse({'success': True})
 
 # ── Unprocess email ───────────────────────────────────────────────────────────
 
@@ -609,6 +657,8 @@ def manage_email_filters(request):
 # ── Download attachment ───────────────────────────────────────────────────────
 
 @login_required
+@login_required
+@xframe_options_sameorigin
 def download_mailbox_attachment(request, email_id, attachment_id):
     """Proxy a single attachment from the Graph API to the browser."""
     email = get_object_or_404(MailboxEmail, id=email_id)

@@ -1,4 +1,4 @@
-from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm, RaumplusOrderingRuleForm
+from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm, RaumplusOrderingRuleForm, SkuGroupForm, SkuGroupMemberForm
 from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, SyncLog, RaumplusOrderingRule, log_activity, Fitter, FactoryWorker
 
 import copy
@@ -19,7 +19,7 @@ from django.db.models import Sum, F, Count, Q, Prefetch
 from django.db.models.functions import Greatest, Coalesce
 from django.db import models
 from django.views.decorators.http import require_http_methods, require_POST
-from .models import StockItem, StockHistory, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem
+from .models import StockItem, StockHistory, ImportHistory, Category, Schedule, StockTakeGroup, Substitution, CSVSkipItem, SkuGroup, SkuGroupMember
 from django.template.loader import render_to_string
 import datetime
 from django.utils import timezone
@@ -213,9 +213,19 @@ def ordering(request):
     is_validator = UserSiteRole.objects.filter(user=request.user, role_name='validator').exists()
     validation_requests_qs = OrderValidationRequest.objects.filter(
         recipient=request.user, is_dismissed=False
-    ).select_related('order')
+    ).select_related('order', 'order__boards_po')
     validation_order_ids = set(vr.order_id for vr in validation_requests_qs)
     validation_requests = list(validation_requests_qs)
+    # Total orders where at least one required component is still unchecked
+    validation_pending_count = sum(
+        1 for vr in validation_requests
+        if not (
+            (vr.boards_checked or vr.order.boards_not_required) and
+            (vr.accessories_checked or vr.order.accessories_not_required) and
+            (vr.os_doors_checked or not vr.order.os_doors_required) and
+            vr.glass_checked
+        )
+    )
 
     # Build a sale_number → BoardsPO map across ALL orders so that duplicate
     # order rows (same sale_number, one with boards_po and one without) both
@@ -256,6 +266,7 @@ def ordering(request):
         'is_validator': is_validator,
         'validation_order_ids': validation_order_ids,
         'validation_requests': validation_requests,
+        'validation_pending_count': validation_pending_count,
         'sale_boards_po_map': sale_boards_po_map,
     })
 
@@ -3859,9 +3870,11 @@ def substitutions(request):
     """Display and manage substitutions and skip items"""
     substitutions = Substitution.objects.all()
     skip_items = CSVSkipItem.objects.all()
+    sku_groups = SkuGroup.objects.prefetch_related('members').all()
     form = SubstitutionForm(request.POST or None)
     skip_form = CSVSkipItemForm(request.POST or None)
-    
+    sku_group_form = SkuGroupForm()
+
     if request.method == 'POST' and form.is_valid():
         sub = form.save(commit=False)
         # Auto-populate names from StockItem if they exist
@@ -3879,19 +3892,165 @@ def substitutions(request):
             pass
         sub.save()
         messages.success(request, 'Substitution added successfully.')
-        return redirect('substitutions')
-    
+        return redirect('stock_list')
+
     if request.method == 'POST' and skip_form.is_valid():
         skip_form.save()
         messages.success(request, 'Skip item added successfully.')
-        return redirect('substitutions')
-    
-    return render(request, 'stock_take/substitutions.html', {
-        'substitutions': substitutions,
-        'skip_items': skip_items,
-        'form': form,
-        'skip_form': skip_form,
-    })
+        return redirect('stock_list')
+
+    return redirect('stock_list')
+
+
+def _apply_sku_groups(order):
+    """Apply SKU groupings to an order's accessories.
+
+    For each SkuGroup where ALL component member SKUs are present in the order,
+    replace those accessories with a single kit accessory.
+    Returns the number of groups applied.
+    """
+    groups = SkuGroup.objects.prefetch_related('members').all()
+    applied_count = 0
+
+    for group in groups:
+        member_skus = list(group.members.values_list('sku', flat=True))
+        if not member_skus:
+            continue
+
+        # Check every member SKU is present
+        present_accessories = {}
+        all_present = True
+        for sku in member_skus:
+            accs = list(order.accessories.filter(sku=sku))
+            if not accs:
+                all_present = False
+                break
+            present_accessories[sku] = accs
+
+        if not all_present:
+            continue
+
+        # Resolve the kit stock item
+        kit_stock_item = StockItem.objects.filter(sku=group.replacement_sku).first()
+        kit_name = group.replacement_name or (kit_stock_item.name if kit_stock_item else group.replacement_sku)
+        kit_cost = group.cost_price if group.cost_price is not None else (kit_stock_item.cost if kit_stock_item else Decimal('0.00'))
+        kit_sell = group.sell_price if group.sell_price is not None else Decimal('0.00')
+
+        # Create the kit accessory if not already present
+        if not order.accessories.filter(sku=group.replacement_sku).exists():
+            Accessory.objects.create(
+                order=order,
+                sku=group.replacement_sku,
+                name=kit_name,
+                description=kit_name,
+                cost_price=kit_cost,
+                sell_price=kit_sell,
+                quantity=Decimal('1'),
+                billable=group.billable,
+                stock_item=kit_stock_item,
+                missing=(kit_stock_item is None),
+            )
+
+        # Delete all component accessories
+        for sku, accs in present_accessories.items():
+            for acc in accs:
+                acc.delete()
+
+        applied_count += 1
+
+    return applied_count
+
+
+@login_required
+def create_sku_group(request):
+    """Create a new SkuGroup (AJAX JSON endpoint)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required.'}, status=405)
+    sku = request.POST.get('replacement_sku', '').strip()
+    name = request.POST.get('replacement_name', '').strip()
+    cost_str = request.POST.get('cost_price', '').strip()
+    billable = bool(request.POST.get('billable'))
+    if not sku:
+        return JsonResponse({'success': False, 'error': 'Kit SKU is required.'})
+    try:
+        cost = Decimal(cost_str) if cost_str else None
+    except (InvalidOperation, ValueError):
+        cost = None
+    if SkuGroup.objects.filter(replacement_sku=sku).exists():
+        return JsonResponse({'success': False, 'error': f'A group for "{sku}" already exists.'})
+    group = SkuGroup.objects.create(replacement_sku=sku, replacement_name=name, cost_price=cost, billable=billable)
+    return JsonResponse({'success': True, 'group': {
+        'id': group.id, 'replacement_sku': group.replacement_sku,
+        'replacement_name': group.replacement_name, 'billable': group.billable,
+    }})
+
+
+@login_required
+def delete_sku_group(request, group_id):
+    """Delete a SkuGroup and all its members (AJAX JSON endpoint)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required.'}, status=405)
+    group = get_object_or_404(SkuGroup, id=group_id)
+    group.delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def add_sku_group_member(request, group_id):
+    """Add a component SKU to an existing SkuGroup (AJAX JSON endpoint)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required.'}, status=405)
+    group = get_object_or_404(SkuGroup, id=group_id)
+    sku = request.POST.get('sku', '').strip()
+    name = request.POST.get('name', '').strip()
+    if not sku:
+        return JsonResponse({'success': False, 'error': 'SKU is required.'})
+    if not name:
+        si = StockItem.objects.filter(sku=sku).first()
+        if si:
+            name = si.name
+    member, created = SkuGroupMember.objects.get_or_create(group=group, sku=sku, defaults={'name': name})
+    return JsonResponse({'success': True, 'created': created, 'member': {
+        'id': member.id, 'sku': member.sku, 'name': member.name,
+    }})
+
+
+@login_required
+def delete_sku_group_member(request, member_id):
+    """Remove a component SKU from a SkuGroup (AJAX JSON endpoint)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required.'}, status=405)
+    member = get_object_or_404(SkuGroupMember, id=member_id)
+    member.delete()
+    return JsonResponse({'success': True})
+
+
+def move_sku_group_member(request, member_id):
+    """Move a component from one SkuGroup to another."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required.'}, status=405)
+    member = get_object_or_404(SkuGroupMember, id=member_id)
+    target_group_id = request.POST.get('target_group_id')
+    target_group = get_object_or_404(SkuGroup, id=target_group_id)
+    if SkuGroupMember.objects.filter(group=target_group, sku=member.sku).exists():
+        return JsonResponse({'success': False, 'error': f'{member.sku} is already in that group.'})
+    member.group = target_group
+    member.save()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def apply_sku_groups_to_order(request, order_id):
+    """Apply SKU groupings to a specific order's accessories (AJAX/POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    order = get_object_or_404(Order, id=order_id)
+    applied = _apply_sku_groups(order)
+    if applied:
+        messages.success(request, f'Applied {applied} SKU group(s) to order accessories.')
+    else:
+        messages.info(request, 'No SKU group matches found in this order.')
+    return redirect('order_details', order_id=order_id)
 
 
 @login_required
@@ -4260,8 +4419,16 @@ def add_board_item(request):
             if not boards_po:
                 return JsonResponse({'success': False, 'error': 'Boards PO not found'})
             
-            # Get the linked order (checks both primary FK and additional M2M)
-            linked_order = _get_linked_order(boards_po)
+            # Use the order_id from the request if provided (ensures correct customer tagging
+            # when the BoardsPO is shared across orders or linked as primary to another order).
+            # Fall back to auto-discovery only when order_id is absent.
+            if order_id:
+                try:
+                    linked_order = Order.objects.get(id=order_id)
+                except Order.DoesNotExist:
+                    linked_order = _get_linked_order(boards_po)
+            else:
+                linked_order = _get_linked_order(boards_po)
             
             # Create the new PNX item
             pnx_item = PNXItem.objects.create(
@@ -4284,8 +4451,8 @@ def add_board_item(request):
                 top_edge=Decimal(str(data.get('top_edge', 0) or 0)),
             )
             
-            # Regenerate PNX and CSV files
-            regenerate_pnx_csv_files(boards_po)
+            # Regenerate PNX and CSV files (pass linked_order to avoid re-discovering the wrong order)
+            regenerate_pnx_csv_files(boards_po, linked_order=linked_order)
             
             return JsonResponse({'success': True, 'item_id': pnx_item.id})
         except Exception as e:
@@ -4422,10 +4589,12 @@ def _next_generated_barcode(boards_po, partdesc, taken_barcodes):
     return next_barcode
 
 
-def regenerate_pnx_csv_files(boards_po):
+def regenerate_pnx_csv_files(boards_po, linked_order=None):
     """Regenerate both PNX and CSV files from current PNX items.
     Uses Django's storage backend (ContentFile + .save()) so files are
     uploaded to the configured storage (e.g. DigitalOcean Spaces).
+    Pass linked_order explicitly to avoid re-discovering the wrong order when a
+    BoardsPO is shared across multiple orders.
     """
     from django.core.files.base import ContentFile
     
@@ -4435,8 +4604,9 @@ def regenerate_pnx_csv_files(boards_po):
     if not pnx_items.exists():
         return
     
-    # Resolve linked order to rebuild the customer value (checks both primary FK and additional M2M)
-    linked_order = _get_linked_order(boards_po)
+    # Use the provided linked_order if given; otherwise auto-discover
+    if linked_order is None:
+        linked_order = _get_linked_order(boards_po)
     customer_value = _build_customer_value(linked_order)
     
     # Update customer field on all items if we have a linked order
@@ -5919,12 +6089,55 @@ def dismiss_validation_request(request, request_id):
 
 
 @login_required
+def save_validation_components(request, request_id):
+    """Save per-component validation checks for an OrderValidationRequest.
+
+    Accepts a JSON body with any subset of:
+        boards_checked, accessories_checked, os_doors_checked, glass_checked (bool)
+
+    Auto-dismisses the request when all applicable components are confirmed:
+        - boards (unless order.boards_not_required)
+        - accessories (unless order.accessories_not_required)
+        - os_doors (only if order.os_doors_required)
+        Glass is always optional and does not block auto-dismiss.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    from .models import OrderValidationRequest
+    import json as _json
+    vr = get_object_or_404(OrderValidationRequest, id=request_id, recipient=request.user)
+    try:
+        data = _json.loads(request.body)
+    except (ValueError, _json.JSONDecodeError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    allowed = {'boards_checked', 'accessories_checked', 'os_doors_checked', 'glass_checked'}
+    fields_to_save = []
+    for field in allowed:
+        if field in data:
+            setattr(vr, field, bool(data[field]))
+            fields_to_save.append(field)
+    # Auto-dismiss when all applicable components are checked
+    order = vr.order
+    boards_ok = vr.boards_checked or order.boards_not_required
+    accessories_ok = vr.accessories_checked or order.accessories_not_required
+    os_doors_ok = vr.os_doors_checked or not order.os_doors_required
+    auto_dismissed = False
+    if boards_ok and accessories_ok and os_doors_ok:
+        vr.is_dismissed = True
+        fields_to_save.append('is_dismissed')
+        auto_dismissed = True
+    if fields_to_save:
+        vr.save(update_fields=fields_to_save)
+    return JsonResponse({'success': True, 'auto_dismissed': auto_dismissed})
+
+
+@login_required
 def get_validation_notifications(request):
     """Return JSON list of undismissed validation requests for the current user."""
     from .models import OrderValidationRequest
     requests_qs = OrderValidationRequest.objects.filter(
         recipient=request.user, is_dismissed=False
-    ).select_related('order', 'created_by').order_by('-created_at')[:20]
+    ).select_related('order', 'order__boards_po').order_by('-created_at')[:20]
     data = []
     for vr in requests_qs:
         order = vr.order
@@ -5933,9 +6146,18 @@ def get_validation_notifications(request):
             'order_id': order.id,
             'sale_number': order.sale_number or '',
             'customer_name': f"{order.first_name} {order.last_name}".strip(),
-            'created_by': vr.created_by.get_full_name() or vr.created_by.username if vr.created_by else '',
-            'created_at': vr.created_at.strftime('%d %b %Y %H:%M'),
+            'order_date': order.order_date.strftime('%d %b %Y') if order.order_date else '',
+            'fit_date': order.fit_date.strftime('%d %b %Y') if order.fit_date else '',
+            'order_type': order.order_type,
+            'boards_po_ref': order.boards_po.po_number if order.boards_po else '',
             'order_url': f"/order/{order.id}/",
+            'boards_checked': vr.boards_checked,
+            'boards_required': not order.boards_not_required,
+            'accessories_checked': vr.accessories_checked,
+            'accessories_required': not order.accessories_not_required,
+            'os_doors_checked': vr.os_doors_checked,
+            'os_doors_required': order.os_doors_required,
+            'glass_checked': vr.glass_checked,
         })
     return JsonResponse({'notifications': data})
 
@@ -6922,6 +7144,7 @@ def stock_list(request):
         # Always fetch fresh substitution data (not cached with stock items)
         cached_data['substitutions'] = list(Substitution.objects.all())
         cached_data['skip_items'] = list(CSVSkipItem.objects.filter(order__isnull=True))
+        cached_data['sku_groups'] = list(SkuGroup.objects.prefetch_related('members').all())
         cached_data['substitution_skus'] = set(s.replacement_sku for s in cached_data['substitutions'])
         cached_data['missing_skus'] = set(s.missing_sku for s in cached_data['substitutions'])
         cached_data['replacement_skus'] = set(s.replacement_sku for s in cached_data['substitutions'])
@@ -7001,9 +7224,10 @@ def stock_list(request):
     stock_take_groups = list(StockTakeGroup.objects.select_related('category').all())
     suppliers = list(Supplier.objects.filter(is_active=True).order_by('name'))
     
-    # Substitutions & skip items for the modal
+    # Substitutions, skip items & SKU groups for the modal
     all_substitutions = list(Substitution.objects.all())
     all_skip_items = list(CSVSkipItem.objects.filter(order__isnull=True))
+    all_sku_groups = list(SkuGroup.objects.prefetch_related('members').all())
     substitution_skus = set(s.replacement_sku for s in all_substitutions)
     missing_skus = set(s.missing_sku for s in all_substitutions)
     replacement_skus = set(s.replacement_sku for s in all_substitutions)
@@ -7028,6 +7252,7 @@ def stock_list(request):
         'suppliers': suppliers,
         'substitutions': all_substitutions,
         'skip_items': all_skip_items,
+        'sku_groups': all_sku_groups,
         'substitution_skus': substitution_skus,
         'missing_skus': missing_skus,
         'replacement_skus': replacement_skus,
@@ -7126,6 +7351,38 @@ def delete_substitution(request, substitution_id):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+def move_substitution_to_skip(request, substitution_id):
+    """Convert a substitution into a global skip item, then delete it."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'})
+    sub = get_object_or_404(Substitution, id=substitution_id)
+    CSVSkipItem.objects.get_or_create(
+        sku=sub.missing_sku,
+        order=None,
+        defaults={'name': sub.missing_name or sub.missing_sku}
+    )
+    sub.delete()
+    return JsonResponse({'success': True})
+
+
+def move_substitution_to_group(request, substitution_id):
+    """Convert a substitution into a SKU group (replacement=kit, missing=component), then delete it."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'})
+    sub = get_object_or_404(Substitution, id=substitution_id)
+    group, _ = SkuGroup.objects.get_or_create(
+        replacement_sku=sub.replacement_sku,
+        defaults={'replacement_name': sub.replacement_name or sub.replacement_sku}
+    )
+    SkuGroupMember.objects.get_or_create(
+        group=group,
+        sku=sub.missing_sku,
+        defaults={'name': sub.missing_name or sub.missing_sku}
+    )
+    sub.delete()
+    return JsonResponse({'success': True})
 
 def edit_substitution(request, substitution_id):
     """Edit a substitution via AJAX"""
@@ -9561,6 +9818,12 @@ def resolve_missing_items(request, order_id):
         success_msg = f'Successfully resolved {resolved_count} missing items using substitutions.'
         if skip_items_removed > 0:
             success_msg += f' Removed {skip_items_removed} items from skip list.'
+
+        # Apply SKU groupings (N→1 kit consolidation)
+        groups_applied = _apply_sku_groups(order)
+        if groups_applied:
+            success_msg += f' Applied {groups_applied} SKU group(s).'
+
         messages.success(request, success_msg)
         
         return redirect('order_details', order_id=order_id)
@@ -9614,14 +9877,11 @@ def delete_skip_item(request, skip_item_id):
     """Delete a skip item"""
     if request.method == 'POST':
         skip_item = get_object_or_404(CSVSkipItem, id=skip_item_id)
+        order_id = skip_item.order_id
         skip_item.delete()
-        messages.success(request, f'Item "{skip_item.name}" removed from skip list.')
-        
-        # Redirect based on whether it was an order-specific or global skip item
-        if skip_item.order:
-            return redirect('order_details', order_id=skip_item.order.id)
-        else:
-            return redirect('substitutions')
+        if order_id:
+            return redirect('order_details', order_id=order_id)
+        return JsonResponse({'success': True})
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
 
 @login_required

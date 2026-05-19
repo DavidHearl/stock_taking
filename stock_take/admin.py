@@ -7,7 +7,7 @@ from .models import (
     StockHistory, Role, PagePermission, XeroToken, SyncLog,
     AnthillSale, AnthillPayment,
     Lead, AnthillOrderToPlace, Designer, PNXItem, Accessory, Schedule, Substitution,
-    CSVSkipItem, SalesAppointment, WorkflowStageDate, Supplier, SupplierContact,
+    CSVSkipItem, SkuGroup, SkuGroupMember, SalesAppointment, WorkflowStageDate, Supplier, SupplierContact,
     PurchaseOrder, PurchaseOrderProduct, PurchaseOrderAttachment, PurchaseOrderInvoice,
     PurchaseOrderProject, ProductCustomerAllocation, Invoice, InvoiceLineItem, InvoicePayment,
     PurchaseInvoice, PurchaseInvoiceLineItem, GalleryImage, Ticket, ClaimDocument,
@@ -374,6 +374,31 @@ class CSVSkipItemAdmin(admin.ModelAdmin):
     search_fields = ['sku', 'name', 'order__sale_number']
     readonly_fields = ['created_at']
     raw_id_fields = ['order']
+
+
+class SkuGroupMemberInline(admin.TabularInline):
+    model = SkuGroupMember
+    extra = 1
+    fields = ['sku', 'name']
+
+
+@admin.register(SkuGroup)
+class SkuGroupAdmin(admin.ModelAdmin):
+    list_display = ['replacement_sku', 'replacement_name', 'member_count', 'cost_price', 'billable', 'created_at']
+    search_fields = ['replacement_sku', 'replacement_name']
+    readonly_fields = ['created_at']
+    inlines = [SkuGroupMemberInline]
+
+    def member_count(self, obj):
+        return obj.members.count()
+    member_count.short_description = 'Components'
+
+
+@admin.register(SkuGroupMember)
+class SkuGroupMemberAdmin(admin.ModelAdmin):
+    list_display = ['sku', 'name', 'group']
+    search_fields = ['sku', 'name', 'group__replacement_sku']
+    raw_id_fields = ['group']
 
 
 @admin.register(SalesAppointment)

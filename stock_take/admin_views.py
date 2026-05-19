@@ -131,8 +131,27 @@ def admin_users(request):
             try:
                 target_user = User.objects.get(id=user_id)
                 if site and site_role:
-                    UserSiteRole.objects.get_or_create(user=target_user, site=site, role_name=site_role)
+                    _, created = UserSiteRole.objects.get_or_create(user=target_user, site=site, role_name=site_role)
                     messages.success(request, f"Added {site_role} role for {target_user.username} at {site}.")
+                    # Backfill: notify newly-added validators of orders already awaiting check
+                    if created and site_role == 'validator':
+                        from .models import OrderValidationRequest, Order
+                        pending_orders = Order.objects.filter(
+                            all_items_ordered=True,
+                            job_finished=False,
+                            anthill_sale__location=site,
+                        ).distinct()
+                        backfill_count = 0
+                        for order in pending_orders:
+                            _, was_created = OrderValidationRequest.objects.get_or_create(
+                                order=order,
+                                recipient=target_user,
+                                defaults={'created_by': None, 'is_dismissed': False},
+                            )
+                            if was_created:
+                                backfill_count += 1
+                        if backfill_count:
+                            messages.info(request, f"Sent {backfill_count} pending order notification(s) to {target_user.username} for {site}.")
                 else:
                     messages.error(request, "Site and role are required.")
             except User.DoesNotExist:

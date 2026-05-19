@@ -733,6 +733,20 @@ def sales_list(request):
     matched_orders = Order.objects.filter(sale_number__in=page_activity_ids).only('id', 'sale_number')
     order_map = {o.sale_number: o for o in matched_orders}
 
+    # Designer report — only for David Hearl
+    is_david_hearl = request.user.email.lower() == 'david.hearl@sliderobes.com'
+    available_locations = []
+    if is_david_hearl:
+        available_locations = list(
+            AnthillSale.objects
+            .filter(category='3')
+            .exclude(location__isnull=True)
+            .exclude(location='')
+            .values_list('location', flat=True)
+            .distinct()
+            .order_by('location')
+        )
+
     context = {
         'sales': page_obj,
         'page_obj': page_obj,
@@ -743,9 +757,49 @@ def sales_list(request):
         'count_open': count_open,
         'count_complete': count_complete,
         'order_map': order_map,
+        'is_david_hearl': is_david_hearl,
+        'available_locations': available_locations,
     }
 
     return render(request, 'stock_take/sales_list.html', context)
+
+
+@login_required
+def sales_by_designer_api(request):
+    """Return sale totals grouped by designer. David Hearl only."""
+    if request.user.email.lower() != 'david.hearl@sliderobes.com':
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+
+    from django.db.models import Sum, Count
+
+    location = request.GET.get('location', '').strip()
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+
+    qs = (
+        AnthillSale.objects
+        .filter(category='3')
+        .exclude(status__iexact='cancelled')
+        .exclude(sale_value__isnull=True)
+    )
+
+    if location:
+        qs = qs.filter(location__iexact=location)
+    if date_from:
+        qs = qs.filter(activity_date__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(activity_date__date__lte=date_to)
+
+    rows = list(
+        qs.values('location', 'assigned_to_name')
+        .annotate(total=Sum('sale_value'), count=Count('pk'))
+        .order_by('location', 'assigned_to_name')
+    )
+    # Decimal isn't JSON-serialisable — convert to float
+    for r in rows:
+        r['total'] = float(r['total'])
+
+    return JsonResponse({'rows': rows})
 
 
 @login_required
@@ -1409,6 +1463,27 @@ def sale_detail(request, pk):
         if bound_form.is_bound:
             missing.update(bound_form.errors.keys())
         context['missing_order_fields'] = missing
+
+    # Collect all purchase orders linked to this sale for the Purchase Orders tab
+    if sale.order:
+        _seen_po_ids = set()
+        _sale_pos = []
+        def _add_sale_po(po, label):
+            if po is not None and po.pk not in _seen_po_ids:
+                _seen_po_ids.add(po.pk)
+                _sale_pos.append({'po': po, 'type': label})
+        _add_sale_po(context.get('boards_purchase_order'), 'Boards')
+        for _bpd in context.get('boards_po_list', []):
+            _add_sale_po(_bpd.get('purchase_order'), 'Boards')
+        _add_sale_po(context.get('os_doors_purchase_order'), 'OS Doors')
+        for _apo in context.get('additional_os_doors_pos_list', []):
+            _add_sale_po(_apo, 'OS Doors')
+        for _proj in sale.order.po_projects.select_related('purchase_order').all():
+            if _proj.purchase_order:
+                _add_sale_po(_proj.purchase_order, 'Project')
+        context['sale_purchase_orders'] = _sale_pos
+    else:
+        context['sale_purchase_orders'] = []
 
     return render(request, 'stock_take/sale_detail.html', context)
 

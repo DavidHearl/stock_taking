@@ -169,6 +169,126 @@
     </div>
 </div>
 
+<!-- SKU Groups Section -->
+<div class="section-card">
+    <div class="section-header">
+        <div class="section-title">
+            <i class="bi bi-collection"></i>
+            <h2>SKU Groups <span class="badge">{{ sku_groups|length }}</span></h2>
+        </div>
+        <p class="section-subtitle">When all component SKUs are present in an order, they are replaced by the kit SKU.</p>
+    </div>
+
+    <!-- Add new group form -->
+    <div class="add-form-container">
+        <form method="POST" action="{% url 'create_sku_group' %}" id="add-sku-group-form" class="add-form">
+            {% csrf_token %}
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Kit SKU <span class="required">*</span></label>
+                    <input type="text" name="replacement_sku" class="form-control" placeholder="e.g. WNG_LNR_NAA_50WINGLINEKITL" required>
+                </div>
+                <div class="form-group">
+                    <label>Kit Name</label>
+                    <input type="text" name="replacement_name" class="form-control" placeholder="e.g. 50 Wing Line Kit L">
+                </div>
+                <div class="form-group">
+                    <label>Cost Price</label>
+                    <input type="number" name="cost_price" class="form-control" placeholder="0.00" step="0.01" min="0">
+                </div>
+                <div class="form-group" style="flex:0 0 auto; display:flex; align-items:flex-end; padding-bottom:4px;">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="billable" value="1"> Billable
+                    </label>
+                </div>
+                <div class="form-group" style="flex:0 0 auto; display:flex; align-items:flex-end;">
+                    <button type="submit" class="action-btn success">
+                        <i class="bi bi-plus-circle"></i> Add Group
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Groups list -->
+    {% if sku_groups %}
+    <div class="data-table-container">
+        {% for group in sku_groups %}
+        <div class="sku-group-card" id="sku-group-{{ group.id }}">
+            <div class="sku-group-header">
+                <div class="sku-group-info">
+                    <strong class="sku-code">{{ group.replacement_sku }}</strong>
+                    {% if group.replacement_name %}
+                        <span class="sku-name">{{ group.replacement_name }}</span>
+                    {% endif %}
+                    {% if group.cost_price %}
+                        <span class="sku-price">£{{ group.cost_price }}</span>
+                    {% endif %}
+                    {% if group.billable %}
+                        <span class="badge badge-success">Billable</span>
+                    {% endif %}
+                    <span class="badge">{{ group.members.count }} component{{ group.members.count|pluralize }}</span>
+                </div>
+                <form method="POST" action="{% url 'delete_sku_group' group.id %}" onsubmit="return confirm('Delete group {{ group.replacement_sku }} and all its components?')">
+                    {% csrf_token %}
+                    <button type="submit" class="action-btn danger" title="Delete group">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </form>
+            </div>
+
+            <div class="sku-group-members">
+                <table class="data-table compact-table">
+                    <thead>
+                        <tr>
+                            <th>Component SKU</th>
+                            <th>Name</th>
+                            <th class="actions-col"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member in group.members.all %}
+                        <tr>
+                            <td><code>{{ member.sku }}</code></td>
+                            <td>{{ member.name }}</td>
+                            <td>
+                                <form method="POST" action="{% url 'delete_sku_group_member' member.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="action-btn danger small" title="Remove component">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3" class="empty-row">No components yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <!-- Add member form -->
+                <form method="POST" action="{% url 'add_sku_group_member' group.id %}" class="add-member-form">
+                    {% csrf_token %}
+                    <div class="form-row compact">
+                        <input type="text" name="sku" class="form-control" placeholder="Component SKU" required>
+                        <input type="text" name="name" class="form-control" placeholder="Name (optional)">
+                        <button type="submit" class="action-btn success small">
+                            <i class="bi bi-plus"></i> Add
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-collection"></i>
+        <p>No SKU groups defined yet.</p>
+    </div>
+    {% endif %}
+</div>
+
 <!-- Edit Substitution Modal -->
 <div class="modal-overlay" id="editSubstitutionModal" style="display:none;" onclick="closeEditModal(event)">
     <div class="modal-dialog" onclick="event.stopPropagation()">

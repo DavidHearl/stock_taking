@@ -343,7 +343,10 @@
                 </button>
                 <div class="validation-bell-dropdown" id="validationBellDropdown" style="display:none;">
                     <div class="validation-bell-header">Orders to Check</div>
-                    <div id="validationBellList"><div class="validation-bell-loading">Loading…</div></div>
+                    <div id="validationBellList" style="max-height:420px;overflow-y:auto;"><div class="validation-bell-loading">Loading…</div></div>
+                    <div class="validation-bell-footer">
+                        <a href="{% url 'ordering' %}?validator=open" class="validation-bell-view-all">View component table →</a>
+                    </div>
                 </div>
             </div>
             {% endif %}
@@ -606,18 +609,82 @@
                         list.innerHTML = '<div class="validation-bell-empty">No pending orders.</div>';
                         return;
                     }
-                    list.innerHTML = data.notifications.map(n => `
-                        <div class="validation-bell-item" id="vn-${n.id}">
-                            <a href="${n.order_url}" class="validation-bell-link">
-                                <span class="validation-bell-sale">${n.sale_number || '#' + n.order_id}</span>
-                                <span class="validation-bell-name">${n.customer_name}</span>
-                            </a>
-                            <span class="validation-bell-meta">${n.created_at}</span>
-                            <button class="validation-bell-dismiss" onclick="dismissValidationNotification(${n.id})" title="Dismiss">✕</button>
-                        </div>
-                    `).join('');
+                    const cell = (req, checked, vrId, field) => {
+                        if (!req) return `<td class="vbell-td-na" title="Not required">–</td>`;
+                        const cls = checked ? 'vbell-td-done' : 'vbell-td-todo';
+                        const icon = checked ? '✓' : '✗';
+                        return `<td class="${cls}" onclick="vbellToggle(${vrId},'${field}',${!checked},this)" title="${checked ? 'Mark unchecked' : 'Mark checked'}">${icon}</td>`;
+                    };
+                    let html = `<table class="vbell-table">
+                        <thead><tr>
+                            <th class="vbell-th-order">Order</th>
+                            <th>Boards</th>
+                            <th>Acc</th>
+                            <th>OSD</th>
+                            <th>Glass</th>
+                            <th></th>
+                        </tr></thead><tbody>`;
+                    html += data.notifications.map(n => {
+                        const typeTag = n.order_type !== 'sale' ? `<span class="vbell-type">${n.order_type}</span>` : '';
+                        const meta = [n.fit_date ? `Fit: ${n.fit_date}` : '', n.boards_po_ref ? `PO: ${n.boards_po_ref}` : ''].filter(Boolean).join(' · ');
+                        return `<tr id="vbn-${n.id}">
+                            <td class="vbell-td-order">
+                                <div class="vbell-order-top">
+                                    <span class="vbell-sale">${n.sale_number || '#'+n.order_id}</span>${typeTag}
+                                </div>
+                                <span class="vbell-customer">${n.customer_name}</span>
+                                ${meta ? `<span class="vbell-meta">${meta}</span>` : ''}
+                            </td>
+                            ${cell(n.boards_required, n.boards_checked, n.id, 'boards_checked')}
+                            ${cell(n.accessories_required, n.accessories_checked, n.id, 'accessories_checked')}
+                            ${cell(n.os_doors_required, n.os_doors_checked, n.id, 'os_doors_checked')}
+                            <td class="${n.glass_checked ? 'vbell-td-done' : 'vbell-td-todo'}" onclick="vbellToggle(${n.id},'glass_checked',${!n.glass_checked},this)" title="${n.glass_checked ? 'Mark unchecked' : 'Mark checked'}">${n.glass_checked ? '✓' : '✗'}</td>
+                            <td><button class="validation-bell-dismiss" onclick="dismissValidationNotification(${n.id})" title="Dismiss">✕</button></td>
+                        </tr>`;
+                    }).join('');
+                    html += '</tbody></table>';
+                    list.innerHTML = html;
                 })
                 .catch(() => { list.innerHTML = '<div class="validation-bell-empty">Failed to load.</div>'; });
+        }
+
+        function vbellToggle(vrId, field, newVal, el) {
+            const prev = el.textContent.trim();
+            const prevCls = el.className;
+            el.textContent = '…';
+            el.className = 'vbell-td-saving';
+            fetch(`/validation-request/${vrId}/save/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [field]: newVal }),
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    if (data.auto_dismissed) {
+                        const row = document.getElementById(`vbn-${vrId}`);
+                        if (row) row.remove();
+                        const tbody = document.querySelector('.vbell-table tbody');
+                        if (tbody && tbody.rows.length === 0) {
+                            document.getElementById('validationBellList').innerHTML = '<div class="validation-bell-empty">All clear — nothing pending.</div>';
+                        }
+                        const badge = document.getElementById('validationBellBadge');
+                        if (badge) {
+                            const c = parseInt(badge.textContent) - 1;
+                            if (c <= 0) document.getElementById('validationBellWrapper').remove();
+                            else badge.textContent = c;
+                        }
+                    } else {
+                        el.textContent = newVal ? '✓' : '✗';
+                        el.className = newVal ? 'vbell-td-done' : 'vbell-td-todo';
+                        el.setAttribute('onclick', `vbellToggle(${vrId},'${field}',${!newVal},this)`);
+                        el.title = newVal ? 'Mark unchecked' : 'Mark checked';
+                    }
+                } else {
+                    el.textContent = prev; el.className = prevCls;
+                }
+            })
+            .catch(() => { el.textContent = prev; el.className = prevCls; });
         }
 
         function dismissValidationNotification(id) {
@@ -628,17 +695,17 @@
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    const el = document.getElementById(`vn-${id}`);
+                    const el = document.getElementById(`vbn-${id}`);
                     if (el) el.remove();
-                    // Update badge
+                    const tbody = document.querySelector('.vbell-table tbody');
+                    if (tbody && tbody.rows.length === 0) {
+                        document.getElementById('validationBellList').innerHTML = '<div class="validation-bell-empty">All clear — nothing pending.</div>';
+                    }
                     const badge = document.getElementById('validationBellBadge');
                     if (badge) {
                         const current = parseInt(badge.textContent) - 1;
-                        if (current <= 0) {
-                            document.getElementById('validationBellWrapper').remove();
-                        } else {
-                            badge.textContent = current;
-                        }
+                        if (current <= 0) document.getElementById('validationBellWrapper').remove();
+                        else badge.textContent = current;
                     }
                 }
             });

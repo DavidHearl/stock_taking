@@ -2119,7 +2119,7 @@
                 {% if boards_po_list|length > 1 %}
                 <div class="form-group" id="board-po-select-group">
                     <label for="add-board-po-select">Board PO *</label>
-                    <select class="form-input" id="add-board-po-select">
+                    <select class="form-input" id="add-board-po-select" onchange="onBoardPOSelectChange(this.value)">
                         {% for bpo_data in boards_po_list %}
                         <option value="{{ bpo_data.po.id }}">{{ bpo_data.po.po_number }}{% if not bpo_data.is_primary %} (Additional){% endif %}</option>
                         {% endfor %}
@@ -2825,8 +2825,19 @@
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
-                        <label for="additional-po-number">PO Number (leave blank to auto-generate)</label>
-                        <input type="text" id="additional-po-number" name="po_number" class="form-input" placeholder="e.g., PO1234">
+                        <label for="additional-po-number">PO Number</label>
+                        <div style="position:relative;">
+                            <input type="text" id="additional-po-number" name="po_number" class="form-input"
+                                   placeholder="Leave blank to auto-generate, or type to find existing"
+                                   autocomplete="off"
+                                   oninput="searchAdditionalPO(this.value)">
+                            <div id="additional-po-results"
+                                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:500;
+                                        background:var(--bg-primary);border:1px solid var(--border-color);
+                                        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.18);
+                                        max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                        </div>
+                        <small class="form-help">Type to search for an existing PO to link, or leave blank to create a new one</small>
                     </div>
                     <div class="form-group">
                         <label for="additional-po-dwg">Attach DWG File (Optional)</label>
@@ -2843,7 +2854,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('addAdditionalPOModal')">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Create PO</button>
+                    <button type="submit" class="btn btn-warning">Add / Link PO</button>
                 </div>
             </form>
         </div>
@@ -3458,6 +3469,27 @@ function cancelJobFinished() {
 document.addEventListener('DOMContentLoaded', function() {
     // Calculate profit on page load
     calculateProfit();
+
+    // Split barcode inputs: show only the classification prefix (e.g. PO1707_HGD),
+    // with the unique sequence (_001) shown as a small muted label beside it.
+    document.querySelectorAll('.pnx-text-input[data-field="barcode"]').forEach(function(input) {
+        const full = input.value;
+        const match = full.match(/^(.+?)(_\d{3})$/);
+        if (!match) return;
+        const prefix = match[1];
+        const seq    = match[2];
+        input.value = prefix;
+        input.setAttribute('data-original-value', prefix);
+        input.setAttribute('data-barcode-suffix', seq);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'barcode-display';
+        input.parentNode.insertBefore(wrapper, input);
+        wrapper.appendChild(input);
+        const label = document.createElement('span');
+        label.className = 'barcode-suffix-label';
+        label.textContent = seq;
+        wrapper.appendChild(label);
+    });
     
     setTimeout(function() {
         const alerts = document.querySelectorAll('.alert');
@@ -3519,8 +3551,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (!pnxDimensionChangesByPO[boardsPoId]) pnxDimensionChangesByPO[boardsPoId] = {};
             
+            // For barcode field, reconstruct the full barcode (prefix + hidden sequence suffix)
+            const suffix = (field === 'barcode') ? (this.getAttribute('data-barcode-suffix') || '') : '';
+            const savedValue = value + suffix;
+            
             if (value !== originalValue) {
-                pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: field, value: value };
+                pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: field, value: savedValue };
                 showSaveBtn(boardsPoId);
             } else {
                 delete pnxDimensionChangesByPO[boardsPoId][key];
@@ -4799,6 +4835,17 @@ function getPartAbbrev(partdesc) {
     // For custom descriptions: take first 3 uppercase chars, strip spaces
     const clean = partdesc.replace(/[^A-Za-z]/g, '').toUpperCase();
     return clean.substring(0, 3) || 'CUS';
+}
+
+function onBoardPOSelectChange(boardsPoId) {
+    activeBoardsPoId = parseInt(boardsPoId, 10);
+    const addBtn = document.querySelector(`.btn-add-icon[data-boards-po-id="${boardsPoId}"]`);
+    const isAngled = addBtn ? addBtn.dataset.isAngled === 'true' : false;
+    activePoIsAngled = isAngled;
+    activePoNumber = (addBtn && addBtn.dataset.poNumber) || '';
+    document.getElementById('standard-dims-row').style.display = isAngled ? 'none' : '';
+    document.getElementById('angled-dims-section').style.display = isAngled ? '' : 'none';
+    updateBarcodePreview();
 }
 
 function buildBarcodePrefix(partdesc) {
@@ -7193,6 +7240,43 @@ function confirmAdditionalOSDoorsPO() {
 }
 
 // Add Additional Boards PO to an order (via modal with DWG upload)
+let _addPOSearchTimer = null;
+function searchAdditionalPO(query) {
+    clearTimeout(_addPOSearchTimer);
+    const dd = document.getElementById('additional-po-results');
+    if (!dd) return;
+    if (!query || query.trim().length < 2) { dd.style.display = 'none'; return; }
+    _addPOSearchTimer = setTimeout(() => {
+        fetch(`/api/purchase-order-search/?q=${encodeURIComponent(query.trim())}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+        .then(r => r.json())
+        .then(data => {
+            const results = data.results || [];
+            if (!results.length) { dd.style.display = 'none'; return; }
+            dd.innerHTML = results.slice(0, 10).map(po => {
+                const num = po.display_number || po.id;
+                const sup = po.supplier_name ? ` – ${po.supplier_name}` : '';
+                const sta = po.status ? ` (${po.status})` : '';
+                return `<div style="padding:7px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid var(--border-color);"
+                             onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
+                             onclick="document.getElementById('additional-po-number').value='${String(num).replace(/'/g,"\\'")}';
+                                      document.getElementById('additional-po-results').style.display='none';">
+                            <strong>${num}</strong><span style="color:var(--text-secondary);">${sup}${sta}</span>
+                        </div>`;
+            }).join('');
+            dd.style.display = 'block';
+        })
+        .catch(() => { dd.style.display = 'none'; });
+    }, 250);
+}
+document.addEventListener('click', e => {
+    const input = document.getElementById('additional-po-number');
+    const dd = document.getElementById('additional-po-results');
+    if (input && dd && !input.contains(e.target) && !dd.contains(e.target)) dd.style.display = 'none';
+});
+
 function submitAdditionalBoardsPO(event) {
     event.preventDefault();
     const form = document.getElementById('add-additional-po-form');

@@ -6,7 +6,7 @@ from .location_view import set_location
 from .dashboard_view import dashboard, dashboard_monthly_sales, dashboard_sales_after, dashboard_sales_after_report, dashboard_sales_after_pdf, dashboard_stock_report, dashboard_stock_pdf, dashboard_monthly_stock_history, dashboard_outstanding_report, dashboard_outstanding_pdf, dashboard_outstanding_xero_check, dashboard_outstanding_xero_check_single, dashboard_week_report, dashboard_week_pdf, dashboard_monthly_report, dashboard_monthly_pdf, dashboard_avg_report, dashboard_avg_pdf, dashboard_save_layout
 from .product_view import product_detail, add_product, upload_product_image, delete_product, product_add_substitution, product_add_link, product_delete_link, product_delete_price_history
 from .purchase_order_views import purchase_orders_list, purchase_order_detail, purchase_order_save, purchase_order_receive, purchase_order_unreceive, purchase_order_create, purchase_order_add_product, purchase_order_delete_product, purchase_order_delete_board_items, sync_purchase_orders_stream, suppliers_list, supplier_detail, supplier_save, supplier_create, product_search, purchase_order_download_pdf, purchase_order_send_email, purchase_order_update_status, purchase_order_upload_attachment, purchase_order_delete_attachment, purchase_order_attach_boards_files, create_boards_purchase_order, create_os_doors_purchase_order, sync_os_doors_po, add_additional_os_doors_po, purchase_order_delete, purchase_order_list_media_files, purchase_order_attach_media_file, product_add_allocation, product_delete_allocation, order_search, purchase_order_search, purchase_order_toggle_project, po_add_project, po_remove_project, supplier_contact_add, supplier_contact_edit, supplier_contact_delete, supplier_contact_set_default, po_upload_invoice, po_update_invoice, po_delete_invoice, carnehill_summary, po_link_purchase_invoice, po_unlink_purchase_invoice, create_raumplus_po, create_stock_shortage_po, raumplus_order_pdf, save_raumplus_draft, delete_raumplus_draft, raumplus_copy_po_items, purchase_order_push_to_xero, purchase_order_remove_xero_sync, purchase_order_split, po_add_timesheet, po_delete_timesheet, po_link_timesheet, po_unlink_timesheet, po_update_timesheet, po_add_expense, po_delete_expense, po_pull_from_invoice, po_save_freight, set_po_type
-from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sale_detail, sale_create_order, sale_save, sale_merge, sale_link_order, sale_coversheet_save, sale_coversheet_pdf, sale_claim_document_upload, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage, bulk_delete_payments, bulk_copy_payments, edit_payment_from_manage, xero_search_invoices, xero_link_invoice, customer_xero_search, customer_xero_link, customer_anthill_scrape, customer_distribute_payments
+from .customer_views import customers_list, customer_detail, customer_save, customer_delete, customers_bulk_delete, customer_create, customer_merge, events_list, sales_list, sales_by_designer_api, sale_detail, sale_create_order, sale_save, sale_merge, sale_link_order, sale_coversheet_save, sale_coversheet_pdf, sale_claim_document_upload, add_manual_payment, delete_manual_payment, delete_xero_payment, toggle_payment_ignored, scrape_anthill_payments, split_payment, customer_manage_payments, move_payment, cross_sale_split_payment, delete_payment_from_manage, bulk_delete_payments, bulk_copy_payments, edit_payment_from_manage, xero_search_invoices, xero_link_invoice, customer_xero_search, customer_xero_link, customer_anthill_scrape, customer_distribute_payments
 from .admin_views import admin_users, admin_roles, admin_settings, admin_role_edit, admin_role_toggle_all, impersonate_start, impersonate_stop, admin_api, run_script, script_output, cancel_script, running_scripts_status, admin_activity_log, resolve_error_log, error_log_history, admin_design_rules
 from .about_views import about_page
 from .it_views import (
@@ -46,6 +46,7 @@ from .accounts_payable_views import (
     parse_email_attachment,
     ignore_email,
     unprocess_email,
+    mark_email_filed,
     download_mailbox_attachment,
     manage_exemptions,
     manage_email_filters,
@@ -138,6 +139,7 @@ urlpatterns = [
     path('accounts-payable/<int:email_id>/link-invoice/', link_existing_invoice_to_email, name='link_existing_invoice_to_email'),
     path('accounts-payable/<int:email_id>/ignore/', ignore_email, name='ignore_email'),
     path('accounts-payable/<int:email_id>/unprocess/', unprocess_email, name='unprocess_email'),
+    path('accounts-payable/<int:email_id>/file/', mark_email_filed, name='mark_email_filed'),
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/', download_mailbox_attachment, name='download_mailbox_attachment'),
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
 
@@ -233,6 +235,7 @@ urlpatterns = [
     # Customers
     path('events/', events_list, name='events_list'),
     path('sales/', sales_list, name='sales_list'),
+    path('sales/by-designer/', sales_by_designer_api, name='sales_by_designer_api'),
     path('sale/<int:pk>/', sale_detail, name='sale_detail'),
     path('sale/<int:pk>/save/', sale_save, name='sale_save'),
     path('sale/<int:pk>/merge/', sale_merge, name='sale_merge'),
@@ -341,6 +344,14 @@ urlpatterns = [
     path('substitutions/', views.substitutions, name='substitutions'),
     path('substitution/delete/<int:substitution_id>/', views.delete_substitution, name='delete_substitution'),
     path('substitution/edit/<int:substitution_id>/', views.edit_substitution, name='edit_substitution'),
+    path('substitution/<int:substitution_id>/move-to-skip/', views.move_substitution_to_skip, name='move_sub_to_skip'),
+    path('substitution/<int:substitution_id>/move-to-group/', views.move_substitution_to_group, name='move_sub_to_group'),
+    path('sku-group/create/', views.create_sku_group, name='create_sku_group'),
+    path('sku-group/<int:group_id>/delete/', views.delete_sku_group, name='delete_sku_group'),
+    path('sku-group/<int:group_id>/add-member/', views.add_sku_group_member, name='add_sku_group_member'),
+    path('sku-group/member/<int:member_id>/delete/', views.delete_sku_group_member, name='delete_sku_group_member'),
+    path('sku-group/member/<int:member_id>/move/', views.move_sku_group_member, name='move_sku_group_member'),
+    path('order/<int:order_id>/apply-sku-groups/', views.apply_sku_groups_to_order, name='apply_sku_groups_to_order'),
     path('ordering/create-po/', views.create_boards_po, name='create_boards_po'),
     path('stock-take/boards-po/<int:boards_po_id>/update-boards-ordered/', views.update_boards_ordered, name='update_boards_ordered'),
     path('stock-take/boards-po/<int:boards_po_id>/update-po-number/', views.update_po_number, name='update_po_number'),
@@ -380,6 +391,7 @@ urlpatterns = [
     path('order/<int:order_id>/remove-additional-boards-po/', views.remove_additional_boards_po, name='remove_additional_boards_po'),
     path('order/<int:order_id>/update-job-checkbox/', views.update_job_checkbox, name='update_job_checkbox'),
     path('validation-request/<int:request_id>/dismiss/', views.dismiss_validation_request, name='dismiss_validation_request'),
+    path('validation-request/<int:request_id>/save/', views.save_validation_components, name='save_validation_components'),
     path('validation-notifications/', views.get_validation_notifications, name='get_validation_notifications'),
     path('order/<int:order_id>/update-financial/', views.update_order_financial, name='update_order_financial'),
     path('order/<int:order_id>/save-all-financials/', views.save_all_order_financials, name='save_all_order_financials'),

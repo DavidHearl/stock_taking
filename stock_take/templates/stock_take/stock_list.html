@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Products - {{ block.super }}{% endblock %}
 
@@ -56,7 +56,7 @@
         </select>
         <span class="stock-value-display">
             <span class="stock-value-label">Value</span>
-            <span class="stock-value-amount" id="total-value">£{{ total_value|floatformat:2 }}</span>
+            <span class="stock-value-amount" id="total-value">£{{ total_value|floatformat:0|intcomma }}</span>
         </span>
         <button type="button" id="bulkEditBtn" class="stock-bulk-btn" onclick="openModal('bulkEditModal')" title="Bulk Edit Selected">
             <i class="bi bi-pencil-square"></i>
@@ -120,7 +120,7 @@
                     <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in missing_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: #e74c3c;" title="Being replaced"></i>{% endif %}{% if item.sku in replacement_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: #27ae60;" title="Replaces another product"></i>{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right">£{{ item.cost|floatformat:2|intcomma }}</td>
                     <td>
                         <select class="tracking-select" data-field="tracking_type" data-id="{{ item.id }}">
                             <option value="stock" {% if item.tracking_type == 'stock' %}selected{% endif %}>Stock</option>
@@ -129,7 +129,7 @@
                         </select>
                     </td>
                     <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }} {% if item.stock_status == 'in-stock' %}<i class="bi bi-check-circle stock-icon-in" title="In Stock"></i>{% elif item.stock_status == 'low-stock' %}<i class="bi bi-exclamation-triangle stock-icon-low" title="Low Stock"></i>{% elif item.stock_status == 'out-of-stock' %}<i class="bi bi-x-circle stock-icon-out" title="Out of Stock"></i>{% else %}<i class="bi bi-dash-circle stock-icon-non" title="Non-Stock"></i>{% endif %}</td>
-                    <td class="text-right">£{{ item.total_value|floatformat:2 }}</td>
+                    <td class="text-right">£{{ item.total_value|floatformat:2|intcomma }}</td>
                     <td class="text-center img-col">{% if item.product_url and 'http' in item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" style="color: var(--primary-color);"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
                     <td class="text-center img-col">{% if item.image %}<span class="img-preview-trigger" onclick="event.stopPropagation(); showImageLightbox('{{ item.image.url }}', '{{ item.name|escapejs }}')"><i class="bi bi-camera-fill stock-has-image" title="View image"></i><span class="img-preview-popup"><img src="{{ item.image.url }}" alt="{{ item.name }}"></span></span>{% endif %}</td>
                 </tr>
@@ -199,84 +199,186 @@
     </div>
 </div>
 
-<!-- Substitutions Modal -->
+<!-- Item Rules Modal (Change / Delete / Group) -->
 <div class="modal" id="substitutionsModal">
     <div class="modal-overlay" onclick="closeModal('substitutionsModal')"></div>
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="bi bi-arrow-left-right"></i> Substitutions & Skip Items</h3>
+                <h3><i class="bi bi-sliders"></i> Item Rules</h3>
                 <button type="button" class="modal-close" onclick="closeModal('substitutionsModal')">&times;</button>
             </div>
-            <div class="modal-body">
-                <!-- Substitutions Section -->
-                <h4 class="sub-section-title">Substitutions</h4>
-                <div class="sub-add-row">
-                    <input type="text" id="addMissingSku" class="form-control" placeholder="Missing SKU">
-                    <input type="text" id="addReplacementSku" class="form-control" placeholder="Replacement SKU">
-                    <button class="btn btn-primary btn-sm" onclick="addSubstitution()"><i class="bi bi-plus-lg"></i></button>
-                </div>
-                <div class="sub-table-wrap">
-                    <table class="sub-table">
-                        <thead>
-                            <tr>
-                                <th></th>
-                                <th>Missing SKU</th>
-                                <th></th>
-                                <th>Replacement SKU</th>
-                                <th class="text-center actions-col">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="substitutionsBody">
-                            {% for sub in substitutions %}
-                            <tr data-id="{{ sub.id }}">
-                                <td class="text-center"><i class="bi bi-arrow-left-right" style="color: #e74c3c;" title="Being replaced"></i></td>
-                                <td>{{ sub.missing_sku }}</td>
-                                <td class="text-center"><i class="bi bi-arrow-right" style="color: var(--text-secondary);"></i></td>
-                                <td><i class="bi bi-arrow-left-right" style="color: #27ae60; margin-right: 4px;"></i>{{ sub.replacement_sku }}</td>
-                                <td class="text-center actions-col">
-                                    <button class="action-icon" title="Edit" onclick="editSubstitution({{ sub.id }})"><i class="bi bi-pencil"></i></button>
-                                    <button class="action-icon danger" title="Delete" onclick="deleteSubstitution({{ sub.id }}, '{{ sub.missing_sku|escapejs }}')"><i class="bi bi-trash"></i></button>
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr class="empty-row"><td colspan="5">No substitutions defined</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+
+            <!-- Tab nav -->
+            <div class="sub-modal-tabs">
+                <button class="sub-modal-tab active" data-tab="sub-tab-change" onclick="switchSubTab(this, 'sub-tab-change')">
+                    <i class="bi bi-arrow-left-right"></i> Change Item
+                    <span class="sub-tab-badge">{{ substitutions|length }}</span>
+                </button>
+                <button class="sub-modal-tab" data-tab="sub-tab-delete" onclick="switchSubTab(this, 'sub-tab-delete')">
+                    <i class="bi bi-x-circle"></i> Delete Item
+                    <span class="sub-tab-badge">{{ skip_items|length }}</span>
+                </button>
+                <button class="sub-modal-tab" data-tab="sub-tab-group" onclick="switchSubTab(this, 'sub-tab-group')">
+                    <i class="bi bi-collection"></i> Group Items
+                    <span class="sub-tab-badge">{{ sku_groups|length }}</span>
+                </button>
+                <button class="sub-tab-action-btn" id="subBulkKebabBtn" onclick="toggleBulkKebab(event)" title="Actions on selected items">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+            </div>
+
+            <div class="modal-body sub-modal-body">
+
+                <!-- ── Tab 1: Change Item (Substitutions) ── -->
+                <div class="sub-tab-panel active" id="sub-tab-change">
+                    <p class="sub-tab-desc">When an order contains the <strong>Missing SKU</strong>, it is automatically replaced by the <strong>Replacement SKU</strong>.</p>
+                    <div class="sub-add-row">
+                        <input type="text" id="addMissingSku" class="form-control" placeholder="Missing SKU">
+                        <span class="sub-arrow"><i class="bi bi-arrow-right"></i></span>
+                        <input type="text" id="addReplacementSku" class="form-control" placeholder="Replacement SKU">
+                        <button class="btn btn-primary btn-sm" onclick="addSubstitution()"><i class="bi bi-plus-lg"></i> Add</button>
+                    </div>
+                    <div class="sub-table-wrap">
+                        <table class="sub-table">
+                            <thead>
+                                <tr>
+                                    <th class="check-col"><input type="checkbox" id="subSelectAll" onchange="toggleSelectAllSubs(this)"></th>
+                                    <th>Missing SKU</th>
+                                    <th style="width:20px;"></th>
+                                    <th>Replacement SKU</th>
+                                    <th class="actions-col"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="substitutionsBody">
+                                {% for sub in substitutions %}
+                                <tr data-id="{{ sub.id }}">
+                                    <td class="check-col"><input type="checkbox" class="sub-check" value="{{ sub.id }}"></td>
+                                    <td>
+                                        <code>{{ sub.missing_sku }}</code>
+                                        {% if sub.missing_name %}<div class="sub-name">{{ sub.missing_name }}</div>{% endif %}
+                                    </td>
+                                    <td class="text-center"><i class="bi bi-arrow-right" style="color:var(--text-secondary);"></i></td>
+                                    <td>
+                                        <code>{{ sub.replacement_sku }}</code>
+                                        {% if sub.replacement_name %}<div class="sub-name">{{ sub.replacement_name }}</div>{% endif %}
+                                    </td>
+                                    <td class="text-center actions-col">
+                                        <button class="action-icon" title="Edit" onclick="editSubstitution({{ sub.id }})"><i class="bi bi-pencil"></i></button>
+                                        <button class="action-icon danger" title="Delete" onclick="deleteSubstitution({{ sub.id }}, '{{ sub.missing_sku|escapejs }}')"><i class="bi bi-trash"></i></button>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr class="empty-row"><td colspan="5">No substitutions defined.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
-                <!-- Skip Items Section -->
-                <h4 class="sub-section-title">Skip Items</h4>
-                <div class="sub-add-row">
-                    <input type="text" id="addSkipSku" class="form-control" placeholder="SKU to skip">
-                    <input type="text" id="addSkipName" class="form-control" placeholder="Item name">
-                    <button class="btn btn-primary btn-sm" onclick="addSkipItem()"><i class="bi bi-plus-lg"></i></button>
+                <!-- ── Tab 2: Delete Item (Skip Items) ── -->
+                <div class="sub-tab-panel" id="sub-tab-delete">
+                    <p class="sub-tab-desc">SKUs listed here are <strong>removed</strong> from an order's accessories when resolving missing items. Use this for accessories that should never appear.</p>
+                    <div class="sub-add-row">
+                        <input type="text" id="addSkipSku" class="form-control" placeholder="SKU to remove">
+                        <input type="text" id="addSkipName" class="form-control" placeholder="Name (for reference)">
+                        <button class="btn btn-primary btn-sm" onclick="addSkipItem()"><i class="bi bi-plus-lg"></i> Add</button>
+                    </div>
+                    <div class="sub-table-wrap">
+                        <table class="sub-table">
+                            <thead>
+                                <tr>
+                                    <th>SKU</th>
+                                    <th>Name</th>
+                                    <th class="text-center actions-col"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="skipItemsBody">
+                                {% for skip in skip_items %}
+                                <tr data-id="{{ skip.id }}">
+                                    <td><code>{{ skip.sku }}</code></td>
+                                    <td>{{ skip.name }}</td>
+                                    <td class="text-center actions-col">
+                                        <button class="action-icon danger" title="Delete" onclick="deleteSkipItem({{ skip.id }}, '{{ skip.sku|escapejs }}')"><i class="bi bi-trash"></i></button>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr class="empty-row"><td colspan="3">No skip items defined.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="sub-table-wrap">
-                    <table class="sub-table">
-                        <thead>
-                            <tr>
-                                <th>SKU</th>
-                                <th>Name</th>
-                                <th class="text-center actions-col">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="skipItemsBody">
-                            {% for skip in skip_items %}
-                            <tr data-id="{{ skip.id }}">
-                                <td>{{ skip.sku }}</td>
-                                <td>{{ skip.name }}</td>
-                                <td class="text-center actions-col">
-                                    <button class="action-icon danger" title="Delete" onclick="deleteSkipItem({{ skip.id }}, '{{ skip.sku|escapejs }}')"><i class="bi bi-trash"></i></button>
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr class="empty-row"><td colspan="3">No skip items defined</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+
+                <!-- ── Tab 3: Group Items (SKU Groups) ── -->
+                <div class="sub-tab-panel" id="sub-tab-group">
+                    <p class="sub-tab-desc">When <strong>all component SKUs</strong> are present in an order, they are replaced by a single kit SKU.</p>
+
+                    <!-- Add new group -->
+                    <div class="sub-add-row sub-group-add-row">
+                        <input type="text" id="addGroupKitSku" class="form-control" placeholder="Kit SKU *" style="flex:1.5;">
+                        <input type="text" id="addGroupKitName" class="form-control" placeholder="Kit name">
+                        <input type="number" id="addGroupCost" class="form-control" placeholder="Cost £" step="0.01" min="0" style="flex:0.6;">
+                        <label class="sub-billable-label">
+                            <input type="checkbox" id="addGroupBillable"> Billable
+                        </label>
+                        <button class="btn btn-primary btn-sm" onclick="addSkuGroup()"><i class="bi bi-plus-lg"></i> Add Group</button>
+                    </div>
+
+                    <!-- Groups list -->
+                    <div id="skuGroupsList">
+                        {% for group in sku_groups %}
+                        <div class="sku-group-row" id="sg-{{ group.id }}">
+                            <div class="sku-group-row-header">
+                                <div class="sku-group-row-info">
+                                    <code class="sg-kit-sku">{{ group.replacement_sku }}</code>
+                                    {% if group.replacement_name %}<span class="sg-kit-name">{{ group.replacement_name }}</span>{% endif %}
+                                    {% if group.cost_price %}<span class="sg-kit-price">£{{ group.cost_price }}</span>{% endif %}
+                                    {% if group.billable %}<span class="sg-badge billable">Billable</span>{% endif %}
+                                    <span class="sg-badge sg-count-badge">{{ group.members.count }} component{{ group.members.count|pluralize }}</span>
+                                </div>
+                                <button class="action-icon danger" title="Delete group" onclick="deleteSkuGroup({{ group.id }}, '{{ group.replacement_sku|escapejs }}')"><i class="bi bi-trash"></i></button>
+                            </div>
+                            <div class="sku-group-members">
+                                <table class="sg-members-table">
+                                    <thead>
+                                        <tr>
+                                            <th>SKU</th>
+                                            <th>Name</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for member in group.members.all %}
+                                        <tr class="sg-member-row" id="sg-member-{{ member.id }}">
+                                            <td class="sg-member-sku"><code>{{ member.sku }}</code></td>
+                                            <td class="sg-member-name">{{ member.name }}</td>
+                                            <td class="sg-member-actions">
+                                                <button class="action-icon small" title="Move to another group" onclick="openSgMoveMenu(event, {{ member.id }}, {{ group.id }})"><i class="bi bi-arrow-left-right"></i></button>
+                                                <button class="action-icon danger small" title="Remove" onclick="deleteSkuGroupMember({{ member.id }}, '{{ member.sku|escapejs }}')"><i class="bi bi-x"></i></button>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <td colspan="3" class="sg-add-member-cell">
+                                                <div class="sg-add-member-row">
+                                                    <input type="text" class="form-control sg-sku-input" placeholder="Component SKU" id="sgMemberSku-{{ group.id }}">
+                                                    <button class="btn btn-outline-primary btn-xs" onclick="addSkuGroupMember({{ group.id }})"><i class="bi bi-plus"></i> Add component</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <div class="empty-row text-center" id="noGroupsMsg" style="padding:24px 0;">No groups defined yet.</div>
+                        {% endfor %}
+                    </div>
                 </div>
+
             </div>
         </div>
     </div>
@@ -378,34 +480,7 @@
 </div>
 
 <!-- Edit Substitution Modal -->
-<div class="modal" id="editSubModal">
-    <div class="modal-overlay" onclick="closeModal('editSubModal')"></div>
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="bi bi-pencil-square"></i> Edit Substitution</h3>
-                <button type="button" class="modal-close" onclick="closeModal('editSubModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="editSubId">
-                <div class="form-group">
-                    <label for="editMissingSku">Missing SKU</label>
-                    <input type="text" id="editMissingSku" class="form-control" required>
-                </div>
-                <div class="form-group">
-                    <label for="editReplacementSku">Replacement SKU</label>
-                    <input type="text" id="editReplacementSku" class="form-control" required>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('editSubModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveSubstitution()">
-                    <i class="bi bi-check-lg"></i> Save
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
+
 
 
 {% endif %}
@@ -778,7 +853,15 @@ function closeDotsMenu() {
     document.querySelectorAll('.dots-menu.open').forEach(m => m.classList.remove('open'));
 }
 
-document.addEventListener('click', function() { closeDotsMenu(); });
+document.addEventListener('click', function() { closeDotsMenu(); closeBulkKebab(); closeSgMoveMenu(); });
+
+/* ── Item Rules Modal Tabs ──────────────────────── */
+function switchSubTab(btn, tabId) {
+    document.querySelectorAll('.sub-modal-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.sub-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+}
 
 /* ── Substitution CRUD ──────────────────────────── */
 const csrfToken = '{{ csrf_token }}';
@@ -808,25 +891,54 @@ function deleteSubstitution(id, label) {
 }
 
 function editSubstitution(id) {
+    const row = document.querySelector('tr[data-id="' + id + '"]');
+    if (!row || row.dataset.editing) return;
     fetch('/substitution/edit/' + id + '/')
         .then(r => r.json())
         .then(d => {
-            document.getElementById('editSubId').value = d.id;
-            document.getElementById('editMissingSku').value = d.missing_sku;
-            document.getElementById('editReplacementSku').value = d.replacement_sku;
-            openModal('editSubModal');
+            row.dataset.origHtml = row.innerHTML;
+            row.dataset.editing = '1';
+            row.innerHTML =
+                '<td class="check-col"></td>' +
+                '<td><input type="text" class="sub-inline-input" id="inlineEditMissing_' + id + '" value="' + d.missing_sku.replace(/"/g, '&quot;') + '"></td>' +
+                '<td class="text-center"><i class="bi bi-arrow-right" style="color:var(--text-secondary);"></i></td>' +
+                '<td><input type="text" class="sub-inline-input" id="inlineEditReplacement_' + id + '" value="' + d.replacement_sku.replace(/"/g, '&quot;') + '"></td>' +
+                '<td class="text-center actions-col">' +
+                    '<button class="action-icon" title="Save" onclick="saveSubstitution(' + id + ')"><i class="bi bi-check-lg" style="color:var(--success-color);"></i></button>' +
+                    '<button class="action-icon" title="Cancel" onclick="cancelEditSubstitution(' + id + ')"><i class="bi bi-x-lg"></i></button>' +
+                '</td>';
+            const mInput = document.getElementById('inlineEditMissing_' + id);
+            const rInput = document.getElementById('inlineEditReplacement_' + id);
+            mInput.focus();
+            mInput.select();
+            [mInput, rInput].forEach(inp => {
+                inp.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') saveSubstitution(id);
+                    if (e.key === 'Escape') cancelEditSubstitution(id);
+                });
+                attachSkuAutocomplete(inp);
+            });
         });
 }
 
-function saveSubstitution() {
-    const id = document.getElementById('editSubId').value;
-    const missingSku = document.getElementById('editMissingSku').value;
+function cancelEditSubstitution(id) {
+    const row = document.querySelector('tr[data-id="' + id + '"]');
+    if (row && row.dataset.origHtml) {
+        row.innerHTML = row.dataset.origHtml;
+        delete row.dataset.origHtml;
+        delete row.dataset.editing;
+    }
+}
+
+function saveSubstitution(id) {
+    const missingSku = document.getElementById('inlineEditMissing_' + id);
+    const replacementSku = document.getElementById('inlineEditReplacement_' + id);
+    if (!missingSku || !replacementSku) return;
     const form = new FormData();
     form.append('csrfmiddlewaretoken', csrfToken);
-    form.append('missing_sku', missingSku);
-    form.append('missing_name', missingSku);
-    form.append('replacement_sku', document.getElementById('editReplacementSku').value);
-
+    form.append('missing_sku', missingSku.value.trim());
+    form.append('missing_name', missingSku.value.trim());
+    form.append('replacement_sku', replacementSku.value.trim());
     fetch('/substitution/edit/' + id + '/', { method: 'POST', body: form })
         .then(r => r.json())
         .then(d => { if (d.success) location.reload(); else alert('Error saving.'); });
@@ -835,7 +947,7 @@ function saveSubstitution() {
 function addSkipItem() {
     const sku = document.getElementById('addSkipSku');
     const name = document.getElementById('addSkipName');
-    if (!sku.value.trim() || !name.value.trim()) return;
+    if (!sku.value.trim()) return;
 
     const form = new FormData();
     form.append('csrfmiddlewaretoken', csrfToken);
@@ -852,9 +964,334 @@ function deleteSkipItem(id, label) {
     form.append('csrfmiddlewaretoken', csrfToken);
     fetch('/skip-item/delete/' + id + '/', { method: 'POST', body: form })
         .then(r => r.json())
-        .then(d => { if (d.success) location.reload(); else alert(d.error); });
+        .then(d => { if (d.success) location.reload(); else alert(d.error || 'Error.'); });
+}
+
+/* ── SKU Group CRUD ─────────────────────────────── */
+function addSkuGroup() {
+    const sku = document.getElementById('addGroupKitSku').value.trim();
+    const name = document.getElementById('addGroupKitName').value.trim();
+    const cost = document.getElementById('addGroupCost').value.trim();
+    const billable = document.getElementById('addGroupBillable').checked;
+    if (!sku) { alert('Kit SKU is required.'); return; }
+
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('replacement_sku', sku);
+    form.append('replacement_name', name);
+    if (cost) form.append('cost_price', cost);
+    if (billable) form.append('billable', '1');
+
+    fetch('{% url "create_sku_group" %}', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert(d.error || 'Error creating group.'); });
+}
+
+function deleteSkuGroup(id, sku) {
+    if (!confirm('Delete group "' + sku + '" and all its components?')) return;
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    fetch('/sku-group/' + id + '/delete/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => { if (d.success) location.reload(); else alert(d.error || 'Error.'); });
+}
+
+function addSkuGroupMember(groupId) {
+    const input = document.getElementById('sgMemberSku-' + groupId);
+    const sku = input ? input.value.trim() : '';
+    if (!sku) { alert('Component SKU is required.'); return; }
+
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('sku', sku);
+
+    fetch('/sku-group/' + groupId + '/add-member/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                if (d.created) {
+                    const m = d.member;
+                    const tbody = document.querySelector('#sg-' + groupId + ' .sg-members-table tbody');
+                    if (tbody) {
+                        const tr = document.createElement('tr');
+                        tr.className = 'sg-member-row';
+                        tr.id = 'sg-member-' + m.id;
+                        tr.innerHTML =
+                            '<td class="sg-member-sku"><code>' + escapeHtml(m.sku) + '</code></td>' +
+                            '<td class="sg-member-name">' + escapeHtml(m.name) + '</td>' +
+                            '<td class="sg-member-actions">' +
+                                '<button class="action-icon small" title="Move to another group" onclick="openSgMoveMenu(event,' + m.id + ',' + groupId + ')"><i class="bi bi-arrow-left-right"></i></button>' +
+                                '<button class="action-icon danger small" title="Remove" onclick="deleteSkuGroupMember(' + m.id + ',\'' + m.sku.replace(/'/g, "\\''") + '\')" ><i class="bi bi-x"></i></button>' +
+                            '</td>';
+                        tbody.appendChild(tr);
+                    }
+                    updateSgCount(groupId);
+                } else {
+                    alert(sku + ' is already in this group.');
+                }
+                if (input) input.value = '';
+            } else {
+                alert(d.error || 'Error adding member.');
+            }
+        });
+}
+
+function deleteSkuGroupMember(memberId, sku) {
+    if (!confirm('Remove component "' + sku + '"?')) return;
+    const row = document.getElementById('sg-member-' + memberId);
+    const groupEl = row ? row.closest('.sku-group-row') : null;
+    const groupId = groupEl ? groupEl.id.replace('sg-', '') : null;
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    fetch('/sku-group/member/' + memberId + '/delete/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                if (row) row.remove();
+                if (groupId) updateSgCount(groupId);
+            } else {
+                alert(d.error || 'Error.');
+            }
+        });
+}
+
+/* ── SKU autocomplete ───────────────────────── */
+const skuAcDropdown = document.createElement('div');
+skuAcDropdown.id = 'skuAcDropdown';
+skuAcDropdown.className = 'sku-ac-dropdown';
+skuAcDropdown.style.display = 'none';
+document.body.appendChild(skuAcDropdown);
+let skuAcTimeout = null;
+
+function attachSkuAutocomplete(input) {
+    input.addEventListener('input', function() {
+        clearTimeout(skuAcTimeout);
+        const q = this.value.trim();
+        const inp = this;
+        if (q.length < 2) { skuAcDropdown.style.display = 'none'; return; }
+        skuAcTimeout = setTimeout(() => {
+            fetch('/stock-take/search-stock-items/?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.results.length) { skuAcDropdown.style.display = 'none'; return; }
+                    skuAcDropdown.innerHTML = data.results.map(r =>
+                        '<div class="sku-ac-item" tabindex="0" data-sku="' + r.sku.replace(/"/g, '&quot;') + '">' +
+                        '<code>' + r.sku + '</code>' +
+                        (r.name ? '<span>' + r.name + '</span>' : '') +
+                        '</div>'
+                    ).join('');
+                    const rect = inp.getBoundingClientRect();
+                    skuAcDropdown.style.left = rect.left + 'px';
+                    skuAcDropdown.style.width = rect.width + 'px';
+                    skuAcDropdown.style.display = 'block';
+                    skuAcDropdown.style.top = (rect.bottom + 2) + 'px';
+                    skuAcDropdown.querySelectorAll('.sku-ac-item').forEach(item => {
+                        item.addEventListener('mousedown', function(e) {
+                            e.preventDefault();
+                            inp.value = this.dataset.sku;
+                            skuAcDropdown.style.display = 'none';
+                        });
+                    });
+                });
+        }, 180);
+    });
+    input.addEventListener('blur', () => setTimeout(() => skuAcDropdown.style.display = 'none', 150));
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') skuAcDropdown.style.display = 'none';
+    });
+}
+
+/* ── SKU Group helpers ──────────────────────── */
+function updateSgCount(groupId) {
+    const tbody = document.querySelector('#sg-' + groupId + ' .sg-members-table tbody');
+    const count = tbody ? tbody.querySelectorAll('tr.sg-member-row').length : 0;
+    const badge = document.querySelector('#sg-' + groupId + ' .sg-count-badge');
+    if (badge) badge.textContent = count + ' component' + (count !== 1 ? 's' : '');
+}
+
+function escapeHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function buildMemberRowHtml(m, groupId) {
+    const safeSku = m.sku.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return '<td class="sg-member-sku"><code>' + escapeHtml(m.sku) + '</code></td>' +
+           '<td class="sg-member-name">' + escapeHtml(m.name) + '</td>' +
+           '<td class="sg-member-actions">' +
+               '<button class="action-icon small" title="Move or copy to another group" onclick="openSgMoveMenu(event,' + m.id + ',' + groupId + ')"><i class="bi bi-arrow-left-right"></i></button>' +
+               '<button class="action-icon danger small" title="Remove" onclick="deleteSkuGroupMember(' + m.id + ',\'' + safeSku + '\')" ><i class="bi bi-x"></i></button>' +
+           '</td>';
+}
+
+/* ── SKU Group member move ──────────────────── */
+const skuGroupsList = [
+    {% for group in sku_groups %}{id: {{ group.id }}, sku: '{{ group.replacement_sku|escapejs }}'},
+    {% endfor %}
+];
+let sgMoveMemberId = null;
+
+function openSgMoveMenu(e, memberId, currentGroupId) {
+    e.stopPropagation();
+    sgMoveMemberId = memberId;
+    // Derive the current group from the DOM in case the row was already moved
+    const row = document.getElementById('sg-member-' + memberId);
+    const groupEl = row ? row.closest('.sku-group-row') : null;
+    const actualGroupId = groupEl ? parseInt(groupEl.id.replace('sg-', '')) : currentGroupId;
+    const menu = document.getElementById('sgMoveMenu');
+    const content = document.getElementById('sgMoveMenuContent');
+    const others = skuGroupsList.filter(g => g.id !== actualGroupId);
+    content.innerHTML = others.length
+        ? '<div class="sg-move-menu-header">Move or copy to&hellip;</div>' +
+          others.map(g =>
+              '<div class="sg-move-row">' +
+                  '<span class="sg-move-row-label" title="' + escapeHtml(g.sku) + '">' + escapeHtml(g.sku) + '</span>' +
+                  '<button onclick="moveMemberToGroup(' + g.id + ')">Move</button>' +
+                  '<button class="sg-copy-btn" onclick="copyMemberToGroup(' + g.id + ')">Copy</button>' +
+              '</div>'
+          ).join('')
+        : '<div style="padding:8px 14px;font-size:0.82rem;color:var(--text-secondary);">No other groups</div>';
+    if (menu.style.display !== 'none') { menu.style.display = 'none'; return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.display = 'block';
+    requestAnimationFrame(() => {
+        menu.style.top = (rect.bottom + 4) + 'px';
+        menu.style.left = Math.max(8, rect.right - menu.offsetWidth) + 'px';
+        const mRect = menu.getBoundingClientRect();
+        if (mRect.bottom > window.innerHeight - 8) menu.style.top = (rect.top - menu.offsetHeight - 4) + 'px';
+    });
+}
+
+function closeSgMoveMenu() {
+    const menu = document.getElementById('sgMoveMenu');
+    if (menu) menu.style.display = 'none';
+    sgMoveMemberId = null;
+}
+
+function moveMemberToGroup(targetGroupId) {
+    const id = sgMoveMemberId;
+    closeSgMoveMenu();
+    if (!id) return;
+    const row = document.getElementById('sg-member-' + id);
+    const sourceGroupEl = row ? row.closest('.sku-group-row') : null;
+    const sourceGroupId = sourceGroupEl ? sourceGroupEl.id.replace('sg-', '') : null;
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('target_group_id', targetGroupId);
+    fetch('/sku-group/member/' + id + '/move/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                const targetTbody = document.querySelector('#sg-' + targetGroupId + ' .sg-members-table tbody');
+                if (row && targetTbody) targetTbody.appendChild(row);
+                if (sourceGroupId) updateSgCount(sourceGroupId);
+                updateSgCount(targetGroupId);
+            } else {
+                alert(d.error || 'Error.');
+            }
+        });
+}
+
+function copyMemberToGroup(targetGroupId) {
+    const id = sgMoveMemberId;
+    closeSgMoveMenu();
+    if (!id) return;
+    const row = document.getElementById('sg-member-' + id);
+    const skuEl = row ? row.querySelector('.sg-member-sku code') : null;
+    const nameEl = row ? row.querySelector('.sg-member-name') : null;
+    const sku = skuEl ? skuEl.textContent.trim() : null;
+    const name = nameEl ? nameEl.textContent.trim() : '';
+    if (!sku) { alert('Could not determine SKU.'); return; }
+    const form = new FormData();
+    form.append('csrfmiddlewaretoken', csrfToken);
+    form.append('sku', sku);
+    form.append('name', name);
+    fetch('/sku-group/' + targetGroupId + '/add-member/', { method: 'POST', body: form })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                if (d.created) {
+                    const m = d.member;
+                    const tbody = document.querySelector('#sg-' + targetGroupId + ' .sg-members-table tbody');
+                    if (tbody) {
+                        const tr = document.createElement('tr');
+                        tr.className = 'sg-member-row';
+                        tr.id = 'sg-member-' + m.id;
+                        tr.innerHTML = buildMemberRowHtml(m, targetGroupId);
+                        tbody.appendChild(tr);
+                    }
+                    updateSgCount(targetGroupId);
+                } else {
+                    alert(sku + ' is already in that group.');
+                }
+            } else {
+                alert(d.error || 'Error copying component.');
+            }
+        });
+}
+
+/* ── Substitution checkboxes & bulk actions ─────── */
+function toggleSelectAllSubs(cb) {
+    document.querySelectorAll('.sub-check').forEach(c => c.checked = cb.checked);
+}
+
+function getCheckedSubIds() {
+    return [...document.querySelectorAll('.sub-check:checked')].map(c => +c.value);
+}
+
+function toggleBulkKebab(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('subBulkKebab');
+    if (menu.style.display !== 'none') { menu.style.display = 'none'; return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.display = 'block';
+    requestAnimationFrame(() => {
+        menu.style.top = (rect.bottom + 4) + 'px';
+        menu.style.left = Math.max(8, rect.right - menu.offsetWidth) + 'px';
+        const mRect = menu.getBoundingClientRect();
+        if (mRect.bottom > window.innerHeight - 8) {
+            menu.style.top = (rect.top - menu.offsetHeight - 4) + 'px';
+        }
+    });
+}
+
+function closeBulkKebab() {
+    const menu = document.getElementById('subBulkKebab');
+    if (menu) menu.style.display = 'none';
+}
+
+function moveCheckedToSkip() {
+    const ids = getCheckedSubIds();
+    if (!ids.length) { alert('No substitutions selected.'); return; }
+    closeBulkKebab();
+    Promise.all(ids.map(id => {
+        const form = new FormData();
+        form.append('csrfmiddlewaretoken', csrfToken);
+        return fetch('/substitution/' + id + '/move-to-skip/', { method: 'POST', body: form }).then(r => r.json());
+    })).then(() => location.reload());
+}
+
+function moveCheckedToGroup() {
+    const ids = getCheckedSubIds();
+    if (!ids.length) { alert('No substitutions selected.'); return; }
+    closeBulkKebab();
+    Promise.all(ids.map(id => {
+        const form = new FormData();
+        form.append('csrfmiddlewaretoken', csrfToken);
+        return fetch('/substitution/' + id + '/move-to-group/', { method: 'POST', body: form }).then(r => r.json());
+    })).then(() => location.reload());
 }
 </script>
+
+<!-- SKU Group member move dropdown -->
+<div id="sgMoveMenu" class="sub-row-kebab-menu" style="display:none;">
+    <div id="sgMoveMenuContent"></div>
+</div>
+
+<!-- Substitution bulk kebab dropdown -->
+<div id="subBulkKebab" class="sub-row-kebab-menu" style="display:none;">
+    <button onclick="moveCheckedToSkip()"><i class="bi bi-x-circle"></i> Move to Delete Item</button>
+    <button onclick="moveCheckedToGroup()"><i class="bi bi-collection"></i> Move to Group Items</button>
+</div>
 
 <!-- Image Lightbox -->
 <div class="img-lightbox" id="imgLightbox" style="display:none;" onclick="closeImageLightbox()">

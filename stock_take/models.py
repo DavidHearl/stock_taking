@@ -1565,6 +1565,36 @@ class CSVSkipItem(models.Model):
         return f"{self.sku} - {self.name}"
 
 
+class SkuGroup(models.Model):
+    """N-to-1 SKU association: all member SKUs collapse into one kit/bundle SKU."""
+    replacement_sku = models.CharField(max_length=100, unique=True, help_text='The kit/bundle SKU that replaces all members')
+    replacement_name = models.CharField(max_length=255, blank=True, help_text='Display name for the kit item')
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    sell_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    billable = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.replacement_sku} ({self.members.count()} components)"
+
+
+class SkuGroupMember(models.Model):
+    """A component SKU that is part of a SkuGroup bundle."""
+    group = models.ForeignKey(SkuGroup, on_delete=models.CASCADE, related_name='members')
+    sku = models.CharField(max_length=100)
+    name = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = [['group', 'sku']]
+        ordering = ['sku']
+
+    def __str__(self):
+        return f"{self.sku} -> {self.group.replacement_sku}"
+
+
 class FitAppointment(models.Model):
     """Track fit appointments and completion status"""
     FITTER_CHOICES = [
@@ -2224,7 +2254,7 @@ class MailboxEmail(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     tab = models.CharField(
         max_length=20, blank=True, default='', db_index=True,
-        choices=[('', 'All'), ('rjl', 'RJL'), ('group', 'Group')],
+        choices=[('', 'All'), ('rjl', 'RJL'), ('group', 'Group'), ('statements', 'Statements')],
         help_text='Company entity tab this email is routed to',
     )
 
@@ -2669,6 +2699,11 @@ class OrderValidationRequest(models.Model):
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_validation_requests')
     created_at = models.DateTimeField(auto_now_add=True)
     is_dismissed = models.BooleanField(default=False)
+    # Per-component validation checks
+    boards_checked = models.BooleanField(default=False, help_text='Validator confirmed boards are correct')
+    accessories_checked = models.BooleanField(default=False, help_text='Validator confirmed accessories are correct')
+    os_doors_checked = models.BooleanField(default=False, help_text='Validator confirmed OS doors are correct')
+    glass_checked = models.BooleanField(default=False, help_text='Validator confirmed glass is correct')
 
     class Meta:
         unique_together = ('order', 'recipient')

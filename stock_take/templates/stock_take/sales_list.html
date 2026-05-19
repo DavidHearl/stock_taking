@@ -40,6 +40,166 @@
     border: 1px solid var(--border-color);
     font-weight: 500;
 }
+/* Kebab menu */
+.sales-kebab-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+.sales-kebab-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background 0.12s, color 0.12s;
+}
+.sales-kebab-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.sales-kebab-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 500;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    min-width: 200px;
+    padding: var(--sp-1) 0;
+}
+.sales-kebab-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    padding: 8px var(--sp-3);
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s;
+}
+.sales-kebab-item:hover {
+    background: var(--bg-hover);
+}
+/* Designer totals modal */
+.designer-totals-dialog {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0;
+    max-width: 620px;
+    width: 90vw;
+    box-shadow: var(--shadow-lg);
+}
+.designer-totals-dialog::backdrop {
+    background: var(--overlay-bg);
+}
+.designer-totals-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-4) var(--sp-4) var(--sp-3);
+    border-bottom: 1px solid var(--border-color);
+}
+.designer-totals-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.designer-totals-filters {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+.designer-totals-filters label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+    display: block;
+}
+.designer-totals-filter-group {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 120px;
+}
+.designer-totals-filter-group select,
+.designer-totals-filter-group input[type="date"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    padding: 5px 8px;
+    width: 100%;
+}
+.designer-totals-body {
+    padding: var(--sp-4);
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.designer-totals-location {
+    margin-bottom: var(--sp-4);
+}
+.designer-totals-location:last-child {
+    margin-bottom: 0;
+}
+.designer-totals-location-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin-bottom: var(--sp-2);
+}
+.designer-totals-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+.designer-totals-table th {
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+.designer-totals-table th:nth-child(2),
+.designer-totals-table th:nth-child(3),
+.designer-totals-table td:nth-child(2),
+.designer-totals-table td:nth-child(3) {
+    text-align: right;
+}
+.designer-totals-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color);
+    font-variant-numeric: tabular-nums;
+}
+.designer-totals-table tr:last-child td {
+    border-bottom: none;
+}
+.designer-totals-empty {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    padding: var(--sp-2) 0;
+}
 </style>
 {% endblock %}
 
@@ -65,6 +225,21 @@
         <span class="customers-location-badge">
             <i class="bi bi-geo-alt-fill"></i> {{ location_filter }}
         </span>
+    </div>
+    {% endif %}
+
+    {% if is_david_hearl %}
+    <div class="tab-actions">
+        <div class="sales-kebab-wrap">
+            <button class="sales-kebab-btn" id="sales-kebab-btn" onclick="toggleSalesKebab(event)" title="Options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="sales-kebab-menu" id="sales-kebab-menu" style="display:none;">
+                <button class="sales-kebab-item" onclick="openDesignerTotals(); closeSalesKebab();">
+                    <i class="bi bi-bar-chart"></i> Sales by Designer
+                </button>
+            </div>
+        </div>
     </div>
     {% endif %}
 </div>
@@ -193,6 +368,40 @@
     </div>
     {% endif %}
 
+{% if is_david_hearl %}
+<!-- Designer Totals Modal -->
+<dialog class="designer-totals-dialog" id="designerTotalsDialog">
+    <div class="designer-totals-header">
+        <h3><i class="bi bi-bar-chart"></i> Sales by Designer</h3>
+        <button type="button" class="modal-close" onclick="document.getElementById('designerTotalsDialog').close()">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+    <div class="designer-totals-filters">
+        <div class="designer-totals-filter-group">
+            <label for="dt-location">Location</label>
+            <select id="dt-location" onchange="loadDesignerTotals()">
+                <option value="">All Locations</option>
+                {% for loc in available_locations %}
+                <option value="{{ loc }}">{{ loc }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="designer-totals-filter-group">
+            <label for="dt-date-from">From</label>
+            <input type="date" id="dt-date-from" onchange="loadDesignerTotals()">
+        </div>
+        <div class="designer-totals-filter-group">
+            <label for="dt-date-to">To</label>
+            <input type="date" id="dt-date-to" onchange="loadDesignerTotals()">
+        </div>
+    </div>
+    <div class="designer-totals-body" id="designerTotalsBody">
+        <p class="designer-totals-empty">Loading&hellip;</p>
+    </div>
+</dialog>
+{% endif %}
+
 <script>
 const searchInput = document.getElementById('sale-search');
 
@@ -210,5 +419,93 @@ if (searchInput) {
     });
     searchInput.focus();
 }
+
+{% if is_david_hearl %}
+const DESIGNER_TOTALS_URL = "{% url 'sales_by_designer_api' %}";
+
+function toggleSalesKebab(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('sales-kebab-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+function closeSalesKebab() {
+    const menu = document.getElementById('sales-kebab-menu');
+    if (menu) menu.style.display = 'none';
+}
+function openDesignerTotals() {
+    document.getElementById('designerTotalsDialog').showModal();
+    loadDesignerTotals();
+}
+document.addEventListener('click', function(e) {
+    const btn = document.getElementById('sales-kebab-btn');
+    if (btn && !btn.contains(e.target)) closeSalesKebab();
+});
+
+function fmtCurrency(n) {
+    return '£' + Math.round(n).toLocaleString('en-GB');
+}
+
+function loadDesignerTotals() {
+    const body = document.getElementById('designerTotalsBody');
+    body.innerHTML = '<p class="designer-totals-empty">Loading&hellip;</p>';
+
+    const params = new URLSearchParams();
+    const loc  = document.getElementById('dt-location').value;
+    const from = document.getElementById('dt-date-from').value;
+    const to   = document.getElementById('dt-date-to').value;
+    if (loc)  params.set('location', loc);
+    if (from) params.set('date_from', from);
+    if (to)   params.set('date_to', to);
+
+    fetch(DESIGNER_TOTALS_URL + '?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            if (!data.rows || data.rows.length === 0) {
+                body.innerHTML = '<p class="designer-totals-empty">No data for the selected filters.</p>';
+                return;
+            }
+
+            // Group by location
+            const groups = {};
+            data.rows.forEach(r => {
+                const loc = r.location || '(No Location)';
+                if (!groups[loc]) groups[loc] = [];
+                groups[loc].push(r);
+            });
+
+            let html = '';
+            for (const [locName, rows] of Object.entries(groups)) {
+                const locTotal = rows.reduce((s, r) => s + r.total, 0);
+                const locCount = rows.reduce((s, r) => s + r.count, 0);
+                html += `<div class="designer-totals-location">
+                    <div class="designer-totals-location-title">${locName}</div>
+                    <table class="designer-totals-table">
+                        <thead><tr>
+                            <th>Designer</th>
+                            <th>Sales</th>
+                            <th>Total Value</th>
+                        </tr></thead>
+                        <tbody>`;
+                rows.forEach(r => {
+                    html += `<tr>
+                        <td>${r.assigned_to_name || '&mdash;'}</td>
+                        <td>${r.count.toLocaleString('en-GB')}</td>
+                        <td>${fmtCurrency(r.total)}</td>
+                    </tr>`;
+                });
+                html += `<tr style="font-weight:700;border-top:1px solid var(--border-color);">
+                    <td>Total</td>
+                    <td>${locCount.toLocaleString('en-GB')}</td>
+                    <td>${fmtCurrency(locTotal)}</td>
+                </tr>`;
+                html += `</tbody></table></div>`;
+            }
+            body.innerHTML = html;
+        })
+        .catch(() => {
+            body.innerHTML = '<p class="designer-totals-empty">Failed to load data.</p>';
+        });
+}
+{% endif %}
 </script>
 {% endblock %}

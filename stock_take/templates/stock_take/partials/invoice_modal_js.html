@@ -29,25 +29,26 @@ function modalSearchPO(q) {
         return;
     }
     modalPOSearchTimer = setTimeout(() => {
-        fetch(`/api/order-search/?q=${encodeURIComponent(q.trim())}`, {
+        fetch(`/api/purchase-order-search/?q=${encodeURIComponent(q.trim())}`, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
         })
         .then(r => r.json())
         .then(data => {
-            const results = data.results || data.orders || data || [];
+            const results = data.results || [];
             if (!results.length) {
-                dd.innerHTML = '<div style="padding:8px 12px;font-size:0.82rem;color:var(--text-muted);">No orders found</div>';
+                dd.innerHTML = '<div style="padding:8px 12px;font-size:0.82rem;color:var(--text-muted);">No purchase orders found</div>';
                 dd.style.display = 'block';
                 return;
             }
             dd.innerHTML = results.slice(0, 15).map(o => {
-                const label = o.display_number || o.number || o.workguru_id || o.id;
-                const supplier = o.supplier_name || o.customer_name || '';
+                const label = o.display_number || o.id;
+                const supplier = o.supplier_name || '';
+                const status = o.status ? ` <span style="opacity:.6;font-size:.75rem;">(${o.status})</span>` : '';
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
                              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
                              onclick="selectModalPO('${o.id}','${String(label).replace(/'/g,"\\'")}')">
-                            <strong>${label}</strong>${supplier ? ` <span style="color:var(--text-secondary);"> – ${supplier}</span>` : ''}
+                            <strong>${label}</strong>${supplier ? ` <span style="color:var(--text-secondary);"> – ${supplier}</span>` : ''}${status}
                         </div>`;
             }).join('');
             dd.style.display = 'block';

@@ -38,20 +38,25 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 
 <!-- Entity tabs -->
 <div class="apay-entity-tabs">
-    <a href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}{% endif %}"
+    <a href="?{% if status_filter and status_filter != 'unprocessed' %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}{% endif %}"
        class="apay-entity-tab {% if not entity_tab %}active{% endif %}">
         All
         <span class="apay-entity-tab-count">{{ total_count|intcomma }}</span>
     </a>
-    <a href="?tab=rjl{% if status_filter %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+    <a href="?tab=rjl{% if status_filter and status_filter != 'unprocessed' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
        class="apay-entity-tab {% if entity_tab == 'rjl' %}active{% endif %}">
         RJL
         <span class="apay-entity-tab-count">{{ rjl_count }}</span>
     </a>
-    <a href="?tab=group{% if status_filter %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+    <a href="?tab=group{% if status_filter and status_filter != 'unprocessed' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
        class="apay-entity-tab {% if entity_tab == 'group' %}active{% endif %}">
         Group
         <span class="apay-entity-tab-count">{{ group_count }}</span>
+    </a>
+    <a href="?tab=statements{% if status_filter and status_filter != 'unprocessed' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+       class="apay-entity-tab {% if entity_tab == 'statements' %}active{% endif %}">
+        Statements
+        <span class="apay-entity-tab-count">{{ statements_count }}</span>
     </a>
 
     <!-- Bulk action bar (shown when rows are selected) -->
@@ -78,10 +83,10 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 
     <!-- Status filter pills -->
     <div class="apay-filter-pills">
-        <a href="?{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}{% endif %}"
-           class="apay-pill {% if not status_filter %}active{% endif %}">All</a>
-        <a href="?status=unprocessed{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
-           class="apay-pill {% if status_filter == 'unprocessed' %}active{% endif %}">Unprocessed</a>
+        <a href="?status=all{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+           class="apay-pill {% if status_filter == 'all' %}active{% endif %}">All</a>
+        <a href="?{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}"
+           class="apay-pill {% if not status_filter or status_filter == 'unprocessed' %}active{% endif %}">Unprocessed</a>
         <a href="?status=processed{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
            class="apay-pill {% if status_filter == 'processed' %}active{% endif %}">Processed</a>
         <a href="?status=ignored{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
@@ -112,6 +117,12 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 <button class="apay-kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
                     <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
                 </button>
+                {% if is_configured %}
+                <hr style="margin:4px 0;border-color:var(--border-color);">
+                <button class="apay-kebab-item" onclick="fullResync(); closeKebab();" title="Re-fetch all emails from the mailbox (ignores date filters)">
+                    <i class="bi bi-arrow-clockwise"></i> Full Resync
+                </button>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -124,21 +135,22 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
     <table class="apay-table" id="apay-table">
         <thead>
             <tr>
-                <th style="width:36px; text-align:center;">
+                <th style="width:40px; text-align:center;">
                     <input type="checkbox" id="select-all" title="Select all" onchange="toggleSelectAll(this)">
                 </th>
-                <th style="width:32px;"></th>
-                <th>From</th>
+                <th style="width:36px;"></th>
+                <th style="width:180px;">From</th>
                 <th>Subject</th>
-                <th>Received</th>
-                <th style="text-align:center;">Attachments</th>
-                <th style="text-align:center;">Status</th>
-                <th style="text-align:center;">Action</th>
+                <th style="width:80px; text-align:center;">PO</th>
+                <th style="width:130px;">Received</th>
+                <th style="width:220px; text-align:center;">Attachments</th>
+                <th style="width:46px; text-align:center;">Status</th>
+                <th style="width:90px; text-align:center;">Action</th>
             </tr>
         </thead>
         <tbody>
             {% for email in emails %}
-            <tr class="apay-row {% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% elif email.po_match_class %}{{ email.po_match_class }}{% endif %}" id="email-row-{{ email.id }}" data-matched="{% if email.purchase_invoice %}1{% else %}0{% endif %}">
+            <tr class="apay-row {% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% endif %}" id="email-row-{{ email.id }}" data-matched="{% if email.purchase_invoice %}1{% else %}0{% endif %}">
                 <td style="text-align:center;">
                     <input type="checkbox" class="apay-row-check" value="{{ email.id }}" onchange="updateBulkBar()">
                 </td>
@@ -150,6 +162,16 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 <td class="apay-from-cell">{{ email.sender_email|default:"(unknown)" }}</td>
                 <td>
                     <div class="apay-subject" title="{{ email.body_preview }}">{{ email.subject|default:"(no subject)" }}</div>
+                </td>
+                <td style="text-align:center;">
+                    {% if email.po_match %}
+                    <a href="{% url 'purchase_order_detail' email.po_match.workguru_id %}"
+                       class="apay-po-badge {% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% else %}apay-po-badge--approved{% endif %}"
+                       title="{{ email.po_match.supplier_name }} – {{ email.po_match.status }}"
+                       target="_blank">{{ email.po_match.display_number|default:email.po_match.workguru_id }}</a>
+                    {% else %}
+                    <span style="color:var(--text-muted)">&ndash;</span>
+                    {% endif %}
                 </td>
                 <td class="apay-date">
                     {% if email.received_at %}
@@ -175,16 +197,11 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 </td>
                 <td style="text-align:center;">
                     {% if email.is_processed %}
-                    <span class="apay-status processed"><i class="bi bi-check-circle-fill"></i> Processed</span>
-                    {% if email.processed_by %}
-                    <span class="apay-initials" title="{{ email.processed_by.get_full_name|default:email.processed_by.username }}">
-                        {% if email.processed_by.first_name or email.processed_by.last_name %}{{ email.processed_by.first_name|slice:":1" }}{{ email.processed_by.last_name|slice:":1" }}{% else %}{{ email.processed_by.username|slice:":2"|upper }}{% endif %}
-                    </span>
-                    {% endif %}
+                    <span class="apay-status processed" title="{% if email.processed_by %}Processed by {{ email.processed_by.get_full_name|default:email.processed_by.username }}{% else %}Processed{% endif %}"><i class="bi bi-check-circle-fill"></i></span>
                     {% elif email.is_ignored %}
-                    <span class="apay-status ignored"><i class="bi bi-slash-circle"></i> Ignored</span>
+                    <span class="apay-status ignored" title="Ignored"><i class="bi bi-slash-circle"></i></span>
                     {% else %}
-                    <span class="apay-status unprocessed"><i class="bi bi-circle"></i> Unprocessed</span>
+                    <span class="apay-status unprocessed" title="Unprocessed"><i class="bi bi-circle"></i></span>
                     {% endif %}
                 </td>
                 <td>
@@ -210,13 +227,21 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                             <i class="bi bi-arrow-counterclockwise"></i>
                         </button>
                         {% elif not email.is_processed %}
-                        {% if email.attachment_list %}
+                        {% if email.tab == 'statements' %}
+                        <button class="apay-icon-btn create"
+                                data-email-id="{{ email.id }}"
+                                title="Mark as filed in Xero"
+                                onclick="markEmailFiled({{ email.id }})">
+                            <i class="bi bi-check2-circle"></i>
+                        </button>
+                        {% elif email.attachment_list %}
                         <button class="apay-icon-btn create"
                                 data-email-id="{{ email.id }}"
                                 data-sender="{{ email.sender_name }}{% if email.sender_name and email.sender_email %} ({{ email.sender_email }}){% else %}{{ email.sender_email }}{% endif %}"
                                 data-sender-name="{{ email.sender_name }}"
                                 data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
                                 data-attachments="{{ email.attachment_names }}"
+                                {% if email.po_match %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}"{% endif %}
                                 title="Create purchase invoice"
                                 onclick="openCreateModal(this)">
                             <i class="bi bi-plus-circle-fill"></i>
@@ -241,7 +266,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 </td>
             </tr>
             <tr class="apay-detail-row" id="detail-row-{{ email.id }}" style="display:none;">
-                <td colspan="8" class="apay-detail-cell">
+                <td colspan="9" class="apay-detail-cell">
                     <div class="apay-detail-panel">
                         <div class="apay-detail-grid">
                             <div class="apay-detail-item">
@@ -255,7 +280,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                         </div>
                         {% if email.body_preview %}
                         <div class="apay-detail-body">
-                            <span class="apay-detail-label">Preview</span>
+                            <span class="apay-detail-label">Message</span>
                             <p>{{ email.body_preview }}</p>
                         </div>
                         {% endif %}
@@ -430,21 +455,24 @@ let selectedInvoiceId = null;
 let linkSearchTimer = null;
 
 // â”€â”€ Sync from mailbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function syncMailbox() {
+function _doSync(force) {
     const btn = document.getElementById('sync-btn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Syncing...';
+    btn.innerHTML = force
+        ? '<i class="bi bi-hourglass-split"></i> Full Resync...'
+        : '<i class="bi bi-hourglass-split"></i> Syncing...';
 
     fetch('{% url "sync_mailbox" %}', {
         method: 'POST',
-        headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ force: !!force }),
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
             const msg = data.new > 0
                 ? `${data.new} new email(s). Reloading...`
-                : `Up to date (${data.total} emails).`;
+                : `Up to date (${data.total} checked).`;
             btn.innerHTML = `<i class="bi bi-check-circle"></i> ${msg}`;
             if (data.new > 0) {
                 setTimeout(() => window.location.reload(), 1200);
@@ -466,6 +494,8 @@ function syncMailbox() {
         alert('Network error during sync');
     });
 }
+function syncMailbox() { _doSync(false); }
+function fullResync() { _doSync(true); }
 
 // â”€â”€ Ignore / Unignore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ignoreEmail(btn) {
@@ -504,6 +534,21 @@ function unignoreEmail(btn) {
             setTimeout(() => row.remove(), 300);
         } else {
             btn.disabled = false;
+        }
+    });
+}
+
+function markEmailFiled(emailId) {
+    const row = document.getElementById(`email-row-${emailId}`);
+    fetch(`/accounts-payable/${emailId}/file/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && row) {
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 300);
         }
     });
 }
@@ -655,23 +700,25 @@ function openCreateModal(btn) {
     const list = document.getElementById('modal-attachment-list');
     if (attachments.length) {
         list.innerHTML = attachments.map((a, i) => {
-            const isPdf = (a.content_type || '').toLowerCase().includes('pdf');
+            const isPdf = (a.content_type || '').toLowerCase().includes('pdf')
+                       || (a.name || '').toLowerCase().endsWith('.pdf');
             const icon = isPdf ? 'bi-file-earmark-pdf' : 'bi-file-earmark';
             const size = formatBytes(a.size);
-            const previewBtn = isPdf
-                ? `<button type="button" class="apay-att-preview-btn" title="Preview PDF"
-                       onclick="event.preventDefault();event.stopPropagation();previewAttachment('${a.id}')">
-                       <i class="bi bi-eye"></i>
-                   </button>`
-                : '';
-            return `<label class="apay-att-option">
-                <input type="radio" name="modal_att_id" value="${a.id}" ${i === 0 ? 'checked' : ''}
-                       onchange="onAttachmentChange(this, '${a.name.replace(/'/g, "\\'")}, ${isPdf})">
-                <i class="bi ${icon}"></i>
-                <span class="apay-att-option-name">${a.name}</span>
-                <span class="apay-att-option-size">${size}</span>
-                ${previewBtn}
-            </label>`;
+            const attId = a.id;
+            return `<div class="apay-att-option-row">
+                <label class="apay-att-option" style="flex:1;min-width:0;">
+                    <input type="radio" name="modal_att_id" value="${attId}" ${i === 0 ? 'checked' : ''}
+                           onchange="onAttachmentChange(this, '${a.name.replace(/'/g, "\\'")}', ${isPdf})">
+                    <i class="bi ${icon}"></i>
+                    <span class="apay-att-option-name">${a.name}</span>
+                    <span class="apay-att-option-size">${size}</span>
+                </label>${isPdf
+                ? `<a href="/accounts-payable/${currentEmailId}/attachment/${attId}/" target="_blank"
+                       class="apay-att-preview-btn" title="Open PDF in new tab">
+                       <i class="bi bi-eye"></i> Preview
+                   </a>`
+                : ''}
+            </div>`;
         }).join('');
 
         const first = attachments[0];

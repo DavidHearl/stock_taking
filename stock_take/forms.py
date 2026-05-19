@@ -118,6 +118,29 @@ class CSVSkipItemForm(forms.ModelForm):
         }
 
 
+class SkuGroupForm(forms.ModelForm):
+    class Meta:
+        from .models import SkuGroup
+        model = SkuGroup
+        fields = ['replacement_sku', 'replacement_name', 'cost_price', 'billable']
+        widgets = {
+            'replacement_sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Kit/bundle SKU'}),
+            'replacement_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Kit display name'}),
+            'cost_price': forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '0.00', 'step': '0.01'}),
+        }
+
+
+class SkuGroupMemberForm(forms.ModelForm):
+    class Meta:
+        from .models import SkuGroupMember
+        model = SkuGroupMember
+        fields = ['sku', 'name']
+        widgets = {
+            'sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Component SKU'}),
+            'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Component name (optional)'}),
+        }
+
+
 class RaumplusOrderingRuleForm(forms.ModelForm):
     description = forms.CharField(
         required=False,

@@ -106,7 +106,7 @@
                                             title="Delete Group">
                                         <i class="bi bi-trash"></i>
                                     </button>
-                                    <button class="btn btn-primary group-items-toggle" onclick="toggleGroupItems({{ group.id }})">
+                                    <button class="btn btn-primary group-items-toggle" onclick="toggleGroupItems({{ group.id }})" data-group-id="{{ group.id }}">
                                         <i class="bi bi-list-ul"></i> View Items ({{ group.stock_items.count }})
                                     </button>
                                 </div>
@@ -114,11 +114,13 @@
                         </div>
                         
                         <!-- Collapsible Items Table -->
-                        {% if group.stock_items.all %}
                         <div class="group-items" id="groupItems{{ group.id }}">
                             <table class="group-items-table">
                                 <thead>
                                     <tr>
+                                        <th style="width:32px;">
+                                            <input type="checkbox" class="group-select-all" data-group-id="{{ group.id }}" title="Select all">
+                                        </th>
                                         <th>SKU</th>
                                         <th>Name</th>
                                         <th>Qty</th>
@@ -130,6 +132,9 @@
                                 <tbody>
                                     {% for item in group.stock_items.all %}
                                     <tr {% if item.needs_stock_take %}class="needs-check"{% endif %}>
+                                        <td>
+                                            <input type="checkbox" class="group-item-cb" data-item-id="{{ item.id }}" data-group-id="{{ group.id }}">
+                                        </td>
                                         <td><strong>{{ item.sku }}</strong></td>
                                         <td>{{ item.name|truncatechars:30 }}</td>
                                         <td>{{ item.quantity }}</td>
@@ -154,7 +159,6 @@
                                 </tbody>
                             </table>
                         </div>
-                        {% endif %}
                     </div>
                     {% endfor %}
                 {% else %}
@@ -584,6 +588,9 @@ document.addEventListener('DOMContentLoaded', function() {
       const itemId = btn.dataset.itemId;
       const itemName = btn.dataset.itemName;
 
+      if (Object.keys(pendingMoves).length > 0) {
+        if (!confirm('You have unsaved moves. Removing this item will reload the page and discard those changes. Continue?')) return;
+      }
       if (!confirm(`Remove "${itemName}" from this stock take group?`)) return;
 
       fetch('{% url "assign_item_to_group" %}', {
@@ -647,6 +654,198 @@ document.addEventListener('DOMContentLoaded', function() {
       .catch(() => alert('Error deleting category.'));
     }
   });
+
+  // ── Mass-move: staging (no page reload until Save) ──────────────────────────
+  const pendingMoves = {}; // itemId → targetGroupId
+
+  document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('group-select-all')) {
+      const groupId = e.target.dataset.groupId;
+      document.querySelectorAll(`.group-item-cb[data-group-id="${groupId}"]`)
+        .forEach(cb => { cb.checked = e.target.checked; });
+      updateSelectionBar();
+    }
+    if (e.target.classList.contains('group-item-cb')) {
+      updateSelectionBar();
+    }
+  });
+
+  function updateSelectionBar() {
+    const checked = document.querySelectorAll('.group-item-cb:checked');
+    const bar = document.getElementById('mass-move-bar');
+    if (checked.length > 0) {
+      document.getElementById('mass-move-count').textContent = checked.length + ' item' + (checked.length === 1 ? '' : 's') + ' selected';
+      bar.style.display = 'flex';
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  function cancelSelection() {
+    document.querySelectorAll('.group-item-cb, .group-select-all').forEach(cb => { cb.checked = false; });
+    document.getElementById('mass-move-bar').style.display = 'none';
+  }
+
+  function executeMassMove() {
+    const targetGroupId = document.getElementById('mass-move-group-select').value;
+    if (!targetGroupId) { alert('Please select a destination group.'); return; }
+    const checked = Array.from(document.querySelectorAll('.group-item-cb:checked'));
+    if (!checked.length) return;
+
+    const targetTbody = document.querySelector(`#groupItems${targetGroupId} .group-items-table tbody`);
+    if (!targetTbody) { alert('Target group not found.'); return; }
+
+    checked.forEach(cb => {
+      const itemId = cb.dataset.itemId;
+      const sourceGroupId = cb.dataset.groupId;
+
+      // Stage the move
+      pendingMoves[itemId] = targetGroupId;
+
+      // Move the <tr> in the DOM
+      const row = cb.closest('tr');
+      cb.dataset.groupId = targetGroupId;
+      cb.checked = false;
+      targetTbody.appendChild(row);
+
+      // Clear source select-all
+      const srcSelectAll = document.querySelector(`.group-select-all[data-group-id="${sourceGroupId}"]`);
+      if (srcSelectAll) srcSelectAll.checked = false;
+    });
+
+    // Open the target group panel so the user can see the moved items
+    const targetPanel = document.getElementById(`groupItems${targetGroupId}`);
+    if (targetPanel && !targetPanel.classList.contains('active')) {
+      targetPanel.classList.add('active');
+    }
+
+    // Update all "View Items (N)" buttons
+    document.querySelectorAll('.group-items-toggle[data-group-id]').forEach(btn => {
+      const gId = btn.dataset.groupId;
+      const tbody = document.querySelector(`#groupItems${gId} .group-items-table tbody`);
+      const count = tbody ? tbody.querySelectorAll('tr').length : 0;
+      btn.innerHTML = `<i class="bi bi-list-ul"></i> View Items (${count})`;
+    });
+
+    updateSelectionBar();
+    updatePendingBar();
+  }
+
+  function updatePendingBar() {
+    const count = Object.keys(pendingMoves).length;
+    const bar = document.getElementById('pending-changes-bar');
+    if (count > 0) {
+      document.getElementById('pending-count').textContent =
+        count + ' unsaved move' + (count === 1 ? '' : 's');
+      bar.style.display = 'flex';
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  function saveChanges() {
+    const entries = Object.entries(pendingMoves);
+    if (!entries.length) return;
+    const btn = document.getElementById('save-changes-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    Promise.all(entries.map(([itemId, groupId]) =>
+      fetch('{% url "assign_item_to_group" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: new URLSearchParams({ item_id: itemId, group_id: groupId })
+      })
+    )).then(() => location.reload())
+      .catch(() => {
+        alert('Error saving changes.');
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+      });
+  }
+
+  function discardChanges() {
+    if (confirm('Discard all unsaved moves and reload the page?')) location.reload();
+  }
 });
 </script>
+
+<!-- Action bars (stacked at bottom) -->
+<style>
+#action-bar-stack {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+}
+#pending-changes-bar,
+#mass-move-bar {
+    display: none;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 10px 24px;
+    border-top: 1px solid var(--border-color);
+}
+#pending-changes-bar {
+    background: var(--bg-primary);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.3);
+}
+#mass-move-bar {
+    background: var(--bg-secondary);
+    box-shadow: 0 -1px 6px rgba(0,0,0,0.2);
+}
+#pending-count {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--warning-color, #f59e0b);
+    white-space: nowrap;
+}
+#mass-move-count {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+#mass-move-group-select {
+    flex: 1;
+    max-width: 280px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    padding: 6px 10px;
+}
+</style>
+
+<div id="action-bar-stack">
+    <div id="pending-changes-bar">
+        <i class="bi bi-clock-history" style="color:var(--warning-color,#f59e0b);"></i>
+        <span id="pending-count"></span>
+        <div style="flex:1;"></div>
+        <button id="save-changes-btn" class="btn btn-primary btn-sm" onclick="saveChanges()">Save Changes</button>
+        <button class="btn btn-secondary btn-sm" onclick="discardChanges()">Discard</button>
+    </div>
+    <div id="mass-move-bar">
+        <span id="mass-move-count"></span>
+        <span style="font-size:0.8rem;color:var(--text-secondary);">Move to:</span>
+        <select id="mass-move-group-select">
+            <option value="">Select group&hellip;</option>
+            {% for category in categories %}
+            <optgroup label="{{ category.name }}">
+                {% for group in category.stock_take_groups.all %}
+                <option value="{{ group.id }}">{{ group.name }}</option>
+                {% endfor %}
+            </optgroup>
+            {% endfor %}
+        </select>
+        <button id="mass-move-btn" class="btn btn-primary btn-sm" onclick="executeMassMove()">Move</button>
+        <button class="btn btn-secondary btn-sm" onclick="cancelSelection()">Cancel</button>
+    </div>
+</div>
 {% endblock %}

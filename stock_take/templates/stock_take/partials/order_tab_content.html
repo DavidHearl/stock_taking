@@ -2538,8 +2538,19 @@
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
-                        <label for="additional-po-number">PO Number (leave blank to auto-generate)</label>
-                        <input type="text" id="additional-po-number" name="po_number" class="form-input" placeholder="e.g., PO1234">
+                        <label for="additional-po-number">PO Number</label>
+                        <div style="position:relative;">
+                            <input type="text" id="additional-po-number" name="po_number" class="form-input"
+                                   placeholder="Leave blank to auto-generate, or type to find existing"
+                                   autocomplete="off"
+                                   oninput="searchAdditionalPO(this.value)">
+                            <div id="additional-po-results"
+                                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:500;
+                                        background:var(--bg-primary);border:1px solid var(--border-color);
+                                        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.18);
+                                        max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                        </div>
+                        <small class="form-help">Type to search for an existing PO to link, or leave blank to create a new one</small>
                     </div>
                     <div class="form-group">
                         <label for="additional-po-dwg">Attach DWG File (Optional)</label>
@@ -2556,14 +2567,13 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('addAdditionalPOModal')">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Create PO</button>
+                    <button type="submit" class="btn btn-warning">Add / Link PO</button>
                 </div>
             </form>
-        </div>
-    </div>
-</div>
+        </div><!-- close modal-content -->
+    </div><!-- close modal-dialog -->
+</div><!-- close addAdditionalPOModal -->
 
-<!-- Modal for Stock Allocation Confirmation -->
 <div class="modal" id="allocationModal">
     <div class="modal-overlay" onclick="cancelAllocation()"></div>
     <div class="modal-dialog">
@@ -6988,6 +6998,43 @@ function confirmAdditionalOSDoorsPO() {
 }
 
 // Add Additional Boards PO to an order (via modal with DWG upload)
+let _addPOSearchTimer = null;
+function searchAdditionalPO(query) {
+    clearTimeout(_addPOSearchTimer);
+    const dd = document.getElementById('additional-po-results');
+    if (!dd) return;
+    if (!query || query.trim().length < 2) { dd.style.display = 'none'; return; }
+    _addPOSearchTimer = setTimeout(() => {
+        fetch(`/api/purchase-order-search/?q=${encodeURIComponent(query.trim())}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+        .then(r => r.json())
+        .then(data => {
+            const results = data.results || [];
+            if (!results.length) { dd.style.display = 'none'; return; }
+            dd.innerHTML = results.slice(0, 10).map(po => {
+                const num = po.display_number || po.id;
+                const sup = po.supplier_name ? ` – ${po.supplier_name}` : '';
+                const sta = po.status ? ` (${po.status})` : '';
+                return `<div style="padding:7px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid var(--border-color);"
+                             onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
+                             onclick="document.getElementById('additional-po-number').value='${String(num).replace(/'/g,"\\'")}';
+                                      document.getElementById('additional-po-results').style.display='none';">
+                            <strong>${num}</strong><span style="color:var(--text-secondary);">${sup}${sta}</span>
+                        </div>`;
+            }).join('');
+            dd.style.display = 'block';
+        })
+        .catch(() => { dd.style.display = 'none'; });
+    }, 250);
+}
+document.addEventListener('click', e => {
+    const input = document.getElementById('additional-po-number');
+    const dd = document.getElementById('additional-po-results');
+    if (input && dd && !input.contains(e.target) && !dd.contains(e.target)) dd.style.display = 'none';
+});
+
 function submitAdditionalBoardsPO(event) {
     event.preventDefault();
     const form = document.getElementById('add-additional-po-form');
