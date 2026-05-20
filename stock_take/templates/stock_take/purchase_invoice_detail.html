@@ -1381,11 +1381,24 @@ function xeroConfirmed() {
 
     fetch(`/purchase-invoices/${INVOICE_ID}/push-to-xero/`, {
         method: 'POST',
-        headers: { 'X-CSRFToken': CSRF }
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            gl_code: (document.getElementById('xero-gl-code')?.value || '').trim(),
+            attach_pdf: document.getElementById('xero-attach-pdf')?.checked ?? true,
+        }),
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            if (data.attach_warning) {
+                // PDF didn't attach — show custom modal asking user if they want to keep the bill
+                _showAttachFailModal(
+                    data.xero_id,
+                    data.xero_url,
+                    btn
+                );
+                return;
+            }
             if (btn) {
                 const xeroUrl = data.xero_url || `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${escHtml(data.xero_id)}`;
                 btn.outerHTML = `<a class="pinv-btn-sm" href="${xeroUrl}" target="_blank" title="View in Xero (ID: ${escHtml(data.xero_id)})">
@@ -1401,6 +1414,36 @@ function xeroConfirmed() {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
         alert('Network error: ' + err.message);
     });
+}
+
+// ── Attach-fail modal helpers ─────────────────────────────────
+function _showAttachFailModal(xeroId, xeroUrl, pushBtn) {
+    const modal = document.getElementById('xero-attach-fail-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.getElementById('xero-attach-fail-keep').onclick = function () {
+        modal.style.display = 'none';
+        if (pushBtn) {
+            const url = xeroUrl || `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${escHtml(xeroId)}`;
+            pushBtn.outerHTML = `<a class="pinv-btn-sm" href="${url}" target="_blank" title="View in Xero (ID: ${escHtml(xeroId)})">
+                <i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> In Xero <i class="bi bi-box-arrow-up-right" style="font-size:0.75rem;"></i>
+            </a>`;
+        }
+    };
+    document.getElementById('xero-attach-fail-delete').onclick = function () {
+        modal.style.display = 'none';
+        fetch(`/purchase-invoices/${INVOICE_ID}/void-xero/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF },
+        })
+        .then(r => r.json())
+        .then(() => {
+            if (pushBtn) { pushBtn.disabled = false; pushBtn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
+        })
+        .catch(() => {
+            if (pushBtn) { pushBtn.disabled = false; pushBtn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
+        });
+    };
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -1642,7 +1685,7 @@ function doCreatePo() {
 </div>
 
 <div id="xero-confirm-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:var(--overlay-bg);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
-    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:400px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:420px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
         <div style="display:flex;align-items:center;gap:12px;">
             <i class="bi bi-cloud-upload" style="font-size:1.4rem;color:var(--primary-color);flex-shrink:0;"></i>
             <div>
@@ -1650,10 +1693,53 @@ function doCreatePo() {
                 <div style="font-size:0.85rem;color:var(--text-secondary);">This will create a <strong style="color:var(--text-primary);">draft bill</strong> in Xero under accounts payable. You can review and approve it there.</div>
             </div>
         </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:0.82rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">
+                GL Account Code
+                <input id="xero-gl-code" type="text" list="xero-gl-datalist"
+                       placeholder="e.g. B1001"
+                       style="font-size:0.875rem;padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);">
+                <datalist id="xero-gl-datalist">
+                    {% for gl in opo_gl_codes %}
+                    <option value="{{ gl.code }}">{{ gl.code }} – {{ gl.name }}</option>
+                    {% endfor %}
+                </datalist>
+            </label>
+            {% if invoice.attachment %}
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.875rem;cursor:pointer;">
+                <input type="checkbox" id="xero-attach-pdf" checked style="width:16px;height:16px;cursor:pointer;">
+                <span>Attach PDF to Xero bill</span>
+            </label>
+            {% endif %}
+        </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;">
             <button class="btn-cancel" onclick="document.getElementById('xero-confirm-modal').style.display='none'">Cancel</button>
             <button class="btn-save" onclick="xeroConfirmed()">
                 <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Attach-fail modal ──────────────────────────────────────── -->
+<div id="xero-attach-fail-modal" style="display:none;position:fixed;inset:0;z-index:3100;background:var(--overlay-bg);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:420px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
+        <div style="display:flex;align-items:flex-start;gap:14px;">
+            <i class="bi bi-exclamation-triangle-fill" style="font-size:1.5rem;color:var(--warning-color, #f5a623);flex-shrink:0;margin-top:2px;"></i>
+            <div>
+                <div style="font-weight:600;font-size:0.95rem;color:var(--text-primary);margin-bottom:6px;">PDF could not be attached</div>
+                <div style="font-size:0.875rem;color:var(--text-secondary);line-height:1.5;">
+                    The invoice was created in Xero as a draft bill, but the PDF attachment failed.<br><br>
+                    Do you want to keep the Xero bill, or delete it and try again later?
+                </div>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button id="xero-attach-fail-delete" class="btn-cancel" style="color:var(--danger-color,#e53e3e);">
+                <i class="bi bi-trash"></i> Delete from Xero
+            </button>
+            <button id="xero-attach-fail-keep" class="btn-save">
+                <i class="bi bi-check-circle"></i> Keep bill
             </button>
         </div>
     </div>

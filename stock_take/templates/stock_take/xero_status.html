@@ -102,18 +102,28 @@
         </div>
         <div class="admin-card-body">
             <p class="xero-body-text">
-                This integration requests <strong>read-only</strong> access to most Xero data, with <strong>write access</strong> for contacts (customers/suppliers).
+                This integration requests <strong>write access</strong> for transactions, contacts, and attachments, plus <strong>read-only</strong> access to settings and reports.
+                Scopes shown below reflect what was actually granted by Xero on the current token.
             </p>
+            {% if missing_attachment_scope and connected %}
+            <div style="display:flex;align-items:flex-start;gap:10px;background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.4);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:0.85rem;color:var(--text-primary);">
+                <i class="bi bi-exclamation-triangle-fill" style="color:#f5a623;flex-shrink:0;margin-top:1px;"></i>
+                <div>
+                    <strong>accounting.attachments</strong> was not granted by Xero.<br>
+                    To enable PDF uploads to Xero bills, add this scope to your app in the
+                    <a href="https://developer.xero.com/app/manage" target="_blank" style="color:var(--primary-color);">Xero Developer Portal</a>,
+                    then <strong>Disconnect</strong> and reconnect below.
+                </div>
+            </div>
+            {% endif %}
             <div class="scope-list">
-                <span class="scope-tag readonly">accounting.transactions.read</span>
-                <span class="scope-tag readonly">accounting.contacts.read</span>
-                <span class="scope-tag scope-tag--write">accounting.contacts (write)</span>
-                <span class="scope-tag readonly">accounting.settings.read</span>
-                <span class="scope-tag readonly">accounting.reports.read</span>
-                <span class="scope-tag">openid</span>
-                <span class="scope-tag">profile</span>
-                <span class="scope-tag">email</span>
-                <span class="scope-tag">offline_access</span>
+                {% for s in scope_rows %}
+                <span class="scope-tag {% if s.kind == 'write' %}scope-tag--write{% elif s.kind == 'read' %}readonly{% endif %}"
+                      style="{% if not s.granted %}opacity:0.4;text-decoration:line-through;{% endif %}"
+                      title="{% if s.granted %}Granted{% else %}Not granted on current token{% endif %}">
+                    {{ s.label }}{% if not s.granted %} ✕{% endif %}
+                </span>
+                {% endfor %}
             </div>
         </div>
     </div>

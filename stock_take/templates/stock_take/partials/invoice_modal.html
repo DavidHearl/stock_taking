@@ -131,8 +131,10 @@
                             <div id="invoice-po-kebab-menu"
                                  style="display:none;position:absolute;top:100%;right:0;z-index:400;min-width:180px;
                                         background:var(--bg-secondary);border:1px solid var(--border-color);
-                                        border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:4px 0;margin-top:4px;">
-                                <a href="{% url 'purchase_orders_list' %}?new=1" target="_blank"
+                                        border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:4px 0;margin-top:4px;">                                <button type="button" class="inv-po-kebab-item" onclick="closeInvoicePoKebab(); pullPOLines()">
+                                    <i class="bi bi-download"></i> Pull lines from PO
+                                </button>
+                                <div style="height:1px;background:var(--border-color);margin:4px 0;"></div>                                <a href="{% url 'purchase_orders_list' %}?new=1" target="_blank"
                                    class="inv-po-kebab-item" onclick="closeInvoicePoKebab()">
                                     <i class="bi bi-plus-lg"></i> New PO
                                 </a>
@@ -153,7 +155,8 @@
                 <div class="pinv-form-row">
                     <label class="pinv-label">Invoice Date</label>
                     <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="date" id="new-pinv-date" class="pinv-input" style="flex:1;min-width:0;">
+                        <input type="date" id="new-pinv-date" class="pinv-input" style="flex:1;min-width:0;"
+                               oninput="autoSetDueDate(this.value)">
                         <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
                                 onclick="document.getElementById('new-pinv-date').value=todayISO()">Today</button>
                     </div>
@@ -175,9 +178,14 @@
                     </select>
                 </div>
                 <div class="pinv-form-row">
-                    <label class="pinv-label">Invoice Value (&pound;)</label>
-                    <div class="pinv-form-row-stack">
-                        <input type="number" id="new-pinv-total" class="pinv-input" step="0.01" min="0" placeholder="e.g. 1250.00">
+                    <label class="pinv-label">Currency</label>
+                    <div style="display:flex;gap:6px;flex-wrap:nowrap;">
+                        <button type="button" id="modal-btn-gbp" class="btn btn-sm"
+                                style="flex:1;white-space:nowrap;background:var(--primary-color);color:#fff;border:1px solid var(--border-color);border-radius:999px;padding:5px 12px;"
+                                onclick="setModalCurrency('GBP')">&#163; GBP</button>
+                        <button type="button" id="modal-btn-eur" class="btn btn-sm"
+                                style="flex:1;white-space:nowrap;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:999px;padding:5px 12px;"
+                                onclick="setModalCurrency('EUR')">€ EUR</button>
                     </div>
                 </div>
                 <div class="pinv-form-row">
@@ -187,17 +195,23 @@
             </div>
             <hr style="border-color:var(--border-color);">
             <div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                     <label class="pinv-label" style="margin:0;">Line Items</label>
                     <button type="button" class="pinv-btn-sm" onclick="addModalLine()">
                         <i class="bi bi-plus-lg"></i> Add Line
                     </button>
                 </div>
+                <div style="display:flex;gap:6px;align-items:center;padding:0 0 5px;border-bottom:1px solid var(--border-color);margin-bottom:4px;">
+                    <span style="flex:2;min-width:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">Description</span>
+                    <span style="flex:1.5;min-width:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">Job / Order</span>
+                    <span style="width:90px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Invoice Price</span>
+                    <span style="width:118px;flex-shrink:0;"></span>
+                </div>
                 <div id="modal-lines"></div>
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px;">
-                <span style="font-size:0.82rem;color:var(--text-secondary);">Total:</span>
-                <span id="modal-total" style="font-size:0.9rem;font-weight:600;">&pound;0.00</span>
+            <div style="display:flex;justify-content:flex-end;align-items:baseline;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-color);">
+                <span style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">Invoice Total</span>
+                <span id="modal-total" style="font-size:1rem;font-weight:700;min-width:90px;text-align:right;">&pound;0.00</span>
             </div>
 
             </div>{# end .pinv-form-panel #}

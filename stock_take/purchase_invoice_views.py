@@ -15,7 +15,7 @@ from django.db.models import Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, Supplier, Timesheet, log_activity, EnabledGLCode, OverheadPurchaseOrder
+from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, PurchaseOrderProduct, Supplier, Timesheet, log_activity, EnabledGLCode, OverheadPurchaseOrder
 
 logger = logging.getLogger(__name__)
 
@@ -662,6 +662,7 @@ def create_purchase_invoice(request):
         status             = data.get('status', 'Draft'),
         total              = total_val,
         notes              = (data.get('notes') or '').strip(),
+        currency           = (data.get('currency') or 'GBP').strip().upper() or 'GBP',
         created_by         = request.user.get_full_name() or request.user.username,
     )
 
@@ -674,10 +675,12 @@ def create_purchase_invoice(request):
             qty      = _parse_decimal(data.get(f'line_qty_{idx}', '1'), '1')
             rate     = _parse_decimal(data.get(f'line_rate_{idx}', '0'))
             order_id = data.get(f'line_order_{idx}', '') or None
+            po_product_id = (data.get(f'line_po_product_{idx}') or '').strip()
             if desc:
                 line_items_raw.append({
                     'description': desc, 'quantity': qty,
                     'rate': rate, 'order_id': order_id,
+                    'po_product_id': po_product_id,
                 })
             idx += 1
     else:
@@ -685,12 +688,13 @@ def create_purchase_invoice(request):
 
     for i, item in enumerate(line_items_raw):
         if isinstance(item, dict):
-            desc     = (item.get('description') or '').strip()
-            qty      = _parse_decimal(item.get('quantity', '1'), '1')
-            rate     = _parse_decimal(item.get('rate', '0'))
-            order_id = item.get('order_id')
+            desc          = (item.get('description') or '').strip()
+            qty           = _parse_decimal(item.get('quantity', '1'), '1')
+            rate          = _parse_decimal(item.get('rate', '0'))
+            order_id      = item.get('order_id')
+            po_product_id = (item.get('po_product_id') or '').strip()
         else:
-            desc, qty, rate, order_id = str(item), Decimal('1'), Decimal('0'), None
+            desc, qty, rate, order_id, po_product_id = str(item), Decimal('1'), Decimal('0'), None, ''
         if desc:
             line = PurchaseInvoiceLineItem.objects.create(
                 invoice     = invoice,
@@ -705,6 +709,11 @@ def create_purchase_invoice(request):
                     line.order = Order.objects.get(id=int(order_id))
                     line.save(update_fields=['order'])
                 except (Order.DoesNotExist, ValueError):
+                    pass
+            if po_product_id:
+                try:
+                    PurchaseOrderProduct.objects.filter(id=int(po_product_id)).update(invoice_price=rate)
+                except (ValueError, TypeError):
                     pass
             # Auto-create installation timesheet if allocated to an order
             _sync_timesheet_for_pi_line(line)
@@ -1424,6 +1433,29 @@ def remove_xero_link(request, invoice_id):
     return JsonResponse({'success': True})
 
 
+# ── Void/delete a Xero draft bill ─────────────────────────────────
+@login_required
+def void_xero_purchase_invoice(request, invoice_id):
+    """Delete the Xero DRAFT bill and clear the local xero_id link."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    if not invoice.xero_id:
+        return JsonResponse({'success': False, 'error': 'No Xero ID on this invoice'}, status=400)
+
+    from stock_take.services import xero_api
+    xero_invoice_id = invoice.xero_id
+    payload = {'Invoices': [{'InvoiceID': xero_invoice_id, 'Status': 'DELETED'}]}
+    result = xero_api._api_put('Invoices', payload)
+    if result is None:
+        err = xero_api.get_last_api_error() or 'Could not delete Xero invoice'
+        return JsonResponse({'success': False, 'error': err})
+
+    invoice.xero_id = ''
+    invoice.save(update_fields=['xero_id'])
+    return JsonResponse({'success': True})
+
+
 # ── Push to Xero ──────────────────────────────────────────────────
 @login_required
 def push_purchase_invoice_to_xero(request, invoice_id):
@@ -1438,6 +1470,13 @@ def push_purchase_invoice_to_xero(request, invoice_id):
             'success': False,
             'error': f'Already pushed to Xero (ID: {invoice.xero_id})',
         }, status=400)
+
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    gl_code = (body.get('gl_code') or '').strip()
+    attach_pdf = body.get('attach_pdf', True)
 
     from stock_take.services import xero_api
 
@@ -1486,19 +1525,25 @@ def push_purchase_invoice_to_xero(request, invoice_id):
     if line_items_qs.exists():
         xero_lines = []
         for li in line_items_qs:
-            xero_lines.append({
+            line = {
                 'Description': li.description or 'Item',
                 'Quantity': str(li.quantity),
                 'UnitAmount': str(li.rate),
                 'LineAmount': str(li.line_total),
-            })
+            }
+            if gl_code:
+                line['AccountCode'] = gl_code
+            xero_lines.append(line)
     else:
         # Fallback: single line using invoice total
-        xero_lines = [{
+        line = {
             'Description': invoice.notes or invoice.invoice_number,
             'Quantity': '1',
             'UnitAmount': str(invoice.total),
-        }]
+        }
+        if gl_code:
+            line['AccountCode'] = gl_code
+        xero_lines = [line]
 
     # ── Build the Xero invoice payload ────────────────────────
     invoice_data = {
@@ -1535,6 +1580,27 @@ def push_purchase_invoice_to_xero(request, invoice_id):
         invoice.xero_id = xero_invoice_id
         invoice.save(update_fields=['xero_id'])
 
+    # Attach the PDF if requested and available
+    pdf_attached = False
+    attach_warning = None
+    if xero_invoice_id and attach_pdf and invoice.attachment:
+        try:
+            filename = invoice.attachment.name.split('/')[-1]
+            with invoice.attachment.open('rb') as f:
+                file_bytes = f.read()
+            content_type = 'application/pdf' if filename.lower().endswith('.pdf') else 'application/octet-stream'
+            attach_result = xero_api.attach_file_to_invoice(xero_invoice_id, filename, file_bytes, content_type)
+            if attach_result is not None:
+                pdf_attached = True
+            else:
+                attach_warning = xero_api.get_last_api_error() or 'Attachment upload returned no data'
+                logger.warning(f'PDF attach returned None for Xero invoice {xero_invoice_id}: {attach_warning}')
+        except Exception as attach_err:
+            attach_warning = str(attach_err)
+            logger.warning(f'Could not attach PDF to Xero invoice {xero_invoice_id}: {attach_err}')
+    elif xero_invoice_id and attach_pdf and not invoice.attachment:
+        attach_warning = 'No attachment on this invoice'
+
     log_activity(
         user=request.user,
         event_type='xero_push',
@@ -1545,12 +1611,16 @@ def push_purchase_invoice_to_xero(request, invoice_id):
     )
 
     xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={xero_invoice_id}'
-    return JsonResponse({
+    response_data = {
         'success': True,
         'xero_id': xero_invoice_id,
         'xero_url': xero_url,
+        'pdf_attached': pdf_attached,
         'message': f'Invoice pushed to Xero as a draft bill (ID: {xero_invoice_id})',
-    })
+    }
+    if attach_warning:
+        response_data['attach_warning'] = attach_warning
+    return JsonResponse(response_data)
 
 
 # ── Generate / re-sync timesheets from invoice lines ─────────────

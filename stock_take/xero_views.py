@@ -107,10 +107,42 @@ def xero_status(request):
         for g in stored_gl
     ]
 
+    # Scopes this app requires and their human-readable labels
+    REQUIRED_SCOPES = [
+        ('accounting.transactions',      'accounting.transactions (write)', 'write'),
+        ('accounting.transactions.read', 'accounting.transactions.read',   'read'),
+        ('accounting.contacts',          'accounting.contacts (write)',     'write'),
+        ('accounting.contacts.read',     'accounting.contacts.read',        'read'),
+        ('accounting.settings.read',     'accounting.settings.read',        'read'),
+        ('accounting.reports.read',      'accounting.reports.read',         'read'),
+        ('accounting.attachments',       'accounting.attachments',          'write'),
+        ('openid',                       'openid',                          ''),
+        ('profile',                      'profile',                         ''),
+        ('email',                        'email',                           ''),
+        ('offline_access',               'offline_access',                  ''),
+    ]
+
+    granted_scopes = set()
+    if token and token.scope:
+        granted_scopes = set(token.scope.split())
+
+    scope_rows = [
+        {
+            'key': key,
+            'label': label,
+            'kind': kind,
+            'granted': key in granted_scopes,
+        }
+        for key, label, kind in REQUIRED_SCOPES
+    ]
+    missing_required = [s for s in scope_rows if not s['granted'] and s['kind'] == 'write' and 'attachments' in s['key']]
+
     context = {
         "connected": token is not None,
         "token": token,
         "organisation": None,
+        "scope_rows": scope_rows,
+        "missing_attachment_scope": bool(missing_required),
         "enabled_gl_codes_json": _json.dumps([g['code'] for g in stored_gl_plain if g['enabled']]),
         "stored_gl_codes_json": _json.dumps(stored_gl_plain),
     }

@@ -400,9 +400,19 @@ def purchase_orders_list(request):
             'sale_number': a['order__sale_number'],
         }
 
+    # Pre-fetch POs that have a stock project entry (for display fallback)
+    stock_po_ids = set(
+        PurchaseOrderProject.objects.filter(
+            purchase_order__in=queryset, project_type='stock'
+        ).values_list('purchase_order_id', flat=True)
+    )
+
     # Annotate POs with linked order info (try each strategy in order)
     po_list = list(queryset)
     for po in po_list:
+        # If project_name is blank but a stock project is assigned, display "Stock"
+        if not po.project_name and po.pk in stock_po_ids:
+            po.project_name = 'Stock'
         info = wg_id_to_order.get(po.project_id)
         if not info and po.project_name:
             info = name_to_order.get(po.project_name)
@@ -4031,6 +4041,32 @@ def order_search(request):
 
 
 @login_required
+@login_required
+def po_lines_api(request):
+    """Return line items (products) for a PO identified by workguru_id query param."""
+    workguru_id = request.GET.get('workguru_id', '').strip()
+    if not workguru_id:
+        return JsonResponse({'error': 'workguru_id required'}, status=400)
+    try:
+        po = PurchaseOrder.objects.get(workguru_id=workguru_id)
+    except PurchaseOrder.DoesNotExist:
+        return JsonResponse({'error': 'PO not found'}, status=404)
+    results = []
+    for p in po.products.order_by('sort_order', 'id'):
+        label = p.name or p.description or p.sku or ''
+        if p.sku and p.name and p.sku != p.name:
+            label = f'{p.sku} – {p.name}'
+        results.append({
+            'id': p.id,
+            'sku': p.sku,
+            'name': p.name,
+            'description': label,
+            'order_price': float(p.order_price),
+            'quantity': float(p.order_quantity or p.quantity or 1),
+        })
+    return JsonResponse({'results': results, 'freight_cost': float(po.freight_cost)})
+
+
 def purchase_order_search(request):
     """Search purchase orders by display_number, supplier or project. Returns JSON.
     Used by the Boards PO combo selector in the order details page.

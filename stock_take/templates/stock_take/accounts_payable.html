@@ -180,6 +180,23 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 </td>
                 <td style="text-align:center;">
                     {% if email.attachment_list %}
+                    {% if email.attachment_list|length > 2 %}
+                    <div style="position:relative;display:inline-block;">
+                        <button class="apay-att-overflow-btn" onclick="toggleAttDropdown(event,this)" title="{{ email.attachment_list|length }} attachments">
+                            <i class="bi bi-paperclip"></i> {{ email.attachment_list|length }}
+                        </button>
+                        <div class="apay-att-overflow-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:600;min-width:240px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.2);padding:4px 0;">
+                            {% for att in email.attachment_list %}
+                            <a href="/accounts-payable/{{ email.id }}/attachment/{{ att.id }}/" target="_blank"
+                               style="display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:0.8rem;color:var(--text-primary);text-decoration:none;"
+                               onmouseover="this.style.background='var(--bg-primary)'" onmouseout="this.style.background=''">
+                                <i class="bi {% if 'pdf' in att.content_type %}bi-file-earmark-pdf{% else %}bi-file-earmark{% endif %}" style="flex-shrink:0;{% if 'pdf' in att.content_type %}color:#dc3545;{% endif %}"></i>
+                                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ att.name }}</span>
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% else %}
                     <div class="apay-att-links">
                         {% for att in email.attachment_list %}
                         <a href="/accounts-payable/{{ email.id }}/attachment/{{ att.id }}/"
@@ -191,6 +208,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                         </a>
                         {% endfor %}
                     </div>
+                    {% endif %}
                     {% else %}
                     <span class="apay-att-none"><i class="bi bi-dash"></i></span>
                     {% endif %}
@@ -683,7 +701,11 @@ function openCreateModal(btn) {
     document.getElementById('new-pinv-due-date').value = '';
     document.getElementById('new-pinv-status').value = 'Draft';
     document.getElementById('new-pinv-notes').value = '';
-    document.getElementById('new-pinv-total').value = '';
+    setModalCurrency('GBP');
+    // Pre-fill PO if the email has a matched PO
+    const prePoId = btn.dataset.poId || '';
+    const prePoLabel = btn.dataset.poLabel || '';
+    if (prePoId) selectModalPO(prePoId, prePoLabel || prePoId);;
     fetch('/api/next-invoice-number/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
         .then(r => r.json())
         .then(d => {
@@ -809,7 +831,7 @@ function submitCreateInvoice() {
         const rate = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
         const ordInp = row.querySelector('.pinv-line-order-input');
         const orderId = ordInp ? (ordInp.dataset.orderId || null) : null;
-        if (desc) lineItems.push({ description: desc, rate, order_id: orderId });
+        if (desc) lineItems.push({ description: desc, rate, order_id: orderId, po_product_id: row.dataset.poProductId || '' });
     });
 
     const fd = new FormData();
@@ -823,15 +845,17 @@ function submitCreateInvoice() {
     fd.append('supplier_reference', document.getElementById('new-pinv-supplier-ref').value.trim());
     const poId = document.getElementById('new-pinv-po-search').dataset.poId || '';
     if (poId) fd.append('purchase_order_id', poId);
-    const manualTotal = parseFloat(document.getElementById('new-pinv-total').value) || 0;
-    if (manualTotal > 0) fd.append('total', manualTotal);
+    fd.append('currency', typeof _modalCurrency !== 'undefined' ? _modalCurrency : 'GBP');
     if (currentAttachmentId) fd.append('attachment_id', currentAttachmentId);
+    const carriageLine = lineItems.find(li => li.is_carriage);
+    if (carriageLine) fd.append('freight_cost', carriageLine.rate);
 
     lineItems.forEach((li, i) => {
         fd.append(`line_desc_${i}`, li.description);
         fd.append(`line_qty_${i}`, '1');
         fd.append(`line_rate_${i}`, li.rate);
         fd.append(`line_order_${i}`, li.order_id || '');
+        if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);
     });
 
     const btn = document.getElementById('modal-confirm-btn');
@@ -843,7 +867,10 @@ function submitCreateInvoice() {
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
         body: fd,
     })
-    .then(r => r.json())
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(`Server ${r.status}: ${t.substring(0, 400)}`); });
+        return r.json();
+    })
     .then(data => {
         if (data.success) {
             window.location.href = data.redirect;
@@ -853,10 +880,10 @@ function submitCreateInvoice() {
             alert('Error: ' + (data.error || 'Unknown error'));
         }
     })
-    .catch(() => {
+    .catch(err => {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-check-lg"></i> Create Invoice';
-        alert('Network error');
+        alert('Error creating invoice:\n' + err.message);
     });
 }
 
@@ -905,7 +932,18 @@ function toggleKebab(e) {
 function closeKebab() {
     document.getElementById('kebab-menu').style.display = 'none';
 }
-document.addEventListener('click', () => closeKebab());
+document.addEventListener('click', () => {
+    closeKebab();
+    document.querySelectorAll('.apay-att-overflow-menu').forEach(m => m.style.display = 'none');
+});
+
+function toggleAttDropdown(event, btn) {
+    event.stopPropagation();
+    const menu = btn.nextElementSibling;
+    const isOpen = menu.style.display !== 'none';
+    document.querySelectorAll('.apay-att-overflow-menu').forEach(m => m.style.display = 'none');
+    menu.style.display = isOpen ? 'none' : 'block';
+}
 
 // ── Hide unmatched rows ───────────────────────────────────────────────────────
 let _hideUnmatched = {{ matched_only|yesno:'true,false' }};

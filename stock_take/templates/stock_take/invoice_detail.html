@@ -341,6 +341,99 @@
     </div>
 </div>
 
+<!-- Push to Xero Section -->
+<div class="inv-detail-section">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 class="inv-section-title" style="margin:0;"><i class="bi bi-cloud-upload"></i> Push to Xero</h3>
+        {% if invoice.xero_id %}
+        <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ invoice.xero_id }}"
+           target="_blank" class="btn btn-sm btn-outline-secondary" style="display:flex;align-items:center;gap:6px;">
+            <i class="bi bi-box-arrow-up-right"></i> View in Xero
+        </a>
+        {% endif %}
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
+
+        <!-- Currency -->
+        <div>
+            <label style="display:block; font-size:0.82rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">
+                Currency
+                <span id="currency-auto-badge" style="font-size:0.75rem; font-weight:400; color:var(--text-muted); margin-left:4px;">
+                    (auto-detected: {{ auto_currency }})
+                </span>
+            </label>
+            <div style="display:flex; gap:0; border:1px solid var(--border-color); border-radius:6px; overflow:hidden; width:fit-content;">
+                <button id="btn-gbp" type="button"
+                        onclick="setCurrency('GBP')"
+                        style="padding:6px 18px; border:none; cursor:pointer; font-size:0.9rem; font-weight:600;
+                               background:{% if display_currency == 'GBP' %}var(--primary-color); color:#fff;{% else %}var(--bg-primary); color:var(--text-primary);{% endif %}
+                               transition:background 0.15s;">
+                    £ GBP
+                </button>
+                <button id="btn-eur" type="button"
+                        onclick="setCurrency('EUR')"
+                        style="padding:6px 18px; border:none; border-left:1px solid var(--border-color); cursor:pointer; font-size:0.9rem; font-weight:600;
+                               background:{% if display_currency == 'EUR' %}var(--primary-color); color:#fff;{% else %}var(--bg-primary); color:var(--text-primary);{% endif %}
+                               transition:background 0.15s;">
+                    € EUR
+                </button>
+            </div>
+        </div>
+
+        <!-- GL Code -->
+        <div>
+            <label style="display:block; font-size:0.82rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">
+                GL Account Code
+            </label>
+            <div style="position:relative;">
+                <!-- Search input shown above the select -->
+                <input type="text" id="gl-search" placeholder="Search GL codes…"
+                       autocomplete="off"
+                       oninput="filterGLCodes(this.value)"
+                       style="width:100%; padding:6px 10px; border:1px solid var(--border-color); border-bottom:none;
+                              border-radius:6px 6px 0 0; background:var(--bg-primary); color:var(--text-primary);
+                              font-size:0.85rem; box-sizing:border-box;">
+                <select id="gl-code-select"
+                        style="width:100%; padding:6px 10px; border:1px solid var(--border-color);
+                               border-radius:0 0 6px 6px; background:var(--bg-primary); color:var(--text-primary);
+                               font-size:0.85rem; max-height:160px; overflow-y:auto;">
+                    {% if gl_codes %}
+                    {% for gl in gl_codes %}
+                    <option value="{{ gl.code }}">{{ gl.code }} – {{ gl.name }}</option>
+                    {% endfor %}
+                    {% else %}
+                    <option value="">No GL codes configured — add them on the Xero settings page</option>
+                    {% endif %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attach PDF checkbox (only when attachment exists) -->
+    {% if invoice.attachment %}
+    <div style="margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="attach-pdf-cb" checked
+               style="width:16px;height:16px;cursor:pointer;">
+        <label for="attach-pdf-cb" style="cursor:pointer; font-size:0.9rem;">
+            Also attach <strong>{{ invoice.attachment.name|cut:"invoice_attachments/" }}</strong> to the Xero invoice
+        </label>
+    </div>
+    {% endif %}
+
+    <div style="display:flex; align-items:center; gap:12px;">
+        <button id="xero-push-btn" type="button" onclick="pushToXero()"
+                class="btn btn-primary" style="display:flex;align-items:center;gap:6px;">
+            {% if invoice.xero_id %}
+            <i class="bi bi-arrow-repeat"></i> Re-push to Xero
+            {% else %}
+            <i class="bi bi-cloud-upload"></i> Push to Xero
+            {% endif %}
+        </button>
+        <span id="xero-push-status" style="font-size:0.88rem; color:var(--text-secondary);"></span>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -596,6 +689,98 @@ function savePartialLink() {
         }
     })
     .catch(err => alert('Error: ' + err.message));
+}
+
+// ── Currency toggle ────────────────────────────────────────────
+let _selectedCurrency = '{{ display_currency }}';
+
+function setCurrency(code) {
+    _selectedCurrency = code;
+    const btnGbp = document.getElementById('btn-gbp');
+    const btnEur = document.getElementById('btn-eur');
+    if (code === 'GBP') {
+        btnGbp.style.background = 'var(--primary-color)';
+        btnGbp.style.color = '#fff';
+        btnEur.style.background = 'var(--bg-primary)';
+        btnEur.style.color = 'var(--text-primary)';
+    } else {
+        btnEur.style.background = 'var(--primary-color)';
+        btnEur.style.color = '#fff';
+        btnGbp.style.background = 'var(--bg-primary)';
+        btnGbp.style.color = 'var(--text-primary)';
+    }
+}
+
+// ── GL code search ─────────────────────────────────────────────
+function filterGLCodes(query) {
+    const select = document.getElementById('gl-code-select');
+    const q = query.toLowerCase();
+    let firstVisible = null;
+    Array.from(select.options).forEach(opt => {
+        const match = !q || opt.text.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q);
+        opt.style.display = match ? '' : 'none';
+        if (match && !firstVisible) firstVisible = opt;
+    });
+    if (firstVisible) firstVisible.selected = true;
+}
+
+// ── Push to Xero ───────────────────────────────────────────────
+function pushToXero() {
+    const btn = document.getElementById('xero-push-btn');
+    const status = document.getElementById('xero-push-status');
+    const glSelect = document.getElementById('gl-code-select');
+    const attachCb = document.getElementById('attach-pdf-cb');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing…';
+    status.textContent = '';
+
+    const payload = {
+        currency: _selectedCurrency,
+        gl_code: glSelect ? glSelect.value : '',
+        attach_pdf: attachCb ? attachCb.checked : false,
+    };
+
+    fetch('{% url "push_invoice_to_xero" invoice.id %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Re-push to Xero';
+
+            let msg = `<i class="bi bi-check-circle-fill" style="color:#28a745;"></i> Pushed — ${data.currency}`;
+            if (data.gl_code) msg += ` · GL: ${data.gl_code}`;
+            if (data.attachment_warning) {
+                msg += ` <span style="color:#dc3545;" title="${data.attachment_warning}"><i class="bi bi-exclamation-triangle-fill"></i> PDF attach failed</span>`;
+            } else if (payload.attach_pdf) {
+                msg += ' · PDF attached';
+            }
+            status.innerHTML = msg;
+
+            // Show / update the View in Xero link if not already present
+            if (data.xero_id && !document.getElementById('xero-view-link')) {
+                btn.insertAdjacentHTML('afterend',
+                    `<a id="xero-view-link" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=${data.xero_id}" target="_blank" class="btn btn-sm btn-outline-secondary" style="display:flex;align-items:center;gap:6px;"><i class="bi bi-box-arrow-up-right"></i> View in Xero</a>`
+                );
+            }
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
+            status.innerHTML = `<span style="color:#dc3545;"><i class="bi bi-exclamation-circle-fill"></i> ${data.error || 'Unknown error'}</span>`;
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
+        status.innerHTML = `<span style="color:#dc3545;"><i class="bi bi-exclamation-circle-fill"></i> Network error: ${err.message}</span>`;
+    });
 }
 </script>
 {% endblock %}

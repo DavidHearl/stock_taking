@@ -62,7 +62,8 @@ XERO_SCOPES = (
     "accounting.contacts.read "
     "accounting.contacts "
     "accounting.settings.read "
-    "accounting.reports.read"
+    "accounting.reports.read "
+    "accounting.attachments"
 )
 
 
@@ -85,6 +86,7 @@ def get_authorization_url(state=""):
         "redirect_uri": redirect_uri,
         "scope": XERO_SCOPES,
         "state": state,
+        "prompt": "consent",  # Force consent screen so new scopes (e.g. accounting.attachments) are granted
     }
     return f"{XERO_AUTH_URL}?{urlencode(params)}"
 
@@ -1022,3 +1024,41 @@ def create_purchase_order(contact_name, po_number, line_items, date=None,
             result = _api_post("PurchaseOrders", payload)
 
     return result
+
+
+def attach_file_to_invoice(xero_invoice_id, filename, file_bytes, content_type="application/pdf"):
+    """
+    Upload a file attachment to an existing Xero invoice.
+
+    Uses PUT /Invoices/{InvoiceID}/Attachments/{FileName} with the raw binary body.
+    Returns the parsed JSON response or None on failure.
+    """
+    access_token, tenant_id = get_valid_access_token()
+    if not access_token:
+        logger.warning("No valid Xero token available")
+        return None
+
+    safe_filename = filename.replace(" ", "_")
+    url = f"{XERO_API_BASE}/Invoices/{xero_invoice_id}/Attachments/{safe_filename}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Xero-Tenant-Id": tenant_id,
+        "Content-Type": content_type,
+        "Accept": "application/json",
+    }
+
+    global _last_api_error
+    _rate_limit_wait()
+    try:
+        response = requests.put(url, headers=headers, data=file_bytes, timeout=60)
+        response.raise_for_status()
+        _last_api_error = None
+        return response.json()
+    except requests.RequestException as e:
+        error_detail = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            error_detail = e.response.text
+            logger.error(f"Response body: {error_detail}")
+        logger.error(f"Xero attach file error (Invoice {xero_invoice_id}): {e}")
+        _last_api_error = error_detail
+        return None

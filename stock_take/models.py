@@ -2146,6 +2146,7 @@ class PurchaseInvoice(models.Model):
         help_text='Purchase orders this supplier invoice is associated with',
     )
     xero_id          = models.CharField(max_length=100, blank=True, help_text='Xero InvoiceID once pushed to Xero')
+    currency         = models.CharField(max_length=3, default='GBP', help_text='ISO currency code')
     created_at       = models.DateTimeField(auto_now_add=True)
     updated_at       = models.DateTimeField(auto_now=True)
     created_by       = models.CharField(max_length=200, blank=True)

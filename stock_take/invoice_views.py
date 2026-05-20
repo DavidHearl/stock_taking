@@ -20,7 +20,7 @@ from django.http import StreamingHttpResponse, JsonResponse
 from django.utils import timezone
 
 
-from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer, Order
+from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer, Order, EnabledGLCode
 
 logger = logging.getLogger(__name__)
 
@@ -281,12 +281,31 @@ def invoice_detail(request, invoice_id):
             'is_partial': 0 < linked_products < total_products,
         })
 
+    # Auto-detect currency: Irish showrooms / customers default to EUR
+    _irish_keywords = ('dublin', 'ireland', 'cork', 'limerick', 'galway', 'waterford',
+                       'kilkenny', 'wexford', 'wicklow', 'kildare', 'roi')
+    auto_currency = 'GBP'
+    showroom_lc = (invoice.showroom or '').lower()
+    if any(kw in showroom_lc for kw in _irish_keywords):
+        auto_currency = 'EUR'
+    elif invoice.customer:
+        country_lc = (invoice.customer.country or '').lower()
+        if country_lc in ('ireland', 'ie', 'roi', 'republic of ireland'):
+            auto_currency = 'EUR'
+    # Use saved currency if already set, otherwise fall back to auto-detected
+    display_currency = invoice.currency if invoice.currency in ('GBP', 'EUR') else auto_currency
+
+    gl_codes = EnabledGLCode.objects.filter(enabled=True).order_by('code')
+
     context = {
         'invoice': invoice,
         'line_items': line_items,
         'payments': payments,
         'linked_pos': linked_pos,
         'linked_pos_info': linked_pos_info,
+        'gl_codes': gl_codes,
+        'auto_currency': auto_currency,
+        'display_currency': display_currency,
     }
     return render(request, 'stock_take/invoice_detail.html', context)
 
@@ -294,11 +313,47 @@ def invoice_detail(request, invoice_id):
 # ── Push single invoice to Xero as Draft ──────────────────────────
 @login_required
 def push_invoice_to_xero(request, invoice_id):
-    """Create a DRAFT sales invoice in Xero from a local Invoice record."""
+    """Create a DRAFT sales invoice in Xero from a local Invoice record.
+
+    Accepts optional JSON body:
+      currency    – 'GBP' or 'EUR' (defaults to invoice.currency or auto-detected)
+      gl_code     – Xero account code string (defaults to first enabled GL code)
+      attach_pdf  – true/false, whether to upload the local attachment to Xero
+    """
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
 
     invoice = get_object_or_404(Invoice, id=invoice_id)
+
+    # Parse optional request body
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+
+    # Currency: request body > invoice field > auto-detect
+    _irish_keywords = ('dublin', 'ireland', 'cork', 'limerick', 'galway', 'waterford',
+                       'kilkenny', 'wexford', 'wicklow', 'kildare', 'roi')
+    showroom_lc = (invoice.showroom or '').lower()
+    auto_currency = 'GBP'
+    if any(kw in showroom_lc for kw in _irish_keywords):
+        auto_currency = 'EUR'
+    elif invoice.customer:
+        country_lc = (invoice.customer.country or '').lower()
+        if country_lc in ('ireland', 'ie', 'roi', 'republic of ireland'):
+            auto_currency = 'EUR'
+
+    currency = body.get('currency', '').strip().upper()
+    if currency not in ('GBP', 'EUR'):
+        currency = invoice.currency if invoice.currency in ('GBP', 'EUR') else auto_currency
+
+    # GL code: request body > first enabled code
+    gl_code = (body.get('gl_code') or '').strip()
+    if not gl_code:
+        first_gl = EnabledGLCode.objects.filter(enabled=True).order_by('code').first()
+        gl_code = first_gl.code if first_gl else ''
+
+    attach_pdf = bool(body.get('attach_pdf', False))
 
     from .services import xero_api
 
@@ -333,7 +388,9 @@ def push_invoice_to_xero(request, invoice_id):
             city = (local_customer.city or local_customer.suburb or '').strip()
             region = (local_customer.state or '').strip()
             postcode = (local_customer.postcode or '').strip()
-            country = (local_customer.country or '').strip()
+            country_val = (local_customer.country or '').strip()
+        else:
+            country_val = ''
 
         create_res = xero_api.create_contact(
             name=invoice.client_name,
@@ -346,7 +403,7 @@ def push_invoice_to_xero(request, invoice_id):
             city=city,
             region=region,
             postal_code=postcode,
-            country=country,
+            country=country_val,
         )
 
         contacts = (create_res or {}).get('Contacts', []) if isinstance(create_res, dict) else []
@@ -366,26 +423,32 @@ def push_invoice_to_xero(request, invoice_id):
             local_customer.save(update_fields=['xero_id'])
 
     # Build line items — single line with the invoice total
-    line_items = [{
+    line_item = {
         "Description": f"{invoice.payment_type or 'Payment'} — {invoice.contract_number}",
         "Quantity": "1",
         "UnitAmount": str(invoice.total),
-        "AccountCode": "G1001",
-    }]
+    }
+    if gl_code:
+        line_item["AccountCode"] = gl_code
 
     invoice_data = {
         "Type": "ACCREC",
         "Contact": {"ContactID": contact_id},
         "Status": "DRAFT",
-        "CurrencyCode": invoice.currency or "GBP",
+        "CurrencyCode": currency,
         "LineAmountTypes": "Inclusive",
-        "LineItems": line_items,
+        "LineItems": [line_item],
         "Reference": invoice.contract_number,
     }
 
     if invoice.date:
         invoice_data["Date"] = invoice.date.isoformat()
         invoice_data["DueDate"] = (invoice.due_date or invoice.date).isoformat()
+
+    # Save currency choice back to the invoice record
+    if invoice.currency != currency:
+        invoice.currency = currency
+        invoice.save(update_fields=['currency'])
 
     payload = {"Invoices": [invoice_data]}
     result = xero_api._api_put("Invoices", payload)
@@ -396,11 +459,37 @@ def push_invoice_to_xero(request, invoice_id):
 
     # Extract the Xero InvoiceID from the response
     invoices_resp = result.get('Invoices', [])
+    xero_invoice_id = ''
     if invoices_resp:
-        invoice.xero_id = invoices_resp[0].get('InvoiceID', '')
+        xero_invoice_id = invoices_resp[0].get('InvoiceID', '')
+        invoice.xero_id = xero_invoice_id
         invoice.save(update_fields=['xero_id'])
 
-    return JsonResponse({'ok': True, 'xero_id': invoice.xero_id})
+    # Optionally attach the local PDF to the Xero invoice
+    attachment_warning = None
+    if attach_pdf and xero_invoice_id and invoice.attachment:
+        try:
+            import os
+            import mimetypes
+            file_path = invoice.attachment.path
+            filename = os.path.basename(file_path)
+            mime_type, _ = mimetypes.guess_type(filename)
+            mime_type = mime_type or 'application/octet-stream'
+            with open(file_path, 'rb') as fh:
+                file_bytes = fh.read()
+            attach_result = xero_api.attach_file_to_invoice(
+                xero_invoice_id, filename, file_bytes, mime_type
+            )
+            if attach_result is None:
+                attachment_warning = xero_api.get_last_api_error() or 'Attachment upload failed'
+        except Exception as exc:
+            logger.error(f'Failed to attach PDF to Xero invoice {xero_invoice_id}: {exc}')
+            attachment_warning = str(exc)
+
+    response_data = {'ok': True, 'xero_id': invoice.xero_id, 'currency': currency, 'gl_code': gl_code}
+    if attachment_warning:
+        response_data['attachment_warning'] = attachment_warning
+    return JsonResponse(response_data)
 
 
 # ── Check invoices against Xero ──────────────────────────────────

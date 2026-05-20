@@ -10,12 +10,27 @@ let modalLineCount = 0;
 let modalOrderDebounce = {};
 let dupCheckTimer = null;
 let duplicateInvoiceId = null;
+let _modalCurrency = 'GBP';
 
 function todayISO() {
     const d = new Date();
     return d.getFullYear() + '-' +
         String(d.getMonth() + 1).padStart(2, '0') + '-' +
         String(d.getDate()).padStart(2, '0');
+}
+
+function autoSetDueDate(invoiceDateVal) {
+    // Set due date to the last day of the month following the invoice date.
+    // e.g. 15/05/2026 → 30/06/2026
+    if (!invoiceDateVal) return;
+    const dueDateEl = document.getElementById('new-pinv-due-date');
+    if (!dueDateEl || dueDateEl.value) return; // don't overwrite if already set
+    const [y, m] = invoiceDateVal.split('-').map(Number);
+    // First day of the month after next (two months ahead), then subtract one day
+    const lastDay = new Date(y, m + 1, 0); // month+1 is 0-indexed, day 0 = last day of prev month
+    dueDateEl.value = lastDay.getFullYear() + '-' +
+        String(lastDay.getMonth() + 1).padStart(2, '0') + '-' +
+        String(lastDay.getDate()).padStart(2, '0');
 }
 let modalPOSearchTimer = null;
 
@@ -70,6 +85,20 @@ function clearModalPO() {
     if (input) { input.value = ''; input.dataset.poId = ''; }
     const dd = document.getElementById('new-pinv-po-dropdown');
     if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+}
+
+function setModalCurrency(code) {
+    _modalCurrency = code;
+    const btnGbp = document.getElementById('modal-btn-gbp');
+    const btnEur = document.getElementById('modal-btn-eur');
+    if (code === 'EUR') {
+        if (btnEur) { btnEur.style.background = 'var(--primary-color)'; btnEur.style.color = '#fff'; }
+        if (btnGbp) { btnGbp.style.background = 'var(--bg-primary)'; btnGbp.style.color = 'var(--text-primary)'; }
+    } else {
+        if (btnGbp) { btnGbp.style.background = 'var(--primary-color)'; btnGbp.style.color = '#fff'; }
+        if (btnEur) { btnEur.style.background = 'var(--bg-primary)'; btnEur.style.color = 'var(--text-primary)'; }
+    }
+    recalcModalTotal();
 }
 
 let modalSupplierSearchTimer = null;
@@ -245,9 +274,9 @@ function addModalLine() {
                        oninput="modalSearchOrders(this,${idx})">
                 <div class="order-search-dropdown modal-order-dd" id="modal-order-dd-${idx}"></div>
             </div>
-            <input type="number" placeholder="\u00a3" step="0.01" min="0" value="0"
+            <input type="number" placeholder="0.00" step="0.01" min="0" value="0"
                    class="pinv-input pinv-line-rate"
-                   style="width:90px;padding:5px 8px;font-size:0.82rem;"
+                   style="width:90px;padding:5px 8px;font-size:0.82rem;text-align:right;"
                    oninput="recalcModalTotal()">
             <button type="button" class="pinv-btn-icon" onclick="copyModalLine(this.closest('.pinv-line-row'))" title="Copy line">
                 <i class="bi bi-copy"></i>
@@ -270,7 +299,8 @@ function recalcModalTotal() {
     document.querySelectorAll('.pinv-line-row').forEach(row => {
         total += parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
     });
-    document.getElementById('modal-total').textContent = '\u00a3' + total.toFixed(2);
+    const sym = (_modalCurrency === 'EUR') ? '\u20ac' : '\u00a3';
+    document.getElementById('modal-total').textContent = sym + total.toFixed(2);
 }
 
 function splitModalLine(row) {
@@ -702,4 +732,44 @@ function openInlinePoFromLines() {
     .catch(() => alert('Network error'));
 }
 document.addEventListener('click', () => closeInvoicePoKebab());
+
+// ── Pull line items from the selected PO ──────────────────────
+function pullPOLines() {
+    const poInput = document.getElementById('new-pinv-po-search');
+    const poId = poInput ? poInput.dataset.poId : '';
+    if (!poId) {
+        alert('Select a purchase order first.');
+        return;
+    }
+    fetch(`/api/po-lines/?workguru_id=${encodeURIComponent(poId)}`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        const results = data.results || [];
+        if (!results.length) { alert('No line items found on this purchase order.'); return; }
+        // Clear existing lines
+        document.getElementById('modal-lines').innerHTML = '';
+        modalLineCount = 0;
+        results.forEach(item => {
+            addModalLine();
+            const rows = document.querySelectorAll('.pinv-line-row');
+            const row = rows[rows.length - 1];
+            row.querySelector('.pinv-line-desc').value = item.description || item.name || '';
+            row.querySelector('.pinv-line-rate').value = parseFloat(item.order_price || 0).toFixed(2);
+            row.dataset.poProductId = item.id;
+        });
+        if (data.freight_cost && parseFloat(data.freight_cost) > 0) {
+            addModalLine();
+            const rows = document.querySelectorAll('.pinv-line-row');
+            const row = rows[rows.length - 1];
+            row.querySelector('.pinv-line-desc').value = 'Carriage';
+            row.querySelector('.pinv-line-rate').value = parseFloat(data.freight_cost).toFixed(2);
+            row.dataset.isCarriage = '1';
+        }
+        recalcModalTotal();
+    })
+    .catch(err => alert('Error fetching PO lines: ' + err.message));
+}
 </script>

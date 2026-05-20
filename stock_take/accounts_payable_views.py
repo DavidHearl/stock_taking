@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
-from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, EnabledGLCode, OverheadPurchaseOrder
+from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, PurchaseOrderProduct, EnabledGLCode, OverheadPurchaseOrder
 from .permissions import page_permission_required
 from .purchase_invoice_views import _extract_pdf_fields, _parse_date, _parse_decimal
 from .services import graph_api
@@ -345,7 +345,6 @@ def create_invoice_from_email(request, email_id):
         return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
 
     email = get_object_or_404(MailboxEmail, id=email_id)
-    mailbox = graph_api._get_settings()['mailbox']
 
     # Accept multipart (full modal form) or plain JSON (legacy simple create)
     ct = request.content_type or ''
@@ -386,6 +385,7 @@ def create_invoice_from_email(request, email_id):
         status=data.get('status', 'Draft'),
         total=total_val,
         notes=(data.get('notes') or '').strip(),
+        currency=(data.get('currency') or 'GBP').strip().upper() or 'GBP',
         created_by=request.user.get_full_name() or request.user.username,
     )
 
@@ -397,6 +397,7 @@ def create_invoice_from_email(request, email_id):
             qty = _parse_decimal(data.get(f'line_qty_{idx}', '1'), '1')
             rate = _parse_decimal(data.get(f'line_rate_{idx}', '0'))
             order_id = data.get(f'line_order_{idx}', '') or None
+            po_product_id = (data.get(f'line_po_product_{idx}') or '').strip()
             if desc:
                 line = PurchaseInvoiceLineItem.objects.create(
                     invoice=invoice,
@@ -412,6 +413,11 @@ def create_invoice_from_email(request, email_id):
                         line.save(update_fields=['order'])
                     except (Order.DoesNotExist, ValueError):
                         pass
+                if po_product_id:
+                    try:
+                        PurchaseOrderProduct.objects.filter(id=int(po_product_id)).update(invoice_price=rate)
+                    except (ValueError, TypeError):
+                        pass
             idx += 1
 
     # Recalculate total from lines if no flat total was provided
@@ -423,6 +429,7 @@ def create_invoice_from_email(request, email_id):
 
     # Download and attach the file from Graph API
     if chosen:
+        mailbox = graph_api._get_settings().get('mailbox', '')
         content, filename, _att_ct, err = graph_api.download_attachment(
             mailbox, email.graph_message_id, chosen['id']
         )

@@ -150,7 +150,7 @@ function openCreateModal() {
     document.getElementById('new-pinv-due-date').value = '';
     document.getElementById('new-pinv-status').value = 'Draft';
     document.getElementById('new-pinv-notes').value = '';
-    document.getElementById('new-pinv-total').value = '';
+    setModalCurrency('GBP');
     clearModalPO();
     clearModalSupplier();
     // Reset attachment
@@ -185,7 +185,7 @@ function submitCreateInvoice() {
         const rate    = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
         const ordInp  = row.querySelector('.pinv-line-order-input');
         const orderId = ordInp ? (ordInp.dataset.orderId || null) : null;
-        if (desc) lineItems.push({ description: desc, quantity: 1, rate: rate, order_id: orderId || null });
+        if (desc) lineItems.push({ description: desc, quantity: 1, rate: rate, order_id: orderId || null, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1' });
     });
 
     // Use FormData to support file upload
@@ -200,14 +200,16 @@ function submitCreateInvoice() {
     fd.append('supplier_reference', document.getElementById('new-pinv-supplier-ref').value.trim());
     const poId = document.getElementById('new-pinv-po-search').dataset.poId || '';
     if (poId) fd.append('purchase_order_id', poId);
-    const manualTotal = parseFloat(document.getElementById('new-pinv-total').value) || 0;
-    if (manualTotal > 0) fd.append('total', manualTotal);
+    fd.append('currency', typeof _modalCurrency !== 'undefined' ? _modalCurrency : 'GBP');
+    const carriageLine = lineItems.find(li => li.is_carriage);
+    if (carriageLine) fd.append('freight_cost', carriageLine.rate);
 
     lineItems.forEach((li, i) => {
         fd.append(`line_desc_${i}`, li.description);
         fd.append(`line_qty_${i}`, '1');
         fd.append(`line_rate_${i}`, li.rate);
         fd.append(`line_order_${i}`, li.order_id || '');
+        if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);
     });
 
     const fileInput = document.getElementById('modal-attachment-input');
