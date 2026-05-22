@@ -25,8 +25,16 @@
             {% else %}
             <span class="pinv-payment unpaid">Unpaid</span>
             {% endif %}
+            {% if invoice.parent_invoice %}
+            <span class="pinv-status draft" style="font-size:0.78rem;">
+                Amendment of <a href="{% url 'purchase_invoice_detail' invoice.parent_invoice.id %}" style="color:inherit;text-decoration:underline;">{{ invoice.parent_invoice.invoice_number }}</a>
+            </span>
+            {% endif %}
         </div>
         <div class="pinv-detail-actions">
+            <button class="pinv-btn-sm" onclick="openAmendmentModal()" title="Create amendment (sub) invoice">
+                <i class="bi bi-file-earmark-plus"></i> Create Amendment
+            </button>
             <button class="pinv-btn-sm" onclick="toggleHeaderEdit()">
                 <i class="bi bi-pencil"></i> Edit
             </button>
@@ -100,7 +108,45 @@
             </div>
             <div class="pinv-meta-item">
                 <span class="meta-label">Invoice Total</span>
-                <span class="meta-value" id="view-total">£{{ invoice.total|floatformat:2 }}</span>
+                <span class="meta-value" id="view-total"><span class="pinv-cur">£</span>{{ invoice.total|floatformat:2 }}</span>
+            </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Currency</span>
+                <span class="meta-value" style="display:flex;align-items:center;gap:4px;">
+                    <button type="button" id="cur-btn-gbp"
+                            class="pinv-currency-btn{% if invoice.currency != 'EUR' %} active{% endif %}"
+                            onclick="setCurrency('GBP')">&#163; GBP</button>
+                    <button type="button" id="cur-btn-eur"
+                            class="pinv-currency-btn{% if invoice.currency == 'EUR' %} active{% endif %}"
+                            onclick="setCurrency('EUR')">&#8364; EUR</button>
+                </span>
+            </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">VAT Rate</span>
+                <span class="meta-value" style="display:flex;align-items:center;gap:6px;">
+                    <span id="view-vat-rate">{% if invoice.vat_rate %}{{ invoice.vat_rate|floatformat:2 }}%{% else %}&mdash;{% endif %}</span>
+                    <span id="vat-rate-display-btns">
+                        <button class="pinv-btn-icon" onclick="openVatEdit()" title="{% if invoice.vat_rate %}Edit VAT rate{% else %}Add VAT{% endif %}" style="font-size:0.78rem;padding:2px 6px;">
+                            {% if invoice.vat_rate %}<i class="bi bi-pencil"></i>{% else %}<i class="bi bi-plus-lg"></i> VAT{% endif %}
+                        </button>
+                        {% if invoice.vat_rate %}
+                        <button class="pinv-btn-icon" onclick="flattenVatToLine()" title="Convert VAT to a line item (useful for non-standard rates in Xero)" style="font-size:0.78rem;padding:2px 6px;">
+                            <i class="bi bi-list-check"></i> → line
+                        </button>
+                        <button class="pinv-btn-icon danger" onclick="clearVatRate()" title="Remove VAT" style="font-size:0.78rem;padding:2px 6px;">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                        {% endif %}
+                    </span>
+                    <span id="vat-rate-inline-form" style="display:none;align-items:center;gap:4px;">
+                        <input type="number" id="inline-vat-input" value="{{ invoice.vat_rate|floatformat:2|default:'' }}"
+                               min="0" max="100" step="0.01" placeholder="e.g. 22"
+                               style="width:64px;padding:2px 6px;font-size:0.82rem;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:5px;color:var(--text-primary);">
+                        <span style="font-size:0.78rem;color:var(--text-secondary);">%</span>
+                        <button class="pinv-btn-icon success" onclick="saveVatRate()" title="Save"><i class="bi bi-check-lg"></i></button>
+                        <button class="pinv-btn-icon" onclick="closeVatEdit()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                    </span>
+                </span>
             </div>
         </div>
         <div class="pinv-meta-group">
@@ -148,10 +194,22 @@
                 <input type="number" id="edit-amount-paid" class="pinv-input" step="0.01" min="0" value="{{ invoice.amount_paid|floatformat:2 }}">
             </div>
             <div class="pinv-form-row">
-                <label class="pinv-label">Invoice Total (£)</label>
+                <label class="pinv-label">Invoice Total (<span class="pinv-cur">£</span>)</label>
                 <div class="pinv-form-row-stack">
                     <input type="number" id="edit-total" class="pinv-input" step="0.01" min="0" value="{{ invoice.total|floatformat:2 }}" placeholder="0.00">
                 </div>
+            </div>
+            <div class="pinv-form-row">
+                <label class="pinv-label">VAT Rate (%)</label>
+                <input type="number" id="edit-vat-rate" class="pinv-input" step="0.01" min="0" max="100"
+                       value="{{ invoice.vat_rate|floatformat:2|default:'' }}" placeholder="e.g. 20 (leave blank for no VAT)">
+            </div>
+            <div class="pinv-form-row">
+                <label class="pinv-label">Currency</label>
+                <select id="edit-currency" class="pinv-input">
+                    <option value="GBP" {% if invoice.currency != 'EUR' %}selected{% endif %}>£ GBP</option>
+                    <option value="EUR" {% if invoice.currency == 'EUR' %}selected{% endif %}>€ EUR</option>
+                </select>
             </div>
             <div class="pinv-form-row">
                 <label class="pinv-label">Notes</label>
@@ -189,9 +247,25 @@
 <div class="pinv-detail-section">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
         <h3 class="pinv-section-title" style="margin:0;"><i class="bi bi-list-ul"></i> Line Items</h3>
-        <button class="pinv-btn-sm" onclick="addLine()">
-            <i class="bi bi-plus-lg"></i> Add Line
-        </button>
+        <div style="display:flex;gap:8px;">
+            {% if invoice.parent_invoice %}
+            <button class="pinv-btn-sm" onclick="importFromParent()" title="Import parent invoice value as a line item">
+                <i class="bi bi-box-arrow-in-down"></i> Import from {{ invoice.parent_invoice.invoice_number }}
+            </button>
+            <button class="pinv-btn-sm" onclick="deductParentPaid()" title="Record the parent invoice total as already paid so it is deducted below the gross total">
+                <i class="bi bi-dash-circle"></i> Deduct paid
+            </button>
+            {% endif %}
+            <button class="pinv-btn-sm" onclick="recalculateTotals()" title="Recalculate totals from line items">
+                <i class="bi bi-arrow-repeat"></i> Recalculate
+            </button>
+            <button class="pinv-btn-sm" onclick="addFreightLine()" title="Add a carriage / freight line">
+                <i class="bi bi-truck"></i> Freight
+            </button>
+            <button class="pinv-btn-sm" onclick="addLine()">
+                <i class="bi bi-plus-lg"></i> Add Line
+            </button>
+        </div>
     </div>
 
     <div class="pinv-table-container" style="max-height:none;">
@@ -201,7 +275,7 @@
                     <th style="min-width:200px;">Description</th>
                     <th style="width:120px;">Date</th>
                     <th style="width:90px;text-align:right;">Qty</th>
-                    <th style="width:110px;text-align:right;">Rate (£)</th>
+                    <th style="width:110px;text-align:right;">Rate (<span class="pinv-cur">£</span>)</th>
                     <th style="width:110px;text-align:right;">Total</th>
                     <th style="min-width:200px;">Allocated To Order</th>
                     <th style="width:50px;text-align:center;" title="Mark as fit/installation day — generates a timesheet entry">Fit?</th>
@@ -290,7 +364,7 @@
                     <td><input type="text" class="pinv-cell-input" id="new-desc" placeholder="Description"></td>
                     <td><input type="date" class="pinv-cell-input" id="new-date" value=""></td>
                     <td><input type="number" class="pinv-cell-input" id="new-qty" value="1" step="0.01" min="0" style="text-align:right;"></td>
-                    <td><input type="number" class="pinv-cell-input" id="new-rate" value="" step="0.01" min="0" style="text-align:right;" placeholder="Rate"></td>
+                    <td><input type="number" class="pinv-cell-input" id="new-rate" value="" step="0.01" style="text-align:right;" placeholder="Rate"></td>
                     <td class="number-cell">—</td>
                     <td>
                         <div class="order-search-wrap">
@@ -318,10 +392,19 @@
 
     <!-- Totals summary -->
     <div class="pinv-detail-summary">
+        <div id="summary-net-row" class="pinv-summary-row" {% if not invoice.vat_rate %}style="display:none;"{% endif %}>
+            <span class="summary-label">Net</span>
+            <span class="summary-value" id="invoice-net"><span class="pinv-cur">£</span>{{ net_total|default:"0.00"|floatformat:2 }}</span>
+        </div>
+        <div id="summary-vat-row" class="pinv-summary-row" {% if not invoice.vat_rate %}style="display:none;"{% endif %}>
+            <span class="summary-label" id="summary-vat-label">VAT{% if invoice.vat_rate %} ({{ invoice.vat_rate|floatformat:2 }}%){% endif %}</span>
+            <span class="summary-value" id="invoice-vat"><span class="pinv-cur">£</span>{{ vat_amount|default:"0.00"|floatformat:2 }}</span>
+        </div>
         <div class="pinv-summary-row total">
             <span class="summary-label">Total</span>
             <span class="summary-value" id="invoice-total"><span class="pinv-cur">£</span>{{ invoice.total|floatformat:2 }}</span>
         </div>
+        <div class="pinv-summary-divider"></div>
         <div class="pinv-summary-row">
             <span class="summary-label">Amount Paid</span>
             <span class="summary-value paid" id="invoice-paid"><span class="pinv-cur">£</span>{{ invoice.amount_paid|floatformat:2 }}</span>
@@ -479,12 +562,106 @@
     </div>
 </div>
 
+<!-- Amendments -->
+{% if amendments %}
+<div class="pinv-section">
+    <div class="pinv-section-header">
+        <h3><i class="bi bi-file-earmark-diff"></i> Amendment Invoices</h3>
+    </div>
+    <table class="pinv-table" style="width:100%;">
+        <thead>
+            <tr>
+                <th>Invoice No.</th>
+                <th>Reason</th>
+                <th>Date</th>
+                <th style="text-align:right;">Total</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for amend in amendments %}
+            <tr>
+                <td><a href="{% url 'purchase_invoice_detail' amend.id %}">{{ amend.invoice_number }}</a></td>
+                <td style="color:var(--text-secondary);font-size:0.85rem;">{{ amend.amendment_reason|default:"—" }}</td>
+                <td>{{ amend.date|date:"d/m/Y"|default:"—" }}</td>
+                <td style="text-align:right;font-weight:600;"><span class="pinv-cur">{{ invoice.currency|default:"GBP"|yesno:"€,£" }}</span>{{ amend.total|floatformat:2 }}</td>
+                <td><span class="pinv-status {{ amend.status|lower }}">{{ amend.status }}</span></td>
+                <td><a href="{% url 'purchase_invoice_detail' amend.id %}" class="pinv-btn-sm">View</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Create Amendment Modal -->
+{% if invoice.parent_invoice %}
+<div id="deduct-paid-modal" style="display:none; position:fixed; inset:0; z-index:1050; background:var(--overlay-bg); align-items:center; justify-content:center;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:28px; width:100%; max-width:460px; box-shadow:var(--shadow-lg);">
+        <h4 style="margin:0 0 6px; font-size:1rem; font-weight:600;"><i class="bi bi-dash-circle" style="margin-right:6px;"></i>Deduct already-paid amount</h4>
+        <p style="margin:12px 0 6px; font-size:0.85rem; color:var(--text-secondary);">
+            This will add a negative line item for <strong>{{ invoice.parent_invoice.total|floatformat:2 }}</strong>
+            (the total of <strong>{{ invoice.parent_invoice.invoice_number }}</strong>) to offset the amount already paid.
+        </p>
+        <p style="margin:0 0 20px; font-size:0.85rem; color:var(--text-secondary);">
+            The deduction appears as an explicit line &mdash; the net total will reflect only what is still owed.
+        </p>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" class="pinv-btn-sm" onclick="closeDeductPaidModal()">Cancel</button>
+            <button type="button" class="pinv-btn-sm primary" onclick="confirmDeductPaid()">
+                <i class="bi bi-check-lg"></i> Confirm
+            </button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Flatten VAT Modal -->
+<div id="flatten-vat-modal" style="display:none; position:fixed; inset:0; z-index:1050; background:var(--overlay-bg); align-items:center; justify-content:center;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:28px; width:100%; max-width:460px; box-shadow:var(--shadow-lg);">
+        <h4 style="margin:0 0 6px; font-size:1rem; font-weight:600;"><i class="bi bi-list-check" style="margin-right:6px;"></i>Convert VAT to a line item</h4>
+        <p style="margin:12px 0 6px; font-size:0.85rem; color:var(--text-secondary);">
+            This will add an explicit line item for the VAT amount ({% if invoice.vat_rate %}{{ invoice.vat_rate|floatformat:2 }}%{% else %}current rate{% endif %} of the net total) and clear the VAT rate.
+        </p>
+        <p style="margin:0 0 20px; font-size:0.85rem; color:var(--text-secondary);">
+            The invoice total stays the same. This is useful for pushing to Xero when the VAT rate is non-standard &mdash; Xero will see the VAT as a plain line item with no tax code.
+        </p>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" class="pinv-btn-sm" onclick="document.getElementById('flatten-vat-modal').style.display='none'">Cancel</button>
+            <button type="button" class="pinv-btn-sm primary" onclick="confirmFlattenVat()">
+                <i class="bi bi-list-check"></i> Convert
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="amendment-modal" style="display:none; position:fixed; inset:0; z-index:1050; background:var(--overlay-bg); align-items:center; justify-content:center;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:28px; width:100%; max-width:480px; box-shadow:var(--shadow-lg);">
+        <h4 style="margin:0 0 6px; font-size:1rem; font-weight:600;">Create Amendment Invoice</h4>
+        <p style="margin:0 0 20px; font-size:0.85rem; color:var(--text-secondary);">
+            This will create <strong>{{ invoice.invoice_number }}-A</strong> as a sub-invoice linked to {{ invoice.invoice_number }}.
+        </p>
+        <label style="display:block; font-size:0.85rem; font-weight:500; margin-bottom:6px;">Reason for amendment <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <textarea id="amendment-reason" rows="3" placeholder="e.g. Missing carriage charge, VAT correction…"
+            style="width:100%; box-sizing:border-box; padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-primary); font-size:0.9rem; resize:vertical;"></textarea>
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
+            <button type="button" class="pinv-btn-sm" onclick="closeAmendmentModal()">Cancel</button>
+            <button type="button" class="pinv-btn-sm primary" id="amendment-create-btn" onclick="submitAmendment()">
+                <i class="bi bi-file-earmark-plus"></i> Create Amendment
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 const INVOICE_ID = {{ invoice.id }};
 const CSRF = '{{ csrf_token }}';
+let CUR_SYM = '{{ invoice.currency|default:"GBP" }}' === 'EUR' ? '\u20ac' : '\u00a3';
+function _curSpan() { return '<span class="pinv-cur">' + CUR_SYM + '</span>'; }
 
 // ── Header edit ────────────────────────────────────────────────
 function toggleHeaderEdit() {
@@ -509,6 +686,8 @@ function saveHeader() {
         amount_paid:    document.getElementById('edit-amount-paid').value,
         total:          document.getElementById('edit-total').value,
         notes:          document.getElementById('edit-notes').value,
+        vat_rate:       document.getElementById('edit-vat-rate').value,
+        currency:       document.getElementById('edit-currency').value,
     };
     fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
         method: 'POST',
@@ -525,16 +704,60 @@ function saveHeader() {
             document.getElementById('detail-number').textContent = data.invoice_number;
             document.getElementById('detail-status-badge').textContent  = data.status;
             document.getElementById('detail-status-badge').className    = 'pinv-status ' + data.status.toLowerCase();
-            document.getElementById('invoice-paid').innerHTML  = '<span class="pinv-cur">£</span>' + parseFloat(data.amount_paid).toFixed(2);
-            document.getElementById('view-total').textContent    = '£' + parseFloat(data.total).toFixed(2);
-            document.getElementById('invoice-total').innerHTML = '<span class="pinv-cur">£</span>' + parseFloat(data.total).toFixed(2);
-            document.getElementById('invoice-outstanding').innerHTML = '<span class="pinv-cur">£</span>' + parseFloat(data.amount_outstanding).toFixed(2);
+            document.getElementById('invoice-paid').innerHTML  = _curSpan() + parseFloat(data.amount_paid).toFixed(2);
+            document.getElementById('invoice-total').innerHTML = _curSpan() + parseFloat(data.total).toFixed(2);
+            document.getElementById('invoice-outstanding').innerHTML = _curSpan() + parseFloat(data.amount_outstanding).toFixed(2);
+            // Update VAT breakdown (net = line_net from server, vat added on top)
+            const newVatRate = parseFloat(data.vat_rate) || 0;
+            const lineNet    = parseFloat(data.line_net)   || 0;
+            const vatAmt2    = parseFloat(data.vat_amount) || 0;
+            const netRow = document.getElementById('summary-net-row');
+            const vatRow = document.getElementById('summary-vat-row');
+            const vatLbl = document.getElementById('summary-vat-label');
+            const netEl  = document.getElementById('invoice-net');
+            const vatEl  = document.getElementById('invoice-vat');
+            const viewVatEl = document.getElementById('view-vat-rate');
+            if (newVatRate > 0) {
+                if (netRow) netRow.style.display = '';
+                if (vatRow) vatRow.style.display = '';
+                if (vatLbl) vatLbl.textContent = `VAT (${newVatRate}%)`;
+                if (netEl)  netEl.innerHTML  = _curSpan() + lineNet.toFixed(2);
+                if (vatEl)  vatEl.innerHTML  = _curSpan() + vatAmt2.toFixed(2);
+                if (viewVatEl) viewVatEl.textContent = newVatRate + '%';
+            } else {
+                if (netRow) netRow.style.display = 'none';
+                if (vatRow) vatRow.style.display = 'none';
+                if (viewVatEl) viewVatEl.textContent = '\u2014';
+            }
+            // Sync currency buttons
+            _syncCurrencyBtns(data.currency || 'GBP');
             updatePaymentBadge(data.payment_status);
             toggleHeaderEdit();
         } else {
             alert(data.error || 'Failed to save');
         }
     });
+}
+
+function _syncCurrencyBtns(code) {
+    CUR_SYM = code === 'EUR' ? '\u20ac' : '\u00a3';
+    document.querySelectorAll('.pinv-cur').forEach(el => el.textContent = CUR_SYM);
+    const gbp = document.getElementById('cur-btn-gbp');
+    const eur = document.getElementById('cur-btn-eur');
+    if (gbp) gbp.className = 'pinv-currency-btn' + (code === 'GBP' ? ' active' : '');
+    if (eur) eur.className = 'pinv-currency-btn' + (code === 'EUR' ? ' active' : '');
+    const sel = document.getElementById('edit-currency');
+    if (sel) sel.value = code;
+}
+
+function setCurrency(code) {
+    fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/json'},
+        body: JSON.stringify({currency: code})
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) _syncCurrencyBtns(data.currency || code); });
 }
 
 function updatePaymentBadge(status) {
@@ -546,10 +769,196 @@ function updatePaymentBadge(status) {
     document.querySelector('.pinv-detail-title-row > div').appendChild(badge);
 }
 
+function openVatEdit() {
+    document.getElementById('vat-rate-display-btns').style.display = 'none';
+    const form = document.getElementById('vat-rate-inline-form');
+    form.style.display = 'inline-flex';
+    document.getElementById('inline-vat-input').focus();
+    document.getElementById('inline-vat-input').select();
+}
+
+function closeVatEdit() {
+    document.getElementById('vat-rate-inline-form').style.display = 'none';
+    document.getElementById('vat-rate-display-btns').style.display = '';
+}
+
+function saveVatRate() {
+    const vatRate = document.getElementById('inline-vat-input').value.trim();
+    _applyVatRate(vatRate);
+}
+
+function clearVatRate() {
+    _applyVatRate('');
+}
+
+function _applyVatRate(vatRate) {
+    fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vat_rate: vatRate })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { alert(data.error || 'Failed to save VAT rate'); return; }
+        closeVatEdit();
+        const newVatRate = parseFloat(data.vat_rate) || 0;
+        const lineNet    = parseFloat(data.line_net)   || 0;
+        const vatAmt     = parseFloat(data.vat_amount) || 0;
+        const gross      = parseFloat(data.total)      || 0;
+        const viewVatEl  = document.getElementById('view-vat-rate');
+        const displayBtns = document.getElementById('vat-rate-display-btns');
+        const netRow = document.getElementById('summary-net-row');
+        const vatRow = document.getElementById('summary-vat-row');
+        const vatLbl = document.getElementById('summary-vat-label');
+        const netEl  = document.getElementById('invoice-net');
+        const vatEl  = document.getElementById('invoice-vat');
+        // Always update the gross total and outstanding
+        document.getElementById('invoice-total').innerHTML = _curSpan() + gross.toFixed(2);
+        document.getElementById('invoice-outstanding').innerHTML = _curSpan() + parseFloat(data.amount_outstanding).toFixed(2);
+        if (newVatRate > 0) {
+            if (viewVatEl)  viewVatEl.textContent = newVatRate + '%';
+            if (netRow) netRow.style.display = '';
+            if (vatRow) vatRow.style.display = '';
+            if (vatLbl) vatLbl.textContent = `VAT (${newVatRate}%)`;
+            if (netEl)  netEl.innerHTML  = _curSpan() + lineNet.toFixed(2);
+            if (vatEl)  vatEl.innerHTML  = _curSpan() + vatAmt.toFixed(2);
+            displayBtns.innerHTML = `
+                <button class="pinv-btn-icon" onclick="openVatEdit()" title="Edit VAT rate" style="font-size:0.78rem;padding:2px 6px;">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="pinv-btn-icon danger" onclick="clearVatRate()" title="Remove VAT" style="font-size:0.78rem;padding:2px 6px;">
+                    <i class="bi bi-x-lg"></i>
+                </button>`;
+        } else {
+            if (viewVatEl)  viewVatEl.textContent = '\u2014';
+            if (netRow) netRow.style.display = 'none';
+            if (vatRow) vatRow.style.display = 'none';
+            displayBtns.innerHTML = `
+                <button class="pinv-btn-icon" onclick="openVatEdit()" title="Add VAT" style="font-size:0.78rem;padding:2px 6px;">
+                    <i class="bi bi-plus-lg"></i> VAT
+                </button>`;
+        }
+    })
+    .catch(() => alert('Network error saving VAT rate'));
+}
+
 // ── Add / save new line ────────────────────────────────────────
 function addLine() {
     document.getElementById('new-line-row').style.display = '';
     document.getElementById('new-desc').focus();
+}
+
+function addFreightLine() {
+    document.getElementById('new-line-row').style.display = '';
+    document.getElementById('new-desc').value = 'Carriage';
+    document.getElementById('new-qty').value  = '1';
+    document.getElementById('new-rate').value  = '';
+    document.getElementById('new-rate').focus();
+}
+
+{% if invoice.parent_invoice %}
+function importFromParent() {
+    document.getElementById('new-line-row').style.display = '';
+    document.getElementById('new-desc').value = 'Amendment — {{ invoice.parent_invoice.invoice_number }}';
+    document.getElementById('new-qty').value  = '1';
+    document.getElementById('new-rate').value = '{{ invoice.parent_invoice.total|floatformat:2 }}';
+    document.getElementById('new-date').value = '';
+    document.getElementById('new-desc').focus();
+}
+
+function deductParentPaid() {
+    document.getElementById('deduct-paid-modal').style.display = 'flex';
+}
+
+function closeDeductPaidModal() {
+    document.getElementById('deduct-paid-modal').style.display = 'none';
+}
+
+function confirmDeductPaid() {
+    closeDeductPaidModal();
+    fetch(`/purchase-invoices/${INVOICE_ID}/lines/add/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            description: 'Less: amount paid on {{ invoice.parent_invoice.invoice_number }}',
+            quantity: 1,
+            rate: -{{ invoice.parent_invoice.total|floatformat:2 }},
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            insertLineRow(data.line);
+            refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
+        } else {
+            alert(data.error || 'Failed to add deduction line');
+        }
+    })
+    .catch(err => alert('Error adding deduction line: ' + err.message));
+}
+{% endif %}
+
+function flattenVatToLine() {
+    document.getElementById('flatten-vat-modal').style.display = 'flex';
+}
+
+function confirmFlattenVat() {
+    document.getElementById('flatten-vat-modal').style.display = 'none';
+    fetch(`/purchase-invoices/${INVOICE_ID}/flatten-vat/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            insertLineRow(data.line);
+            refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
+            // Hide VAT rows in summary since rate is now cleared
+            const netRow = document.getElementById('summary-net-row');
+            const vatRow = document.getElementById('summary-vat-row');
+            if (netRow) netRow.style.display = 'none';
+            if (vatRow) vatRow.style.display = 'none';
+            // Update VAT rate display
+            document.getElementById('view-vat-rate').textContent = '—';
+            const btns = document.getElementById('vat-rate-display-btns');
+            if (btns) btns.innerHTML = '<button class="pinv-btn-icon" onclick="openVatEdit()" title="Add VAT" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-plus-lg"></i> VAT</button>';
+        } else {
+            alert(data.error || 'Failed to flatten VAT');
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+
+function recalculateTotals() {
+    fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('invoice-total').innerHTML        = _curSpan() + parseFloat(data.total).toFixed(2);
+            document.getElementById('invoice-paid').innerHTML         = _curSpan() + parseFloat(data.amount_paid).toFixed(2);
+            document.getElementById('invoice-outstanding').innerHTML  = _curSpan() + parseFloat(data.amount_outstanding).toFixed(2);
+            const lineNet = parseFloat(data.line_net)   || 0;
+            const vatAmt  = parseFloat(data.vat_amount) || 0;
+            const vatRate = parseFloat(data.vat_rate)   || 0;
+            const netRow  = document.getElementById('summary-net-row');
+            const vatRow  = document.getElementById('summary-vat-row');
+            const vatLbl  = document.getElementById('summary-vat-label');
+            const netEl   = document.getElementById('invoice-net');
+            const vatEl   = document.getElementById('invoice-vat');
+            if (vatRate > 0) {
+                if (netRow) netRow.style.display = '';
+                if (vatRow) vatRow.style.display = '';
+                if (vatLbl) vatLbl.textContent = `VAT (${vatRate.toFixed(2)}%)`;
+                if (netEl)  netEl.innerHTML = _curSpan() + lineNet.toFixed(2);
+                if (vatEl)  vatEl.innerHTML = _curSpan() + vatAmt.toFixed(2);
+            }
+        }
+    });
 }
 
 function saveNewLine() {
@@ -612,7 +1021,7 @@ function buildLineHTML(line) {
         <td><input type="date" class="pinv-cell-input line-date" value="${line.line_date || ''}" oninput="markLineDirty(${line.id})"></td>
         <td><input type="number" class="pinv-cell-input line-qty" value="${line.quantity}" step="0.01" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
         <td><input type="number" class="pinv-cell-input line-rate" value="${line.rate}" step="0.01" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
-        <td class="number-cell line-total-cell" id="line-total-${line.id}"><span class="pinv-cur">£</span>${parseFloat(line.line_total).toFixed(2)}</td>
+        <td class="number-cell line-total-cell" id="line-total-${line.id}">${_curSpan()}${parseFloat(line.line_total).toFixed(2)}</td>
         <td>
             <div class="order-search-wrap">
                 <div class="order-input-row">
@@ -668,7 +1077,7 @@ function updateLine(lineId) {
     const isFitDay = fitDayChk ? fitDayChk.checked : false;
 
     // Optimistic total update
-    row.querySelector('.line-total-cell').innerHTML = '<span class="pinv-cur">£</span>' + (qty * rate).toFixed(2);
+    row.querySelector('.line-total-cell').innerHTML = _curSpan() + (qty * rate).toFixed(2);
 
     fetch(`/purchase-invoices/${INVOICE_ID}/lines/${lineId}/update/`, {
         method: 'POST',
@@ -678,7 +1087,7 @@ function updateLine(lineId) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            document.getElementById('line-total-' + lineId).innerHTML = '<span class="pinv-cur">£</span>' + parseFloat(data.line.line_total).toFixed(2);
+            document.getElementById('line-total-' + lineId).innerHTML = _curSpan() + parseFloat(data.line.line_total).toFixed(2);
             refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
             const saveBtn = document.getElementById('line-save-' + lineId);
             if (saveBtn) saveBtn.style.display = 'none';
@@ -739,7 +1148,7 @@ function doSplit() {
             if (origRow) {
                 origRow.querySelector('.line-qty').value  = data.original.quantity;
                 origRow.querySelector('.line-rate').value = data.original.rate;
-                origRow.querySelector('.line-total-cell').innerHTML = '<span class="pinv-cur">£</span>' + parseFloat(data.original.line_total).toFixed(2);
+                origRow.querySelector('.line-total-cell').innerHTML = _curSpan() + parseFloat(data.original.line_total).toFixed(2);
             }
             // Insert all new lines after original
             let afterId = data.after_line_id;
@@ -787,9 +1196,9 @@ function deleteLine(lineId) {
 
 // ── Refresh totals ─────────────────────────────────────────────
 function refreshTotals(total, paid, outstanding) {
-    document.getElementById('invoice-total').innerHTML       = '<span class="pinv-cur">£</span>' + parseFloat(total).toFixed(2);
-    document.getElementById('invoice-paid').innerHTML        = '<span class="pinv-cur">£</span>' + parseFloat(paid).toFixed(2);
-    document.getElementById('invoice-outstanding').innerHTML = '<span class="pinv-cur">£</span>' + parseFloat(outstanding).toFixed(2);
+    document.getElementById('invoice-total').innerHTML       = _curSpan() + parseFloat(total).toFixed(2);
+    document.getElementById('invoice-paid').innerHTML        = _curSpan() + parseFloat(paid).toFixed(2);
+    document.getElementById('invoice-outstanding').innerHTML = _curSpan() + parseFloat(outstanding).toFixed(2);
 }
 
 // ── Order search ───────────────────────────────────────────────
@@ -1374,7 +1783,7 @@ function pushToXero() {
     document.getElementById('xero-confirm-modal').style.display = 'flex';
 }
 
-function xeroConfirmed() {
+function xeroConfirmed(forceNoVat = false) {
     document.getElementById('xero-confirm-modal').style.display = 'none';
     const btn = document.getElementById('xero-push-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing…'; }
@@ -1385,6 +1794,7 @@ function xeroConfirmed() {
         body: JSON.stringify({
             gl_code: (document.getElementById('xero-gl-code')?.value || '').trim(),
             attach_pdf: document.getElementById('xero-attach-pdf')?.checked ?? true,
+            force_no_vat: forceNoVat,
         }),
     })
     .then(r => r.json())
@@ -1405,6 +1815,10 @@ function xeroConfirmed() {
                     <i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> In Xero <i class="bi bi-box-arrow-up-right" style="font-size:0.75rem;"></i>
                 </a>`;
             }
+        } else if (data.can_force_no_vat) {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
+            document.getElementById('xero-vat-fallback-msg').textContent = data.error;
+            document.getElementById('xero-vat-fallback-modal').style.display = 'flex';
         } else {
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero'; }
             alert('Error: ' + (data.error || 'Failed to push to Xero'));
@@ -1615,6 +2029,8 @@ function doCreatePo() {
     })
     .catch(() => alert('Network error'));
 }
+// Initialise currency symbol from invoice currency on page load
+_syncCurrencyBtns('{{ invoice.currency|default:"GBP" }}');
 </script>
 
 <!-- Manual link Xero modal -->
@@ -1716,6 +2132,26 @@ function doCreatePo() {
             <button class="btn-cancel" onclick="document.getElementById('xero-confirm-modal').style.display='none'">Cancel</button>
             <button class="btn-save" onclick="xeroConfirmed()">
                 <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Attach-fail modal ──────────────────────────────────────── -->
+<div id="xero-vat-fallback-modal" style="display:none;position:fixed;inset:0;z-index:3100;background:var(--overlay-bg);align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.4);width:100%;max-width:460px;padding:28px 28px 20px;display:flex;flex-direction:column;gap:20px;">
+        <div style="display:flex;align-items:flex-start;gap:14px;">
+            <i class="bi bi-exclamation-triangle-fill" style="font-size:1.5rem;color:var(--warning-color,#f5a623);flex-shrink:0;margin-top:2px;"></i>
+            <div>
+                <div style="font-weight:600;font-size:0.95rem;color:var(--text-primary);margin-bottom:6px;">VAT rate not available in Xero</div>
+                <p id="xero-vat-fallback-msg" style="margin:0 0 10px;font-size:0.85rem;color:var(--text-secondary);"></p>
+                <p style="margin:0;font-size:0.85rem;color:var(--text-secondary);">You can push without a VAT code — the invoice will appear in Xero as <strong>No Tax</strong> and you can assign the correct tax there.</p>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn-cancel" onclick="document.getElementById('xero-vat-fallback-modal').style.display='none'">Cancel</button>
+            <button class="btn-save" onclick="document.getElementById('xero-vat-fallback-modal').style.display='none'; xeroConfirmed(true);">
+                <i class="bi bi-cloud-upload"></i> Push without VAT code
             </button>
         </div>
     </div>
@@ -1850,5 +2286,54 @@ function doCreatePo() {
         </div>
     </div>
 </div>
+
+<script>
+// ── Amendment invoice ──────────────────────────────────────────
+function openAmendmentModal() {
+    document.getElementById('amendment-reason').value = '';
+    document.getElementById('amendment-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('amendment-reason').focus(), 50);
+}
+
+function closeAmendmentModal() {
+    document.getElementById('amendment-modal').style.display = 'none';
+}
+
+document.getElementById('amendment-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeAmendmentModal();
+});
+
+function submitAmendment() {
+    const btn = document.getElementById('amendment-create-btn');
+    const reason = document.getElementById('amendment-reason').value.trim();
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating…';
+
+    fetch('{% url "create_purchase_amendment_invoice" invoice.id %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': CSRF,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reason }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.invoice_url;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-file-earmark-plus"></i> Create Amendment';
+            alert(data.error || 'Failed to create amendment');
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-file-earmark-plus"></i> Create Amendment';
+        alert('Error: ' + err.message);
+    });
+}
+</script>
 
 {% endblock %}

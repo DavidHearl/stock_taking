@@ -14,7 +14,7 @@ from .it_views import (
     mobile_phone_templates, mobile_phone_template_create,
     laptop_devices, desktop_devices,
 )
-from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products, push_invoice_to_xero, check_invoices_in_xero
+from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, create_amendment_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products, push_invoice_to_xero, check_invoices_in_xero, recalculate_invoice
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download, claim_search_api
 from .gallery_views import gallery, gallery_upload, gallery_delete, gallery_update, gallery_customer_orders, gallery_rotate
@@ -25,7 +25,7 @@ from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_statu
 from .lead_views import leads_list, lead_detail, lead_save, lead_delete, leads_bulk_delete, lead_create, lead_merge, lead_convert
 from .enquiry_views import website_enquiries_list, website_enquiry_receive, website_enquiry_update, website_enquiry_delete, website_enquiry_detail
 from .purchase_invoice_views import (
-    purchase_invoices_list, purchase_invoice_detail, create_purchase_invoice,
+    purchase_invoices_list, purchase_invoice_detail, create_purchase_invoice, create_purchase_amendment_invoice,
     update_purchase_invoice, delete_purchase_invoice, add_purchase_invoice_line,
     update_purchase_invoice_line, delete_purchase_invoice_line,
     copy_purchase_invoice_line, split_purchase_invoice_line,
@@ -37,7 +37,7 @@ from .purchase_invoice_views import (
     create_opo_from_invoice, link_opo_to_invoice, unlink_opo_from_invoice,
     search_opos_for_invoice, create_po_from_invoice, create_po_standalone,
     manual_link_xero, sync_xero_payment_statuses, next_invoice_number, supplier_search,
-    resync_invoice_timesheets,
+    resync_invoice_timesheets, flatten_vat_to_line_item,
 )
 from .accounts_payable_views import (
     accounts_payable_inbox,
@@ -101,6 +101,7 @@ urlpatterns = [
     path('purchase-invoices/create/', create_purchase_invoice, name='create_purchase_invoice'),
     path('purchase-invoices/parse-pdf/', parse_purchase_invoice_pdf, name='parse_purchase_invoice_pdf'),
     path('purchase-invoices/<int:invoice_id>/', purchase_invoice_detail, name='purchase_invoice_detail'),
+    path('purchase-invoices/<int:invoice_id>/create-amendment/', create_purchase_amendment_invoice, name='create_purchase_amendment_invoice'),
     path('purchase-invoices/<int:invoice_id>/update/', update_purchase_invoice, name='update_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/delete/', delete_purchase_invoice, name='delete_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/lines/add/', add_purchase_invoice_line, name='add_purchase_invoice_line'),
@@ -113,6 +114,7 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/link-po/', link_purchase_invoice_po, name='link_purchase_invoice_po'),
     path('purchase-invoices/<int:invoice_id>/unlink-po/<int:po_id>/', unlink_purchase_invoice_po, name='unlink_purchase_invoice_po'),
     path('purchase-invoices/<int:invoice_id>/push-to-xero/', push_purchase_invoice_to_xero, name='push_purchase_invoice_to_xero'),
+    path('purchase-invoices/<int:invoice_id>/flatten-vat/', flatten_vat_to_line_item, name='flatten_vat_to_line_item'),
     path('purchase-invoices/<int:invoice_id>/void-xero/', void_xero_purchase_invoice, name='void_xero_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/search-in-xero/', search_purchase_invoice_in_xero, name='search_purchase_invoice_in_xero'),
     path('purchase-invoices/sync-xero-payments/', sync_xero_payment_statuses, name='sync_xero_payment_statuses'),
@@ -162,11 +164,13 @@ urlpatterns = [
     path('invoices/sync-anthill/', sync_invoices_from_anthill, name='sync_invoices_anthill'),
     path('invoices/create-from-anthill/', create_invoices_from_anthill, name='create_invoices_from_anthill'),
     path('invoices/<int:invoice_id>/', invoice_detail, name='invoice_detail'),
+    path('invoices/<int:invoice_id>/create-amendment/', create_amendment_invoice, name='create_amendment_invoice'),
     path('invoices/<int:invoice_id>/link-po/', invoice_link_po, name='invoice_link_po'),
     path('invoices/<int:invoice_id>/unlink-po/', invoice_unlink_po, name='invoice_unlink_po'),
     path('invoices/<int:invoice_id>/upload-attachment/', invoice_upload_attachment, name='invoice_upload_attachment'),
     path('invoices/<int:invoice_id>/delete-attachment/', invoice_delete_attachment, name='invoice_delete_attachment'),
     path('invoices/<int:invoice_id>/push-to-xero/', push_invoice_to_xero, name='push_invoice_to_xero'),
+    path('invoices/<int:invoice_id>/recalculate/', recalculate_invoice, name='recalculate_invoice'),
     path('invoices/check-xero/', check_invoices_in_xero, name='check_invoices_in_xero'),
     path('invoices/<int:invoice_id>/set-linked-products/', invoice_set_linked_products, name='invoice_set_linked_products'),
     path('api/invoice-search/', invoice_search, name='invoice_search'),
@@ -340,6 +344,7 @@ urlpatterns = [
     path('shortages/raumplus-order-pdf/', raumplus_order_pdf, name='raumplus_order_pdf'),
     path('shortages/save-raumplus-draft/', save_raumplus_draft, name='save_raumplus_draft'),
     path('shortages/save-rau-rule-defaults/', views.save_rau_rule_defaults, name='save_rau_rule_defaults'),
+    path('shortages/style-jobs-report/', views.raumplus_style_jobs_report, name='raumplus_style_jobs_report'),
     path('shortages/delete-raumplus-draft/<int:draft_id>/', delete_raumplus_draft, name='delete_raumplus_draft'),
     path('api/raumplus-copy-po/<int:po_id>/', raumplus_copy_po_items, name='raumplus_copy_po_items'),
     path('costing-report/', views.costing_report, name='costing_report'),

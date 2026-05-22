@@ -1062,3 +1062,62 @@ def attach_file_to_invoice(xero_invoice_id, filename, file_bytes, content_type="
         logger.error(f"Xero attach file error (Invoice {xero_invoice_id}): {e}")
         _last_api_error = error_detail
         return None
+
+
+# In-process cache: rate (int) → TaxType code string
+_tax_rate_code_cache: dict = {}
+
+
+def find_or_create_tax_rate(rate_percent: int) -> str | None:
+    """Return the Xero TaxType code for the given VAT percentage.
+
+    1. Checks the in-process cache.
+    2. Queries /TaxRates for an existing rate whose effective rate matches.
+    3. If none found, creates a new custom tax rate via POST /TaxRates.
+    4. Returns the TaxType string, or None on failure.
+    """
+    global _tax_rate_code_cache
+
+    if rate_percent in _tax_rate_code_cache:
+        return _tax_rate_code_cache[rate_percent]
+
+    # ── 1. Fetch existing tax rates ───────────────────────────
+    result = _api_get('TaxRates')
+    if result:
+        for tr in result.get('TaxRates', []):
+            # Skip deleted / archived rates
+            if tr.get('Status', '').upper() in ('DELETED', 'ARCHIVED'):
+                continue
+            # EffectiveRate is the total rate after compounding
+            effective = tr.get('EffectiveRate')
+            if effective is not None and round(float(effective)) == rate_percent:
+                code = tr['TaxType']
+                _tax_rate_code_cache[rate_percent] = code
+                logger.info(f"Xero tax rate {rate_percent}% found: {code} ({tr.get('Name')})")
+                return code
+
+    # ── 2. Create a new tax rate ──────────────────────────────
+    logger.info(f"No Xero tax rate found for {rate_percent}% — creating one.")
+    payload = {
+        'TaxRates': [{
+            'Name': f'VAT {rate_percent}%',
+            'TaxComponents': [{
+                'Name': f'{rate_percent}% VAT',
+                'Rate': float(rate_percent),
+                'IsCompound': False,
+                'IsNonRecoverable': False,
+            }],
+        }]
+    }
+    create_result = _api_put('TaxRates', payload)
+    if create_result:
+        for tr in create_result.get('TaxRates', []):
+            code = tr.get('TaxType')
+            if code:
+                _tax_rate_code_cache[rate_percent] = code
+                logger.info(f"Xero tax rate {rate_percent}% created: {code}")
+                return code
+
+    xero_err = _last_api_error or 'unknown error'
+    logger.error(f"Failed to find or create Xero tax rate for {rate_percent}%: {xero_err}")
+    return None

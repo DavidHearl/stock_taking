@@ -1379,6 +1379,7 @@ def shortages(request):
 
         APPLY_STYLE_BUFFER = _parse_bool('rule_apply_style_buffer', _rule_bool_default('rule_apply_style_buffer', True))
         MIN_STYLE_BUFFER = _parse_int('rule_style_buffer', _rule_default('rule_style_buffer', 8), min_value=0, max_value=1000)
+        STYLE_PREDICTION_MONTHS = _parse_int('rule_style_prediction_months', _rule_default('rule_style_prediction_months', 6), min_value=1, max_value=24)
         ENFORCE_MIN_LINE_COST = _parse_bool('rule_enforce_min_line_cost', _rule_bool_default('rule_enforce_min_line_cost', True))
         APPLY_PRIORITY_WEIGHTING = _parse_bool('rule_apply_priority_weighting', _rule_bool_default('rule_apply_priority_weighting', True))
         TOP_ROLLER_PRIORITY = _parse_decimal('rule_top_roller_priority', _rule_default('rule_top_roller_priority', '3.0'), min_value='0', max_value='20')
@@ -1453,6 +1454,7 @@ def shortages(request):
         ENABLE_MIN_ORDER_VALUE = _row_enabled('rule_min_order_value', _rule_enabled_default('rule_min_order_value', True), 'rule_enable_min_order_value')
         ENABLE_VAT_PERCENT = _row_enabled('rule_vat_percent', _rule_enabled_default('rule_vat_percent', True), 'rule_enable_vat_percent')
         ENABLE_STYLE_BUFFER = _row_enabled('rule_style_buffer', APPLY_STYLE_BUFFER, 'rule_apply_style_buffer')
+        ENABLE_STYLE_PREDICTION_MONTHS = _row_enabled('rule_style_prediction_months', True, '')
         ENABLE_MIN_LINE_COST = _row_enabled('rule_min_line_cost', ENFORCE_MIN_LINE_COST, 'rule_enforce_min_line_cost')
         ENABLE_RECENT_WEIGHT_PERCENT = _row_enabled('rule_recent_weight_percent', APPLY_WEIGHTED_AVERAGE, 'rule_apply_weighted_average')
         ENABLE_PREDICTION_BUFFER_PERCENT = _row_enabled('rule_prediction_buffer_percent', APPLY_WEIGHTED_AVERAGE, 'rule_apply_weighted_average')
@@ -1735,7 +1737,10 @@ def shortages(request):
                 data['all_time_monthly_avg'] = recent_monthly_avg
                 data['weighted_monthly_avg'] = recent_monthly_avg
             prediction_multiplier = 1 + (float(prediction_buffer_percent) / 100)
-            data['predicted_need'] = data['weighted_monthly_avg'] * prediction_months * prediction_multiplier
+            _style_text = (data['sku'] + ' ' + data['name']).upper()
+            _item_is_style = any(code in _style_text for code in ('S150', 'S750', 'S751', 'S753'))
+            item_prediction_months = STYLE_PREDICTION_MONTHS if _item_is_style else prediction_months
+            data['predicted_need'] = data['weighted_monthly_avg'] * item_prediction_months * prediction_multiplier
             if APPLY_GASKET_TARGET and ('GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper()):
                 target_stock = gasket_target_stock
                 data['predicted_shortage'] = max(0, max(data['predicted_need'], target_stock) - data['current_stock'])
@@ -2287,7 +2292,7 @@ def shortages(request):
             ]},
             {'category': 'Prediction Model', 'rules': [
                 'Historical period: Last 90 days of orders',
-                f'Prediction window: Next {prediction_months} months + {prediction_buffer_percent}% buffer',
+                f'Prediction window: Next {prediction_months} months + {prediction_buffer_percent}% buffer (styles: {STYLE_PREDICTION_MONTHS} months)',
                 f'Weighted average: {recent_weight_percent}% recent + {100 - recent_weight_percent}% historical ({"ON" if APPLY_WEIGHTED_AVERAGE else "OFF"})',
             ]},
             {'category': 'Target Stock Levels', 'rules': [
@@ -2298,6 +2303,7 @@ def shortages(request):
 
         computed_rule_values = {
             'rule_style_buffer': MIN_STYLE_BUFFER,
+            'rule_style_prediction_months': STYLE_PREDICTION_MONTHS,
             'rule_min_line_cost': MIN_LINE_COST,
             'rule_min_order_value': MIN_ORDER_VALUE,
             'rule_vat_percent': vat_percent,
@@ -2331,6 +2337,7 @@ def shortages(request):
             'rule_min_order_value': ENABLE_MIN_ORDER_VALUE,
             'rule_vat_percent': ENABLE_VAT_PERCENT,
             'rule_style_buffer': ENABLE_STYLE_BUFFER,
+            'rule_style_prediction_months': ENABLE_STYLE_PREDICTION_MONTHS,
             'rule_min_line_cost': ENABLE_MIN_LINE_COST,
             'rule_recent_weight_percent': ENABLE_RECENT_WEIGHT_PERCENT,
             'rule_prediction_buffer_percent': ENABLE_PREDICTION_BUFFER_PERCENT,
@@ -2362,6 +2369,7 @@ def shortages(request):
 
         BUFFER_RULE_NAMES = {
             'rule_style_buffer',
+            'rule_style_prediction_months',
             'rule_track_buffer',
             'rule_rail_buffer',
             'rule_pair_balance_packs',
@@ -3186,6 +3194,7 @@ def raumplus_storage(request):
     MIN_ORDER_VALUE = Decimal('5000.00')  # £5000 minimum order for free shipping (inc VAT)
     MIN_LINE_COST = Decimal('100.00')  # £100 minimum per line item
     VAT_RATE = Decimal('1.19')  # 19% VAT (Raumplus is a German supplier)
+    STYLE_PREDICTION_MONTHS = 6  # Styles use a longer prediction window (vs 4 months for other items)
 
     def classify_special_rau_item(accessory):
         """Return (family, divisor) for special rail/track rules, else (None, None)."""
@@ -3398,8 +3407,12 @@ def raumplus_storage(request):
             data['all_time_monthly_avg'] = recent_monthly_avg
             data['weighted_monthly_avg'] = recent_monthly_avg
         
-        # Predicted usage for next 4 months using weighted average with 20% buffer
-        data['predicted_4month'] = data['weighted_monthly_avg'] * 4 * 1.2  # Add 20% buffer
+        # Styles carry elevated stock — use a longer prediction window based on usage history.
+        # All other items use the standard 4-month window.
+        _style_text = (data['sku'] + ' ' + data['name']).upper()
+        _is_style = any(code in _style_text for code in ('S150', 'S750', 'S751', 'S753'))
+        prediction_months = STYLE_PREDICTION_MONTHS if _is_style else 4
+        data['predicted_4month'] = data['weighted_monthly_avg'] * prediction_months * 1.2  # Add 20% buffer
         
         # Special handling for 4mm gasket - maintain target stock of 800
         if 'GASKET - 4MM' in data['name'].upper() or 'GASKET-4MM' in data['name'].upper():
@@ -3822,7 +3835,7 @@ def raumplus_storage(request):
             'category': 'Prediction Model',
             'rules': [
                 'Historical period: Last 90 days of orders',
-                'Prediction window: Next 4 months + 20% buffer',
+                f'Prediction window: Next 4 months (styles: {STYLE_PREDICTION_MONTHS} months) + 20% buffer',
                 'Weighted average: 70% recent trend + 30% historical baseline',
             ]
         },
@@ -4075,6 +4088,184 @@ def raumplus_ordering_rule_edit(request, rule_id):
         'form': form,
         'applicable_products': applicable_products,
         'selected_product_ids': selected_product_ids,
+    })
+
+
+@login_required
+def raumplus_style_jobs_report(request):
+    """
+    AJAX endpoint that returns a JSON report of all upcoming jobs requiring
+    style items (S150, S750, S751, S753), with per-job stock availability
+    simulated in fit-date order so that problem jobs are clearly flagged.
+    """
+    import math as _math
+    from collections import defaultdict as _dd
+    from django.db.models import Sum as _Sum, F as _F
+    from django.db.models.functions import Coalesce as _Coalesce
+    from django.utils import timezone as _tz
+
+    STYLE_CODES = ('S150 ', 'S750 ', 'S751 ', 'S753 ')
+
+    def _is_style_item(name):
+        upper = (name or '').upper()
+        return any(upper.startswith(code) for code in STYLE_CODES)
+
+    # ── 1. Fetch all unfinished orders with Raumplus accessories ────────
+    upcoming_orders = (
+        Order.objects
+        .filter(job_finished=False)
+        .prefetch_related('accessories__stock_item')
+        .order_by('fit_date')
+    )
+
+    # ── 2. Build per-job style requirements ─────────────────────────────
+    jobs_with_styles = []
+    all_style_skus = set()
+
+    for order in upcoming_orders:
+        style_items = {}
+        for acc in order.accessories.all():
+            if 'RAU' not in acc.sku.upper():
+                continue
+            if acc.is_allocated:
+                continue
+            if not _is_style_item(acc.name):
+                continue
+            qty = float(acc.quantity or 0)
+            if qty <= 0:
+                continue
+            if acc.sku not in style_items:
+                style_items[acc.sku] = {
+                    'sku': acc.sku,
+                    'name': acc.name,
+                    'required': 0.0,
+                    'stock_item_id': acc.stock_item.id if acc.stock_item else None,
+                }
+            style_items[acc.sku]['required'] += qty
+            all_style_skus.add(acc.sku)
+
+        if style_items:
+            jobs_with_styles.append({
+                'order': order,
+                'style_items': style_items,
+            })
+
+    # ── 3. Get current stock levels for all style SKUs ──────────────────
+    stock_levels = {}
+    if all_style_skus:
+        from stock_take.models import StockItem as _SI
+        for item in _SI.objects.filter(sku__in=all_style_skus).values('sku', 'quantity'):
+            stock_levels[item['sku']] = float(item['quantity'] or 0)
+
+    # ── 4. Get incoming quantities (approved POs) ────────────────────────
+    incoming_map = {}
+    if all_style_skus:
+        incoming_data = PurchaseOrderProduct.objects.filter(
+            sku__in=all_style_skus,
+            purchase_order__status='Approved'
+        ).values('sku').annotate(
+            total=_Sum(_F('order_quantity') * _Coalesce(_F('stock_item__pack_size'), 1))
+        )
+        incoming_map = {row['sku']: float(row['total'] or 0) for row in incoming_data}
+
+    # ── 5. Simulate allocation in fit-date order ─────────────────────────
+    available = {}
+    for sku in all_style_skus:
+        available[sku] = (stock_levels.get(sku, 0.0) + incoming_map.get(sku, 0.0))
+
+    problem_job_count = 0
+    jobs_output = []
+
+    for job_data in jobs_with_styles:
+        order = job_data['order']
+        items_output = []
+        job_has_problem = False
+
+        for sku, item in sorted(job_data['style_items'].items(), key=lambda x: x[1]['name']):
+            required = item['required']
+            avail_now = available.get(sku, 0.0)
+            can_fulfil = avail_now >= required
+            if not can_fulfil:
+                job_has_problem = True
+
+            items_output.append({
+                'sku': sku,
+                'name': item['name'],
+                'required': round(required, 0),
+                'available': round(avail_now, 0),
+                'shortfall': round(max(0.0, required - avail_now), 0),
+                'status': 'ok' if can_fulfil else 'shortage',
+                'stock_item_id': item['stock_item_id'],
+            })
+            # Deduct from simulated running stock
+            available[sku] = max(0.0, avail_now - required)
+
+        if job_has_problem:
+            problem_job_count += 1
+
+        customer_name = ''
+        if order.customer:
+            customer_name = str(order.customer)
+        if not customer_name:
+            customer_name = f"{order.first_name} {order.last_name}".strip()
+
+        jobs_output.append({
+            'order_id': order.id,
+            'sale_number': order.sale_number,
+            'customer': customer_name,
+            'fit_date': order.fit_date.strftime('%d/%m/%Y') if order.fit_date else None,
+            'has_problem': job_has_problem,
+            'items': items_output,
+        })
+
+    # ── 6. Build style-SKU summary (only SKUs in current jobs) ─────────
+    style_summary = []
+    for sku in sorted(all_style_skus):
+        style_summary.append({
+            'sku': sku,
+            'current_stock': stock_levels.get(sku, 0.0),
+            'incoming_qty': incoming_map.get(sku, 0.0),
+        })
+
+    # ── 7. Full style inventory (ALL style items, regardless of jobs) ───
+    from django.db.models import Q as _Q
+    all_style_qs = list(
+        _SI.objects.filter(
+            _Q(name__istartswith='S150 ') |
+            _Q(name__istartswith='S750 ') |
+            _Q(name__istartswith='S751 ') |
+            _Q(name__istartswith='S753 ')
+        ).values('sku', 'name', 'quantity').order_by('name')
+    )
+    # Fetch incoming for any SKUs not already in incoming_map
+    extra_skus = {row['sku'] for row in all_style_qs} - all_style_skus
+    if extra_skus:
+        extra_incoming = PurchaseOrderProduct.objects.filter(
+            sku__in=extra_skus,
+            purchase_order__status='Approved'
+        ).values('sku').annotate(
+            total=_Sum(_F('order_quantity') * _Coalesce(_F('stock_item__pack_size'), 1))
+        )
+        for row in extra_incoming:
+            incoming_map[row['sku']] = float(row['total'] or 0)
+
+    all_styles_summary = [
+        {
+            'sku': row['sku'],
+            'name': row['name'],
+            'current_stock': float(row['quantity'] or 0),
+            'incoming_qty': incoming_map.get(row['sku'], 0.0),
+        }
+        for row in all_style_qs
+    ]
+
+    return JsonResponse({
+        'generated_at': _tz.now().strftime('%d/%m/%Y %H:%M'),
+        'total_jobs': len(jobs_output),
+        'problem_jobs': problem_job_count,
+        'jobs': jobs_output,
+        'style_summary': style_summary,
+        'all_styles_summary': all_styles_summary,
     })
 
 
@@ -10233,6 +10424,8 @@ def update_stock_items_batch(request):
                         item.supplier_id = int(value) if value else None
                     if 'description' in item_data:
                         item.description = item_data['description']
+                    if 'specifications' in item_data:
+                        item.specifications = item_data['specifications']
                     if 'supplier_code' in item_data:
                         item.supplier_code = item_data['supplier_code']
                     if 'supplier_sku' in item_data:

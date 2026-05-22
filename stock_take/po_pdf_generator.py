@@ -157,7 +157,7 @@ def _currency_symbol(currency):
     return symbols.get(currency, currency + ' ')
 
 
-def generate_purchase_order_pdf(purchase_order, products, supplier_vat_rate=None):
+def generate_purchase_order_pdf(purchase_order, products, supplier_vat_rate=None, hide_descriptions=False):
     """
     Generate a Purchase Order PDF.
 
@@ -380,7 +380,7 @@ def generate_purchase_order_pdf(purchase_order, products, supplier_vat_rate=None
 
         # Combine name and description for display
         desc_text = str(product.name or '')
-        if product.description and product.description != desc_text:
+        if not hide_descriptions and product.description and product.description != desc_text:
             desc_text = f'{desc_text}<br/><font size="7" color="#6b7280">{product.description}</font>' if desc_text else str(product.description)
 
         table_data.append([

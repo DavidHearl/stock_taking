@@ -409,6 +409,14 @@ def purchase_orders_list(request):
 
     # Annotate POs with linked order info (try each strategy in order)
     po_list = list(queryset)
+
+    # Batch-lookup linked purchase invoices (one query for all POs)
+    po_invoice_map = {}  # po.pk -> list of {id, invoice_number, supplier_name}
+    for inv in PurchaseInvoice.objects.filter(
+        purchase_orders__in=po_list
+    ).values('id', 'invoice_number', 'supplier_name', 'purchase_orders'):
+        po_invoice_map.setdefault(inv['purchase_orders'], []).append(inv)
+
     for po in po_list:
         # If project_name is blank but a stock project is assigned, display "Stock"
         if not po.project_name and po.pk in stock_po_ids:
@@ -419,6 +427,7 @@ def purchase_orders_list(request):
         if not info:
             info = alloc_map.get(po.pk)
         po.linked_order_info = info
+        po.linked_invoices_list = po_invoice_map.get(po.pk, [])
 
     context = {
         'purchase_orders': po_list,
@@ -2129,7 +2138,8 @@ def purchase_order_download_pdf(request, po_id):
 
     supplier_obj = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
     supplier_vat_rate = supplier_obj.vat_rate if supplier_obj and supplier_obj.vat_rate is not None else None
-    pdf_buffer = generate_purchase_order_pdf(po, products, supplier_vat_rate=supplier_vat_rate)
+    hide_descriptions = request.GET.get('hide_descriptions', '0') == '1'
+    pdf_buffer = generate_purchase_order_pdf(po, products, supplier_vat_rate=supplier_vat_rate, hide_descriptions=hide_descriptions)
 
     response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
     filename = f'Purchase_Order_{po.display_number}.pdf'
@@ -2301,7 +2311,8 @@ def purchase_order_send_email(request, po_id):
     # Resolve supplier for VAT rate
     _send_supplier = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
     supplier_vat_rate = _send_supplier.vat_rate if _send_supplier and _send_supplier.vat_rate is not None else None
-    pdf_buffer = generate_purchase_order_pdf(po, products, supplier_vat_rate=supplier_vat_rate)
+    hide_descriptions = bool(data.get('hide_descriptions', False))
+    pdf_buffer = generate_purchase_order_pdf(po, products, supplier_vat_rate=supplier_vat_rate, hide_descriptions=hide_descriptions)
     pdf_filename = f'Purchase_Order_{po.display_number}.pdf'
 
     try:

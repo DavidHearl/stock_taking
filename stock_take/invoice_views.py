@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import StreamingHttpResponse, JsonResponse
@@ -297,6 +297,9 @@ def invoice_detail(request, invoice_id):
 
     gl_codes = EnabledGLCode.objects.filter(enabled=True).order_by('code')
 
+    # Amendments: invoices that have this invoice as their parent
+    amendments = invoice.amendments.order_by('created_at')
+
     context = {
         'invoice': invoice,
         'line_items': line_items,
@@ -306,6 +309,7 @@ def invoice_detail(request, invoice_id):
         'gl_codes': gl_codes,
         'auto_currency': auto_currency,
         'display_currency': display_currency,
+        'amendments': amendments,
     }
     return render(request, 'stock_take/invoice_detail.html', context)
 
@@ -313,16 +317,24 @@ def invoice_detail(request, invoice_id):
 # ── Push single invoice to Xero as Draft ──────────────────────────
 @login_required
 def push_invoice_to_xero(request, invoice_id):
-    """Create a DRAFT sales invoice in Xero from a local Invoice record.
+    """Create a DRAFT sales invoice in Xero from a local Invoice record."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
+    try:
+        return _push_invoice_to_xero_impl(request, invoice_id)
+    except Exception as exc:
+        logger.exception('Unexpected error in push_invoice_to_xero for invoice %s', invoice_id)
+        return JsonResponse({'ok': False, 'error': str(exc)})
+
+
+def _push_invoice_to_xero_impl(request, invoice_id):
+    """Inner implementation — called by push_invoice_to_xero.
 
     Accepts optional JSON body:
       currency    – 'GBP' or 'EUR' (defaults to invoice.currency or auto-detected)
       gl_code     – Xero account code string (defaults to first enabled GL code)
       attach_pdf  – true/false, whether to upload the local attachment to Xero
     """
-    if request.method != 'POST':
-        return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
-
     invoice = get_object_or_404(Invoice, id=invoice_id)
 
     # Parse optional request body
@@ -490,6 +502,48 @@ def push_invoice_to_xero(request, invoice_id):
     if attachment_warning:
         response_data['attachment_warning'] = attachment_warning
     return JsonResponse(response_data)
+
+
+# ── Recalculate invoice totals from line items ────────────────────
+@login_required
+def recalculate_invoice(request, invoice_id):
+    """Recompute invoice subtotal/tax/total from line items and update amount_outstanding."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+
+    if not invoice.line_items.exists():
+        return JsonResponse({'success': False, 'error': 'No line items — recalculation skipped'})
+
+    agg = invoice.line_items.aggregate(s=Sum('line_total'), t=Sum('tax_amount'))
+    subtotal = agg['s'] or Decimal('0')
+    total_tax = agg['t'] or Decimal('0')
+    total = subtotal + total_tax
+    amount_outstanding = max(total - invoice.amount_paid, Decimal('0'))
+
+    if total > 0 and invoice.amount_paid >= total:
+        payment_status = 'paid'
+    elif invoice.amount_paid > 0:
+        payment_status = 'partial'
+    else:
+        payment_status = 'unpaid'
+
+    invoice.subtotal = subtotal
+    invoice.total_tax = total_tax
+    invoice.total = total
+    invoice.amount_outstanding = amount_outstanding
+    invoice.payment_status = payment_status
+    invoice.save(update_fields=['subtotal', 'total_tax', 'total', 'amount_outstanding', 'payment_status'])
+
+    return JsonResponse({
+        'success': True,
+        'subtotal': str(subtotal),
+        'total_tax': str(total_tax),
+        'total': str(total),
+        'amount_paid': str(invoice.amount_paid),
+        'amount_outstanding': str(amount_outstanding),
+    })
 
 
 # ── Check invoices against Xero ──────────────────────────────────
@@ -927,28 +981,35 @@ def create_invoices_from_anthill(request):
     created = 0
     skipped = 0
 
-    for pay in payments:
-        contract = (pay.get('contract_number') or '').strip()
-        if not contract:
-            skipped += 1
-            continue
+    try:
+        for pay in payments:
+            contract = (pay.get('contract_number') or '').strip()
+            if not contract:
+                skipped += 1
+                continue
 
-        amount = _parse_amount(pay.get('amount', ''))
-        payment_date = _parse_date(pay.get('payment_date', ''))
+            amount = _parse_amount(pay.get('amount', ''))
+            payment_date = _parse_date(pay.get('payment_date', ''))
 
-        exists = Invoice.objects.filter(
-            contract_number=contract,
-            payment_type=pay.get('payment_type', ''),
-            total=amount,
-            date=payment_date,
-        ).exists()
+            exists = Invoice.objects.filter(
+                contract_number=contract,
+                payment_type=pay.get('payment_type', ''),
+                total=amount,
+                date=payment_date,
+            ).exists()
 
-        if exists:
-            skipped += 1
-            continue
+            if exists:
+                skipped += 1
+                continue
 
-        _create_invoice_from_payment(pay, now)
-        created += 1
+            _create_invoice_from_payment(pay, now)
+            created += 1
+    except Exception as exc:
+        logger.exception('create_invoices_from_anthill failed after %d created', created)
+        return JsonResponse({
+            'success': False,
+            'error': f'Import failed after {created} record(s) created: {exc}',
+        }, status=500)
 
     return JsonResponse({
         'success': True,
@@ -1054,6 +1115,75 @@ def create_invoice(request):
         'success': True,
         'invoice_id': invoice.id,
         'invoice_url': f'/invoices/{invoice.id}/',
+    })
+
+
+# ── Create amendment (sub) invoice ────────────────────────────────
+@login_required
+def create_amendment_invoice(request, invoice_id):
+    """Create an amendment invoice linked to an existing parent invoice.
+
+    Auto-generates the sub-reference number:
+      INV-A00-006        → first amendment  → INV-A00-006-A
+      INV-A00-006-A      already exists     → INV-A00-006-A2
+      INV-A00-006-A2     already exists     → INV-A00-006-A3
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    parent = get_object_or_404(Invoice, id=invoice_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    reason = data.get('reason', '').strip()
+
+    # Build sub-reference number
+    existing_amendments = parent.amendments.values_list('invoice_number', flat=True)
+    count = len(existing_amendments)
+    if count == 0:
+        sub_number = f'{parent.invoice_number}-A'
+    else:
+        sub_number = f'{parent.invoice_number}-A{count + 1}'
+
+    # Ensure uniqueness (edge case: someone manually created a clashing number)
+    suffix = count + 1
+    while Invoice.objects.filter(invoice_number=sub_number).exists():
+        suffix += 1
+        sub_number = f'{parent.invoice_number}-A{suffix}'
+
+    amendment = Invoice.objects.create(
+        invoice_number=sub_number,
+        parent_invoice=parent,
+        amendment_reason=reason,
+        client_name=parent.client_name,
+        client_id=parent.client_id,
+        customer=parent.customer,
+        project_name=parent.project_name,
+        project_number=parent.project_number,
+        project_id=parent.project_id,
+        order=parent.order,
+        showroom=parent.showroom,
+        contract_number=parent.contract_number,
+        date=parent.date,
+        status='Draft',
+        is_vat_inclusive=parent.is_vat_inclusive,
+        vat_rate=parent.vat_rate,
+        currency=parent.currency,
+        subtotal=Decimal('0'),
+        total_tax=Decimal('0'),
+        total=Decimal('0'),
+        amount_outstanding=Decimal('0'),
+        payment_status='unpaid',
+    )
+
+    return JsonResponse({
+        'success': True,
+        'invoice_id': amendment.id,
+        'invoice_number': amendment.invoice_number,
+        'invoice_url': f'/invoices/{amendment.id}/',
     })
 
 

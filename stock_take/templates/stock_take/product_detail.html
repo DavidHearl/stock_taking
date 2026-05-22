@@ -117,6 +117,16 @@
                 <td class="info-value">£{{ product.sell_price|floatformat:2 }}</td>
             </tr>
             <tr>
+                <td class="info-label" style="vertical-align: top; padding-top: 10px;">Specifications</td>
+                <td class="info-value specs-display" colspan="3" data-field="specifications" data-value="{{ product.specifications }}">
+                    {% if product.specifications %}
+                    <ul class="product-specs-list">
+                        {% for line in product.specifications.splitlines %}{% if line.strip %}<li>{{ line.strip }}</li>{% endif %}{% endfor %}
+                    </ul>
+                    {% else %}-{% endif %}
+                </td>
+            </tr>
+            <tr>
                 <td class="info-label">Category</td>
                 <td class="info-value" data-field="category_id" data-value="{{ product.category.id }}">{{ product.category.name|default:"Not Set" }}</td>
                 <td class="info-label">Total Value</td>
@@ -1054,6 +1064,33 @@ function toggleEditMode() {
             input = document.createElement('textarea');
             input.value = value;
             input.rows = 3;
+        } else if (fieldName === 'specifications') {
+            const lines = (value || '').split('\n').filter(l => l.trim());
+            field.innerHTML = '';
+            const wrapper = document.createElement('div');
+            wrapper.id = 'specs-editor';
+            wrapper.style.cssText = 'display:flex;flex-direction:column;gap:0.25rem;';
+            // Hidden textarea — saveProduct() reads this value
+            const hidden = document.createElement('textarea');
+            hidden.id = 'specs-hidden-textarea';
+            hidden.style.display = 'none';
+            hidden.value = value || '';
+            wrapper.appendChild(hidden);
+            // Rows
+            const rowsDiv = document.createElement('div');
+            rowsDiv.id = 'specs-rows';
+            rowsDiv.style.cssText = 'display:flex;flex-direction:column;gap:0.25rem;';
+            lines.forEach(line => rowsDiv.appendChild(_buildSpecRow(line)));
+            wrapper.appendChild(rowsDiv);
+            // Add button
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'btn btn-sm btn-outline-secondary mt-2';
+            addBtn.innerHTML = '<i class="bi bi-plus-circle"></i> Add specification';
+            addBtn.onclick = addSpecRow;
+            wrapper.appendChild(addBtn);
+            field.appendChild(wrapper);
+            return; // skip generic field.innerHTML = ''; field.appendChild(input)
         } else if (decimalFields.includes(fieldName)) {
             input = document.createElement('input');
             input.type = 'number';
@@ -1073,6 +1110,41 @@ function toggleEditMode() {
         field.innerHTML = '';
         field.appendChild(input);
     });
+}
+
+function _buildSpecRow(text) {
+    const row = document.createElement('div');
+    row.className = 'spec-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:0.3rem;';
+    const grip = document.createElement('span');
+    grip.innerHTML = '<i class="bi bi-grip-vertical" style="color:var(--text-muted);font-size:0.85rem;"></i>';
+    grip.style.cssText = 'cursor:grab;flex-shrink:0;padding:0 2px;user-select:none;';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'form-control form-control-sm spec-input';
+    inp.value = text || '';
+    inp.placeholder = 'Specification detail';
+    inp.style.flex = '1';
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn btn-sm btn-outline-danger';
+    delBtn.style.cssText = 'flex-shrink:0;padding:0.15rem 0.45rem;';
+    delBtn.title = 'Remove this specification';
+    delBtn.innerHTML = '<i class="bi bi-trash"></i>';
+    delBtn.onclick = function() { row.remove(); };
+    row.appendChild(grip);
+    row.appendChild(inp);
+    row.appendChild(delBtn);
+    return row;
+}
+
+function addSpecRow() {
+    const rowsDiv = document.getElementById('specs-rows');
+    if (rowsDiv) {
+        const row = _buildSpecRow('');
+        rowsDiv.appendChild(row);
+        row.querySelector('.spec-input').focus();
+    }
 }
 
 function cancelEdit() {
@@ -1108,6 +1180,15 @@ function cancelEdit() {
         } else if (fieldName === 'order_source') {
             const choice = orderSourceChoices.find(c => c[0] == displayValue);
             displayValue = choice ? choice[1] : displayValue;
+        } else if (fieldName === 'specifications') {
+            const rawSpecs = displayValue || '';
+            if (rawSpecs.trim()) {
+                const lines = rawSpecs.split('\n').filter(l => l.trim());
+                field.innerHTML = '<ul class="product-specs-list">' + lines.map(l => `<li>${l.trim()}</li>`).join('') + '</ul>';
+            } else {
+                field.textContent = '-';
+            }
+            return;
         }
         
         field.textContent = displayValue || '-';
@@ -1116,7 +1197,7 @@ function cancelEdit() {
 
 async function saveProduct() {
     const fieldLabels = {
-        sku: 'SKU', name: 'Name', description: 'Description', cost: 'Cost Price', pack_cost_price: 'Pack Cost Price',
+        sku: 'SKU', name: 'Name', description: 'Description', specifications: 'Specifications', cost: 'Cost Price', pack_cost_price: 'Pack Cost Price',
         price_per_sqm: 'Price per SQM',
         category_id: 'Category', tracking_type: 'Tracking Type', order_source: 'Order Source', location: 'Location',
         min_order_qty: 'Min Order Qty', par_level: 'Par Level', pack_size: 'Pack Size',
@@ -1128,6 +1209,14 @@ async function saveProduct() {
 
     const updates = {};
     const changes = [];
+
+    // Sync spec CRUD rows into the hidden textarea before value collection
+    const _specsRows = document.getElementById('specs-rows');
+    const _specsHidden = document.getElementById('specs-hidden-textarea');
+    if (_specsRows && _specsHidden) {
+        _specsHidden.value = Array.from(_specsRows.querySelectorAll('.spec-input'))
+            .map(i => i.value.trim()).filter(v => v).join('\n');
+    }
 
     document.querySelectorAll('.info-value[data-field]').forEach(field => {
         const fieldName = field.dataset.field;

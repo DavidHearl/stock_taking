@@ -92,9 +92,12 @@
             <button class="btn btn-sm btn-secondary" id="cancel-btn" onclick="cancelEdit()" style="display:none;">
                 <i class="bi bi-x-lg"></i> Cancel
             </button>
-            <a href="{% url 'purchase_order_download_pdf' purchase_order.workguru_id %}" class="btn btn-sm btn-secondary" title="Download PDF">
+            <a href="{% url 'purchase_order_download_pdf' purchase_order.workguru_id %}" class="btn btn-sm btn-secondary" id="pdf-download-btn" title="Download PDF">
                 <i class="bi bi-file-earmark-pdf"></i> PDF
             </a>
+            <button class="btn btn-sm btn-secondary" id="hide-desc-toggle" onclick="toggleHideDescriptions()" title="Show/hide product descriptions in the PDF">
+                <i class="bi bi-eye"></i> Descriptions
+            </button>
             <button class="btn btn-sm btn-send" id="send-btn" onclick="openSendModal()">
                 <i class="bi bi-envelope"></i> Send
             </button>
@@ -1518,6 +1521,14 @@ Kind regards,
 Sliderobes</textarea>
             </div>
             <div class="modal-form-group">
+                <label>PDF Options</label>
+                <label class="email-attachment-item" style="cursor:pointer;">
+                    <input type="checkbox" id="hide-descriptions-cb">
+                    <i class="bi bi-eye-slash"></i>
+                    <span>Hide product descriptions</span>
+                </label>
+            </div>
+            <div class="modal-form-group">
                 <label>Attachments</label>
                 <div class="email-attachments-list">
                     <label class="email-attachment-item">
@@ -2440,6 +2451,28 @@ function deleteBoardItems(itemIds, btn) {
 }
 
 /* ── Send PO Email ──────────────────────────────── */
+let _hideDescriptions = false;
+function toggleHideDescriptions() {
+    _hideDescriptions = !_hideDescriptions;
+    const btn = document.getElementById('hide-desc-toggle');
+    const pdfLink = document.getElementById('pdf-download-btn');
+    const baseUrl = '{% url "purchase_order_download_pdf" purchase_order.workguru_id %}';
+    if (_hideDescriptions) {
+        btn.innerHTML = '<i class="bi bi-eye-slash"></i> Descriptions';
+        btn.classList.add('active');
+        btn.title = 'Descriptions hidden in PDF — click to show';
+        pdfLink.href = baseUrl + '?hide_descriptions=1';
+    } else {
+        btn.innerHTML = '<i class="bi bi-eye"></i> Descriptions';
+        btn.classList.remove('active');
+        btn.title = 'Descriptions shown in PDF — click to hide';
+        pdfLink.href = baseUrl;
+    }
+    // Sync to the email modal checkbox
+    const cb = document.getElementById('hide-descriptions-cb');
+    if (cb) cb.checked = _hideDescriptions;
+}
+
 function openSendModal() {
     document.getElementById('send-modal').style.display = 'flex';
 }
@@ -2480,13 +2513,15 @@ function sendPOEmail() {
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Sending...';
 
+    const hideDescriptions = document.getElementById('hide-descriptions-cb').checked;
+
     fetch('{% url "purchase_order_send_email" purchase_order.workguru_id %}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}',
         },
-        body: JSON.stringify({ to, cc, subject, body, attachment_ids: attachmentIds }),
+        body: JSON.stringify({ to, cc, subject, body, attachment_ids: attachmentIds, hide_descriptions: hideDescriptions }),
     })
     .then(res => res.json())
     .then(result => {

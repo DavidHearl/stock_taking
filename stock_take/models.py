@@ -919,6 +919,7 @@ class StockItem(models.Model):
     sku = models.CharField(max_length=100, db_index=True)
     name = models.CharField(max_length=200, db_index=True)
     description = models.TextField(blank=True, default='')
+    specifications = models.TextField(blank=True, default='', help_text='Technical specifications, one per line — displayed as bullet points')
     cost = models.DecimalField(max_digits=10, decimal_places=3)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     stock_take_group = models.ForeignKey(StockTakeGroup, on_delete=models.SET_NULL, 
@@ -2050,6 +2051,14 @@ class Invoice(models.Model):
         help_text='PDF or document attached to this invoice',
     )
 
+    # Amendment (sub-invoice) fields
+    parent_invoice = models.ForeignKey(
+        'self', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='amendments',
+        help_text='Parent invoice this is an amendment of',
+    )
+    amendment_reason = models.TextField(blank=True, help_text='Reason / description for this amendment invoice')
+
     # Metadata
     raw_data = models.JSONField(null=True, blank=True, help_text='Full API response')
     synced_at = models.DateTimeField(null=True, blank=True, help_text='Last sync timestamp')
@@ -2147,9 +2156,18 @@ class PurchaseInvoice(models.Model):
     )
     xero_id          = models.CharField(max_length=100, blank=True, help_text='Xero InvoiceID once pushed to Xero')
     currency         = models.CharField(max_length=3, default='GBP', help_text='ISO currency code')
+    vat_rate         = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='VAT rate applied to this invoice (e.g. 20.00 for 20%)')
     created_at       = models.DateTimeField(auto_now_add=True)
     updated_at       = models.DateTimeField(auto_now=True)
     created_by       = models.CharField(max_length=200, blank=True)
+
+    # Amendment (sub-invoice) fields
+    parent_invoice = models.ForeignKey(
+        'self', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='amendments',
+        help_text='Parent invoice this is an amendment of',
+    )
+    amendment_reason = models.TextField(blank=True, help_text='Reason / description for this amendment invoice')
 
     class Meta:
         ordering = ['-date', '-created_at']

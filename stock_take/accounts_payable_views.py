@@ -69,17 +69,24 @@ def _find_po_matches(emails):
 
     result = {}
     for email in candidates:
+        # Skip emails with no attachments — nothing to process
+        if not (email.attachment_names or '').strip():
+            continue
+
         found = {}  # po['id'] -> po  (deduplicates)
 
-        # Signal 1: PO-like numbers in subject
+        # Signal 1: explicit PO reference in subject (PO prefix required to avoid
+        # coincidental number matches like invoice numbers, dates, etc.)
         subject = email.subject or ''
-        for m in _re.finditer(r'(?:PO\s*#?\s*)?(\d{3,6})\b', subject, _re.IGNORECASE):
+        for m in _re.finditer(r'PO\s*#?\s*(\d{3,6})\b', subject, _re.IGNORECASE):
             key = m.group(1)
             if key in po_by_number:
                 po = po_by_number[key]
                 found[po['id']] = po
 
-        # Signal 2: supplier name words in sender text
+        # Signal 2: supplier name in sender text — require the full name or
+        # at least 2 significant words to match (single-word matches cause too
+        # many false positives with common words).
         sender_text = f"{email.sender_name} {email.sender_email}".lower()
         for po in pos:
             if po['id'] in found:
@@ -87,13 +94,13 @@ def _find_po_matches(emails):
             sname = (po['supplier_name'] or '').strip().lower()
             if not sname:
                 continue
-            # Try full name
+            # Try full name first
             if sname in sender_text:
                 found[po['id']] = po
             else:
-                # Try first two significant words (≥4 chars)
+                # Require at least 2 significant words (≥4 chars) to match
                 words = [w for w in sname.split() if len(w) >= 4]
-                if words and any(w in sender_text for w in words[:2]):
+                if len(words) >= 2 and sum(1 for w in words if w in sender_text) >= 2:
                     found[po['id']] = po
 
         if found:
@@ -144,7 +151,7 @@ def accounts_payable_inbox(request):
         # with the deferred traversal restriction on processed_by.
         lightweight = list(
             MailboxEmail.objects.filter(is_processed=False, is_ignored=False)
-            .only('id', 'subject', 'sender_name', 'sender_email')
+            .only('id', 'subject', 'sender_name', 'sender_email', 'attachment_names')
         )
         email_po_matches_all = _find_po_matches(lightweight)
         matched_ids = list(email_po_matches_all.keys())

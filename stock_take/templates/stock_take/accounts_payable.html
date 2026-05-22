@@ -809,9 +809,11 @@ function parseEmailAttachment(attachmentId) {
                 const lastRow = document.getElementById('modal-lines').lastElementChild;
                 if (lastRow) {
                     const descInput = lastRow.querySelector('.pinv-line-desc');
-                    const rateInput = lastRow.querySelector('.pinv-line-rate');
+                    const rateInput  = lastRow.querySelector('.pinv-line-rate');
+                    const totalInput = lastRow.querySelector('.pinv-line-total');
                     if (descInput) descInput.value = li.description || '';
                     if (rateInput) rateInput.value = li.amount != null ? li.amount : '';
+                    if (totalInput) totalInput.value = li.amount != null ? li.amount : '';
                     if (li.description) autoLinkOrder(lastRow, li.description);
                 }
             });
@@ -827,11 +829,12 @@ function submitCreateInvoice() {
 
     const lineItems = [];
     document.querySelectorAll('.pinv-line-row').forEach(row => {
-        const desc = row.querySelector('.pinv-line-desc').value.trim();
-        const rate = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
-        const ordInp = row.querySelector('.pinv-line-order-input');
-        const orderId = ordInp ? (ordInp.dataset.orderId || null) : null;
-        if (desc) lineItems.push({ description: desc, rate, order_id: orderId, po_product_id: row.dataset.poProductId || '' });
+        const desc     = row.querySelector('.pinv-line-desc').value.trim();
+        const qty      = parseFloat(row.querySelector('.pinv-line-qty')?.value) || 1;
+        const rate     = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        const ordInp   = row.querySelector('.pinv-line-order-input');
+        const orderId  = ordInp ? (ordInp.dataset.orderId || null) : null;
+        if (desc) lineItems.push({ description: desc, quantity: qty, rate, order_id: orderId, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1' });
     });
 
     const fd = new FormData();
@@ -846,13 +849,16 @@ function submitCreateInvoice() {
     const poId = document.getElementById('new-pinv-po-search').dataset.poId || '';
     if (poId) fd.append('purchase_order_id', poId);
     fd.append('currency', typeof _modalCurrency !== 'undefined' ? _modalCurrency : 'GBP');
+    const _vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
+    const _vatRate    = parseFloat(document.getElementById('modal-vat-rate')?.value) || 0;
+    if (_vatEnabled && _vatRate > 0) fd.append('vat_rate', _vatRate);
     if (currentAttachmentId) fd.append('attachment_id', currentAttachmentId);
     const carriageLine = lineItems.find(li => li.is_carriage);
-    if (carriageLine) fd.append('freight_cost', carriageLine.rate);
+    if (carriageLine) fd.append('freight_cost', (carriageLine.quantity || 1) * carriageLine.rate);
 
     lineItems.forEach((li, i) => {
         fd.append(`line_desc_${i}`, li.description);
-        fd.append(`line_qty_${i}`, '1');
+        fd.append(`line_qty_${i}`, li.quantity);
         fd.append(`line_rate_${i}`, li.rate);
         fd.append(`line_order_${i}`, li.order_id || '');
         if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);

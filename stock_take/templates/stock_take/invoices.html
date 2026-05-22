@@ -497,7 +497,14 @@ function importNewInvoices() {
         },
         body: JSON.stringify({ payments: _newPayments })
     })
-    .then(r => r.json())
+    .then(r => {
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+            // Session may have expired — server returned a redirect/HTML page
+            throw new Error('Your session may have expired. Please refresh the page and try again.');
+        }
+        return r.json();
+    })
     .then(data => {
         if (data.success) {
             importBtn.innerHTML = '<i class="bi bi-check-lg"></i> ' + data.created + ' imported';
@@ -512,7 +519,7 @@ function importNewInvoices() {
     .catch(err => {
         importBtn.disabled = false;
         importBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Import New';
-        alert('Error: ' + err.message);
+        alert(err.message || 'Import failed. Please try again.');
     });
 }
 
@@ -534,6 +541,7 @@ function pushToXero(invoiceId) {
             'Content-Type': 'application/json',
         },
         credentials: 'same-origin',
+        body: JSON.stringify({ gl_code: 'G1001' }),
     })
     .then(r => r.json())
     .then(data => {

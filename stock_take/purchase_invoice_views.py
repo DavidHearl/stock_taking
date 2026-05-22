@@ -624,8 +624,80 @@ def purchase_invoice_detail(request, invoice_id):
         'linked_opos': invoice.overhead_pos.all().order_by('-created_at'),
         'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
         'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
+        'amendments': invoice.amendments.order_by('created_at'),
     }
+    # Pre-compute VAT breakdown: net = sum of line items, VAT added on top.
+    # Only apply vat_rate when there is no explicit VAT line item already in the list
+    # (to avoid double-counting when the user has flattened/added VAT as a line).
+    if invoice.vat_rate and invoice.vat_rate > 0:
+        line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+        has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
+        if not has_vat_line:
+            vat_amount  = (line_net * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+            gross_total = (line_net + vat_amount).quantize(Decimal('0.01'))
+            # Auto-correct stored total if it doesn't match the gross (e.g. VAT was set after creation)
+            if invoice.total != gross_total:
+                invoice.total = gross_total
+                invoice.save(update_fields=['total'])
+            context['net_total']  = line_net
+            context['vat_amount'] = vat_amount
+        # else: VAT is already a line item – omit the Net/VAT breakdown rows
     return render(request, 'stock_take/purchase_invoice_detail.html', context)
+
+
+# ── Create amendment (sub) invoice ────────────────────────────────
+@login_required
+def create_purchase_amendment_invoice(request, invoice_id):
+    """Create an amendment invoice linked to an existing parent purchase invoice.
+
+    Auto-generates the sub-reference number:
+      INV-A00-006        → first amendment  → INV-A00-006-A
+      INV-A00-006-A      already exists     → INV-A00-006-A2
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    parent = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    reason = data.get('reason', '').strip()
+
+    # Build sub-reference number
+    count = parent.amendments.count()
+    if count == 0:
+        sub_number = f'{parent.invoice_number}-A'
+    else:
+        sub_number = f'{parent.invoice_number}-A{count + 1}'
+
+    suffix = count + 1
+    while PurchaseInvoice.objects.filter(invoice_number=sub_number).exists():
+        suffix += 1
+        sub_number = f'{parent.invoice_number}-A{suffix}'
+
+    amendment = PurchaseInvoice.objects.create(
+        invoice_number=sub_number,
+        parent_invoice=parent,
+        amendment_reason=reason,
+        supplier_name=parent.supplier_name,
+        date=parent.date,
+        status='Draft',
+        currency=parent.currency,
+        vat_rate=parent.vat_rate,
+        total=Decimal('0'),
+        amount_paid=Decimal('0'),
+        payment_status='unpaid',
+    )
+
+    return JsonResponse({
+        'success': True,
+        'invoice_id': amendment.id,
+        'invoice_number': amendment.invoice_number,
+        'invoice_url': f'/purchase-invoices/{amendment.id}/',
+    })
 
 
 # ── Create invoice ────────────────────────────────────────────────
@@ -651,6 +723,8 @@ def create_purchase_invoice(request):
         return JsonResponse({'error': 'Invoice number is required'}, status=400)
 
     total_val = _parse_decimal(data.get('total', '0'))
+    _vr = (data.get('vat_rate') or '').strip()
+    vat_rate_val = _parse_decimal(_vr) if _vr else None
 
     invoice = PurchaseInvoice.objects.create(
         invoice_number     = invoice_number,
@@ -663,6 +737,7 @@ def create_purchase_invoice(request):
         total              = total_val,
         notes              = (data.get('notes') or '').strip(),
         currency           = (data.get('currency') or 'GBP').strip().upper() or 'GBP',
+        vat_rate           = vat_rate_val,
         created_by         = request.user.get_full_name() or request.user.username,
     )
 
@@ -718,9 +793,13 @@ def create_purchase_invoice(request):
             # Auto-create installation timesheet if allocated to an order
             _sync_timesheet_for_pi_line(line)
 
-    # Recalculate total from lines if no total provided
+    # Recalculate total from lines if no total provided, applying VAT if set
     if total_val == 0 and line_items_raw:
-        invoice.total = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or 0
+        net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+        if vat_rate_val and vat_rate_val > 0:
+            invoice.total = net * (1 + vat_rate_val / Decimal('100'))
+        else:
+            invoice.total = net
         invoice.save(update_fields=['total'])
 
     if uploaded_file:
@@ -731,7 +810,13 @@ def create_purchase_invoice(request):
     po_id = (data.get('purchase_order_id') or '').strip()
     if po_id:
         try:
-            invoice.purchase_orders.add(PurchaseOrder.objects.get(id=int(po_id)))
+            po_obj = PurchaseOrder.objects.get(id=int(po_id))
+            invoice.purchase_orders.add(po_obj)
+            # If the invoice has a carriage/freight line, save it to the PO
+            freight_val = _parse_decimal(data.get('freight_cost', '0'))
+            if freight_val > 0:
+                po_obj.freight_cost = freight_val
+                po_obj.save(update_fields=['freight_cost'])
         except (PurchaseOrder.DoesNotExist, ValueError):
             pass
 
@@ -796,8 +881,33 @@ def update_purchase_invoice(request, invoice_id):
             invoice.payment_status = 'unpaid'
     if 'notes' in data:
         invoice.notes = data['notes'].strip()
+    if 'currency' in data:
+        invoice.currency = (data['currency'] or 'GBP').strip().upper()[:3]
+    if 'vat_rate' in data:
+        _vr = str(data.get('vat_rate') or '').strip()
+        invoice.vat_rate = _parse_decimal(_vr) if _vr else None
+        # Recompute gross total from line items whenever VAT rate changes.
+        # Don't apply the rate when VAT is already a line item.
+        line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+        _has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
+        if invoice.vat_rate and invoice.vat_rate > 0 and not _has_vat_line:
+            invoice.total = (line_net * (1 + invoice.vat_rate / Decimal('100'))).quantize(Decimal('0.01'))
+        else:
+            invoice.total = line_net
 
     invoice.save()
+    # If no specific field was updated this is a pure recalculate call – recompute from lines.
+    _update_keys = ('invoice_number', 'supplier_name', 'date', 'due_date', 'status',
+                    'payment_status', 'total', 'amount_paid', 'notes', 'currency', 'vat_rate')
+    if not any(k in data for k in _update_keys):
+        _recalc_invoice_total(invoice)
+        invoice.refresh_from_db()
+    # Compute VAT breakdown for response
+    line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+    vat_amount = Decimal('0')
+    has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
+    if invoice.vat_rate and invoice.vat_rate > 0 and not has_vat_line:
+        vat_amount = (line_net * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
     return JsonResponse({
         'success':           True,
         'invoice_number':    invoice.invoice_number,
@@ -810,6 +920,10 @@ def update_purchase_invoice(request, invoice_id):
         'amount_outstanding': str(invoice.amount_outstanding),
         'payment_status':    invoice.payment_status,
         'notes':             invoice.notes or '',
+        'vat_rate':          str(invoice.vat_rate) if invoice.vat_rate is not None else '',
+        'line_net':          str(line_net),
+        'vat_amount':        str(vat_amount),
+        'currency':          invoice.currency or 'GBP',
     })
 
 
@@ -1131,12 +1245,58 @@ def order_purchase_invoice_lines(request, order_id):
 
 
 # ── Helpers ───────────────────────────────────────────────────────
+@login_required
+def flatten_vat_to_line_item(request, invoice_id):
+    """Convert the invoice's VAT rate into an explicit line item and clear the rate."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    if not invoice.vat_rate or invoice.vat_rate <= 0:
+        return JsonResponse({'error': 'This invoice has no VAT rate set.'}, status=400)
+
+    line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+    vat_amount = (line_net * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+
+    sort_order = invoice.line_items.count()
+    vat_line = PurchaseInvoiceLineItem.objects.create(
+        invoice=invoice,
+        description=f'VAT {invoice.vat_rate:g}% on {invoice.currency or "GBP"} {line_net:.2f}',
+        quantity=Decimal('1'),
+        rate=vat_amount,
+        line_total=vat_amount,
+        sort_order=sort_order,
+    )
+
+    # Clear the VAT rate so the invoice total is now the flat sum of all line items
+    invoice.vat_rate = None
+    invoice.save(update_fields=['vat_rate'])
+    _recalc_invoice_total(invoice)
+    invoice.refresh_from_db()
+
+    return JsonResponse({
+        'success': True,
+        'line': _line_to_dict(vat_line),
+        'invoice_total': str(invoice.total),
+        'amount_paid': str(invoice.amount_paid),
+        'amount_outstanding': str(invoice.amount_outstanding),
+    })
+
+
 def _recalc_invoice_total(invoice):
-    total = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+    line_sum = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+    # Apply vat_rate only when there is no explicit VAT line item (avoids double-counting).
+    has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
+    if invoice.vat_rate and invoice.vat_rate > 0 and not has_vat_line:
+        vat = (line_sum * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+        total = line_sum + vat
+    else:
+        total = line_sum
     invoice.total = total
-    # Clamp amount_paid
+    # Clamp amount_paid — never let it go negative
     if invoice.amount_paid > total:
-        invoice.amount_paid = total
+        invoice.amount_paid = max(Decimal('0'), total)
     # Re-derive payment status
     if invoice.total <= 0:
         invoice.payment_status = 'unpaid'
@@ -1252,7 +1412,7 @@ def supplier_search(request):
         name__icontains=q, is_active=True
     ).order_by('name')[:20]
     return JsonResponse({'results': [
-        {'id': s.id, 'name': s.name, 'city': s.city or ''}
+        {'id': s.id, 'name': s.name, 'city': s.city or '', 'vat_rate': float(s.vat_rate) if s.vat_rate is not None else None}
         for s in suppliers
     ]})
 
@@ -1521,6 +1681,45 @@ def push_purchase_invoice_to_xero(request, invoice_id):
 
     # ── Build line items ──────────────────────────────────────
     line_items_qs = invoice.line_items.all().order_by('sort_order', 'id')
+    has_vat = invoice.vat_rate and invoice.vat_rate > 0
+
+    # Known UK Xero tax codes by rate.  Any other rate is looked up (or created)
+    # in the account via the TaxRates API.
+    _UK_VAT_CODE_MAP = {
+        0:  'ZERORATEDINPUT',
+        5:  'RRINPUT',
+        20: 'INPUT2',
+    }
+    if has_vat:
+        vat_rate_int = int(invoice.vat_rate)
+        tax_type = _UK_VAT_CODE_MAP.get(vat_rate_int)
+        if tax_type is None:
+            # Look up or create the rate in Xero
+            tax_type = xero_api.find_or_create_tax_rate(vat_rate_int)
+        if tax_type is None:
+            # Auto-create failed — check if the caller wants to push anyway without a tax code
+            force_no_vat = data.get('force_no_vat') is True
+            if not force_no_vat:
+                xero_err = xero_api.get_last_api_error()
+                detail = f' Xero said: {xero_err}' if xero_err else ''
+                return JsonResponse({
+                    'success': False,
+                    'error': (
+                        f'Could not find or create a {vat_rate_int}% VAT rate in Xero.{detail} '
+                        f'You can either add a tax rate named "VAT {vat_rate_int}%" in Xero, '
+                        f'or push the invoice without a VAT code and assign the tax in Xero manually.'
+                    ),
+                    'can_force_no_vat': True,
+                    'vat_rate_int': vat_rate_int,
+                })
+            # Force push: use NOINPUT so Xero accepts the invoice without a tax code
+            tax_type = 'NOINPUT'
+            line_amount_type = 'NoTax'
+        else:
+            line_amount_type = 'Exclusive'
+    else:
+        tax_type = None
+        line_amount_type = 'NoTax'
 
     if line_items_qs.exists():
         xero_lines = []
@@ -1529,13 +1728,14 @@ def push_purchase_invoice_to_xero(request, invoice_id):
                 'Description': li.description or 'Item',
                 'Quantity': str(li.quantity),
                 'UnitAmount': str(li.rate),
-                'LineAmount': str(li.line_total),
             }
             if gl_code:
                 line['AccountCode'] = gl_code
+            if tax_type:
+                line['TaxType'] = tax_type
             xero_lines.append(line)
     else:
-        # Fallback: single line using invoice total
+        # Fallback: single line using invoice total (already gross)
         line = {
             'Description': invoice.notes or invoice.invoice_number,
             'Quantity': '1',
@@ -1543,6 +1743,8 @@ def push_purchase_invoice_to_xero(request, invoice_id):
         }
         if gl_code:
             line['AccountCode'] = gl_code
+        if tax_type:
+            line['TaxType'] = tax_type
         xero_lines = [line]
 
     # ── Build the Xero invoice payload ────────────────────────
@@ -1551,8 +1753,8 @@ def push_purchase_invoice_to_xero(request, invoice_id):
         'Contact': {'ContactID': contact_id},
         'Status': 'DRAFT',
         'InvoiceNumber': invoice.invoice_number,
-        'CurrencyCode': 'GBP',
-        'LineAmountTypes': 'Inclusive',
+        'CurrencyCode': invoice.currency or 'GBP',
+        'LineAmountTypes': line_amount_type,
         'LineItems': xero_lines,
         'Reference': invoice.notes or '',
     }

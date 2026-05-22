@@ -132,9 +132,10 @@ function modalSearchSupplier(q) {
             dd.innerHTML = results.map(s => {
                 const city = s.city ? ` <span style="color:var(--text-secondary);"> – ${s.city}</span>` : '';
                 const esc = String(s.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const vr = (s.vat_rate !== undefined && s.vat_rate !== null) ? s.vat_rate : 'null';
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
                              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
-                             onclick="selectModalSupplier('${esc}')">${s.name}${city}</div>`;
+                             onclick="selectModalSupplier('${esc}', ${vr})">${s.name}${city}</div>`;
             }).join('');
             dd.style.display = 'block';
         })
@@ -142,7 +143,7 @@ function modalSearchSupplier(q) {
     }, 250);
 }
 
-function selectModalSupplier(name) {
+function selectModalSupplier(name, vatRate) {
     const input = document.getElementById('new-pinv-supplier');
     const dd = document.getElementById('new-pinv-supplier-dropdown');
     if (input) {
@@ -153,6 +154,20 @@ function selectModalSupplier(name) {
     if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
     const warn = document.getElementById('new-pinv-supplier-warning');
     if (warn) warn.style.display = 'none';
+    if (vatRate !== undefined && vatRate !== null) _setModalVatRate(vatRate);
+}
+
+function _setModalVatRate(vatRate) {
+    const cb        = document.getElementById('modal-vat-enabled');
+    const rateInput = document.getElementById('modal-vat-rate');
+    if (!cb || !rateInput) return;
+    if (vatRate !== null && vatRate !== undefined && vatRate > 0) {
+        rateInput.value = vatRate;
+        cb.checked = true;
+    } else {
+        cb.checked = false;
+    }
+    recalcModalTotal();
 }
 
 function validateModalSupplier() {
@@ -267,55 +282,164 @@ function addModalLine() {
     row.innerHTML = `
         <div style="display:flex;gap:6px;align-items:center;">
             <input type="text" placeholder="Description" class="pinv-input pinv-line-desc" style="flex:2;min-width:0;">
-            <div style="position:relative;flex:1.5;min-width:0;">
+            <input type="number" placeholder="1" step="any" min="0" value="1"
+                   class="pinv-input pinv-line-qty"
+                   style="width:50px;padding:5px 8px;font-size:0.82rem;text-align:right;"
+                   oninput="recalcLineTotal(this.closest('.pinv-line-row'))">
+            <input type="number" placeholder="0.00" step="0.01" min="0" value=""
+                   class="pinv-input pinv-line-rate"
+                   style="width:90px;padding:5px 8px;font-size:0.82rem;text-align:right;"
+                   oninput="recalcLineTotal(this.closest('.pinv-line-row'))">
+            <input type="number" placeholder="0.00" step="0.01" min="0" value=""
+                   class="pinv-input pinv-line-total"
+                   style="width:90px;padding:5px 8px;font-size:0.82rem;text-align:right;"
+                   oninput="recalcLineRate(this.closest('.pinv-line-row'))">
+            <button type="button" class="pinv-btn-icon pinv-line-drag-handle" title="Drag to reorder" style="cursor:grab;">
+                <i class="bi bi-grip-vertical"></i>
+            </button>
+            <button type="button" class="pinv-btn-icon pinv-kebab-trigger" onclick="toggleLineKebab(this)" title="More options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+        </div>
+        <div class="pinv-order-subrow" style="display:none;padding:3px 0 4px 2px;">
+            <div style="position:relative;max-width:320px;">
                 <input type="text" class="pinv-input pinv-line-order-input"
                        style="width:100%;padding:5px 8px;font-size:0.82rem;box-sizing:border-box;"
                        placeholder="Link to order\u2026" autocomplete="off" data-order-id=""
                        oninput="modalSearchOrders(this,${idx})">
                 <div class="order-search-dropdown modal-order-dd" id="modal-order-dd-${idx}"></div>
             </div>
-            <input type="number" placeholder="0.00" step="0.01" min="0" value="0"
-                   class="pinv-input pinv-line-rate"
-                   style="width:90px;padding:5px 8px;font-size:0.82rem;text-align:right;"
-                   oninput="recalcModalTotal()">
-            <button type="button" class="pinv-btn-icon" onclick="copyModalLine(this.closest('.pinv-line-row'))" title="Copy line">
-                <i class="bi bi-copy"></i>
-            </button>
-            <button type="button" class="pinv-btn-icon" onclick="splitModalLine(this.closest('.pinv-line-row'))" title="Split into equal parts">
-                <i class="bi bi-scissors"></i>
-            </button>
-            <button type="button" class="pinv-btn-icon pinv-line-drag-handle" title="Drag to reorder" style="cursor:grab;">
-                <i class="bi bi-grip-vertical"></i>
-            </button>
-            <button type="button" class="pinv-btn-icon" onclick="this.closest('.pinv-line-row').remove(); recalcModalTotal();" title="Remove line">
-                <i class="bi bi-x"></i>
-            </button>
         </div>`;
     container.appendChild(row);
 }
 
+let _kebabTargetBtn = null, _kebabTargetRow = null;
+
+function toggleLineKebab(btn) {
+    const portal = document.getElementById('pinv-kebab-portal');
+    if (portal.style.display !== 'none' && _kebabTargetBtn === btn) {
+        _closeKebabPortal();
+        return;
+    }
+    _kebabTargetBtn = btn;
+    _kebabTargetRow = btn.closest('.pinv-line-row');
+    const orderInput = _kebabTargetRow.querySelector('.pinv-line-order-input');
+    const hasOrder = orderInput && orderInput.dataset.orderId;
+    portal.innerHTML = `
+        <button type="button" class="pinv-km-item" data-action="copy">
+            <i class="bi bi-copy"></i> Copy line
+        </button>
+        <button type="button" class="pinv-km-item" data-action="split">
+            <i class="bi bi-scissors"></i> Split line
+        </button>
+        <div class="pinv-kebab-sep"></div>
+        <button type="button" class="pinv-km-item" data-action="order">
+            <i class="bi bi-${hasOrder ? 'link-slash' : 'link-45deg'}"></i>
+            ${hasOrder ? 'Unlink order' : 'Link to order\u2026'}
+        </button>
+        <div class="pinv-kebab-sep"></div>
+        <button type="button" class="pinv-km-item danger" data-action="delete">
+            <i class="bi bi-trash"></i> Delete line
+        </button>`;
+    portal.style.display = 'block';
+    const rect = btn.getBoundingClientRect();
+    const menuH = portal.offsetHeight || 180;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    portal.style.top  = (spaceBelow >= menuH + 8 ? rect.bottom + 3 : rect.top - menuH - 3) + 'px';
+    portal.style.right = (window.innerWidth - rect.right) + 'px';
+}
+
+function _closeKebabPortal() {
+    const portal = document.getElementById('pinv-kebab-portal');
+    if (portal) { portal.style.display = 'none'; portal.innerHTML = ''; }
+    _kebabTargetBtn = null;
+    _kebabTargetRow = null;
+}
+
+function toggleOrderRow(row) {
+    const subrow = row.querySelector('.pinv-order-subrow');
+    const input  = subrow.querySelector('.pinv-line-order-input');
+    if (subrow.style.display === 'none') {
+        subrow.style.display = '';
+        input.focus();
+    } else {
+        input.value = '';
+        input.dataset.orderId = '';
+        subrow.style.display = 'none';
+    }
+}
+
+function showOrderRow(row) {
+    const subrow = row.querySelector('.pinv-order-subrow');
+    if (subrow) subrow.style.display = '';
+}
+
+function addFreightLine() {
+    addModalLine();
+    const rows = document.querySelectorAll('.pinv-line-row');
+    const row = rows[rows.length - 1];
+    row.dataset.isCarriage = '1';
+    row.querySelector('.pinv-line-desc').value = 'Carriage';
+    row.querySelector('.pinv-line-qty').value = '1';
+    row.querySelector('.pinv-line-rate').focus();
+}
+
+function recalcLineTotal(row) {
+    const qty  = parseFloat(row.querySelector('.pinv-line-qty').value) || 1;
+    const rate = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+    row.querySelector('.pinv-line-total').value = (qty * rate).toFixed(2);
+    recalcModalTotal();
+}
+
+function recalcLineRate(row) {
+    const qty   = parseFloat(row.querySelector('.pinv-line-qty').value) || 1;
+    const total = parseFloat(row.querySelector('.pinv-line-total').value) || 0;
+    row.querySelector('.pinv-line-rate').value = (qty > 0 ? total / qty : 0).toFixed(2);
+    recalcModalTotal();
+}
+
 function recalcModalTotal() {
-    let total = 0;
+    let net = 0;
     document.querySelectorAll('.pinv-line-row').forEach(row => {
-        total += parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        net += parseFloat(row.querySelector('.pinv-line-total').value) || 0;
     });
     const sym = (_modalCurrency === 'EUR') ? '\u20ac' : '\u00a3';
-    document.getElementById('modal-total').textContent = sym + total.toFixed(2);
+    const vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
+    const vatRate    = parseFloat(document.getElementById('modal-vat-rate')?.value) || 0;
+    const netRow = document.getElementById('modal-net-row');
+    const vatRow = document.getElementById('modal-vat-row');
+    const vatLbl = document.getElementById('modal-vat-label');
+    if (vatEnabled && vatRate > 0) {
+        const vatAmt = net * vatRate / 100;
+        const gross  = net + vatAmt;
+        if (netRow) netRow.style.display = 'flex';
+        if (vatRow) vatRow.style.display = 'flex';
+        if (vatLbl) vatLbl.textContent = `VAT (${vatRate}%)`;
+        document.getElementById('modal-net-total').textContent  = sym + net.toFixed(2);
+        document.getElementById('modal-vat-amount').textContent = sym + vatAmt.toFixed(2);
+        document.getElementById('modal-total').textContent      = sym + gross.toFixed(2);
+    } else {
+        if (netRow) netRow.style.display = 'none';
+        if (vatRow) vatRow.style.display = 'none';
+        document.getElementById('modal-total').textContent = sym + net.toFixed(2);
+    }
 }
 
 function splitModalLine(row) {
     const n = parseInt(prompt('Split into how many equal lines?', '3'), 10);
     if (!n || n < 2 || n > 20) return;
-    const desc = row.querySelector('.pinv-line-desc').value.trim();
-    const total = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
-    const each = parseFloat((total / n).toFixed(2));
+    const desc  = row.querySelector('.pinv-line-desc').value.trim();
+    const total = parseFloat(row.querySelector('.pinv-line-total').value) || 0;
+    const each  = parseFloat((total / n).toFixed(2));
     row.remove();
     for (let i = 0; i < n; i++) {
         addModalLine();
         const rows = document.querySelectorAll('.pinv-line-row');
         const newRow = rows[rows.length - 1];
-        newRow.querySelector('.pinv-line-desc').value = desc;
-        newRow.querySelector('.pinv-line-rate').value = each;
+        newRow.querySelector('.pinv-line-desc').value  = desc;
+        newRow.querySelector('.pinv-line-qty').value   = '1';
+        newRow.querySelector('.pinv-line-rate').value  = each.toFixed(2);
+        newRow.querySelector('.pinv-line-total').value = each.toFixed(2);
     }
     recalcModalTotal();
 }
@@ -375,6 +499,20 @@ document.addEventListener('click', function(e) {
             dd.innerHTML = ''; dd.style.display = 'none';
         });
     }
+    if (!e.target.closest('.pinv-kebab-trigger') && !e.target.closest('#pinv-kebab-portal')) {
+        _closeKebabPortal();
+    } else {
+        const act = e.target.closest('#pinv-kebab-portal [data-action]');
+        if (act && _kebabTargetRow) {
+            const row = _kebabTargetRow;
+            const action = act.dataset.action;
+            _closeKebabPortal();
+            if (action === 'copy') copyModalLine(row);
+            else if (action === 'split') splitModalLine(row);
+            else if (action === 'order') toggleOrderRow(row);
+            else if (action === 'delete') { row.remove(); recalcModalTotal(); }
+        }
+    }
 });
 
 async function autoLinkOrder(row, description) {
@@ -398,7 +536,10 @@ async function autoLinkOrder(row, description) {
             if (data.results && data.results.length === 1) {
                 const o = data.results[0];
                 const input = row.querySelector('.pinv-line-order-input');
-                if (input) selectModalOrder(input, row.dataset.lineIdx, o.id, o.sale_number, o.customer_name);
+                if (input) {
+                    selectModalOrder(input, row.dataset.lineIdx, o.id, o.sale_number, o.customer_name);
+                    showOrderRow(row);
+                }
                 return;
             }
         } catch(e) {}
@@ -409,14 +550,17 @@ function copyModalLine(row) {
     addModalLine();
     const rows = document.querySelectorAll('.pinv-line-row');
     const newRow = rows[rows.length - 1];
-    newRow.querySelector('.pinv-line-desc').value = row.querySelector('.pinv-line-desc').value;
-    newRow.querySelector('.pinv-line-rate').value = row.querySelector('.pinv-line-rate').value;
+    newRow.querySelector('.pinv-line-desc').value  = row.querySelector('.pinv-line-desc').value;
+    newRow.querySelector('.pinv-line-qty').value   = row.querySelector('.pinv-line-qty').value;
+    newRow.querySelector('.pinv-line-rate').value  = row.querySelector('.pinv-line-rate').value;
+    newRow.querySelector('.pinv-line-total').value = row.querySelector('.pinv-line-total').value;
     const srcInput = row.querySelector('.pinv-line-order-input');
     const dstInput = newRow.querySelector('.pinv-line-order-input');
     if (srcInput && dstInput) {
         dstInput.value = srcInput.value;
         dstInput.dataset.orderId = srcInput.dataset.orderId || '';
         dstInput.dataset.orderNumber = srcInput.dataset.orderNumber || '';
+        if (srcInput.dataset.orderId) showOrderRow(newRow);
     }
     recalcModalTotal();
 }
@@ -489,7 +633,7 @@ function autoPopulateFromFilename(filename) {
             const results = data.results || [];
             for (const s of results) {
                 if (lowerName.includes(s.name.toLowerCase())) {
-                    selectModalSupplier(s.name);
+                    selectModalSupplier(s.name, s.vat_rate !== undefined ? s.vat_rate : null);
                     break;
                 }
             }
@@ -756,16 +900,23 @@ function pullPOLines() {
             addModalLine();
             const rows = document.querySelectorAll('.pinv-line-row');
             const row = rows[rows.length - 1];
-            row.querySelector('.pinv-line-desc').value = item.description || item.name || '';
-            row.querySelector('.pinv-line-rate').value = parseFloat(item.order_price || 0).toFixed(2);
+            const qty  = parseFloat(item.quantity || 1);
+            const rate = parseFloat(item.order_price || 0);
+            row.querySelector('.pinv-line-desc').value  = item.description || item.name || '';
+            row.querySelector('.pinv-line-qty').value   = qty;
+            row.querySelector('.pinv-line-rate').value  = rate.toFixed(2);
+            row.querySelector('.pinv-line-total').value = (qty * rate).toFixed(2);
             row.dataset.poProductId = item.id;
         });
         if (data.freight_cost && parseFloat(data.freight_cost) > 0) {
             addModalLine();
             const rows = document.querySelectorAll('.pinv-line-row');
             const row = rows[rows.length - 1];
-            row.querySelector('.pinv-line-desc').value = 'Carriage';
-            row.querySelector('.pinv-line-rate').value = parseFloat(data.freight_cost).toFixed(2);
+            const fc = parseFloat(data.freight_cost).toFixed(2);
+            row.querySelector('.pinv-line-desc').value  = 'Carriage';
+            row.querySelector('.pinv-line-qty').value   = '1';
+            row.querySelector('.pinv-line-rate').value  = fc;
+            row.querySelector('.pinv-line-total').value = fc;
             row.dataset.isCarriage = '1';
         }
         recalcModalTotal();

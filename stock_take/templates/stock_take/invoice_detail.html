@@ -34,6 +34,16 @@
             {% else %}
             <span class="inv-payment unpaid">Unpaid</span>
             {% endif %}
+            {% if invoice.parent_invoice %}
+            <span class="inv-status draft" style="font-size:0.78rem;">
+                Amendment of <a href="{% url 'invoice_detail' invoice.parent_invoice.id %}" style="color:inherit;text-decoration:underline;">{{ invoice.parent_invoice.invoice_number }}</a>
+            </span>
+            {% endif %}
+        </div>
+        <div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="openAmendmentModal()" title="Create amendment (sub) invoice">
+                <i class="bi bi-file-earmark-plus"></i> Create Amendment
+            </button>
         </div>
     </div>
 
@@ -149,31 +159,34 @@
 </div>
 
 <!-- Financial Summary -->
-<div class="inv-detail-summary">
+<div class="inv-detail-summary" style="position:relative;">
+    <button type="button"
+            onclick="recalculateTotals()"
+            class="btn btn-sm btn-outline-secondary"
+            style="position:absolute;top:0;right:0;display:flex;align-items:center;gap:5px;"
+            title="Recompute totals from line items">
+        <i class="bi bi-arrow-repeat"></i> Recalculate
+    </button>
     <div class="inv-summary-row">
         <span class="summary-label">Subtotal</span>
-        <span class="summary-value">£{{ invoice.subtotal|floatformat:2|intcomma }}</span>
+        <span class="summary-value" id="inv-subtotal">£{{ invoice.subtotal|floatformat:2|intcomma }}</span>
     </div>
     <div class="inv-summary-row">
         <span class="summary-label">Tax</span>
-        <span class="summary-value">£{{ invoice.total_tax|floatformat:2|intcomma }}</span>
+        <span class="summary-value" id="inv-total-tax">£{{ invoice.total_tax|floatformat:2|intcomma }}</span>
     </div>
     <div class="inv-summary-row total">
         <span class="summary-label">Total</span>
-        <span class="summary-value">£{{ invoice.total|floatformat:2|intcomma }}</span>
+        <span class="summary-value" id="inv-total">£{{ invoice.total|floatformat:2|intcomma }}</span>
     </div>
-    {% if invoice.amount_paid > 0 %}
-    <div class="inv-summary-row paid">
+    <div class="inv-summary-row paid" id="inv-paid-row"{% if not invoice.amount_paid %} style="display:none;"{% endif %}>
         <span class="summary-label">Paid</span>
-        <span class="summary-value">£{{ invoice.amount_paid|floatformat:2|intcomma }}</span>
+        <span class="summary-value" id="inv-amount-paid">£{{ invoice.amount_paid|floatformat:2|intcomma }}</span>
     </div>
-    {% endif %}
-    {% if invoice.amount_outstanding > 0 %}
-    <div class="inv-summary-row outstanding">
+    <div class="inv-summary-row outstanding" id="inv-outstanding-row"{% if not invoice.amount_outstanding %} style="display:none;"{% endif %}>
         <span class="summary-label">Outstanding</span>
-        <span class="summary-value">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
+        <span class="summary-value" id="inv-amount-outstanding">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
     </div>
-    {% endif %}
 </div>
 
 <!-- Payments -->
@@ -431,6 +444,58 @@
             {% endif %}
         </button>
         <span id="xero-push-status" style="font-size:0.88rem; color:var(--text-secondary);"></span>
+    </div>
+</div>
+
+<!-- Amendments -->
+{% if amendments %}
+<div class="inv-detail-section">
+    <h3 class="inv-section-title"><i class="bi bi-file-earmark-diff"></i> Amendment Invoices</h3>
+    <div class="inv-table-container" style="max-height: none;">
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>Invoice No.</th>
+                    <th>Reason</th>
+                    <th>Date</th>
+                    <th style="text-align:right;">Total</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for amend in amendments %}
+                <tr>
+                    <td><a href="{% url 'invoice_detail' amend.id %}">{{ amend.invoice_number }}</a></td>
+                    <td style="color:var(--text-secondary);font-size:0.85rem;">{{ amend.amendment_reason|default:"—" }}</td>
+                    <td>{{ amend.date|date:"d/m/Y"|default:"—" }}</td>
+                    <td class="number-cell">£{{ amend.total|floatformat:2 }}</td>
+                    <td><span class="inv-status {{ amend.status|lower }}">{{ amend.status }}</span></td>
+                    <td><a href="{% url 'invoice_detail' amend.id %}" class="btn btn-sm btn-outline-secondary">View</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Create Amendment Modal -->
+<div id="amendment-modal" style="display:none; position:fixed; inset:0; z-index:1050; background:var(--overlay-bg); align-items:center; justify-content:center;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:28px; width:100%; max-width:480px; box-shadow:var(--shadow-lg);">
+        <h4 style="margin:0 0 6px; font-size:1rem; font-weight:600;">Create Amendment Invoice</h4>
+        <p style="margin:0 0 20px; font-size:0.85rem; color:var(--text-secondary);">
+            This will create <strong id="amend-preview-number">{{ invoice.invoice_number }}-A</strong> as a sub-invoice linked to {{ invoice.invoice_number }}.
+        </p>
+        <label style="display:block; font-size:0.85rem; font-weight:500; margin-bottom:6px;">Reason for amendment <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <textarea id="amendment-reason" rows="3" placeholder="e.g. Missing carriage charge, VAT correction…"
+            style="width:100%; box-sizing:border-box; padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-primary); font-size:0.9rem; resize:vertical;"></textarea>
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
+            <button type="button" class="btn btn-outline-secondary" onclick="closeAmendmentModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="amendment-create-btn" onclick="submitAmendment()">
+                <i class="bi bi-file-earmark-plus"></i> Create Amendment
+            </button>
+        </div>
     </div>
 </div>
 
@@ -780,6 +845,75 @@ function pushToXero() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
         status.innerHTML = `<span style="color:#dc3545;"><i class="bi bi-exclamation-circle-fill"></i> Network error: ${err.message}</span>`;
+    });
+}
+
+// ── Recalculate Totals ─────────────────────────────────────────
+function recalculateTotals() {
+    fetch('/invoices/{{ invoice.id }}/recalculate/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { alert(data.error || 'Recalculation failed'); return; }
+        const fmt = v => parseFloat(v).toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+        document.getElementById('inv-subtotal').textContent      = '£' + fmt(data.subtotal);
+        document.getElementById('inv-total-tax').textContent     = '£' + fmt(data.total_tax);
+        document.getElementById('inv-total').textContent         = '£' + fmt(data.total);
+        document.getElementById('inv-amount-paid').textContent   = '£' + fmt(data.amount_paid);
+        document.getElementById('inv-amount-outstanding').textContent = '£' + fmt(data.amount_outstanding);
+        document.getElementById('inv-paid-row').style.display        = parseFloat(data.amount_paid) > 0 ? '' : 'none';
+        document.getElementById('inv-outstanding-row').style.display = parseFloat(data.amount_outstanding) > 0 ? '' : 'none';
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+// ── Amendment invoice ──────────────────────────────────────────
+function openAmendmentModal() {
+    document.getElementById('amendment-reason').value = '';
+    document.getElementById('amendment-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('amendment-reason').focus(), 50);
+}
+
+function closeAmendmentModal() {
+    document.getElementById('amendment-modal').style.display = 'none';
+}
+
+document.getElementById('amendment-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeAmendmentModal();
+});
+
+function submitAmendment() {
+    const btn = document.getElementById('amendment-create-btn');
+    const reason = document.getElementById('amendment-reason').value.trim();
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating…';
+
+    fetch('{% url "create_amendment_invoice" invoice.id %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reason }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.invoice_url;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-file-earmark-plus"></i> Create Amendment';
+            alert(data.error || 'Failed to create amendment');
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-file-earmark-plus"></i> Create Amendment';
+        alert('Error: ' + err.message);
     });
 }
 </script>

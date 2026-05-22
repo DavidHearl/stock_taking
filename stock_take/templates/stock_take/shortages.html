@@ -190,6 +190,9 @@
         <span class="meta-badge highlight">Order Value (ex VAT): £{{ current_order_value|floatformat:2 }}</span>
     </div>
     <div class="rau-action-buttons">
+        <button class="btn btn-outline-info" onclick="openStyleJobsReport()">
+            <i class="bi bi-clipboard2-data"></i> Style Jobs Report
+        </button>
         <button class="btn btn-primary" onclick="openRauplusOrderModal()">
             <i class="bi bi-cart3"></i> View Raumplus Order
         </button>
@@ -816,6 +819,28 @@
     </div>
 </div>
 
+<!-- ── Style Jobs Report Modal ──────────────────────────────────────────── -->
+<div id="style-jobs-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeStyleJobsModal(event)">
+    <div class="rau-order-modal" style="max-width:900px;" onclick="event.stopPropagation()">
+        <div class="rau-order-modal-header">
+            <h3><i class="bi bi-clipboard2-data"></i> Style Items — Job Report</h3>
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-left:auto;">
+                <button id="style-jobs-print-btn" class="btn btn-sm btn-outline-secondary" onclick="printStyleJobsReport()" style="display:none;" title="Save as PDF">
+                    <i class="bi bi-file-earmark-pdf"></i> Save as PDF
+                </button>
+                <button class="pred-modal-close" onclick="closeStyleJobsModal()">&times;</button>
+            </div>
+        </div>
+        <div class="rau-order-modal-body" style="padding:1.25rem;">
+            <div id="style-jobs-loading" style="text-align:center;padding:2rem;">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p style="margin-top:0.75rem;color:#888;">Generating report&hellip;</p>
+            </div>
+            <div id="style-jobs-content" style="display:none;"></div>
+        </div>
+    </div>
+</div>
+
 <!-- ── Raumplus Order Modal ───────────────────────────────────────────── -->
 <div id="rau-order-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRauplusOrderModal(event)">
     <div class="rau-order-modal" onclick="event.stopPropagation()">
@@ -1003,6 +1028,405 @@
 
 {% block extra_js %}
 <script>
+    // ── Style Jobs Report ────────────────────────────────────────────────
+    const STYLE_JOBS_REPORT_URL = "{% url 'raumplus_style_jobs_report' %}";
+    let _lastStyleJobsData = null;
+
+    function openStyleJobsReport() {
+        const modal = document.getElementById('style-jobs-modal');
+        const loading = document.getElementById('style-jobs-loading');
+        const content = document.getElementById('style-jobs-content');
+        const printBtn = document.getElementById('style-jobs-print-btn');
+        loading.style.display = 'block';
+        content.style.display = 'none';
+        content.innerHTML = '';
+        if (printBtn) printBtn.style.display = 'none';
+        modal.style.display = 'flex';
+
+        fetch(STYLE_JOBS_REPORT_URL, {credentials: 'same-origin'})
+            .then(r => r.json())
+            .then(data => {
+                _lastStyleJobsData = data;
+                loading.style.display = 'none';
+                content.innerHTML = renderStyleJobsReport(data);
+                content.style.display = 'block';
+                if (printBtn) printBtn.style.display = '';
+            })
+            .catch(() => {
+                loading.style.display = 'none';
+                content.innerHTML = '<div style="color:#dc3545;padding:1rem;">Failed to load report. Please try again.</div>';
+                content.style.display = 'block';
+            });
+    }
+
+    function closeStyleJobsModal(e) {
+        if (!e || e.target === document.getElementById('style-jobs-modal')) {
+            document.getElementById('style-jobs-modal').style.display = 'none';
+            const printBtn = document.getElementById('style-jobs-print-btn');
+            if (printBtn) printBtn.style.display = 'none';
+        }
+    }
+
+    function renderStyleJobsReport(data) {
+        // ── Re-group data by colour variant (not by job) ─────────────────
+        const variantMap = {};
+        data.jobs.forEach(job => {
+            job.items.forEach(item => {
+                if (!variantMap[item.sku]) {
+                    variantMap[item.sku] = {
+                        name: item.name,
+                        stock_item_id: item.stock_item_id,
+                        jobs: [],
+                        has_shortage: false,
+                    };
+                }
+                variantMap[item.sku].jobs.push({
+                    order_id: job.order_id,
+                    sale_number: job.sale_number,
+                    customer: job.customer,
+                    fit_date: job.fit_date,
+                    required: item.required,
+                    available: item.available,  // running balance before this job
+                    shortfall: item.shortfall,
+                    status: item.status,
+                });
+                if (item.status === 'shortage') variantMap[item.sku].has_shortage = true;
+            });
+        });
+
+        // Merge per-SKU stock data
+        const summaryMap = {};
+        data.style_summary.forEach(s => { summaryMap[s.sku] = s; });
+
+        // Sort: short variants first, then alphabetically
+        const variants = Object.entries(variantMap).sort(([, a], [, b]) => {
+            if (a.has_shortage !== b.has_shortage) return a.has_shortage ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        const atRiskCount = data.jobs.filter(j => j.has_problem).length;
+        const shortVariants = variants.filter(([, v]) => v.has_shortage).length;
+        const statColor = atRiskCount > 0 ? '#dc3545' : '#198754';
+
+        // ── Summary bar ──────────────────────────────────────────────────
+        let html = `<div style="margin-bottom:1rem;padding:0.7rem 1rem;background:#f8f9fa;border-radius:6px;display:flex;gap:2rem;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:0.82rem;color:#666;">Generated: ${data.generated_at}</span>
+            <span><strong>${data.total_jobs}</strong> job${data.total_jobs !== 1 ? 's' : ''} &nbsp;·&nbsp; <strong>${variants.length}</strong> colour variant${variants.length !== 1 ? 's' : ''}</span>
+            <span style="color:${statColor};font-weight:600;">${atRiskCount > 0 ? `${shortVariants} variant${shortVariants !== 1 ? 's' : ''} short · ${atRiskCount} job${atRiskCount !== 1 ? 's' : ''} at risk` : 'All jobs fully covered'}</span>
+        </div>`;
+
+        if (data.total_jobs === 0) {
+            return html + '<div style="padding:1.5rem;text-align:center;color:#888;"><i class="bi bi-check-circle" style="font-size:1.5rem;"></i><p>No upcoming jobs require style items.</p></div>';
+        }
+
+        // ── One section per colour variant ───────────────────────────────
+        html += '<div style="display:flex;flex-direction:column;gap:0.6rem;">';
+
+        variants.forEach(([sku, v]) => {
+            const s = summaryMap[sku] || {current_stock: 0, incoming_qty: 0};
+            const totalAvail = s.current_stock + s.incoming_qty;
+            const totalNeed = v.jobs.reduce((sum, j) => sum + j.required, 0);
+            const balance = totalAvail - totalNeed;
+            const isRisk = v.has_shortage;
+            const borderColor = isRisk ? '#f5c6cb' : '#dee2e6';
+            const headerBg = isRisk ? '#fff0f0' : '#f8f9fa';
+            const balColor = balance < 0 ? '#dc3545' : '#198754';
+
+            const nameEl = v.stock_item_id
+                ? `<a href="/product/${v.stock_item_id}/" target="_blank" style="font-weight:600;font-size:0.9rem;color:inherit;text-decoration:none;">${v.name}</a>`
+                : `<span style="font-weight:600;font-size:0.9rem;">${v.name}</span>`;
+
+            const badge = isRisk
+                ? `<span style="font-size:0.72rem;background:#dc3545;color:#fff;padding:0.1rem 0.5rem;border-radius:10px;font-weight:600;white-space:nowrap;">⚠ Short by ${Math.abs(balance)}</span>`
+                : `<span style="font-size:0.72rem;background:#198754;color:#fff;padding:0.1rem 0.5rem;border-radius:10px;font-weight:600;">✓ OK</span>`;
+
+            let rows = '';
+            v.jobs.forEach(job => {
+                const isJobShort = job.status === 'shortage';
+                const rowBg = isJobShort ? '#fff3cd' : '';
+                const remaining = job.available - job.required;
+                const stCell = isJobShort
+                    ? `<td style="padding:0.28rem 0.7rem;text-align:right;color:#dc3545;font-weight:600;white-space:nowrap;">⚠ short&nbsp;${job.shortfall}</td>`
+                    : `<td style="padding:0.28rem 0.7rem;text-align:right;color:#198754;white-space:nowrap;">✓&nbsp;<span style="color:#999;font-weight:normal;font-size:0.78rem;">${remaining} left</span></td>`;
+                rows += `<tr style="background:${rowBg};border-top:1px solid #f0f0f0;">
+                    <td style="padding:0.28rem 0.7rem;"><a href="/order/${job.order_id}/" target="_blank" style="font-weight:600;color:inherit;text-decoration:none;">BFS-SD-${job.sale_number}</a></td>
+                    <td style="padding:0.28rem 0.7rem;">${job.customer || '—'}</td>
+                    <td style="padding:0.28rem 0.7rem;color:#666;font-size:0.8rem;white-space:nowrap;">${job.fit_date || '—'}</td>
+                    <td style="padding:0.28rem 0.7rem;text-align:right;">${job.required}</td>
+                    ${stCell}
+                </tr>`;
+            });
+
+            html += `<div style="border:1px solid ${borderColor};border-radius:6px;overflow:hidden;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;padding:0.55rem 0.85rem;background:${headerBg};border-bottom:1px solid ${borderColor};">
+                    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                        ${nameEl} ${badge}
+                        <span style="font-size:0.79rem;color:#888;">${v.jobs.length} job${v.jobs.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div style="display:flex;gap:1.1rem;font-size:0.79rem;color:#666;flex-wrap:wrap;">
+                        <span>In stock:&nbsp;<strong>${s.current_stock}</strong></span>
+                        ${s.incoming_qty > 0 ? `<span>Incoming:&nbsp;<strong>${s.incoming_qty}</strong></span>` : ''}
+                        <span>Need:&nbsp;<strong>${totalNeed}</strong></span>
+                        <span>Balance:&nbsp;<strong style="color:${balColor};">${balance >= 0 ? '+' : ''}${balance}</strong></span>
+                    </div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead><tr style="background:#f5f5f5;color:#555;">
+                        <th style="padding:0.28rem 0.7rem;text-align:left;">Sale #</th>
+                        <th style="padding:0.28rem 0.7rem;text-align:left;">Customer</th>
+                        <th style="padding:0.28rem 0.7rem;text-align:left;">Fit Date</th>
+                        <th style="padding:0.28rem 0.7rem;text-align:right;">Required</th>
+                        <th style="padding:0.28rem 0.7rem;text-align:right;">Status</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+        });
+
+        html += '</div>';
+
+        // ── Full style stock summary ─────────────────────────────────────
+        if (data.all_styles_summary && data.all_styles_summary.length > 0) {
+            let sumRows = '';
+            data.all_styles_summary.forEach(s => {
+                const v = variantMap[s.sku];
+                const totalNeed = v ? v.jobs.reduce((sum, j) => sum + j.required, 0) : 0;
+                const totalAvail = s.current_stock + s.incoming_qty;
+                const balance = totalAvail - totalNeed;
+                const isShort = balance < 0;
+                const balColor = isShort ? '#dc3545' : '#198754';
+                const rowBg = isShort ? '#fff5f5' : '';
+                sumRows += `<tr style="background:${rowBg};border-top:1px solid #f0f0f0;">
+                    <td style="padding:0.22rem 0.6rem;font-size:0.73rem;color:#666;word-break:break-all;">${s.sku}</td>
+                    <td style="padding:0.22rem 0.6rem;font-size:0.8rem;">${s.name}</td>
+                    <td style="padding:0.22rem 0.6rem;text-align:right;">${s.current_stock}</td>
+                    <td style="padding:0.22rem 0.6rem;text-align:right;">${s.incoming_qty > 0 ? s.incoming_qty : '—'}</td>
+                    <td style="padding:0.22rem 0.6rem;text-align:right;">${totalNeed > 0 ? totalNeed : '—'}</td>
+                    <td style="padding:0.22rem 0.6rem;text-align:right;font-weight:700;color:${balColor};">${balance >= 0 ? '+' : ''}${balance}</td>
+                </tr>`;
+            });
+            html += `<div style="margin-top:1rem;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
+                <div style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0.85rem;background:var(--bg-tertiary);border-bottom:1px solid var(--border-color);">
+                    <i class="bi bi-table" style="color:var(--text-secondary);"></i>
+                    <strong style="font-size:0.85rem;">Full Style Stock Summary</strong>
+                    <span style="font-size:0.78rem;color:var(--text-muted);">— all items, balance after scheduled jobs</span>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;table-layout:fixed;">
+                    <colgroup>
+                        <col style="width:26%;"><col style="width:26%;"><col style="width:12%;">
+                        <col style="width:12%;"><col style="width:12%;"><col style="width:12%;">
+                    </colgroup>
+                    <thead><tr style="background:var(--bg-secondary);color:var(--text-secondary);font-size:0.75rem;">
+                        <th style="padding:0.25rem 0.6rem;text-align:left;">SKU</th>
+                        <th style="padding:0.25rem 0.6rem;text-align:left;">Colour</th>
+                        <th style="padding:0.25rem 0.6rem;text-align:right;">In Stock</th>
+                        <th style="padding:0.25rem 0.6rem;text-align:right;">Incoming</th>
+                        <th style="padding:0.25rem 0.6rem;text-align:right;">Jobs</th>
+                        <th style="padding:0.25rem 0.6rem;text-align:right;">Balance</th>
+                    </tr></thead>
+                    <tbody>${sumRows}</tbody>
+                </table>
+            </div>`;
+        }
+
+        html += `<p style="font-size:0.78rem;color:#888;margin-top:0.6rem;">* Stock is allocated in fit-date order — each job reduces the pool for later jobs. Incoming stock (approved POs) is included in the starting balance.</p>`;
+        return html;
+    }
+
+    function printStyleJobsReport() {
+        if (!_lastStyleJobsData) return;
+        const data = _lastStyleJobsData;
+
+        // Same variant-grouping as the modal view
+        const variantMap = {};
+        data.jobs.forEach(job => {
+            job.items.forEach(item => {
+                if (!variantMap[item.sku]) {
+                    variantMap[item.sku] = {name: item.name, jobs: [], has_shortage: false};
+                }
+                variantMap[item.sku].jobs.push({
+                    order_id: job.order_id, sale_number: job.sale_number,
+                    customer: job.customer, fit_date: job.fit_date,
+                    required: item.required, available: item.available,
+                    shortfall: item.shortfall, status: item.status,
+                });
+                if (item.status === 'shortage') variantMap[item.sku].has_shortage = true;
+            });
+        });
+        const summaryMap = {};
+        data.style_summary.forEach(s => { summaryMap[s.sku] = s; });
+        const variants = Object.entries(variantMap).sort(([, a], [, b]) => {
+            if (a.has_shortage !== b.has_shortage) return a.has_shortage ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        const atRiskCount = data.jobs.filter(j => j.has_problem).length;
+        const shortVariants = variants.filter(([, v]) => v.has_shortage).length;
+        const statusSummary = atRiskCount > 0
+            ? `${shortVariants} variant${shortVariants !== 1 ? 's' : ''} short &nbsp;·&nbsp; ${atRiskCount} job${atRiskCount !== 1 ? 's' : ''} at risk`
+            : 'All jobs fully covered';
+        const statusColour = atRiskCount > 0 ? '#c0392b' : '#1a7a4a';
+
+        let variantBlocks = '';
+        variants.forEach(([sku, v]) => {
+            const s = summaryMap[sku] || {current_stock: 0, incoming_qty: 0};
+            const totalAvail = s.current_stock + s.incoming_qty;
+            const totalNeed = v.jobs.reduce((sum, j) => sum + j.required, 0);
+            const balance = totalAvail - totalNeed;
+            const isRisk = v.has_shortage;
+
+            // Section colour theming
+            const accentColour  = isRisk ? '#c0392b' : '#1a7a4a';
+            const headerBg      = isRisk ? '#fdf0ef' : '#eef8f2';
+            const headerBorder  = isRisk ? '#e8a09a' : '#8fd4ae';
+            const badgeBg       = isRisk ? '#c0392b' : '#1a7a4a';
+            const badge         = isRisk ? `⚠ Short by ${Math.abs(balance)}` : `✓ OK`;
+            const balColour     = balance < 0 ? '#c0392b' : '#1a7a4a';
+
+            let rows = '';
+            v.jobs.forEach((job, idx) => {
+                const isJobShort = job.status === 'shortage';
+                const rowBg = isJobShort ? '#fef9e7' : (idx % 2 === 1 ? '#f9fafb' : '#ffffff');
+                const remaining = job.available - job.required;
+                const st = isJobShort
+                    ? `<span style="color:#c0392b;font-weight:700;">⚠ short&nbsp;${job.shortfall}</span>`
+                    : `<span style="color:#1a7a4a;font-weight:600;">✓&nbsp;<span style="color:#888;font-weight:400;">${remaining} left</span></span>`;
+                rows += `<tr style="background:${rowBg};">
+                    <td style="padding:0.3rem 0.6rem;font-weight:600;">BFS-SD-${job.sale_number}</td>
+                    <td style="padding:0.3rem 0.6rem;">${job.customer || '—'}</td>
+                    <td style="padding:0.3rem 0.6rem;color:#555;">${job.fit_date || '—'}</td>
+                    <td style="padding:0.3rem 0.6rem;text-align:right;">${job.required}</td>
+                    <td style="padding:0.3rem 0.6rem;text-align:right;">${st}</td>
+                </tr>`;
+            });
+
+            const stockLine = `In stock:&nbsp;<strong>${s.current_stock}</strong>`
+                + (s.incoming_qty > 0 ? `&nbsp;·&nbsp;Incoming:&nbsp;<strong>${s.incoming_qty}</strong>` : '')
+                + `&nbsp;·&nbsp;Need:&nbsp;<strong>${totalNeed}</strong>`
+                + `&nbsp;·&nbsp;Balance:&nbsp;<strong style="color:${balColour};">${balance >= 0 ? '+' : ''}${balance}</strong>`;
+
+            variantBlocks += `
+            <div style="border:1px solid ${headerBorder};border-radius:5px;margin-bottom:0.7rem;break-inside:avoid;overflow:hidden;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.45rem 0.75rem;background:${headerBg};border-bottom:1px solid ${headerBorder};">
+                    <div style="display:flex;align-items:center;gap:0.5rem;">
+                        <span style="width:4px;height:1.4em;background:${accentColour};border-radius:2px;display:inline-block;"></span>
+                        <strong style="font-size:0.9rem;">${v.name}</strong>
+                        <span style="font-size:0.71rem;background:${badgeBg};color:#fff;padding:0.1em 0.55em;border-radius:10px;font-weight:700;">${badge}</span>
+                        <span style="font-size:0.78rem;color:#666;">${v.jobs.length}&nbsp;job${v.jobs.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div style="font-size:0.78rem;color:#555;">${stockLine}</div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;table-layout:fixed;">
+                    <colgroup>
+                        <col style="width:24%;">
+                        <col style="width:32%;">
+                        <col style="width:16%;">
+                        <col style="width:10%;">
+                        <col style="width:18%;">
+                    </colgroup>
+                    <thead>
+                        <tr style="background:#e8ecef;color:#333;font-weight:700;">
+                            <th style="padding:0.3rem 0.6rem;">Sale Number</th>
+                            <th style="padding:0.3rem 0.6rem;">Customer</th>
+                            <th style="padding:0.3rem 0.6rem;">Fit Date</th>
+                            <th style="padding:0.3rem 0.6rem;text-align:right;">Req'd</th>
+                            <th style="padding:0.3rem 0.6rem;text-align:right;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+        });
+
+        // ── Stock summary table (ALL style items, not just those in jobs) ──
+        let summaryRows = '';
+        (data.all_styles_summary || []).forEach(s => {
+            const v = variantMap[s.sku];
+            const totalNeed = v ? v.jobs.reduce((sum, j) => sum + j.required, 0) : 0;
+            const totalAvail = s.current_stock + s.incoming_qty;
+            const balance = totalAvail - totalNeed;
+            const isShort = balance < 0;
+            const balColour = isShort ? '#c0392b' : '#1a7a4a';
+            const rowBg = isShort ? '#fdf0ef' : '#ffffff';
+            summaryRows += `<tr style="background:${rowBg};border-top:1px solid #e8e8e8;">
+                <td style="padding:0.3rem 0.6rem;font-weight:600;color:#555;font-size:0.72rem;word-break:break-all;">${s.sku}</td>
+                <td style="padding:0.3rem 0.6rem;">${s.name}</td>
+                <td style="padding:0.3rem 0.6rem;text-align:right;">${s.current_stock}</td>
+                <td style="padding:0.3rem 0.6rem;text-align:right;">${s.incoming_qty > 0 ? s.incoming_qty : '—'}</td>
+                <td style="padding:0.3rem 0.6rem;text-align:right;">${totalNeed}</td>
+                <td style="padding:0.3rem 0.6rem;text-align:right;font-weight:700;color:${balColour};">${balance >= 0 ? '+' : ''}${balance}</td>
+            </tr>`;
+        });
+        const stockSummaryBlock = `
+        <div style="margin-top:1.2rem;break-before:auto;">
+            <div style="background:linear-gradient(135deg,#0d3349 0%,#0a5b6b 100%);color:#fff;padding:0.5rem 0.75rem;border-radius:5px 5px 0 0;">
+                <strong style="font-size:0.9rem;">Full Style Stock Summary</strong>
+                <span style="font-size:0.78rem;opacity:0.8;margin-left:0.75rem;">All style items — balance after all scheduled jobs</span>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.8rem;table-layout:fixed;border:1px solid #ccd8dd;border-top:none;">
+                <colgroup>
+                    <col style="width:26%;">
+                    <col style="width:28%;">
+                    <col style="width:11%;">
+                    <col style="width:11%;">
+                    <col style="width:11%;">
+                    <col style="width:13%;">
+                </colgroup>
+                <thead>
+                    <tr style="background:#e8ecef;color:#333;font-weight:700;">
+                        <th style="padding:0.3rem 0.6rem;">SKU</th>
+                        <th style="padding:0.3rem 0.6rem;">Colour</th>
+                        <th style="padding:0.3rem 0.6rem;text-align:right;">In Stock</th>
+                        <th style="padding:0.3rem 0.6rem;text-align:right;">Incoming</th>
+                        <th style="padding:0.3rem 0.6rem;text-align:right;">Jobs Need</th>
+                        <th style="padding:0.3rem 0.6rem;text-align:right;">Balance</th>
+                    </tr>
+                </thead>
+                <tbody>${summaryRows}</tbody>
+            </table>
+        </div>`;
+
+        // Build the full HTML for the PDF
+        const pdfHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <title>Raumplus Style Jobs Report \u2013 ${data.generated_at}</title>
+        <style>
+            @page { size: A4 landscape; margin: 1.2cm 1.4cm; }
+            * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            body { font-family: Arial, Helvetica, sans-serif; font-size: 0.8rem; color: #1a1a1a; margin: 0; padding: 0; background: #fff; }
+            .report-header { background: linear-gradient(135deg, #0d3349 0%, #0a5b6b 100%); color: #fff; padding: 0.75rem 1.1rem 0.65rem; border-radius: 5px; margin-bottom: 0.85rem; }
+            .report-header h1 { margin: 0 0 0.2rem; font-size: 1.1rem; font-weight: 700; }
+            .report-header .meta { font-size: 0.76rem; opacity: 0.85; margin-bottom: 0.25rem; }
+            .report-header .status-pill { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 0.12em 0.65em; border-radius: 20px; background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.35); color: #fff; }
+            .note { color: #888; font-size: 0.7rem; margin-top: 0.7rem; border-top: 1px solid #e0e0e0; padding-top: 0.4rem; }
+        </style></head><body>
+        <div class="report-header">
+            <h1>Raumplus Style Items &mdash; Job Report</h1>
+            <div class="meta">Generated: ${data.generated_at} &nbsp;\u00b7&nbsp; ${data.total_jobs} job${data.total_jobs !== 1 ? 's' : ''} across ${variants.length} colour variant${variants.length !== 1 ? 's' : ''}</div>
+            <span class="status-pill" style="background:${atRiskCount > 0 ? 'rgba(192,57,43,0.75)' : 'rgba(26,122,74,0.75)'};">${statusSummary}</span>
+        </div>
+        ${variantBlocks}
+        ${stockSummaryBlock}
+        <p class="note">* Stock is allocated in fit-date order \u2014 each job reduces the pool for later jobs. Incoming stock (approved POs) is included in the starting balance.</p>
+        </body></html>`;
+
+        // Print via a hidden iframe — no new tab opens
+        const existingIframe = document.getElementById('style-jobs-pdf-frame');
+        if (existingIframe) existingIframe.remove();
+        const iframe = document.createElement('iframe');
+        iframe.id = 'style-jobs-pdf-frame';
+        iframe.style.cssText = 'position:fixed;width:1px;height:1px;border:0;left:-9999px;top:-9999px;opacity:0;';
+        document.body.appendChild(iframe);
+        const iDoc = iframe.contentDocument || iframe.contentWindow.document;
+        iDoc.open();
+        iDoc.write(pdfHtml);
+        iDoc.close();
+        setTimeout(function() {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            setTimeout(function() { iframe.remove(); }, 500);
+        }, 300);
+    }
+
     // ── Raumplus Order Modal ─────────────────────────────────────────────
     // orderRows: array of {sku, name, suggested_qty, order_qty, cost, section, included}
     let RAU_ORDER_ROWS = [];

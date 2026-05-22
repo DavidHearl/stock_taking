@@ -2139,62 +2139,69 @@ def scrape_anthill_payments(request, pk):
     # with href="#" — it is a pure client-side visibility toggle, not a
     # separate URL.  The paymentsTable is already embedded in the original
     # page HTML; we just need to parse it directly from resp.text.
-    parser = _TableParser()
-    parser.feed(resp.text)
+    try:
+        parser = _TableParser()
+        parser.feed(resp.text)
 
-    diag = {
-        'final_url': resp.url,
-        'http_status': resp.status_code,
-        'raw_has_payments_table': 'paymentsTable' in resp.text,
-        'html_sample': resp.text[:5000].replace('\n', ' ').replace('\r', ''),
-    }
-    title_match = re.search(r'<title[^>]*>([^<]{0,120})</title>', resp.text, re.IGNORECASE)
-    if title_match:
-        diag['page_title'] = title_match.group(1).strip()
+        diag = {
+            'final_url': resp.url,
+            'http_status': resp.status_code,
+            'raw_has_payments_table': 'paymentsTable' in resp.text,
+            'html_sample': resp.text[:5000].replace('\n', ' ').replace('\r', ''),
+        }
+        title_match = re.search(r'<title[^>]*>([^<]{0,120})</title>', resp.text, re.IGNORECASE)
+        if title_match:
+            diag['page_title'] = title_match.group(1).strip()
 
-    if not parser.found:
+        if not parser.found:
+            return JsonResponse({
+                'success': False,
+                'error': (
+                    'Payments table not found on the Anthill page. '
+                    'The page may still require login, or the table structure may have changed.'
+                ),
+                'diag': diag,
+            })
+
+        payments = []
+        for row in parser.rows[1:]:   # skip the header row (th cells)
+            if len(row) < 5:
+                continue
+            # Skip rows that are only action links (edit / delete / receipt etc.)
+            action_words = {'edit', 'delete', 'receipt', 'unconfirm', 'confirm', 'view'}
+            non_empty = [c for c in row if c]
+            if non_empty and all(c.lower() in action_words for c in non_empty):
+                continue
+
+            payment_type = row[0]
+            date_str     = row[1]
+            location     = row[2]
+            user         = row[3]
+            amount_str   = row[4]
+            status       = row[5].strip() if len(row) > 5 else ''
+
+            amount_clean = amount_str.replace('£', '').replace(',', '').strip()
+
+            if not payment_type or not amount_clean:
+                continue
+
+            payments.append({
+                'type': payment_type,
+                'date': date_str,
+                'location': location,
+                'user': user,
+                'amount': amount_clean,
+                'status': status,
+            })
+
+        return JsonResponse({'success': True, 'payments': payments})
+
+    except Exception as exc:
+        logger.exception('scrape_anthill_payments failed for sale pk=%s', pk)
         return JsonResponse({
             'success': False,
-            'error': (
-                'Payments table not found on the Anthill page. '
-                'The page may still require login, or the table structure may have changed.'
-            ),
-            'diag': diag,
-        })
-
-
-    payments = []
-    for row in parser.rows[1:]:   # skip the header row (th cells)
-        if len(row) < 5:
-            continue
-        # Skip rows that are only action links (edit / delete / receipt etc.)
-        action_words = {'edit', 'delete', 'receipt', 'unconfirm', 'confirm', 'view'}
-        non_empty = [c for c in row if c]
-        if non_empty and all(c.lower() in action_words for c in non_empty):
-            continue
-
-        payment_type = row[0]
-        date_str     = row[1]
-        location     = row[2]
-        user         = row[3]
-        amount_str   = row[4]
-        status       = row[5].strip() if len(row) > 5 else ''
-
-        amount_clean = amount_str.replace('£', '').replace(',', '').strip()
-
-        if not payment_type or not amount_clean:
-            continue
-
-        payments.append({
-            'type': payment_type,
-            'date': date_str,
-            'location': location,
-            'user': user,
-            'amount': amount_clean,
-            'status': status,
-        })
-
-    return JsonResponse({'success': True, 'payments': payments})
+            'error': f'Error processing Anthill response: {exc}',
+        }, status=500)
 
 
 @login_required

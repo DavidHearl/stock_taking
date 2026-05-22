@@ -197,21 +197,55 @@
             <div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                     <label class="pinv-label" style="margin:0;">Line Items</label>
-                    <button type="button" class="pinv-btn-sm" onclick="addModalLine()">
-                        <i class="bi bi-plus-lg"></i> Add Line
-                    </button>
+                    <div style="display:flex;gap:6px;">
+                        <button type="button" class="pinv-btn-sm" style="background:var(--bg-secondary);color:var(--text-secondary);" onclick="addFreightLine()">
+                            <i class="bi bi-truck"></i> Freight
+                        </button>
+                        <button type="button" class="pinv-btn-sm" onclick="addModalLine()">
+                            <i class="bi bi-plus-lg"></i> Add Line
+                        </button>
+                    </div>
                 </div>
                 <div style="display:flex;gap:6px;align-items:center;padding:0 0 5px;border-bottom:1px solid var(--border-color);margin-bottom:4px;">
                     <span style="flex:2;min-width:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">Description</span>
-                    <span style="flex:1.5;min-width:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">Job / Order</span>
-                    <span style="width:90px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Invoice Price</span>
-                    <span style="width:118px;flex-shrink:0;"></span>
+                    <span style="width:50px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Qty</span>
+                    <span style="width:90px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Unit Price</span>
+                    <span style="width:90px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Line Total</span>
+                    <span style="width:62px;flex-shrink:0;"></span>
                 </div>
                 <div id="modal-lines"></div>
             </div>
-            <div style="display:flex;justify-content:flex-end;align-items:baseline;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-color);">
-                <span style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">Invoice Total</span>
-                <span id="modal-total" style="font-size:1rem;font-weight:700;min-width:90px;text-align:right;">&pound;0.00</span>
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-color);">
+                <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:6px;">
+                    <label style="display:flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-secondary);cursor:pointer;user-select:none;">
+                        <input type="checkbox" id="modal-vat-enabled" onchange="recalcModalTotal()" style="cursor:pointer;">
+                        Apply VAT
+                    </label>
+                    <div style="display:inline-flex;align-items:stretch;border:1px solid var(--border-color);border-radius:5px;overflow:hidden;background:var(--bg-primary);">
+                        <button type="button"
+                                onclick="var i=document.getElementById('modal-vat-rate');i.value=Math.max(0,parseFloat(i.value||0)-1);recalcModalTotal();"
+                                style="border:none;border-right:1px solid var(--border-color);background:none;padding:0 7px;cursor:pointer;color:var(--text-secondary);font-size:1rem;line-height:1;">&#8722;</button>
+                        <input type="number" id="modal-vat-rate" value="20" min="0" max="100" step="1"
+                               style="width:36px;padding:3px 2px;font-size:0.82rem;text-align:center;background:transparent;border:none;color:var(--text-primary);-moz-appearance:textfield;appearance:textfield;"
+                               oninput="recalcModalTotal()">
+                        <button type="button"
+                                onclick="var i=document.getElementById('modal-vat-rate');i.value=Math.min(100,parseFloat(i.value||0)+1);recalcModalTotal();"
+                                style="border:none;border-left:1px solid var(--border-color);background:none;padding:0 7px;cursor:pointer;color:var(--text-secondary);font-size:1rem;line-height:1;">&#43;</button>
+                    </div>
+                    <span style="font-size:0.78rem;color:var(--text-secondary);">%</span>
+                </div>
+                <div id="modal-net-row" style="display:none;justify-content:flex-end;align-items:baseline;gap:8px;margin-bottom:3px;">
+                    <span style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">Net</span>
+                    <span id="modal-net-total" style="font-size:0.9rem;font-weight:500;min-width:90px;text-align:right;">&pound;0.00</span>
+                </div>
+                <div id="modal-vat-row" style="display:none;justify-content:flex-end;align-items:baseline;gap:8px;margin-bottom:3px;">
+                    <span id="modal-vat-label" style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">VAT (20%)</span>
+                    <span id="modal-vat-amount" style="font-size:0.9rem;font-weight:500;min-width:90px;text-align:right;">&pound;0.00</span>
+                </div>
+                <div style="display:flex;justify-content:flex-end;align-items:baseline;gap:8px;">
+                    <span style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">Invoice Total</span>
+                    <span id="modal-total" style="font-size:1rem;font-weight:700;min-width:90px;text-align:right;">&pound;0.00</span>
+                </div>
             </div>
 
             </div>{# end .pinv-form-panel #}
@@ -227,6 +261,9 @@
         </div>
     </div>
 </div>
+
+{# Portal for line-row kebab menus — position:fixed so not clipped by modal overflow #}
+<div id="pinv-kebab-portal" style="display:none;position:fixed;z-index:9999;"></div>
 
 {# ─── Inline OPO Quick-Create Modal ────────────────────────────────────────── #}
 <div class="pinv-modal-overlay" id="inline-opo-modal" style="z-index:2500;" onclick="closeInlineOPOModal(event)">
