@@ -101,23 +101,29 @@ def ordering(request):
     # but NOT for fit_date sort — there fit_date must remain the primary key.
     if sort_by != 'fit_date':
         ordering.insert(1, 'boards_is_ordered')
-    # OPTIMIZATION: Don't load PNX items upfront - they'll be loaded via AJAX when row is clicked
-    # OPTIMIZATION: Removed prefetch and annotations - will lazy load indicators via AJAX
-    from django.db.models import Exists, OuterRef, Q
-    
-    # Get all orders for statistics
-    from django.db.models import Case, When, Value, BooleanField as BF
+    from django.db.models import Exists, OuterRef, Q, Case, When, Value, BooleanField as BF
+
+    # Annotate each order with has_os_doors in a single subquery — replaces 1 EXISTS per order
     all_orders = Order.objects.select_related('boards_po').prefetch_related('additional_boards_pos').annotate(
         boards_is_ordered=Case(
             When(boards_po__boards_ordered=True, then=Value(True)),
             default=Value(False),
             output_field=BF(),
-        )
+        ),
+        has_os_doors=Exists(OSDoor.objects.filter(customer_id=OuterRef('pk'))),
     )
-    total_orders = all_orders.count()
-    completed_orders = all_orders.filter(job_finished=True).count()
-    wip_orders = all_orders.filter(job_finished=False).count()
-    
+
+    # Single aggregate instead of 3 separate COUNT queries
+    from django.db.models import Count, Sum
+    order_counts = Order.objects.aggregate(
+        total=Count('id'),
+        completed=Count('id', filter=Q(job_finished=True)),
+        wip=Count('id', filter=Q(job_finished=False)),
+    )
+    total_orders = order_counts['total']
+    completed_orders = order_counts['completed']
+    wip_orders = order_counts['wip']
+
     # Filter orders based on tab
     if tab == 'completed':
         orders = all_orders.filter(job_finished=True).order_by(*ordering)
@@ -125,10 +131,12 @@ def ordering(request):
         orders = all_orders.filter(job_finished=False).order_by(*ordering)
     else:  # 'all'
         orders = all_orders.order_by(*ordering)
+
+    # Evaluate the queryset once — reused for order_data, pfp/regular splits, and the template
+    orders_list = list(orders)
     
     # OPTIMIZATION: Don't load BoardsPO details upfront - only load basic list for the edit section
     # Get boards count for each PO using prefetch
-    from django.db.models import Count, Sum
     boards_pos = BoardsPO.objects.prefetch_related('pnx_items').annotate(
         boards_count=Count('pnx_items')
     ).order_by('-po_number')
@@ -150,7 +158,7 @@ def ordering(request):
     
     # Build financial map: sale_number -> {sale_value, payments_total, outstanding}
     # Looks up AnthillSale by anthill_activity_id matching the order's sale_number
-    order_data = list(orders.values_list('id', 'sale_number'))
+    order_data = [(o.id, o.sale_number) for o in orders_list]
     all_sale_numbers = [sn for _, sn in order_data]
     fin_rows = (
         AnthillSale.objects
@@ -230,21 +238,40 @@ def ordering(request):
     # Build a sale_number → BoardsPO map across ALL orders so that duplicate
     # order rows (same sale_number, one with boards_po and one without) both
     # show the correct PO in the Boards column.
+    # Build sale_boards_po_map from the already-evaluated orders_list (no extra DB queries).
+    # First pass: orders with a primary boards_po (from select_related, already loaded).
     sale_boards_po_map = {}
-    for o in Order.objects.filter(boards_po__isnull=False).select_related('boards_po'):
-        sale_boards_po_map[o.sale_number] = o.boards_po
-    # Also cover cases where the PO is only in additional_boards_pos
-    for o in Order.objects.prefetch_related('additional_boards_pos').exclude(
-        sale_number__in=sale_boards_po_map
-    ):
-        first_extra = o.additional_boards_pos.first()
-        if first_extra:
-            sale_boards_po_map[o.sale_number] = first_extra
+    for o in orders_list:
+        if o.sale_number and o.boards_po and o.sale_number not in sale_boards_po_map:
+            sale_boards_po_map[o.sale_number] = o.boards_po
+    # Second pass: use the prefetch cache for additional_boards_pos (.all() not .first())
+    for o in orders_list:
+        if o.sale_number and o.sale_number not in sale_boards_po_map:
+            extras = list(o.additional_boards_pos.all())  # uses prefetch cache
+            if extras:
+                sale_boards_po_map[o.sale_number] = extras[0]
+    # Any order not in the current tab may still share a sale_number with a different tab order;
+    # cover those with a single efficient query on the full order set.
+    missing_sn = [
+        sn for sn in (
+            Order.objects.filter(boards_po__isnull=False)
+            .values_list('sale_number', flat=True).distinct()
+        )
+        if sn and sn not in sale_boards_po_map
+    ]
+    if missing_sn:
+        for o in Order.objects.filter(sale_number__in=missing_sn, boards_po__isnull=False).select_related('boards_po'):
+            if o.sale_number not in sale_boards_po_map:
+                sale_boards_po_map[o.sale_number] = o.boards_po
+
+    # Split the already-evaluated list in Python — avoids 2 extra DB queries
+    pfp_orders = [o for o in orders_list if o.order_date is None and o.fit_date is None]
+    regular_orders = [o for o in orders_list if o.order_date is not None or o.fit_date is not None]
 
     return render(request, 'stock_take/ordering.html', {
-        'orders': orders,
-        'pfp_orders': orders.filter(order_date__isnull=True, fit_date__isnull=True),
-        'regular_orders': orders.filter(models.Q(order_date__isnull=False) | models.Q(fit_date__isnull=False)),
+        'orders': orders_list,
+        'pfp_orders': pfp_orders,
+        'regular_orders': regular_orders,
         'boards_pos': boards_pos,
         'accessories_csvs': accessories_csvs,
         'form': form,
@@ -6378,33 +6405,48 @@ def _build_order_context(order, request):
     (standalone) and sale_detail (order tab on the combined page)."""
     from .models import OrderWorkflowProgress, WorkflowStage, TaskCompletion
 
+    # Eagerly load all workflow stages once so stage filtering is done in Python
+    workflow_stages = list(WorkflowStage.objects.all().prefetch_related('tasks'))
+
     workflow_progress, created = OrderWorkflowProgress.objects.get_or_create(
         order=order,
-        defaults={'current_stage': WorkflowStage.objects.first()}
+        defaults={'current_stage': workflow_stages[0] if workflow_stages else None}
     )
-    workflow_stages = WorkflowStage.objects.all().prefetch_related('tasks')
 
+    # Batch-fetch existing task completions; only create genuinely missing ones
+    # so we avoid repeated INSERTs on every page view.
     task_completions = {}
     if workflow_progress.current_stage:
-        for task in workflow_progress.current_stage.tasks.all():
-            completion, _ = TaskCompletion.objects.get_or_create(
-                order_progress=workflow_progress,
-                task=task
-            )
-            task_completions[task.id] = completion
+        current_tasks = list(workflow_progress.current_stage.tasks.all())
+        if current_tasks:
+            task_ids = [t.id for t in current_tasks]
+            existing = {tc.task_id: tc for tc in TaskCompletion.objects.filter(
+                order_progress=workflow_progress, task_id__in=task_ids
+            )}
+            for task in current_tasks:
+                if task.id not in existing:
+                    tc = TaskCompletion.objects.create(
+                        order_progress=workflow_progress, task=task
+                    )
+                    existing[task.id] = tc
+            task_completions = {t.id: existing[t.id] for t in current_tasks if t.id in existing}
 
     phases = [('enquiry', 'Enquiry'), ('lead', 'Lead'), ('sale', 'Sale')]
-    stages_by_phase = {}
-    for phase_code, phase_display in phases:
-        stages_by_phase[phase_code] = workflow_stages.filter(phase=phase_code)
+    # Filter stages in Python — avoids 3 extra DB round-trips
+    stages_by_phase = {
+        phase_code: [s for s in workflow_stages if s.phase == phase_code]
+        for phase_code, _ in phases
+    }
 
     price_per_sqm_str = request.session.get('price_per_sqm', '12')
     price_per_sqm = float(price_per_sqm_str)
 
     form = OrderForm(instance=order)
 
-    if order.os_doors.exists():
-        latest_os_door = order.os_doors.order_by('-id').first()
+    # Fetch os_doors once and reuse — avoids repeated queries later
+    all_os_doors = list(order.os_doors.all())
+    if all_os_doors:
+        latest_os_door = max(all_os_doors, key=lambda d: d.id)
         os_door_form = OSDoorForm(initial={
             'door_style': latest_os_door.door_style,
             'style_colour': latest_os_door.style_colour,
@@ -6451,45 +6493,52 @@ def _build_order_context(order, request):
         items.sort(key=lambda x: x.sort_key)
         return items, total
 
+    # Batch-lookup all PurchaseOrders needed for the boards PO list and the two standalone
+    # boards/os-doors purchase order fields in a single query.
+    _po_display_numbers = {bpo.po_number for bpo in all_boards_pos_list}
+    if order.os_doors_po:
+        _po_display_numbers.add(order.os_doors_po)
+    _po_lookup = {}
+    if _po_display_numbers:
+        _po_lookup = {po.display_number: po for po in PurchaseOrder.objects.filter(
+            display_number__in=_po_display_numbers
+        )}
+
     boards_po_list = []
     order_pnx_items = []
     pnx_total_cost = 0
     for idx, bpo in enumerate(all_boards_pos_list):
         items, cost = process_pnx_items(bpo, order.sale_number, price_per_sqm)
-        local_po = PurchaseOrder.objects.filter(display_number=bpo.po_number).first()
         boards_po_list.append({
             'po': bpo,
             'is_primary': (idx == 0 and order.boards_po_id == bpo.id),
             'pnx_items': items,
             'total_cost': cost,
-            'purchase_order': local_po,
+            'purchase_order': _po_lookup.get(bpo.po_number),
         })
         order_pnx_items.extend(items)
         pnx_total_cost += cost
 
-    has_os_door_accessories = order.accessories.filter(is_os_door=True).exists()
+    # Fetch all accessories once; all downstream filtering is done in Python
+    all_accessories = list(order.accessories.all())
 
-    glass_items_qs = order.accessories.filter(sku__istartswith='GLS')
-    raumplus_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').filter(sku__icontains='_RAU_')
-    non_glass_accessories_qs = order.accessories.exclude(sku__istartswith='GLS').exclude(sku__icontains='_RAU_')
-
-    glass_items = sorted(list(glass_items_qs), key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id))
-    raumplus_accessories = sorted(list(raumplus_accessories_qs), key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id))
-    non_glass_accessories = sorted(list(non_glass_accessories_qs), key=lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id))
-
+    # Process skip items using the already-fetched list — avoids per-sku DB queries
+    skip_skus = (
+        set(si.sku for si in order.csv_skip_items.all()) |
+        set(si.sku for si in CSVSkipItem.objects.filter(order__isnull=True))
+    )
     skip_items_removed = 0
-    for skip_item in order.csv_skip_items.all():
-        for accessory in order.accessories.filter(sku=skip_item.sku):
+    if skip_skus:
+        to_delete = [a for a in all_accessories if a.sku in skip_skus]
+        for accessory in to_delete:
             accessory.delete()
             skip_items_removed += 1
-    for skip_item in CSVSkipItem.objects.filter(order__isnull=True):
-        for accessory in order.accessories.filter(sku=skip_item.sku):
-            accessory.delete()
-            skip_items_removed += 1
+        if skip_items_removed > 0:
+            all_accessories = [a for a in all_accessories if a.sku not in skip_skus]
 
-    if skip_items_removed > 0 and order.accessories.exists():
+    if skip_items_removed > 0 and all_accessories:
         processed_rows = []
-        for accessory in order.accessories.all():
+        for accessory in all_accessories:
             row = {
                 'Sku': accessory.sku, 'Name': accessory.name, 'Description': accessory.description,
                 'CostPrice': str(accessory.cost_price), 'SellPrice': str(accessory.sell_price),
@@ -6510,30 +6559,47 @@ def _build_order_context(order, request):
             order.processed_csv_created_at = timezone.now()
             order.save()
 
+    # Filter accessories in Python — replaces 4+ separate DB queries
+    _acc_sort_key = lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
+    has_os_door_accessories = any(a.is_os_door for a in all_accessories)
+    glass_items = sorted(
+        [a for a in all_accessories if a.sku.upper().startswith('GLS')], key=_acc_sort_key
+    )
+    raumplus_accessories = sorted(
+        [a for a in all_accessories if not a.sku.upper().startswith('GLS') and '_RAU_' in a.sku.upper()],
+        key=_acc_sort_key,
+    )
+    non_glass_accessories = sorted(
+        [a for a in all_accessories if not a.sku.upper().startswith('GLS') and '_RAU_' not in a.sku.upper()],
+        key=_acc_sort_key,
+    )
+
     materials_cost = order.calculate_materials_cost(price_per_sqm)
     if order.materials_cost != materials_cost:
         order.materials_cost = materials_cost
         order.save(update_fields=['materials_cost'])
 
-    boards_cost = Decimal('0.00')
-    for bpo in all_boards_pos_list:
-        for pnx_item in bpo.pnx_items.filter(customer__icontains=order.sale_number):
-            boards_cost += pnx_item.get_cost(price_per_sqm)
+    # Reuse already-fetched PNX items for boards cost — avoids re-querying per BPO
+    boards_cost = sum(
+        item.calculated_cost for item in order_pnx_items
+        if item.customer and order.sale_number and order.sale_number.upper() in item.customer.upper()
+    )
 
-    accessories_cost = sum(a.cost_price * a.quantity for a in order.accessories.all())
-    os_doors_cost = sum(d.cost_price * d.quantity for d in order.os_doors.all())
+    accessories_cost = sum(a.cost_price * a.quantity for a in all_accessories)
+    os_doors_cost = sum(d.cost_price * d.quantity for d in all_os_doors)
 
     installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order', 'purchase_invoice_line__invoice')
     manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
-    expenses = order.expenses.all().select_related('fitter')
+    # Evaluate expenses once so petrol/materials/other cost sums don't each hit the DB
+    expenses = list(order.expenses.all().select_related('fitter'))
 
     calculated_installation_cost = order.calculate_installation_cost()
     calculated_manufacturing_cost = order.calculate_manufacturing_cost()
     installation_fitter_cost = sum(ts.total_cost for ts in installation_timesheets if ts.fitter)
     purchase_invoice_ts_cost = sum(ts.total_cost for ts in installation_timesheets if ts.purchase_invoice_line_id)
-    petrol_cost = sum(exp.amount for exp in expenses.filter(expense_type='petrol'))
-    materials_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='materials'))
-    other_expense_cost = sum(exp.amount for exp in expenses.filter(expense_type='other'))
+    petrol_cost = sum(exp.amount for exp in expenses if exp.expense_type == 'petrol')
+    materials_expense_cost = sum(exp.amount for exp in expenses if exp.expense_type == 'materials')
+    other_expense_cost = sum(exp.amount for exp in expenses if exp.expense_type == 'other')
 
     from collections import defaultdict
     manufacturing_by_worker = defaultdict(Decimal)
@@ -6552,19 +6618,16 @@ def _build_order_context(order, request):
             Q(total_orders=0) | Q(total_orders__gt=models.F('finished_orders'))
         ).order_by('-po_number')
 
-    boards_purchase_order = None
-    if order.boards_po:
-        boards_purchase_order = PurchaseOrder.objects.filter(display_number=order.boards_po.po_number).first()
-
-    os_doors_purchase_order = None
-    if order.os_doors_po:
-        os_doors_purchase_order = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+    # Use the batch PO lookup built earlier — no extra DB queries needed
+    boards_purchase_order = _po_lookup.get(order.boards_po.po_number) if order.boards_po else None
+    os_doors_purchase_order = _po_lookup.get(order.os_doors_po) if order.os_doors_po else None
 
     additional_os_doors_pos_list = list(order.additional_os_doors_pos.order_by('-workguru_id'))
 
-    total_accessories = order.accessories.count()
-    all_allocated = total_accessories > 0 and not order.accessories.filter(is_allocated=False).exists()
-    unallocated_count = order.accessories.filter(is_allocated=False).count()
+    # Derive counts from the already-fetched list — avoids 3 extra COUNT queries
+    total_accessories = len(all_accessories)
+    all_allocated = total_accessories > 0 and all(a.is_allocated for a in all_accessories)
+    unallocated_count = sum(1 for a in all_accessories if not a.is_allocated)
 
     available_purchase_orders = PurchaseOrder.objects.filter(status__in=['Draft', 'Approved']).order_by('-workguru_id')[:50]
 
@@ -6573,13 +6636,19 @@ def _build_order_context(order, request):
 
     anthill_sales = order.anthill_sale.select_related('customer').order_by('-activity_date')
 
-    distinct_materials = list(PNXItem.objects.values('matname', 'barcode').distinct().order_by('matname').values('matname', 'barcode'))
-    seen_matnames = set()
-    unique_materials = []
-    for m in distinct_materials:
-        if m['matname'] not in seen_matnames:
-            seen_matnames.add(m['matname'])
-            unique_materials.append(m)
+    from django.core.cache import cache as _cache
+    unique_materials = _cache.get('order_ctx_unique_materials')
+    if unique_materials is None:
+        distinct_materials = list(
+            PNXItem.objects.values('matname', 'barcode').distinct().order_by('matname').values('matname', 'barcode')
+        )
+        seen_matnames = set()
+        unique_materials = []
+        for m in distinct_materials:
+            if m['matname'] not in seen_matnames:
+                seen_matnames.add(m['matname'])
+                unique_materials.append(m)
+        _cache.set('order_ctx_unique_materials', unique_materials, 3600)
 
     order_matnames = set()
     for item in order_pnx_items:
@@ -6592,6 +6661,7 @@ def _build_order_context(order, request):
         'form': form,
         'os_door_form': os_door_form,
         'other_orders': other_orders,
+        '_skip_items_removed': skip_items_removed,
         'available_pos': available_pos,
         'boards_po_list': boards_po_list,
         'order_pnx_items': order_pnx_items,
@@ -7346,8 +7416,9 @@ def stock_list(request):
     
     # Use only() to limit fields loaded from database
     items = StockItem.objects.select_related('category', 'stock_take_group', 'supplier').only(
-        'id', 'sku', 'name', 'cost', 'quantity', 'tracking_type', 
-        'location', 'serial_or_batch', 'image', 'category__name', 'category__color',
+        'id', 'sku', 'name', 'cost', 'quantity', 'tracking_type',
+        'location', 'serial_or_batch', 'image', 'product_url',
+        'category__name', 'category__color',
         'stock_take_group__name', 'supplier__name'
     ).all()
     
@@ -7371,11 +7442,8 @@ def stock_list(request):
     latest_import = ImportHistory.objects.first()
     import_history = ImportHistory.objects.all()[:10]  # Last 10 imports
     
-    # Calculate statistics - use count() to avoid loading all items
-    all_items_query = StockItem.objects.all()
-    
     # Single sorted list with annotated stock status
-    all_stock_items = list(items.select_related('category', 'stock_take_group', 'supplier').order_by('sku'))
+    all_stock_items = list(items.order_by('sku'))
     
     # Annotate each item with stock_status for template icon rendering
     in_stock_count = 0

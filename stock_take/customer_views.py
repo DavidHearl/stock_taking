@@ -1085,6 +1085,11 @@ def _claim_doc_type_from_filename(filename):
 
 
 def _important_claim_doc_types(limit=3):
+    from django.core.cache import cache as _cache
+    cache_key = f'important_claim_doc_types_{limit}'
+    result = _cache.get(cache_key)
+    if result is not None:
+        return result
     defaults = ['ProductionDrawings', 'Survey', 'Checklist']
     docs = ClaimDocument.objects.only('file').order_by('-uploaded_at')[:500]
     counts = {}
@@ -1096,7 +1101,9 @@ def _important_claim_doc_types(limit=3):
 
     ranked = [k for k, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
     combined = ranked + [d for d in defaults if d not in ranked]
-    return combined[:limit]
+    result = combined[:limit]
+    _cache.set(cache_key, result, 3600)
+    return result
 
 
 @login_required

@@ -68,15 +68,19 @@ def user_permissions(request):
         nav_counts = {
             'open_ticket_count': Ticket.objects.filter(status__in=['open', 'in_progress']).count(),
             'unread_ticket_count': Ticket.objects.filter(read_by_admin=False).exclude(status='closed').count() if is_admin else 0,
-            'open_sales_count': AnthillSale.objects.filter(status__iexact='open').exclude(category='8').count(),
-            'open_remedials_count': AnthillSale.objects.filter(category='8', status__iexact='open').count(),
+            'open_sales_count': AnthillSale.objects.filter(status='open').exclude(category='8').count(),
+            'open_remedials_count': AnthillSale.objects.filter(category='8', status='open').count(),
         }
         cache.set('nav_counts', nav_counts, 120)
 
-    # Unread validation requests for the current user
-    unread_validation_count = OrderValidationRequest.objects.filter(
-        recipient=request.user, is_dismissed=False
-    ).count()
+    # Unread validation requests for the current user (cached per user, 60s TTL)
+    _val_cache_key = f'unread_validation_count_{request.user.pk}'
+    unread_validation_count = cache.get(_val_cache_key)
+    if unread_validation_count is None:
+        unread_validation_count = OrderValidationRequest.objects.filter(
+            recipient=request.user, is_dismissed=False
+        ).count()
+        cache.set(_val_cache_key, unread_validation_count, 60)
 
     return {
         'role_perms': perms,
