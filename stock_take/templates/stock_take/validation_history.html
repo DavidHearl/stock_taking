@@ -1,0 +1,346 @@
+﻿{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Validation History{% endblock %}
+{% block page_title %}Validation History{% endblock %}
+
+{% block nav_validation_history_active %}active{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/validation_history.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="vh-page">
+
+    <!-- __ Toolbar ______________________________________________ -->
+    <div class="vh-toolbar">
+        <!-- Search (left) -->
+        <form method="get" class="vh-search-wrapper">
+            <i class="bi bi-search"></i>
+            <input type="text" name="search" value="{{ search }}"
+                   placeholder="Search order or customer..."
+                   autocomplete="off">
+            {% if search %}<a href="?status={{ filter_status }}" class="vh-search-clear">&times;</a>{% endif %}
+            <input type="hidden" name="status" value="{{ filter_status }}">
+        </form>
+
+        <!-- Filters + New (right) -->
+        <div class="vh-toolbar-right">
+            <a href="?status=all{% if search %}&search={{ search }}{% endif %}"
+               class="vh-filter-btn {% if filter_status == 'all' %}active{% endif %}">
+                All <span class="vh-filter-count">{{ total_count }}</span>
+            </a>
+            <a href="?status=pending{% if search %}&search={{ search }}{% endif %}"
+               class="vh-filter-btn {% if filter_status == 'pending' %}active{% endif %}">
+                Pending <span class="vh-filter-count">{{ pending_count }}</span>
+            </a>
+            <a href="?status=completed{% if search %}&search={{ search }}{% endif %}"
+               class="vh-filter-btn {% if filter_status == 'completed' %}active{% endif %}">
+                Completed <span class="vh-filter-count">{{ completed_count }}</span>
+            </a>
+            <button type="button" onclick="openCreateModal()"
+                    class="btn btn-sm btn-primary vh-new-btn">
+                <i class="bi bi-plus-lg"></i> New
+            </button>
+        </div>
+    </div>
+
+    <!-- __ Table _______________________________________________ -->
+    <div class="vh-table-card">
+        <div class="vh-table-header">
+            <h2><i class="bi bi-clock-history"></i> Validated Orders</h2>
+            <a href="{% url 'ordering' %}" class="btn btn-sm btn-outline-secondary vh-back-btn">
+                <i class="bi bi-arrow-left"></i> Back to Orders
+            </a>
+        </div>
+
+        {% if validation_requests %}
+        <div class="vh-table-scroll">
+            <table class="vh-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Date</th>
+                        <th class="center">Boards</th>
+                        <th class="center">Acc</th>
+                        <th class="center">OS Doors</th>
+                        <th class="center">Glass</th>
+                        <th class="center">Raumplus</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in validation_requests %}
+                    <tr id="row-{{ req.order.id }}">
+                        <!-- Order / Customer -->
+                        <td>
+                            <a href="{% url 'order_details' req.order.id %}" class="vh-order-link">
+                                #{{ req.order.sale_number }}
+                            </a>
+                            <div class="vh-customer-name">
+                                {{ req.order.first_name }} {{ req.order.last_name }}
+                            </div>
+                        </td>
+                        <!-- Date -->
+                        <td class="nowrap">
+                            {{ req.created_at|date:"d M Y" }}<br>
+                            <span class="vh-date-time">{{ req.created_at|date:"H:i" }}</span>
+                        </td>
+                        <!-- Boards -->
+                        <td class="center">
+                            {% if req.order.boards_not_required %}
+                                <span class="vh-check na" title="Not applicable"><i class="bi bi-dash-circle"></i></span>
+                            {% elif req.boards_checked %}
+                                <span class="vh-check ok" title="Checked — click to uncheck"
+                                      onclick="vhToggle({{ req.order.id }}, 'boards_checked', this)"><i class="bi bi-check-circle-fill"></i></span>
+                            {% else %}
+                                <span class="vh-check fail" title="Not checked — click to mark done"
+                                      onclick="vhToggle({{ req.order.id }}, 'boards_checked', this)"><i class="bi bi-x-circle-fill"></i></span>
+                            {% endif %}
+                        </td>
+                        <!-- Accessories -->
+                        <td class="center">
+                            {% if req.order.accessories_not_required %}
+                                <span class="vh-check na" title="Not applicable"><i class="bi bi-dash-circle"></i></span>
+                            {% elif req.accessories_checked %}
+                                <span class="vh-check ok" title="Checked — click to uncheck"
+                                      onclick="vhToggle({{ req.order.id }}, 'accessories_checked', this)"><i class="bi bi-check-circle-fill"></i></span>
+                            {% else %}
+                                <span class="vh-check fail" title="Not checked — click to mark done"
+                                      onclick="vhToggle({{ req.order.id }}, 'accessories_checked', this)"><i class="bi bi-x-circle-fill"></i></span>
+                            {% endif %}
+                        </td>
+                        <!-- OS Doors -->
+                        <td class="center">
+                            {% if not req.order.os_doors_required %}
+                                <span class="vh-check na" title="Not applicable"><i class="bi bi-dash-circle"></i></span>
+                            {% elif req.os_doors_checked %}
+                                <span class="vh-check ok" title="Checked — click to uncheck"
+                                      onclick="vhToggle({{ req.order.id }}, 'os_doors_checked', this)"><i class="bi bi-check-circle-fill"></i></span>
+                            {% else %}
+                                <span class="vh-check fail" title="Not checked — click to mark done"
+                                      onclick="vhToggle({{ req.order.id }}, 'os_doors_checked', this)"><i class="bi bi-x-circle-fill"></i></span>
+                            {% endif %}
+                        </td>
+                        <!-- Glass -->
+                        <td class="center">
+                            {% if req.order.glass_not_required %}
+                                <span class="vh-check na" title="Not applicable"><i class="bi bi-dash-circle"></i></span>
+                            {% elif req.glass_checked %}
+                                <span class="vh-check ok" title="Checked — click to uncheck"
+                                      onclick="vhToggle({{ req.order.id }}, 'glass_checked', this)"><i class="bi bi-check-circle-fill"></i></span>
+                            {% else %}
+                                <span class="vh-check fail" title="Not checked — click to mark done"
+                                      onclick="vhToggle({{ req.order.id }}, 'glass_checked', this)"><i class="bi bi-x-circle-fill"></i></span>
+                            {% endif %}
+                        </td>
+                        <!-- Raumplus -->
+                        <td class="center">
+                            {% if not req.order.raumplus_required %}
+                                <span class="vh-check na" title="Not applicable"><i class="bi bi-dash-circle"></i></span>
+                            {% elif req.raumplus_checked %}
+                                <span class="vh-check ok" title="Checked — click to uncheck"
+                                      onclick="vhToggle({{ req.order.id }}, 'raumplus_checked', this)"><i class="bi bi-check-circle-fill"></i></span>
+                            {% else %}
+                                <span class="vh-check fail" title="Not checked — click to mark done"
+                                      onclick="vhToggle({{ req.order.id }}, 'raumplus_checked', this)"><i class="bi bi-x-circle-fill"></i></span>
+                            {% endif %}
+                        </td>
+                        <!-- Status -->
+                        <td>
+                            {% if req.is_completed %}
+                                <span class="vh-badge completed">Completed</span>
+                            {% else %}
+                                <span class="vh-badge pending">Pending</span>
+                            {% endif %}
+                        </td>
+                        <!-- Actions -->
+                        <td>
+                            <div class="vh-actions">
+                                {% if req.is_completed %}
+                                <button class="vh-btn vh-btn-reopen"
+                                        onclick="vhReopen({{ req.order.id }}, this)"
+                                        title="Reopen validation">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Reopen
+                                </button>
+                                {% else %}
+                                <button class="vh-btn vh-btn-complete"
+                                        onclick="vhComplete({{ req.order.id }}, this)"
+                                        title="Mark as completed">
+                                    <i class="bi bi-check-lg"></i> Complete
+                                </button>
+                                {% endif %}
+                                <button class="vh-btn vh-btn-delete"
+                                        onclick="vhDelete({{ req.order.id }}, '{{ req.order.sale_number }}', this)"
+                                        title="Delete record">
+                                    <i class="bi bi-trash3"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="vh-empty">
+            <i class="bi bi-inbox"></i>
+            <p>No validation records found{% if search %} matching &ldquo;{{ search }}&rdquo;{% elif filter_status != 'all' %} for this filter{% endif %}.</p>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- __ Create Modal _____________________________________________ -->
+<div class="vh-modal-overlay" id="vh-create-modal">
+    <div class="vh-modal">
+        <h3><i class="bi bi-plus-circle"></i> New Validation Request</h3>
+        <label for="vh-sale-input">Sale Number</label>
+        <input type="text" id="vh-sale-input" placeholder="e.g. 425035" autocomplete="off">
+        <div class="vh-modal-error" id="vh-create-error"></div>
+        <div class="vh-modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeCreateModal()">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="vhCreate()">Create</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const VH_CSRF = '{{ csrf_token }}';
+
+function openCreateModal() {
+    document.getElementById('vh-sale-input').value = '';
+    document.getElementById('vh-create-error').textContent = '';
+    document.getElementById('vh-create-modal').classList.add('active');
+    document.getElementById('vh-sale-input').focus();
+}
+function closeCreateModal() {
+    document.getElementById('vh-create-modal').classList.remove('active');
+}
+document.getElementById('vh-create-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeCreateModal();
+});
+document.getElementById('vh-sale-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') vhCreate();
+});
+
+function vhPost(url, body) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': VH_CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(r => r.json());
+}
+
+function vhToggle(orderId, field, span) {
+    const isChecked = span.classList.contains('ok');
+    const newValue = !isChecked;
+    span.style.opacity = '0.4';
+    span.style.pointerEvents = 'none';
+    vhPost(`/validation-history/order/${orderId}/toggle/`, { field: field, value: newValue })
+        .then(d => {
+            span.style.opacity = '';
+            span.style.pointerEvents = '';
+            if (d.success) {
+                if (newValue) {
+                    span.classList.remove('fail');
+                    span.classList.add('ok');
+                    span.innerHTML = '<i class="bi bi-check-circle-fill"></i>';
+                    span.title = 'Checked — click to uncheck';
+                } else {
+                    span.classList.remove('ok');
+                    span.classList.add('fail');
+                    span.innerHTML = '<i class="bi bi-x-circle-fill"></i>';
+                    span.title = 'Not checked — click to mark done';
+                }
+                if (d.auto_completed) {
+                    const row = document.getElementById(`row-${orderId}`);
+                    if (row) {
+                        const badge = row.querySelector('.vh-badge');
+                        if (badge) { badge.className = 'vh-badge completed'; badge.textContent = 'Completed'; }
+                        const completeBtn = row.querySelector('.vh-btn-complete');
+                        if (completeBtn) {
+                            completeBtn.className = 'vh-btn vh-btn-reopen';
+                            completeBtn.title = 'Reopen validation';
+                            completeBtn.setAttribute('onclick', `vhReopen(${orderId}, this)`);
+                            completeBtn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Reopen';
+                        }
+                    }
+                }
+            } else {
+                alert('Failed to update: ' + (d.error || 'unknown error'));
+            }
+        })
+        .catch(() => { span.style.opacity = ''; span.style.pointerEvents = ''; });
+}
+
+function vhComplete(orderId, btn) {
+    btn.disabled = true;
+    vhPost(`/validation-history/order/${orderId}/complete/`, {})
+        .then(d => {
+            if (d.success) {
+                const row = document.getElementById(`row-${orderId}`);
+                if (row) {
+                    const badge = row.querySelector('.vh-badge');
+                    if (badge) { badge.className = 'vh-badge completed'; badge.textContent = 'Completed'; }
+                    btn.className = 'vh-btn vh-btn-reopen';
+                    btn.title = 'Reopen validation';
+                    btn.setAttribute('onclick', `vhReopen(${orderId}, this)`);
+                    btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Reopen';
+                    btn.disabled = false;
+                }
+            } else { alert('Error: ' + (d.error||'unknown')); btn.disabled = false; }
+        })
+        .catch(() => { alert('Request failed'); btn.disabled = false; });
+}
+
+function vhReopen(orderId, btn) {
+    btn.disabled = true;
+    vhPost(`/validation-history/order/${orderId}/reopen/`, {})
+        .then(d => {
+            if (d.success) {
+                const row = document.getElementById(`row-${orderId}`);
+                if (row) {
+                    const badge = row.querySelector('.vh-badge');
+                    if (badge) { badge.className = 'vh-badge pending'; badge.textContent = 'Pending'; }
+                    btn.className = 'vh-btn vh-btn-complete';
+                    btn.title = 'Mark as completed';
+                    btn.setAttribute('onclick', `vhComplete(${orderId}, this)`);
+                    btn.innerHTML = '<i class="bi bi-check-lg"></i> Complete';
+                    btn.disabled = false;
+                }
+            } else { alert('Error: ' + (d.error||'unknown')); btn.disabled = false; }
+        })
+        .catch(() => { alert('Request failed'); btn.disabled = false; });
+}
+
+function vhDelete(orderId, saleNumber, btn) {
+    if (!confirm(`Delete all validation records for order #${saleNumber}? This cannot be undone.`)) return;
+    btn.disabled = true;
+    vhPost(`/validation-history/order/${orderId}/delete/`, {})
+        .then(d => {
+            if (d.success) {
+                const row = document.getElementById(`row-${orderId}`);
+                if (row) row.remove();
+            } else { alert('Error: ' + (d.error||'unknown')); btn.disabled = false; }
+        })
+        .catch(() => { alert('Request failed'); btn.disabled = false; });
+}
+
+function vhCreate() {
+    const saleNumber = document.getElementById('vh-sale-input').value.trim();
+    const errorEl = document.getElementById('vh-create-error');
+    if (!saleNumber) { errorEl.textContent = 'Please enter a sale number.'; return; }
+    errorEl.textContent = '';
+    vhPost('/validation-history/create/', { sale_number: saleNumber })
+        .then(d => {
+            if (d.success) { closeCreateModal(); location.reload(); }
+            else { errorEl.textContent = d.error || 'Failed to create validation request.'; }
+        })
+        .catch(() => { errorEl.textContent = 'Request failed. Please try again.'; });
+}
+</script>
+{% endblock %}

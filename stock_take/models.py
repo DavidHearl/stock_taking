@@ -458,6 +458,7 @@ class BoardsPO(models.Model):
     csv_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='CSV version of the PNX file')
     dwg_file = models.FileField(upload_to='boards_po_files/', blank=True, null=True, help_text='DWG drawing file for manufacturer')
     boards_ordered = models.BooleanField(default=False)
+    from_stock = models.BooleanField(default=False, help_text='Boards for this PO were taken from existing stock')
     is_angled = models.BooleanField(default=False, help_text='Whether this PO contains angled/tapered boards')
 
     def __str__(self):
@@ -503,6 +504,8 @@ class Order(models.Model):
     os_doors_po = models.CharField(max_length=50, blank=True, help_text='PO number when OS Doors are ordered')
     boards_not_required = models.BooleanField(default=False, help_text='Boards are not required for this order')
     accessories_not_required = models.BooleanField(default=False, help_text='Accessories are not required for this order')
+    glass_not_required = models.BooleanField(default=True, help_text='Glass does not need to be validated for this order')
+    raumplus_required = models.BooleanField(default=False, help_text='Raumplus items need to be validated for this order')
     all_items_ordered = models.BooleanField(default=False, help_text='Manual confirmation that all items have been ordered')
     workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
     original_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Original uploaded CSV file')
@@ -573,7 +576,7 @@ class Order(models.Model):
         if not all_pos:
             return False
         for bpo in all_pos:
-            if not bpo.boards_ordered:
+            if not bpo.boards_ordered and not bpo.from_stock:
                 return False
         
         # Check OS doors are ordered (if required)
@@ -609,8 +612,13 @@ class Order(models.Model):
 
     @property
     def os_doors_ordered(self):
-        """Check if OS doors are ordered for this order"""
-        return self.os_doors_required and bool(self.os_doors_po)
+        """Check if OS doors are ordered for this order (based on linked PO status)"""
+        if not self.os_doors_required or not self.os_doors_po:
+            return False
+        po = PurchaseOrder.objects.filter(display_number=self.os_doors_po).first()
+        if po:
+            return po.status in ('Approved', 'Received')
+        return False
 
     @property
     def os_doors_received(self):
@@ -2723,6 +2731,7 @@ class OrderValidationRequest(models.Model):
     accessories_checked = models.BooleanField(default=False, help_text='Validator confirmed accessories are correct')
     os_doors_checked = models.BooleanField(default=False, help_text='Validator confirmed OS doors are correct')
     glass_checked = models.BooleanField(default=False, help_text='Validator confirmed glass is correct')
+    raumplus_checked = models.BooleanField(default=False, help_text='Validator confirmed Raumplus items are correct')
 
     class Meta:
         unique_together = ('order', 'recipient')

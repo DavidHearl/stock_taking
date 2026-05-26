@@ -235,6 +235,13 @@ def ordering(request):
         )
     )
 
+    # Orders that were fully validated (have a dismissed request and no pending request)
+    dismissed_order_ids = set(
+        OrderValidationRequest.objects.filter(is_dismissed=True)
+        .values_list('order_id', flat=True)
+    )
+    validated_order_ids = dismissed_order_ids - validation_order_ids
+
     # Build a sale_number → BoardsPO map across ALL orders so that duplicate
     # order rows (same sale_number, one with boards_po and one without) both
     # show the correct PO in the Boards column.
@@ -292,6 +299,7 @@ def ordering(request):
         'all_existing_sale_numbers': all_existing_sale_numbers,
         'is_validator': is_validator,
         'validation_order_ids': validation_order_ids,
+        'validated_order_ids': validated_order_ids,
         'validation_requests': validation_requests,
         'validation_pending_count': validation_pending_count,
         'sale_boards_po_map': sale_boards_po_map,
@@ -4503,6 +4511,16 @@ def update_boards_ordered(request, boards_po_id):
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 @login_required
+def toggle_boards_po_from_stock(request, boards_po_id):
+    """Toggle the from_stock flag on a BoardsPO (AJAX POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    boards_po = get_object_or_404(BoardsPO, id=boards_po_id)
+    boards_po.from_stock = not boards_po.from_stock
+    boards_po.save(update_fields=['from_stock'])
+    return JsonResponse({'success': True, 'from_stock': boards_po.from_stock})
+
+@login_required
 def update_po_number(request, boards_po_id):
     """Update the PO number for a Boards PO"""
     if request.method == 'POST':
@@ -6328,7 +6346,7 @@ def save_validation_components(request, request_id):
         data = _json.loads(request.body)
     except (ValueError, _json.JSONDecodeError):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    allowed = {'boards_checked', 'accessories_checked', 'os_doors_checked', 'glass_checked'}
+    allowed = {'boards_checked', 'accessories_checked', 'os_doors_checked', 'glass_checked', 'raumplus_checked'}
     fields_to_save = []
     for field in allowed:
         if field in data:
@@ -6339,14 +6357,176 @@ def save_validation_components(request, request_id):
     boards_ok = vr.boards_checked or order.boards_not_required
     accessories_ok = vr.accessories_checked or order.accessories_not_required
     os_doors_ok = vr.os_doors_checked or not order.os_doors_required
+    glass_ok = vr.glass_checked or order.glass_not_required
+    raumplus_ok = vr.raumplus_checked or not order.raumplus_required
     auto_dismissed = False
-    if boards_ok and accessories_ok and os_doors_ok:
+    if boards_ok and accessories_ok and os_doors_ok and glass_ok and raumplus_ok:
         vr.is_dismissed = True
         fields_to_save.append('is_dismissed')
         auto_dismissed = True
     if fields_to_save:
         vr.save(update_fields=fields_to_save)
     return JsonResponse({'success': True, 'auto_dismissed': auto_dismissed})
+
+
+@login_required
+def validation_history(request):
+    """Validation history — one row per order, aggregated across all validators."""
+    from .models import OrderValidationRequest, Order
+    from django.db.models import Max, Count, Q, F as DjF
+
+    filter_status = request.GET.get('status', 'all')
+    search = request.GET.get('search', '').strip()
+
+    # Stats: one entry per distinct order (unfiltered by search)
+    all_agg = list(
+        OrderValidationRequest.objects
+        .values('order_id')
+        .annotate(
+            total=Count('id'),
+            dismissed_count=Count('id', filter=Q(is_dismissed=True)),
+        )
+    )
+    total_count = len(all_agg)
+    completed_count = sum(1 for s in all_agg if s['dismissed_count'] == s['total'])
+    pending_count = total_count - completed_count
+
+    # Table data: full aggregation per order
+    filtered_agg = (
+        OrderValidationRequest.objects
+        .values('order_id')
+        .annotate(
+            latest_created=Max('created_at'),
+            total=Count('id'),
+            dismissed_count=Count('id', filter=Q(is_dismissed=True)),
+            boards_ok=Count('id', filter=Q(boards_checked=True)),
+            accessories_ok=Count('id', filter=Q(accessories_checked=True)),
+            os_doors_ok=Count('id', filter=Q(os_doors_checked=True)),
+            glass_ok=Count('id', filter=Q(glass_checked=True)),
+            raumplus_ok=Count('id', filter=Q(raumplus_checked=True)),
+        )
+        .order_by('-latest_created')
+    )
+
+    if filter_status == 'pending':
+        filtered_agg = filtered_agg.filter(dismissed_count__lt=DjF('total'))
+    elif filter_status == 'completed':
+        filtered_agg = filtered_agg.filter(dismissed_count=DjF('total'))
+
+    if search:
+        filtered_agg = filtered_agg.filter(
+            Q(order__sale_number__icontains=search) |
+            Q(order__first_name__icontains=search) |
+            Q(order__last_name__icontains=search)
+        )
+
+    order_ids = [s['order_id'] for s in filtered_agg]
+    orders_map = {o.id: o for o in Order.objects.filter(id__in=order_ids)}
+
+    summaries = []
+    for s in filtered_agg:
+        order = orders_map.get(s['order_id'])
+        if order:
+            summaries.append({
+                'order': order,
+                'created_at': s['latest_created'],
+                'is_completed': s['dismissed_count'] == s['total'],
+                'boards_checked': s['boards_ok'] > 0,
+                'accessories_checked': s['accessories_ok'] > 0,
+                'os_doors_checked': s['os_doors_ok'] > 0,
+                'glass_checked': s['glass_ok'] > 0,
+                'raumplus_checked': s['raumplus_ok'] > 0,
+            })
+
+    return render(request, 'stock_take/validation_history.html', {
+        'validation_requests': summaries,
+        'filter_status': filter_status,
+        'search': search,
+        'total_count': total_count,
+        'pending_count': pending_count,
+        'completed_count': completed_count,
+    })
+
+
+@login_required
+@require_POST
+def validation_history_complete(request, order_id):
+    """Mark all validation requests for an order as completed."""
+    from .models import OrderValidationRequest
+    updated = OrderValidationRequest.objects.filter(order_id=order_id, is_dismissed=False).update(is_dismissed=True)
+    return JsonResponse({'success': True, 'updated': updated})
+
+
+@login_required
+@require_POST
+def validation_history_reopen(request, order_id):
+    """Reopen all validation requests for an order."""
+    from .models import OrderValidationRequest
+    updated = OrderValidationRequest.objects.filter(order_id=order_id, is_dismissed=True).update(is_dismissed=False)
+    return JsonResponse({'success': True, 'updated': updated})
+
+
+@login_required
+@require_POST
+def validation_history_delete(request, order_id):
+    """Delete all validation requests for an order."""
+    from .models import OrderValidationRequest
+    deleted, _ = OrderValidationRequest.objects.filter(order_id=order_id).delete()
+    return JsonResponse({'success': True, 'deleted': deleted})
+
+
+@login_required
+@require_POST
+def validation_history_toggle_component(request, order_id):
+    """Toggle a single component check for all validation requests of an order."""
+    import json as _json
+    from .models import OrderValidationRequest
+    try:
+        data = _json.loads(request.body)
+    except (ValueError, _json.JSONDecodeError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    field = data.get('field')
+    value = data.get('value')
+    allowed_fields = {'boards_checked', 'accessories_checked', 'os_doors_checked', 'glass_checked', 'raumplus_checked'}
+    if field not in allowed_fields:
+        return JsonResponse({'error': 'Invalid field'}, status=400)
+    if not isinstance(value, bool):
+        return JsonResponse({'error': 'Value must be boolean'}, status=400)
+    order = get_object_or_404(Order, id=order_id)
+    OrderValidationRequest.objects.filter(order_id=order_id).update(**{field: value})
+    # Auto-complete when checking — if all applicable components are now done
+    auto_completed = False
+    if value:
+        req = OrderValidationRequest.objects.filter(order_id=order_id).first()
+        if req:
+            boards_ok = req.boards_checked or order.boards_not_required
+            accessories_ok = req.accessories_checked or order.accessories_not_required
+            os_doors_ok = req.os_doors_checked or not order.os_doors_required
+            glass_ok = req.glass_checked or order.glass_not_required
+            raumplus_ok = req.raumplus_checked or not order.raumplus_required
+            if boards_ok and accessories_ok and os_doors_ok and glass_ok and raumplus_ok:
+                OrderValidationRequest.objects.filter(order_id=order_id, is_dismissed=False).update(is_dismissed=True)
+                auto_completed = True
+    return JsonResponse({'success': True, 'auto_completed': auto_completed})
+
+
+@login_required
+@require_POST
+def validation_history_create(request):
+    """Create/retrigger validation requests for an order by sale number."""
+    import json as _json
+    try:
+        data = _json.loads(request.body)
+    except (ValueError, _json.JSONDecodeError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    sale_number = str(data.get('sale_number', '')).strip()
+    if not sale_number:
+        return JsonResponse({'error': 'Sale number required'}, status=400)
+    order = Order.objects.filter(sale_number=sale_number).first()
+    if not order:
+        return JsonResponse({'error': f'Order #{sale_number} not found'}, status=404)
+    _notify_validators_all_items_ordered(order, triggered_by=request.user)
+    return JsonResponse({'success': True})
 
 
 @login_required

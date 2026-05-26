@@ -221,6 +221,21 @@ class ActivityLoggingMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
+    def process_exception(self, request, exception):
+        """
+        Called by Django when an unhandled exception occurs in a view.
+        Captures the full traceback and stores it on the request so __call__
+        can include it when writing the ActivityLog error entry.
+        This works in both DEBUG=True and DEBUG=False environments.
+        """
+        import traceback
+        request._captured_exception = {
+            'type': type(exception).__name__,
+            'value': str(exception),
+            'traceback': traceback.format_exc(),
+        }
+        return None  # Do not suppress — let Django generate the 500 response
+
     def __call__(self, request):
         response = self.get_response(request)
 
@@ -236,19 +251,44 @@ class ActivityLoggingMiddleware:
                 exception_type = ''
                 exception_value = ''
                 exception_location = ''
+                exception_traceback = ''
                 try:
+                    # ── Use captured exception info (works in DEBUG=False) ──
+                    captured = getattr(request, '_captured_exception', None)
+                    if captured:
+                        exception_type = captured.get('type', '')
+                        exception_value = captured.get('value', '')
+                        exception_traceback = captured.get('traceback', '')
+                        # Derive location from the last frame of the traceback
+                        if exception_traceback:
+                            import re
+                            frames = re.findall(
+                                r'File "([^"]+)", line (\d+), in (\w+)', exception_traceback
+                            )
+                            if frames:
+                                f_file, f_line, f_func = frames[-1]
+                                exception_location = f"{f_file}, line {f_line}, in {f_func}"
+                        error_message = f"{exception_type}: {exception_value}"
+                        # Also emit to the standard logger so it appears in gunicorn logs
+                        logger.error(
+                            'Unhandled exception on %s %s\n%s',
+                            request.method, request.path, exception_traceback,
+                        )
+
                     content_type = response.get('Content-Type', '')
                     if 'application/json' in content_type:
                         import json
                         body = json.loads(response.content.decode('utf-8', errors='replace'))
-                        error_message = body.get('error', '') or body.get('message', '') or body.get('detail', '')
+                        json_error = body.get('error', '') or body.get('message', '') or body.get('detail', '')
+                        if json_error and not error_message:
+                            error_message = json_error
                     if not error_message:
                         # Try to get Django messages framework errors
                         from django.contrib.messages import get_messages
                         msgs = [str(m) for m in get_messages(request) if m.level >= 40]  # ERROR level
                         error_message = '; '.join(msgs)
-                    # For 500 errors in DEBUG, extract exception details from the HTML response
-                    if response.status_code >= 500 and 'text/html' in content_type:
+                    # For 500 errors in DEBUG=True, also try to extract from the HTML response
+                    if not exception_type and response.status_code >= 500 and 'text/html' in content_type:
                         try:
                             html = response.content.decode('utf-8', errors='replace')
                             import re
@@ -297,6 +337,7 @@ class ActivityLoggingMiddleware:
                             'exception_type': exception_type,
                             'exception_value': exception_value,
                             'exception_location': exception_location,
+                            'exception_traceback': exception_traceback,
                         },
                     )
                 except Exception:

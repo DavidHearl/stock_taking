@@ -1060,6 +1060,7 @@ def error_log_history(request):
             'exception_type': e.extra_data.get('exception_type', ''),
             'exception_value': e.extra_data.get('exception_value', ''),
             'exception_location': e.extra_data.get('exception_location', ''),
+            'exception_traceback': e.extra_data.get('exception_traceback', ''),
             'resolved_at': e.resolved_at.strftime('%d %b %Y %H:%M') if e.resolved_at else '',
             'resolved_by': (
                 e.resolved_by.get_full_name() or e.resolved_by.username

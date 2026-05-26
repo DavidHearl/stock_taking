@@ -95,6 +95,56 @@ body.light-mode .badge-acc-added {
     border: 1px solid rgba(220,53,69,0.45);
     color: #dc3545;
 }
+/* Validated badge in Ordered column */
+.badge-validated {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: rgba(16,185,129,0.15);
+    border: 1px solid rgba(16,185,129,0.45);
+    color: #10b981;
+    white-space: nowrap;
+}
+/* Validator bell button on toolbar */
+.btn-validator-bell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1.5px solid var(--warning-color, #f59e0b);
+    background: rgba(245,158,11,0.10);
+    color: var(--warning-color, #f59e0b);
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+.btn-validator-bell:hover { background: rgba(245,158,11,0.22); }
+.btn-validator-bell.btn-validator-bell-empty { opacity: 0.45; }
+.btn-validator-bell-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    border-radius: 10px;
+    min-width: 17px;
+    height: 17px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    line-height: 1;
+}
 /* Payment column */
 .badge-paid {
     display: inline-block;
@@ -350,10 +400,13 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
             <i class="bi bi-clock"></i> Hide PFP
         </button>
         {% if is_validator %}
-        <button type="button" class="btn btn-validator {% if not validation_pending_count %}btn-validator-empty{% endif %}" onclick="openModal('validatorCheckModal')" title="{% if validation_pending_count %}{{ validation_pending_count }} order{{ validation_pending_count|pluralize }} to validate{% else %}All orders validated{% endif %}">
-            <i class="bi bi-clipboard2-check"></i>
-            Validation{% if validation_pending_count %} <strong>{{ validation_pending_count }}</strong>{% endif %}
+        <button type="button" class="btn-validator-bell {% if not validation_pending_count %}btn-validator-bell-empty{% endif %}" onclick="openModal('validatorCheckModal')" title="{% if validation_pending_count %}{{ validation_pending_count }} order{{ validation_pending_count|pluralize }} to validate{% else %}All orders validated{% endif %}">
+            <i class="bi bi-bell-fill"></i>
+            {% if validation_pending_count %}<span class="btn-validator-bell-badge">{{ validation_pending_count }}</span>{% endif %}
         </button>
+        <a href="{% url 'validation_history' %}" class="btn btn-sm" style="padding:6px 10px;border-radius:16px;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.40);color:#8b5cf6;font-size:0.8rem;" title="Validation History">
+            <i class="bi bi-clock-history"></i>
+        </a>
         {% endif %}
         <button type="button" id="anthillOrdersBtn" class="btn btn-orders-to-place" onclick="openAnthillOrdersModal()" title="Orders awaiting placement in Anthill">
             <i class="bi bi-arrow-repeat"></i>
@@ -466,6 +519,8 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
                                 </a>
                                 {% if bpo.boards_ordered %}
                                     <span class="status-icon success" title="Ordered">✓</span>
+                                {% elif bpo.from_stock %}
+                                    <span class="status-icon success" title="From Stock"><i class="bi bi-box-fill" style="font-size:0.8em;"></i></span>
                                 {% else %}
                                     <span class="status-icon danger" title="Not Ordered">✗</span>
                                 {% endif %}
@@ -515,6 +570,8 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
                     {% endif %}
                     {% if order.id in validation_order_ids %}
                         <span class="badge-needs-check" title="This order is ready to be checked">Check</span>
+                    {% elif order.id in validated_order_ids %}
+                        <span class="badge-validated" title="Order has been validated">✓ Valid</span>
                     {% endif %}
                 </td>
                 <!-- Payment -->
@@ -603,6 +660,8 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
                                 </a>
                                 {% if bpo.boards_ordered %}
                                     <span class="status-icon success" title="Ordered">✓</span>
+                                {% elif bpo.from_stock %}
+                                    <span class="status-icon success" title="From Stock"><i class="bi bi-box-fill" style="font-size:0.8em;"></i></span>
                                 {% else %}
                                     <span class="status-icon danger" title="Not Ordered">✗</span>
                                 {% endif %}
@@ -652,6 +711,8 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
                     {% endif %}
                     {% if order.id in validation_order_ids %}
                         <span class="badge-needs-check" title="This order is ready to be checked">Check</span>
+                    {% elif order.id in validated_order_ids %}
+                        <span class="badge-validated" title="Order has been validated">✓ Valid</span>
                     {% endif %}
                 </td>
                 <!-- Payment -->
@@ -820,11 +881,25 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
                                     <span class="vchip vchip-na"><i class="bi bi-door-open"></i> OS Doors</span>
                                 {% endif %}
                                 {# Glass #}
-                                <span class="vchip {% if vr.glass_checked %}vchip-done{% else %}vchip-todo{% endif %}"
-                                      id="vchip-glass-{{ vr.id }}"
-                                      onclick="toggleVChip(this, {{ vr.id }}, 'glass_checked')">
-                                    <i class="bi bi-gem"></i> Glass
-                                </span>
+                                {% if vr.order.glass_not_required %}
+                                    <span class="vchip vchip-na"><i class="bi bi-gem"></i> Glass</span>
+                                {% else %}
+                                    <span class="vchip {% if vr.glass_checked %}vchip-done{% else %}vchip-todo{% endif %}"
+                                          id="vchip-glass-{{ vr.id }}"
+                                          onclick="toggleVChip(this, {{ vr.id }}, 'glass_checked')">
+                                        <i class="bi bi-gem"></i> Glass
+                                    </span>
+                                {% endif %}
+                                {# Raumplus #}
+                                {% if vr.order.raumplus_required %}
+                                    <span class="vchip {% if vr.raumplus_checked %}vchip-done{% else %}vchip-todo{% endif %}"
+                                          id="vchip-raumplus-{{ vr.id }}"
+                                          onclick="toggleVChip(this, {{ vr.id }}, 'raumplus_checked')">
+                                        <i class="bi bi-grid-fill"></i> Raumplus
+                                    </span>
+                                {% else %}
+                                    <span class="vchip vchip-na"><i class="bi bi-grid-fill"></i> Raumplus</span>
+                                {% endif %}
                             </div>
                             <div class="vcard-actions">
                                 <a href="{{ order_href_map|get_item:vr.order.id }}" class="btn-vcard-view" target="_blank" title="Open order">
@@ -847,7 +922,10 @@ body.light-mode .btn-validator:hover { background: rgba(109,40,217,0.18); }
             </div>
             <div class="modal-footer" style="justify-content:space-between;align-items:center;">
                 <span id="validatorSaveStatus" style="font-size:0.8rem;color:var(--text-secondary);"></span>
-                <button type="button" class="btn btn-secondary" onclick="closeModal('validatorCheckModal')">Close</button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <a href="{% url 'validation_history' %}" class="btn btn-sm btn-outline-secondary" style="font-size:0.8rem;"><i class="bi bi-clock-history"></i> View History</a>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('validatorCheckModal')">Close</button>
+                </div>
             </div>
         </div>
     </div>

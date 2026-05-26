@@ -1814,7 +1814,14 @@
                                 {% else %}<span style="color:var(--text-muted);font-size:0.8rem;">—</span>{% endif %}
                             </td>
                             <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if bpd.purchase_order and bpd.purchase_order.total %}£{{ bpd.purchase_order.total|floatformat:2 }}{% else %}—{% endif %}</td>
-                            <td style="text-align:right;">
+                            <td style="text-align:right;white-space:nowrap;">
+                                <button class="btn btn-sm {% if bpd.po.from_stock %}btn-success{% else %}btn-outline-secondary{% endif %}"
+                                        style="padding:2px 8px;font-size:0.72rem;"
+                                        title="{% if bpd.po.from_stock %}From stock — click to unmark{% else %}Mark as used from stock{% endif %}"
+                                        onclick="toggleBoardsPoFromStock({{ bpd.po.id }}, this)">
+                                    <i class="bi bi-{% if bpd.po.from_stock %}box-fill{% else %}box{% endif %}"></i>
+                                    {% if bpd.po.from_stock %}Stock{% endif %}
+                                </button>
                                 {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a>{% endif %}
                             </td>
                         </tr>
@@ -2349,6 +2356,25 @@ document.addEventListener('click', function(e) {
 
 // ── Link Existing Boards PO ──────────────────────────────────────
 let _linkBoardsPOTimer = null;
+
+// ── Toggle from_stock on a boards PO ────────────────────────────
+function toggleBoardsPoFromStock(boardsPoId, btn) {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    fetch(`/stock-take/boards-po/${boardsPoId}/toggle-from-stock/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) return;
+        const fromStock = data.from_stock;
+        btn.className = 'btn btn-sm ' + (fromStock ? 'btn-success' : 'btn-outline-secondary');
+        btn.style.padding = '2px 8px';
+        btn.style.fontSize = '0.72rem';
+        btn.title = fromStock ? 'From stock — click to unmark' : 'Mark as used from stock';
+        btn.innerHTML = `<i class="bi bi-${fromStock ? 'box-fill' : 'box'}"></i>${fromStock ? ' Stock' : ''}`;
+    });
+}
 
 // ── Inline PO linking from Purchase Orders tab ───────────────────
 function togglePoLinkSearch(rowId) {
