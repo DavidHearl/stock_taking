@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm, RaumplusOrderingRuleForm, SkuGroupForm, SkuGroupMemberForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, SyncLog, RaumplusOrderingRule, log_activity, Fitter, FactoryWorker
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, OSDoorOption, SyncLog, RaumplusOrderingRule, log_activity, Fitter, FactoryWorker
 
 import copy
 import csv
@@ -5115,6 +5115,18 @@ def update_os_doors_batch(request):
                         if 'received_quantity' in updates:
                             received_quantity = Decimal(str(updates['received_quantity']))
                             os_door.received_quantity = received_quantity
+
+                        # Update text/dimension fields if provided
+                        if 'door_style' in updates:
+                            os_door.door_style = str(updates['door_style'])
+                        if 'style_colour' in updates:
+                            os_door.style_colour = str(updates['style_colour'])
+                        if 'colour' in updates:
+                            os_door.colour = str(updates['colour'])
+                        if 'height' in updates:
+                            os_door.height = Decimal(str(updates['height']))
+                        if 'width' in updates:
+                            os_door.width = Decimal(str(updates['width']))
                     # Handle legacy boolean/quantity values
                     elif isinstance(updates, bool):
                         # Boolean update - set to full quantity if received, 0 if not
@@ -6803,6 +6815,23 @@ def _build_order_context(order, request):
     os_doors_purchase_order = _po_lookup.get(order.os_doors_po) if order.os_doors_po else None
 
     additional_os_doors_pos_list = list(order.additional_os_doors_pos.order_by('-workguru_id'))
+    all_os_doors_pos_list = (
+        [os_doors_purchase_order] if os_doors_purchase_order else []
+    ) + additional_os_doors_pos_list
+
+    # Build a quick lookup of OS Door style/colour images from the library.
+    os_door_style_images = {}
+    os_door_colour_images = {}
+    for opt in OSDoorOption.objects.all():
+        if not opt.image:
+            continue
+        key = (opt.name or '').strip().lower()
+        if not key:
+            continue
+        if opt.option_type == OSDoorOption.OPTION_STYLE:
+            os_door_style_images[key] = opt.image.url
+        elif opt.option_type == OSDoorOption.OPTION_COLOUR:
+            os_door_colour_images[key] = opt.image.url
 
     # Derive counts from the already-fetched list — avoids 3 extra COUNT queries
     total_accessories = len(all_accessories)
@@ -6876,6 +6905,9 @@ def _build_order_context(order, request):
         'boards_purchase_order': boards_purchase_order,
         'os_doors_purchase_order': os_doors_purchase_order,
         'additional_os_doors_pos_list': additional_os_doors_pos_list,
+        'all_os_doors_pos_list': all_os_doors_pos_list,
+        'os_door_style_images': os_door_style_images,
+        'os_door_colour_images': os_door_colour_images,
         'available_purchase_orders': available_purchase_orders,
         'purchase_invoice_lines': purchase_invoice_lines,
         'purchase_invoice_cost': purchase_invoice_cost,
@@ -8123,6 +8155,93 @@ def raumplus_option_create(request):
             'image_url': option.image.url if option.image else '',
         }
     })
+
+
+# ─── OS Door Style & Colour Library ──────────────────────────────────
+
+@login_required
+def os_door_options_page(request):
+    """Render the OS Door Style & Colour library page."""
+    options = OSDoorOption.objects.order_by('option_type', 'name')
+    styles = [o for o in options if o.option_type == OSDoorOption.OPTION_STYLE]
+    colours = [o for o in options if o.option_type == OSDoorOption.OPTION_COLOUR]
+    return render(request, 'stock_take/os_door_options.html', {
+        'styles': styles,
+        'colours': colours,
+    })
+
+
+@login_required
+def os_door_options_list(request):
+    """Return OS Door styles and colours as JSON."""
+    options = OSDoorOption.objects.order_by('option_type', 'name')
+    grouped = {'styles': [], 'colours': []}
+    for option in options:
+        payload = {
+            'id': option.id,
+            'name': option.name,
+            'image_url': option.image.url if option.image else '',
+        }
+        if option.option_type == OSDoorOption.OPTION_STYLE:
+            grouped['styles'].append(payload)
+        elif option.option_type == OSDoorOption.OPTION_COLOUR:
+            grouped['colours'].append(payload)
+    return JsonResponse(grouped)
+
+
+@login_required
+@require_POST
+def os_door_option_create(request):
+    """Create an OS Door style or colour entry."""
+    is_multipart = bool(request.content_type and 'multipart' in request.content_type)
+    if is_multipart:
+        data = request.POST
+        image_file = request.FILES.get('image')
+    else:
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+        image_file = None
+
+    option_type = (data.get('option_type') or '').strip().lower()
+    name = (data.get('name') or '').strip()
+
+    if option_type not in {OSDoorOption.OPTION_STYLE, OSDoorOption.OPTION_COLOUR}:
+        return JsonResponse({'success': False, 'error': 'Invalid OS Door option type.'}, status=400)
+    if not name:
+        return JsonResponse({'success': False, 'error': 'Name is required.'}, status=400)
+    if not image_file:
+        return JsonResponse({'success': False, 'error': 'Image is required.'}, status=400)
+
+    existing = OSDoorOption.objects.filter(option_type=option_type, name__iexact=name).first()
+    if existing:
+        return JsonResponse({'success': False, 'error': f'{existing.name} already exists.'}, status=400)
+
+    option = OSDoorOption.objects.create(option_type=option_type, name=name, image=image_file)
+    return JsonResponse({
+        'success': True,
+        'option': {
+            'id': option.id,
+            'name': option.name,
+            'option_type': option.option_type,
+            'image_url': option.image.url if option.image else '',
+        }
+    })
+
+
+@login_required
+@require_POST
+def os_door_option_delete(request, option_id):
+    """Delete an OS Door style or colour entry."""
+    try:
+        option = OSDoorOption.objects.get(id=option_id)
+    except OSDoorOption.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Not found.'}, status=404)
+    if option.image:
+        option.image.delete(save=False)
+    option.delete()
+    return JsonResponse({'success': True})
 
 
 def update_item(request, item_id):

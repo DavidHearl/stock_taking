@@ -117,10 +117,12 @@
                     <th>Description</th>
                     <th>Issue Date</th>
                     <th>Expected Date</th>
+                    <th>Received Date</th>
                     <th class="text-right">Total</th>
                     <th>Status</th>
                     <th class="text-center">Emailed</th>
                     <th class="text-center">Invoice</th>
+                    <th class="text-center">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -142,8 +144,9 @@
                         {% endif %}
                     </td>
                     <td class="po-desc-cell">{{ po.description|default:"-"|truncatewords:10 }}</td>
-                    <td>{{ po.issue_date|format_date_str|default:"-" }}</td>
+                    <td>{{ po.issue_date|default:po.creation_time_wg|format_date_str|default:"-" }}</td>
                     <td>{{ po.expected_date|format_date_str|default:"-" }}</td>
+                    <td>{{ po.received_date|format_date_str|default:"-" }}</td>
                     <td class="text-right">£{{ po.total|floatformat:2 }}</td>
                     <td>
                         <span class="po-status {% if po.status == 'Draft' %}draft{% elif po.status == 'Sent' %}sent{% elif po.status == 'Received' %}received{% elif po.status == 'Partially Received' %}partially-received{% elif po.status == 'Approved' %}approved{% elif po.status == 'Cancelled' %}cancelled{% endif %}">
@@ -164,6 +167,13 @@
                             <i class="bi bi-receipt"></i>
                         </a>
                         {% endwith %}
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if po.total == 0 %}
+                        <button class="btn-po-action" title="Recalculate total from line items" onclick="recalculatePOTotal({{ po.workguru_id }}, this)">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
                         {% endif %}
                     </td>
                 </tr>
@@ -264,6 +274,45 @@ function applySupplierFilter() {
         if (!cb.checked) excluded.push(cb.value);
     });
     window.location.href = buildUrl({ exclude_supplier: excluded, status: 'all' });
+}
+
+/* ── Recalculate PO Total ── */
+function recalculatePOTotal(poId, btn) {
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.querySelector('i').classList.add('spinning');
+
+    fetch(`/purchase-order/${poId}/recalculate-total/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = btn.closest('tr');
+            const totalCell = row.querySelector('td.text-right');
+            const newTotal = parseFloat(data.total);
+            totalCell.textContent = '\xa3' + newTotal.toFixed(2);
+            if (newTotal !== 0) {
+                btn.closest('td').innerHTML = '';
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        } else {
+            alert(data.error || 'Failed to recalculate total');
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    })
+    .catch(() => {
+        alert('Request failed');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    });
 }
 
 /* ── Zero Total Filter ── */

@@ -309,7 +309,7 @@
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.is_angled %} <span class="badge badge-info">ANGLED</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% endif %}</h3>
+                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.is_angled %} <span class="badge badge-info">ANGLED</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% if bpo_data.purchase_order %}{% if bpo_data.purchase_order.status == 'Received' %} <span class="badge badge-received">Received {{ bpo_data.purchase_order.received_date|format_date_str }}</span>{% elif bpo_data.purchase_order.expected_date %} <span class="po-date-hint">Expected: {{ bpo_data.purchase_order.expected_date|format_date_str }}</span>{% endif %}{% endif %}{% endif %}</h3>
                 </div>
                 <div class="header-actions">
                     <!-- File status indicators -->
@@ -430,15 +430,15 @@
                                     <th title="PRFID4">E4</th>
                                     <th title="PRFID2">E2</th>
                                     <th class="col-stock">Stock</th>
-                                    <th>Status</th>
                                     <th>Cost</th>
                                     {% if bpo_data.po.is_angled %}<th style="width:36px;"></th>{% endif %}
+                                    <th style="width:36px;"></th>
                                     <th style="width:36px;"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for item in bpo_data.pnx_items %}
-                                <tr>
+                                <tr class="board-row row-readonly" data-pnx-id="{{ item.id }}">
                                     <td><input type="checkbox" class="pnx-item-checkbox"
                                                data-item-id="{{ item.id }}"
                                                data-boards-po-id="{{ bpo_data.po.id }}"
@@ -570,15 +570,6 @@
                                     <td class="stock-qty-cell {% if item.is_standard_board %}{% if item.stock_quantity == 0 %}stock-zero{% elif item.stock_quantity < 5 %}stock-low{% endif %}{% endif %}">
                                         {% if item.is_standard_board %}{{ item.stock_quantity }}{% else %}-{% endif %}
                                     </td>
-                                    <td>
-                                        {% if item.is_fully_received %}
-                                            <span class="badge badge-success">Received</span>
-                                        {% elif item.is_partially_received %}
-                                            <span class="badge badge-warning">Partial</span>
-                                        {% else %}
-                                            <span class="badge badge-danger">Pending</span>
-                                        {% endif %}
-                                    </td>
                                     <td>£{{ item.calculated_cost|floatformat:2 }}</td>
                                     {% if bpo_data.po.is_angled %}
                                     <td style="text-align:center;">
@@ -596,11 +587,18 @@
                                             <i class="bi bi-copy"></i>
                                         </button>
                                     </td>
+                                    <td style="text-align:center;">
+                                        <button type="button" class="btn-row-icon btn-board-edit" title="Edit row"
+                                                onclick="toggleBoardRowEdit(this)">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                    </td>
                                 </tr>
                                 {% endfor %}
                                 <tr class="total-row">
-                                    <td colspan="{% if bpo_data.po.is_angled %}15{% else %}12{% endif %}"><strong>Total Cost:</strong></td>
+                                    <td colspan="{% if bpo_data.po.is_angled %}14{% else %}11{% endif %}"><strong>Total Cost:</strong></td>
                                     <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
+                                    <td></td>
                                     <td></td>
                                 </tr>
                             </tbody>
@@ -699,11 +697,15 @@
                                     </td>
                                     <td>{{ accessory.name }}</td>
                                     <td>
-                                        <input type="number" class="quantity-input accessory-quantity" 
-                                               value="{{ accessory.quantity|floatformat:0 }}" 
-                                               data-accessory-id="{{ accessory.id }}"
-                                               data-original-quantity="{{ accessory.quantity|floatformat:0 }}"
-                                               min="0" step="1">
+                                        <div class="qty-stepper-input">
+                                            <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,-1)" tabindex="-1">&#8722;</button>
+                                            <input type="number" class="qty-step-value quantity-input accessory-quantity"
+                                                   value="{{ accessory.quantity|floatformat:0 }}"
+                                                   data-accessory-id="{{ accessory.id }}"
+                                                   data-original-quantity="{{ accessory.quantity|floatformat:0 }}"
+                                                   min="0" step="1">
+                                            <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,1)" tabindex="-1">+</button>
+                                        </div>
                                     </td>
                                     <td>£{{ accessory.cost_price|floatformat:2 }}</td>
                                     <td>
@@ -760,223 +762,221 @@
 
         <!-- OS Doors Section -->
         {% if order.os_doors.all or order.os_doors_required %}
+
+        {# ── No-PO placeholder: shown only when no PO has been linked yet ── #}
+        {% if not all_os_doors_pos_list %}
         <div class="card">
             <div class="card-header">
                 <div class="boards-header-left">
-                    {% if os_doors_purchase_order %}
-                        <a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
-                            <i class="bi bi-eye"></i> View PO
-                        </a>
-                    {% endif %}
-                    <h3>
-                        {% if order.os_doors_po %}{{ order.os_doors_po }}: {% endif %}OS Doors
+                    <h3>OS Doors
                         {% if order.os_doors_required %}
-                            {% if os_doors_purchase_order %}
-                                {% if os_doors_purchase_order.status == 'Approved' or os_doors_purchase_order.status == 'Received' %}
-                                    <span class="badge badge-success badge-ml">Ordered</span>
-                                {% else %}
-                                    <span class="badge badge-warning badge-ml">{{ os_doors_purchase_order.status }}</span>
-                                {% endif %}
-                            {% elif order.os_doors_po %}
-                                <span class="badge badge-warning badge-ml">PO Linked</span>
-                            {% else %}
-                                <span class="badge badge-danger badge-ml">Required</span>
-                            {% endif %}
+                            <span class="badge badge-danger badge-ml">Required</span>
                         {% endif %}
                     </h3>
                 </div>
                 <div class="header-actions">
-                    {% if os_doors_purchase_order %}
-                        <button type="button" class="btn btn-sm btn-update-icon" id="update-os-doors-po-btn"
-                                title="Sync current cost/qty to the linked Purchase Order"
-                                onclick="syncOSDoorsPO({{ order.id }})">
-                            <i class="bi bi-arrow-repeat"></i>
-                        </button>
-                    {% endif %}
-                    {% if order.os_doors_po %}
-                    <form method="POST" action="{% url 'clear_os_doors_ordered' order.id %}" style="display:inline;"
-                          onsubmit="return confirm('Clear the OS Doors ordered mark? This will not delete the PO.');">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-warning" title="Clear ordered mark">
-                            <i class="bi bi-x-circle"></i> Clear Ordered
-                        </button>
-                    </form>
-                    {% endif %}
-                    {% if not order.os_doors_po %}
-                    <!-- Search / link existing PO -->
-                    <div class="os-doors-po-combo" style="position:relative; display:inline-block;">
-                        <div class="flex-row-gap">
-                            <div style="position:relative;">
-                                <input type="text" class="form-input" id="os-doors-po-search"
-                                       placeholder="Search PO..."
-                                       autocomplete="off"
-                                       style="width:150px; height:28px; font-size:0.8rem;"
-                                       oninput="searchOSDoorsPO(this.value)"
-                                       onfocus="this.select(); searchOSDoorsPO(this.value);">
-                                <div class="boards-po-results" id="os-doors-po-results" style="display:none;"></div>
-                            </div>
-                            <button type="button"
-                                    class="btn btn-sm btn-create-po-icon"
-                                    title="Create a local PO for OS Doors"
-                                    onclick="createOSDoorsPO({{ order.id }})">
-                                <i class="bi bi-file-earmark-plus"></i>
-                            </button>
-                        </div>
-                    </div>
-                    {% endif %}
-                    <button type="button" class="btn btn-sm btn-save-dims" id="save-os-doors-changes" style="display: none;">
-                        <i class="bi bi-save"></i> Save Changes
-                    </button>
-                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-os-doors-selected">
-                        <i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">0</span>)
-                    </button>
-                    {% if order.os_doors_required %}
-                    <button type="button" class="btn btn-sm btn-outline-danger" title="Remove OS Doors Required marker"
-                            onclick="openModal('confirmRemoveOSDoorsModal')">
-                        <i class="bi bi-x-lg"></i> Remove
-                    </button>
-                    {% endif %}
-                    <button class="btn btn-sm btn-paste-icon" type="button" onclick="openPasteOSDoorModal('{{ order.os_doors_po }}')" title="Paste OS Door">
-                        <i class="bi bi-clipboard"></i>
-                    </button>
-                    <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('{{ order.os_doors_po }}')" title="Add OS Door">
+                    <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
                         <i class="bi bi-plus-lg"></i>
                     </button>
+                    <div class="osd-kebab-wrap">
+                        <button type="button" class="btn btn-sm btn-kebab-icon" title="More options" onclick="toggleOSDKebab(this)">
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <div class="osd-kebab-menu">
+                            <a href="{% url 'os_door_options' %}" class="osd-kebab-item" target="_blank" rel="noopener"><i class="bi bi-collection"></i> Style &amp; Colour Library</a>
+                            <button type="button" class="osd-kebab-item" onclick="toggleApoPoSearch('primary-os-doors-po-search'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-link-45deg"></i> Link PO
+                            </button>
+                            <button type="button" class="osd-kebab-item" onclick="createOSDoorsPO({{ order.id }}); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-file-earmark-plus"></i> Create PO
+                            </button>
+                            {% if order.os_doors_required %}
+                            <button type="button" class="osd-kebab-item danger" onclick="openModal('confirmRemoveOSDoorsModal'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-x-lg"></i> Remove OS Doors
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="apo-po-search-panel" id="primary-os-doors-po-search" style="display:none;">
+                <div style="position:relative; padding: 8px 16px;">
+                    <input type="text" class="form-input" id="os-doors-po-search"
+                           placeholder="Search PO to link..."
+                           autocomplete="off"
+                           style="width:100%;"
+                           oninput="searchOSDoorsPO(this.value)"
+                           onfocus="this.select(); searchOSDoorsPO(this.value);">
+                    <div class="boards-po-results" id="os-doors-po-results" style="display:none;"></div>
                 </div>
             </div>
             <div class="card-body">
-                <!-- Existing OS Doors for this PO -->
-                {% if order.os_doors.all %}
-                <div class="table-container">
-                    <table class="table" id="os-doors-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="os-door-select-all" title="Select all"></th>
-                                <th>Door Style</th>
-                                <th>Style Colour</th>
-                                <th>Height</th>
-                                <th>Width</th>
-                                <th>Colour</th>
-                                <th style="width: 64px;">Qty</th>
-                                <th style="width: 110px;">Cost Price</th>
-                                <th>Total Cost</th>
-                                <th>Received</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for os_door in order.os_doors.all %}
-                            {% if not os_door.po_number or os_door.po_number == order.os_doors_po %}
-                            <tr data-os-door-id="{{ os_door.id }}">
-                                <td><input type="checkbox" class="checkbox-input os-door-select" data-os-door-id="{{ os_door.id }}"></td>
-                                <td>{{ os_door.door_style }}</td>
-                                <td>{{ os_door.style_colour }}</td>
-                                <td>{{ os_door.height|floatformat:0 }}</td>
-                                <td>{{ os_door.width|floatformat:0 }}</td>
-                                <td>{{ os_door.colour }}</td>
-                                <td>
-                                    <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60" 
-                                           data-os-door-id="{{ os_door.id }}" 
-                                           value="{{ os_door.quantity }}">
-                                </td>
-                                <td>
-                                    <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100" 
-                                           data-os-door-id="{{ os_door.id }}" 
-                                           value="{{ os_door.cost_price }}" 
-                                           placeholder="£0.00">
-                                </td>
-                                <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
-                                    £{{ os_door.cost_price|multiply:os_door.quantity }}
-                                </td>
-                                <td>
-                                    <input type="checkbox" class="checkbox-input os-door-received-checkbox" 
-                                           data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
-                                </td>
-                            </tr>
-                            {% endif %}
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-muted">No OS doors added yet.</p>
-                {% endif %}
-
+                <p class="text-muted">No OS doors added yet. Link or create a PO to get started.</p>
             </div>
         </div>
+        {% endif %}
 
-        {% if order.os_doors_po %}
-        {% for apo in additional_os_doors_pos_list %}
-        <div class="card mt-3">
+        {# ── Unified loop: one identical card per linked PO ── #}
+        {% for apo in all_os_doors_pos_list %}
+        <div class="card{% if not forloop.first %} mt-3{% endif %}">
             <div class="card-header">
                 <div class="boards-header-left">
                     <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
                         <i class="bi bi-eye"></i> View PO
                     </a>
-                    <h3>{{ apo.display_number }}: OS Doors <span class="badge badge-info badge-ml">Additional</span>{% if apo.email_sent_at %} <span class="badge badge-ordered">Ordered</span>{% endif %}</h3>
+                    <h3>{{ apo.display_number }}: OS Doors
+                        {% if apo.status == 'Approved' or apo.status == 'Received' %}
+                            <span class="badge badge-ordered badge-ml">Ordered</span>
+                        {% elif apo.status %}
+                            <span class="badge badge-warning badge-ml">{{ apo.status }}</span>
+                        {% endif %}
+                    </h3>
                 </div>
                 <div class="header-actions">
-                    <button type="button" class="btn btn-sm btn-update-icon" title="Sync to Purchase Order" onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}')">
-                        <i class="bi bi-arrow-repeat"></i>
-                    </button>
-                    <button class="btn btn-sm btn-paste-icon" type="button" onclick="openPasteOSDoorModal('{{ apo.display_number }}')" title="Paste OS Door">
-                        <i class="bi bi-clipboard"></i>
+                    <button type="button" class="btn btn-sm btn-update-po" title="Sync to Purchase Order"
+                            onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}', this)">
+                        <i class="bi bi-arrow-repeat"></i> Update PO
                     </button>
                     <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('{{ apo.display_number }}')" title="Add OS Door">
                         <i class="bi bi-plus-lg"></i>
                     </button>
+                    <div class="osd-kebab-wrap">
+                        <button type="button" class="btn btn-sm btn-kebab-icon" title="More options" onclick="toggleOSDKebab(this)">
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <div class="osd-kebab-menu">
+                            <a href="{% url 'os_door_options' %}" class="osd-kebab-item" target="_blank" rel="noopener"><i class="bi bi-collection"></i> Style &amp; Colour Library</a>
+                            {% if apo.display_number == order.os_doors_po %}
+                            <button type="button" class="osd-kebab-item" onclick="if(confirm('Clear the OS Doors ordered mark? This will not delete the PO.')) document.getElementById('clear-os-doors-form').submit()">
+                                <i class="bi bi-x-circle"></i> Clear Ordered
+                            </button>
+                            {% if order.os_doors_required %}
+                            <button type="button" class="osd-kebab-item danger" onclick="openModal('confirmRemoveOSDoorsModal'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-x-lg"></i> Remove OS Doors
+                            </button>
+                            {% endif %}
+                            {% else %}
+                            <button type="button" class="osd-kebab-item" onclick="toggleApoPoSearch('apo-search-{{ apo.workguru_id }}'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-link-45deg"></i> Change PO
+                            </button>
+                            <button type="button" class="osd-kebab-item danger" onclick="removeAdditionalOSDoorsPO({{ order.id }}, {{ apo.workguru_id }})">
+                                <i class="bi bi-x-lg"></i> Remove
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             </div>
+            {% if apo.display_number == order.os_doors_po %}
+            <form id="clear-os-doors-form" method="POST" action="{% url 'clear_os_doors_ordered' order.id %}" style="display:none;">
+                {% csrf_token %}
+            </form>
+            {% else %}
+            <div class="apo-po-search-panel" id="apo-search-{{ apo.workguru_id }}" style="display:none;">
+                <input type="text" class="form-input" placeholder="Search for a PO to link…" autocomplete="off"
+                       oninput="searchAdditionalOSDoorPO({{ apo.workguru_id }}, this.value)"
+                       onfocus="if(this.value.length>=2) searchAdditionalOSDoorPO({{ apo.workguru_id }}, this.value)"
+                       style="width:100%;">
+                <div class="boards-po-results" id="apo-po-results-{{ apo.workguru_id }}" style="display:none;"></div>
+            </div>
+            {% endif %}
             <div class="card-body">
-                <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
-                    <thead>
-                        <tr>
-                            <th>Door Style</th>
-                            <th>Style Colour</th>
-                            <th>Height</th>
-                            <th>Width</th>
-                            <th>Colour</th>
-                            <th style="width: 64px;">Qty</th>
-                            <th style="width: 110px;">Cost Price</th>
-                            <th>Total Cost</th>
-                            <th>Received</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for os_door in order.os_doors.all %}
-                        {% if os_door.po_number == apo.display_number %}
-                        <tr data-os-door-id="{{ os_door.id }}">
-                            <td>{{ os_door.door_style }}</td>
-                            <td>{{ os_door.style_colour }}</td>
-                            <td>{{ os_door.height|floatformat:0 }}</td>
-                            <td>{{ os_door.width|floatformat:0 }}</td>
-                            <td>{{ os_door.colour }}</td>
-                            <td>
-                                <input type="number" step="1" min="1" class="form-input os-door-qty-input input-width-60"
-                                       data-os-door-id="{{ os_door.id }}"
-                                       value="{{ os_door.quantity }}">
-                            </td>
-                            <td>
-                                <input type="number" step="0.01" min="0" class="form-input os-door-cost-input input-width-100"
-                                       data-os-door-id="{{ os_door.id }}"
-                                       value="{{ os_door.cost_price }}"
-                                       placeholder="£0.00">
-                            </td>
-                            <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
-                                £{{ os_door.cost_price|multiply:os_door.quantity }}
-                            </td>
-                            <td>
-                                <input type="checkbox" class="checkbox-input os-door-received-checkbox"
-                                       data-os-door-id="{{ os_door.id }}" {% if os_door.received %}checked{% endif %}>
-                            </td>
-                        </tr>
-                        {% endif %}
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="table-container">
+                    <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
+                        <thead>
+                            <tr>
+                                <th>Door Style</th>
+                                <th>Style Colour</th>
+                                <th>Height</th>
+                                <th>Width</th>
+                                <th>Qty</th>
+                                <th>Cost Price</th>
+                                <th>Total Cost</th>
+                                <th style="width: 52px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for os_door in order.os_doors.all %}
+                            {% if os_door.po_number == apo.display_number or apo.display_number == order.os_doors_po and not os_door.po_number %}
+                            {% with style_key=os_door.door_style|lower sc_key=os_door.style_colour|lower %}
+                            <tr data-os-door-id="{{ os_door.id }}">
+                                <td>
+                                    <div class="osd-cell-with-swatch">
+                                        <span class="osd-display osd-display-door-style">{{ os_door.door_style }}</span>
+                                        {% with style_img=os_door_style_images|get_item:style_key %}{% if style_img %}<span class="osd-cam-wrap"><i class="bi bi-camera osd-cam-icon"></i><img class="osd-cam-preview" src="{{ style_img }}" alt=""></span>{% endif %}{% endwith %}
+                                    </div>
+                                    <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}" style="display:none;">
+                                </td>
+                                <td>
+                                    <div class="osd-cell-with-swatch">
+                                        {% with sc_img=os_door_colour_images|get_item:sc_key %}{% if sc_img %}<img class="osd-colour-swatch" src="{{ sc_img }}" alt="">{% endif %}{% endwith %}
+                                        <span class="osd-display osd-display-style-colour">{{ os_door.style_colour }}</span>
+                                    </div>
+                                    <input type="text" class="osd-edit-input osd-input-style-colour" value="{{ os_door.style_colour }}" style="display:none;">
+                                </td>
+                                <td>
+                                    <span class="osd-display osd-display-height">{{ os_door.height|floatformat:0 }}</span>
+                                    <input type="number" class="osd-edit-input osd-input-height no-pnx-spinner" value="{{ os_door.height|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                </td>
+                                <td>
+                                    <span class="osd-display osd-display-width">{{ os_door.width|floatformat:0 }}</span>
+                                    <input type="number" class="osd-edit-input osd-input-width no-pnx-spinner" value="{{ os_door.width|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                </td>
+                                <td>
+                                    <div class="qty-stepper-input">
+                                        <button type="button" class="qty-step-btn" onclick="osDoorAdjustQty({{ os_door.id }}, -1)" tabindex="-1">&#8722;</button>
+                                        <input type="number" class="qty-step-value os-door-qty-input no-pnx-spinner" data-os-door-id="{{ os_door.id }}" value="{{ os_door.quantity }}" min="1" step="1" onchange="osDoorQtyChanged({{ os_door.id }})">
+                                        <button type="button" class="qty-step-btn" onclick="osDoorAdjustQty({{ os_door.id }}, 1)" tabindex="-1">+</button>
+                                    </div>
+                                </td>
+                                <td class="os-door-cost-cell">
+                                    <span class="osd-display os-door-cost-display">£{{ os_door.cost_price }}</span>
+                                    <input type="number" step="0.01" min="0" class="osd-edit-input os-door-cost-input-inline os-door-cost-input no-pnx-spinner" value="{{ os_door.cost_price }}" style="display:none;">
+                                </td>
+                                <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
+                                    £{{ os_door.cost_price|multiply:os_door.quantity }}
+                                </td>
+                                <td style="text-align: right;">
+                                    <button type="button" class="btn-row-icon" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <div class="os-door-edit-actions" style="display:none;">
+                                        <button type="button" class="btn-row-save" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                        <button type="button" class="btn-row-cancel" title="Cancel" onclick="cancelOsDoorEdit({{ os_door.id }})">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endwith %}
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr class="os-doors-summary-row">
+                                <td colspan="8" style="padding: 0; border: none;">
+                                    <div class="os-doors-summary-footer">
+                                        <div class="osdf-meta">
+                                            <i class="bi bi-receipt"></i>
+                                            <span class="osdf-count">0 items</span>
+                                            <span class="osdf-po-name">{{ apo.display_number }}: OS Doors</span>
+                                        </div>
+                                        <div class="osdf-totals">
+                                            <span class="osdf-label">Total Cost</span>
+                                            <strong class="os-doors-table-total osdf-amount">£0.00</strong>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
             </div>
         </div>
         {% endfor %}
-        {% endif %}
+
         {% else %}
         <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
             <span class="section-divider-label"><i class="bi bi-chevron-down"></i> OS Doors</span>
@@ -1076,11 +1076,15 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <input type="number" class="quantity-input glass-quantity" 
-                                           value="{{ glass.quantity|floatformat:0 }}" 
-                                           data-accessory-id="{{ glass.id }}"
-                                           data-original-quantity="{{ glass.quantity|floatformat:0 }}"
-                                           min="0" step="1">
+                                    <div class="qty-stepper-input">
+                                        <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,-1)" tabindex="-1">&#8722;</button>
+                                        <input type="number" class="qty-step-value quantity-input glass-quantity"
+                                               value="{{ glass.quantity|floatformat:0 }}"
+                                               data-accessory-id="{{ glass.id }}"
+                                               data-original-quantity="{{ glass.quantity|floatformat:0 }}"
+                                               min="0" step="1">
+                                        <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,1)" tabindex="-1">+</button>
+                                    </div>
                                 </td>
                                 <td>
                                     {% if glass.is_cut_to_size and glass.stock_item and glass.stock_item.price_per_sqm %}
@@ -1199,11 +1203,15 @@
                                 </td>
                                 <td>{{ rau.name }}</td>
                                 <td>
-                                    <input type="number" class="quantity-input accessory-quantity" 
-                                           value="{{ rau.quantity|floatformat:0 }}" 
-                                           data-accessory-id="{{ rau.id }}"
-                                           data-original-quantity="{{ rau.quantity|floatformat:0 }}"
-                                           min="0" step="1">
+                                    <div class="qty-stepper-input">
+                                        <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,-1)" tabindex="-1">&#8722;</button>
+                                        <input type="number" class="qty-step-value quantity-input accessory-quantity"
+                                               value="{{ rau.quantity|floatformat:0 }}"
+                                               data-accessory-id="{{ rau.id }}"
+                                               data-original-quantity="{{ rau.quantity|floatformat:0 }}"
+                                               min="0" step="1">
+                                        <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,1)" tabindex="-1">+</button>
+                                    </div>
                                 </td>
                                 <td>£{{ rau.cost_price|floatformat:2 }}</td>
                                 <td>
@@ -1583,57 +1591,134 @@
 <!-- Modal for Adding OS Door -->
 <div class="modal" id="addOSDoorModal">
     <div class="modal-overlay" onclick="closeModal('addOSDoorModal')"></div>
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-lg">
         <div class="modal-content">
             <form method="POST" action="{% url 'order_details' order.id %}">
                 {% csrf_token %}
                 <div class="modal-header">
-                    <h3>Add New OS Door</h3>
+                    <h3>Add OS Door</h3>
+                    <div class="osd-modal-tabs">
+                        <button type="button" class="osd-modal-tab active" id="osd-tab-new-btn" onclick="switchOSDModalTab('new')"><i class="bi bi-pencil"></i> New</button>
+                        <button type="button" class="osd-modal-tab" id="osd-tab-paste-btn" onclick="switchOSDModalTab('paste')"><i class="bi bi-clipboard"></i> Paste</button>
+                    </div>
                     <button type="button" class="modal-close" onclick="closeModal('addOSDoorModal')">✕</button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-grid-2col">
-                        <div class="form-group">
-                            <label for="{{ os_door_form.door_style.id_for_label }}">Door Style</label>
-                            {{ os_door_form.door_style }}
+                    <!-- New Door tab -->
+                    <div id="osd-modal-new-tab">
+                        <div class="form-grid-2col">
+                            <div class="form-group">
+                                <label for="{{ os_door_form.door_style.id_for_label }}">Door Style</label>
+                                {{ os_door_form.door_style }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.style_colour.id_for_label }}">Style Colour</label>
+                                {{ os_door_form.style_colour }}
+                            </div>
+                            <div class="form-group form-group-span-2">
+                                <label for="{{ os_door_form.item_description.id_for_label }}">Item Description</label>
+                                {{ os_door_form.item_description }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.height.id_for_label }}">Height (mm)</label>
+                                {{ os_door_form.height }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.width.id_for_label }}">Width (mm)</label>
+                                {{ os_door_form.width }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.colour.id_for_label }}">Colour</label>
+                                {{ os_door_form.colour }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.quantity.id_for_label }}">Quantity</label>
+                                {{ os_door_form.quantity }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.cost_price.id_for_label }}">Cost Price (£)</label>
+                                {{ os_door_form.cost_price }}
+                            </div>
+                            <div class="form-group">
+                                <label for="{{ os_door_form.po_number.id_for_label }}">PO Number</label>
+                                {{ os_door_form.po_number }}
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">{{ os_door_form.ordered }} <span>Ordered</span></label>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">{{ os_door_form.received }} <span>Received</span></label>
+                            </div>
                         </div>
+                    </div>
+                    <!-- Paste tab -->
+                    <div id="osd-modal-paste-tab" style="display:none;">
                         <div class="form-group">
-                            <label for="{{ os_door_form.style_colour.id_for_label }}">Style Colour</label>
-                            {{ os_door_form.style_colour }}
+                            <label for="osd-paste-input">Paste row from supplier sheet</label>
+                            <textarea class="form-input" id="osd-paste-input" rows="3"
+                                      placeholder="e.g. Morris &#9;Superior Matt Light Grey Superior Matt Light Grey &#9;Morris Superior Matt Light Grey Drawer 210 x 960 (MTM) &#9;Light Grey Light Grey &#9;H &#9;£36.58"></textarea>
+                            <small class="form-help">Paste a tab-separated row directly from the supplier spreadsheet, then click Parse.</small>
                         </div>
-                        <div class="form-group form-group-span-2">
-                            <label for="{{ os_door_form.item_description.id_for_label }}">Item Description</label>
-                            {{ os_door_form.item_description }}
+                        <div class="flex-row-gap" style="margin-bottom: 1rem;">
+                            <button type="button" class="btn btn-primary" onclick="parseOSDoorPaste()">
+                                <i class="bi bi-magic"></i> Parse
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="document.getElementById('osd-parse-rules').classList.toggle('hidden')">
+                                <i class="bi bi-info-circle"></i> Parsing Rules
+                            </button>
                         </div>
-                        <div class="form-group">
-                            <label for="{{ os_door_form.height.id_for_label }}">Height (mm)</label>
-                            {{ os_door_form.height }}
+                        <div id="osd-parse-rules" class="hidden" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem;">
+                            <h4 style="margin-bottom: 0.5rem;">Parsing Rules</h4>
+                            <p style="margin-bottom: 0.5rem;"><strong>Expected tab-separated columns:</strong></p>
+                            <ol style="margin: 0.5rem 0 1rem; padding-left: 1.5rem;">
+                                <li><strong>Door Style</strong> — e.g. Morris, Lanark</li>
+                                <li><strong>Style Colour</strong> — e.g. Superior Matt Light Grey (may be duplicated)</li>
+                                <li><strong>Item Description</strong> — full description including dimensions</li>
+                                <li><strong>Colour</strong> — e.g. Light Grey (may be duplicated)</li>
+                                <li><strong>Handing</strong> — H (ignored)</li>
+                                <li><strong>Unit Price</strong> — e.g. £18.29</li>
+                                <li><strong>Quantity</strong> — e.g. 2</li>
+                                <li><strong>Total Price</strong> — e.g. £36.58</li>
+                            </ol>
+                            <p style="margin-bottom: 0.25rem;"><strong>Dimensions</strong> are extracted from the description (e.g. "210 x 960").</p>
+                            <p style="margin-bottom: 0.5rem;">Empty leading columns are automatically skipped.</p>
+                            <hr style="border-color: var(--border-color); margin: 0.75rem 0;">
+                            <div class="form-grid-2col" style="gap: 0.5rem;">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="osd-rules-styles" style="font-size: 0.85rem;"><strong>Known Door Styles</strong> (comma-separated)</label>
+                                    <input type="text" class="form-input" id="osd-rules-styles"
+                                           value="Morris, Lanark" style="font-size: 0.85rem;">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="osd-rules-colours" style="font-size: 0.85rem;"><strong>Known Style Colours</strong> (comma-separated)</label>
+                                    <input type="text" class="form-input" id="osd-rules-colours"
+                                           value="Superior Matt Light Grey, Superior Matt White, Superior Matt Cashmere, Superior Matt Anthracite, Superior Matt Dust Grey, Superior Matt Graphite"
+                                           style="font-size: 0.85rem;">
+                                </div>
+                            </div>
+                            <small class="form-help" style="margin-top: 0.25rem; display: block;">Edit these lists to add new door styles or colours. Changes are used immediately when you click Parse.</small>
                         </div>
-                        <div class="form-group">
-                            <label for="{{ os_door_form.width.id_for_label }}">Width (mm)</label>
-                            {{ os_door_form.width }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ os_door_form.colour.id_for_label }}">Colour</label>
-                            {{ os_door_form.colour }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ os_door_form.quantity.id_for_label }}">Quantity</label>
-                            {{ os_door_form.quantity }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ os_door_form.cost_price.id_for_label }}">Cost Price (£)</label>
-                            {{ os_door_form.cost_price }}
-                        </div>
-                        <div class="form-group">
-                            <label for="{{ os_door_form.po_number.id_for_label }}">PO Number</label>
-                            {{ os_door_form.po_number }}
-                        </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">{{ os_door_form.ordered }} <span>Ordered</span></label>
-                        </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">{{ os_door_form.received }} <span>Received</span></label>
+                        <div id="osd-parse-result" class="hidden">
+                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                                <h4 style="margin:0;" id="osd-parse-count">0 doors found</h4>
+                                <small class="form-help" style="margin:0;">Edit Qty or Cost Price inline if needed.</small>
+                            </div>
+                            <div style="overflow-x:auto; max-height:340px; overflow-y:auto;">
+                                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                                    <thead>
+                                        <tr style="border-bottom:2px solid var(--border-color); white-space:nowrap;">
+                                            <th style="padding:6px 8px; text-align:left;">Door Style</th>
+                                            <th style="padding:6px 8px; text-align:center;">H &times; W</th>
+                                            <th style="padding:6px 8px; text-align:left;">Colour</th>
+                                            <th style="padding:6px 8px; text-align:center; width:60px;">Qty</th>
+                                            <th style="padding:6px 8px; text-align:right; width:90px;">Cost (£)</th>
+                                            <th style="padding:6px 8px; width:30px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="osd-parsed-tbody"></tbody>
+                                </table>
+                            </div>
+                            <div id="osd-parse-progress" class="hidden" style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-secondary);"></div>
                         </div>
                     </div>
                 </div>
@@ -1641,6 +1726,9 @@
                     <button type="button" class="btn btn-secondary" onclick="closeModal('addOSDoorModal')">Cancel</button>
                     <button type="submit" class="btn btn-success" id="add-os-door-submit">
                         <i class="bi bi-plus-lg"></i> Add OS Door
+                    </button>
+                    <button type="button" class="btn btn-success" id="osd-parsed-submit" onclick="submitParsedOSDoor()" disabled style="display:none;">
+                        <i class="bi bi-plus-lg"></i> <span id="osd-submit-label">Add OS Door</span>
                     </button>
                 </div>
             </form>
@@ -1672,98 +1760,6 @@
                     <button type="submit" class="btn btn-primary">Update PO</button>
                 </div>
             </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal for Pasting OS Door Data -->
-<div class="modal" id="pasteOSDoorModal">
-    <div class="modal-overlay" onclick="closeModal('pasteOSDoorModal')"></div>
-    <div class="modal-dialog modal-dialog-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Paste OS Door Data</h3>
-                <button type="button" class="modal-close" onclick="closeModal('pasteOSDoorModal')">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="osd-paste-input">Paste row from supplier sheet</label>
-                    <textarea class="form-input" id="osd-paste-input" rows="3" 
-                              placeholder="e.g. Morris &#9;Superior Matt Light Grey Superior Matt Light Grey &#9;Morris Superior Matt Light Grey Drawer 210 x 960 (MTM) &#9;Light Grey Light Grey &#9;H &#9;£36.58"></textarea>
-                    <small class="form-help">Paste a tab-separated row directly from the supplier spreadsheet, then click Parse.</small>
-                </div>
-                <div class="flex-row-gap" style="margin-bottom: 1rem;">
-                    <button type="button" class="btn btn-primary" onclick="parseOSDoorPaste()">
-                        <i class="bi bi-magic"></i> Parse
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('osd-parse-rules').classList.toggle('hidden')">
-                        <i class="bi bi-info-circle"></i> Parsing Rules
-                    </button>
-                </div>
-
-                <!-- Parsing rules reference (hidden by default) -->
-                <div id="osd-parse-rules" class="hidden" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem;">
-                    <h4 style="margin-bottom: 0.5rem;">Parsing Rules</h4>
-                    <p style="margin-bottom: 0.5rem;"><strong>Expected tab-separated columns:</strong></p>
-                    <ol style="margin: 0.5rem 0 1rem; padding-left: 1.5rem;">
-                        <li><strong>Door Style</strong> — e.g. Morris, Lanark</li>
-                        <li><strong>Style Colour</strong> — e.g. Superior Matt Light Grey (may be duplicated)</li>
-                        <li><strong>Item Description</strong> — full description including dimensions</li>
-                        <li><strong>Colour</strong> — e.g. Light Grey (may be duplicated)</li>
-                        <li><strong>Handing</strong> — H (ignored)</li>
-                        <li><strong>Unit Price</strong> — e.g. £18.29</li>
-                        <li><strong>Quantity</strong> — e.g. 2</li>
-                        <li><strong>Total Price</strong> — e.g. £36.58</li>
-                    </ol>
-                    <p style="margin-bottom: 0.25rem;"><strong>Dimensions</strong> are extracted from the description (e.g. "210 x 960").</p>
-                    <p style="margin-bottom: 0.5rem;">Empty leading columns are automatically skipped.</p>
-                    <hr style="border-color: var(--border-color); margin: 0.75rem 0;">
-                    <div class="form-grid-2col" style="gap: 0.5rem;">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label for="osd-rules-styles" style="font-size: 0.85rem;"><strong>Known Door Styles</strong> (comma-separated)</label>
-                            <input type="text" class="form-input" id="osd-rules-styles" 
-                                   value="Morris, Lanark" style="font-size: 0.85rem;">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label for="osd-rules-colours" style="font-size: 0.85rem;"><strong>Known Style Colours</strong> (comma-separated)</label>
-                            <input type="text" class="form-input" id="osd-rules-colours" 
-                                   value="Superior Matt Light Grey, Superior Matt White, Superior Matt Cashmere, Superior Matt Anthracite, Superior Matt Dust Grey, Superior Matt Graphite" 
-                                   style="font-size: 0.85rem;">
-                        </div>
-                    </div>
-                    <small class="form-help" style="margin-top: 0.25rem; display: block;">Edit these lists to add new door styles or colours. Changes are used immediately when you click Parse.</small>
-                </div>
-
-                <!-- Parsed result preview -->
-                <div id="osd-parse-result" class="hidden">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
-                        <h4 style="margin:0;" id="osd-parse-count">0 doors found</h4>
-                        <small class="form-help" style="margin:0;">Edit Qty or Cost Price inline if needed.</small>
-                    </div>
-                    <div style="overflow-x:auto; max-height:340px; overflow-y:auto;">
-                        <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
-                            <thead>
-                                <tr style="border-bottom:2px solid var(--border-color); white-space:nowrap;">
-                                    <th style="padding:6px 8px; text-align:left;">Door Style</th>
-                                    <th style="padding:6px 8px; text-align:center;">H &times; W</th>
-                                    <th style="padding:6px 8px; text-align:left;">Colour</th>
-                                    <th style="padding:6px 8px; text-align:center; width:60px;">Qty</th>
-                                    <th style="padding:6px 8px; text-align:right; width:90px;">Cost (£)</th>
-                                    <th style="padding:6px 8px; width:30px;"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="osd-parsed-tbody"></tbody>
-                        </table>
-                    </div>
-                    <div id="osd-parse-progress" class="hidden" style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-secondary);"></div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('pasteOSDoorModal')">Cancel</button>
-                <button type="button" class="btn btn-success" id="osd-parsed-submit" onclick="submitParsedOSDoor()" disabled>
-                    <i class="bi bi-plus-lg"></i> <span id="osd-submit-label">Add OS Door</span>
-                </button>
-            </div>
         </div>
     </div>
 </div>
@@ -3806,167 +3802,44 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Track OS Doors changes
-    let osDoorsChanges = {};
-
+    // ─── OS Doors table JS ───────────────────────────────────────────
     function recalcOsDoorTotal(row) {
-        const costInput = row.querySelector('.os-door-cost-input');
         const qtyInput = row.querySelector('.os-door-qty-input');
-        const costPrice = parseFloat(costInput.value) || 0;
-        const quantity = parseInt(qtyInput.value) || 0;
-        const totalCostCell = row.querySelector('.os-door-total-cost');
-        totalCostCell.textContent = '£' + (costPrice * quantity).toFixed(2);
-    }
-
-    // Handle OS Doors cost price input changes
-    document.querySelectorAll('.os-door-cost-input').forEach(function(input) {
-        input.addEventListener('input', function() {
-            const osDoorId = this.getAttribute('data-os-door-id');
-            const costPrice = parseFloat(this.value) || 0;
-            if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
-            osDoorsChanges[osDoorId].cost_price = costPrice;
-            recalcOsDoorTotal(this.closest('tr'));
-            const saveBtn = document.getElementById('save-os-doors-changes');
-            if (saveBtn) saveBtn.style.display = '';
-        });
-    });
-
-    // Handle OS Doors quantity input changes
-    document.querySelectorAll('.os-door-qty-input').forEach(function(input) {
-        input.addEventListener('input', function() {
-            const osDoorId = this.getAttribute('data-os-door-id');
-            const quantity = parseInt(this.value) || 0;
-            if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
-            osDoorsChanges[osDoorId].quantity = quantity;
-            recalcOsDoorTotal(this.closest('tr'));
-            const saveBtn = document.getElementById('save-os-doors-changes');
-            if (saveBtn) saveBtn.style.display = '';
-        });
-    });
-
-    // Handle OS Doors received checkbox changes
-    document.querySelectorAll('.os-door-received-checkbox').forEach(function(checkbox) {
-        checkbox.addEventListener('change', function() {
-            const osDoorId = this.getAttribute('data-os-door-id');
-            const row = this.closest('tr');
-            const qtyInput = row.querySelector('.os-door-qty-input');
-            const quantity = parseInt(qtyInput.value) || 0;
-            if (!osDoorsChanges[osDoorId]) osDoorsChanges[osDoorId] = {};
-            osDoorsChanges[osDoorId].received_quantity = this.checked ? quantity : 0;
-            const saveBtn = document.getElementById('save-os-doors-changes');
-            if (saveBtn) saveBtn.style.display = '';
-        });
-    });
-
-    // ─── Select / bulk delete ─────────────────────────────────────
-    const selectAllCheckbox = document.getElementById('os-door-select-all');
-    const deleteBtn = document.getElementById('delete-os-doors-selected');
-    const selectedCountSpan = document.getElementById('os-door-selected-count');
-
-    function updateDeleteButton() {
-        const checked = document.querySelectorAll('.os-door-select:checked');
-        const count = checked.length;
-        if (selectedCountSpan) selectedCountSpan.textContent = count;
-        if (deleteBtn) {
-            if (count > 0) {
-                deleteBtn.classList.remove('hidden');
-            } else {
-                deleteBtn.classList.add('hidden');
-            }
+        const costInput = row.querySelector('.os-door-cost-input');
+        const costDisplay = row.querySelector('.os-door-cost-display');
+        const qty = parseInt(qtyInput ? qtyInput.value : 0) || 0;
+        let cost = 0;
+        if (costInput && costInput.style.display !== 'none') {
+            cost = parseFloat(costInput.value) || 0;
+        } else if (costDisplay) {
+            cost = parseFloat(costDisplay.textContent.replace('£', '')) || 0;
         }
+        const totalCostCell = row.querySelector('.os-door-total-cost');
+        if (totalCostCell) totalCostCell.textContent = '£' + (cost * qty).toFixed(2);
+        const table = row.closest('table');
+        if (table) updateOsDoorsTableTotal(table);
     }
 
-    if (selectAllCheckbox) {
-        selectAllCheckbox.addEventListener('change', function() {
-            document.querySelectorAll('.os-door-select').forEach(cb => cb.checked = this.checked);
-            updateDeleteButton();
+    function updateOsDoorsTableTotal(table) {
+        let sum = 0;
+        let count = 0;
+        table.querySelectorAll('tbody .os-door-total-cost').forEach(function(cell) {
+            sum += parseFloat(cell.textContent.replace('£', '')) || 0;
+            count++;
         });
+        const footerCell = table.querySelector('tfoot .os-doors-table-total');
+        if (footerCell) footerCell.textContent = '£' + sum.toFixed(2);
+        const countEl = table.querySelector('.osdf-count');
+        if (countEl) countEl.textContent = count + ' item' + (count !== 1 ? 's' : '');
     }
 
-    document.querySelectorAll('.os-door-select').forEach(function(cb) {
-        cb.addEventListener('change', updateDeleteButton);
+    // Initialise all table totals on load
+    document.querySelectorAll('table').forEach(function(table) {
+        if (table.querySelector('.os-door-total-cost')) updateOsDoorsTableTotal(table);
     });
-
-    if (deleteBtn) {
-        deleteBtn.addEventListener('click', function() {
-            const checked = document.querySelectorAll('.os-door-select:checked');
-            const ids = Array.from(checked).map(cb => cb.getAttribute('data-os-door-id'));
-            if (ids.length === 0) return;
-            if (!confirm(`Delete ${ids.length} OS door item(s)? This cannot be undone.`)) return;
-
-            this.disabled = true;
-            this.innerHTML = '<i class="bi bi-hourglass"></i> Deleting...';
-
-            fetch('/stock-take/delete-os-doors-batch/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-                },
-                body: JSON.stringify({ ids: ids })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showAlert(`${data.deleted} OS door item(s) deleted.`, 'success');
-                    location.reload();
-                } else {
-                    showAlert('Error deleting items: ' + data.error, 'danger');
-                    this.disabled = false;
-                    this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected (<span id="os-door-selected-count">' + ids.length + '</span>)';
-                }
-            })
-            .catch(error => {
-                showAlert('Error deleting items.', 'danger');
-                this.disabled = false;
-                this.innerHTML = '<i class="bi bi-trash"></i> Delete Selected';
-            });
-        });
-    }
 
     // Handle save button click for OS Doors
-    const saveOsDoorsBtn = document.getElementById('save-os-doors-changes');
-    if (saveOsDoorsBtn) {
-        saveOsDoorsBtn.addEventListener('click', function() {
-            if (Object.keys(osDoorsChanges).length === 0) {
-                showAlert('No changes to save.', 'info');
-                return;
-            }
-
-            // Disable button during save
-            this.disabled = true;
-            this.innerHTML = '<i class="bi bi-hourglass"></i> Saving...';
-
-            // Send all changes in one request
-            fetch('/stock-take/update-os-doors-batch/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-                },
-                body: JSON.stringify({ changes: osDoorsChanges })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showAlert('OS Doors changes saved successfully!', 'success');
-                    osDoorsChanges = {}; // Clear changes
-                    location.reload(); // Reload to show updated status
-                } else {
-                    showAlert('Error saving OS Doors changes: ' + data.error, 'danger');
-                    // Re-enable button
-                    this.disabled = false;
-                    this.innerHTML = '<i class="bi bi-save"></i> Save OS Doors Changes';
-                }
-            })
-            .catch(error => {
-                showAlert('Error saving OS Doors changes', 'danger');
-                // Re-enable button
-                this.disabled = false;
-                this.innerHTML = '<i class="bi bi-save"></i> Save OS Doors Changes';
-            });
-        });
-    }
+    // (Save Changes button removed; changes are saved immediately via stepper or inline edit)
 
     // Add loading state to the regular Add OS Door form submit
     const addOsDoorBtn = document.getElementById('add-os-door-submit');
@@ -4472,6 +4345,8 @@ function openAddOSDoorModal(poNumber) {
     if (field && poNumber) {
         field.value = poNumber;
     }
+    _osdActivePo = poNumber || '';
+    switchOSDModalTab('new');
     openModal('addOSDoorModal');
 }
 
@@ -4480,7 +4355,109 @@ let _osdActivePo = '';
 
 function openPasteOSDoorModal(poNumber) {
     _osdActivePo = poNumber || '';
-    openModal('pasteOSDoorModal');
+    const field = document.getElementById('id_po_number');
+    if (field && poNumber) field.value = poNumber;
+    switchOSDModalTab('paste');
+    openModal('addOSDoorModal');
+}
+
+function switchOSDModalTab(tab) {
+    const newTab = document.getElementById('osd-modal-new-tab');
+    const pasteTab = document.getElementById('osd-modal-paste-tab');
+    const newSubmit = document.getElementById('add-os-door-submit');
+    const pasteSubmit = document.getElementById('osd-parsed-submit');
+    const btnNew = document.getElementById('osd-tab-new-btn');
+    const btnPaste = document.getElementById('osd-tab-paste-btn');
+    if (tab === 'paste') {
+        newTab.style.display = 'none';
+        pasteTab.style.display = '';
+        newSubmit.style.display = 'none';
+        pasteSubmit.style.display = '';
+        btnNew.classList.remove('active');
+        btnPaste.classList.add('active');
+    } else {
+        newTab.style.display = '';
+        pasteTab.style.display = 'none';
+        newSubmit.style.display = '';
+        pasteSubmit.style.display = 'none';
+        btnNew.classList.add('active');
+        btnPaste.classList.remove('active');
+    }
+}
+
+function toggleOSDKebab(btn) {
+    const menu = btn.nextElementSibling;
+    const isOpen = menu.classList.contains('open');
+    document.querySelectorAll('.osd-kebab-menu.open').forEach(m => m.classList.remove('open'));
+    if (!isOpen) menu.classList.add('open');
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.osd-kebab-wrap')) {
+        document.querySelectorAll('.osd-kebab-menu.open').forEach(m => m.classList.remove('open'));
+    }
+});
+
+let _apoPoSearchTimers = {};
+
+function toggleApoPoSearch(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const isOpen = panel.style.display !== 'none';
+    document.querySelectorAll('.apo-po-search-panel').forEach(p => { p.style.display = 'none'; });
+    if (!isOpen) {
+        panel.style.display = '';
+        panel.querySelector('input').focus();
+    }
+}
+
+function searchAdditionalOSDoorPO(wguruId, query) {
+    clearTimeout(_apoPoSearchTimers[wguruId]);
+    const resultsDiv = document.getElementById(`apo-po-results-${wguruId}`);
+    if (!resultsDiv) return;
+    if (query.length < 2) { resultsDiv.style.display = 'none'; return; }
+    _apoPoSearchTimers[wguruId] = setTimeout(() => {
+        fetch(`{% url 'purchase_order_search' %}?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                resultsDiv.innerHTML = '';
+                if (!data.results || data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No purchase orders found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                data.results.forEach(po => {
+                    const item = document.createElement('div');
+                    item.className = 'boards-po-result-item';
+                    item.innerHTML = `<span class="boards-po-result-number">${po.display_number}</span><span class="boards-po-result-meta">${po.supplier_name}${po.project_number ? ' · ' + po.project_number : ''}</span><span class="boards-po-result-status badge-${(po.status || 'draft').toLowerCase()}">${po.status}</span>`;
+                    item.addEventListener('click', () => selectAdditionalOSDoorPO({{ order.id }}, wguruId, po));
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = 'block';
+            })
+            .catch(() => { resultsDiv.style.display = 'none'; });
+    }, 250);
+}
+
+function selectAdditionalOSDoorPO(orderId, oldWguruId, po) {
+    fetch(`/order/${orderId}/change-additional-os-doors-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ old_workguru_id: oldWguruId, new_display_number: po.display_number })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert(`OS Doors PO changed to ${result.po_number}`, 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(err => showAlert('Error changing PO: ' + err.message, 'danger'));
 }
 
 function openModal(modalId, boardsPoId) {
@@ -6894,8 +6871,8 @@ document.addEventListener('click', function(e) {
     }
 });
 
-function syncOSDoorsPO(orderId, poDisplayNumber, tableId) {
-    const btn = document.getElementById('update-os-doors-po-btn');
+function syncOSDoorsPO(orderId, poDisplayNumber, tableId, btnEl) {
+    const btn = btnEl || document.getElementById('update-os-doors-po-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass"></i> Updating...'; }
 
     // Collect current cost/qty from the live form inputs for the relevant table
@@ -6985,6 +6962,208 @@ function confirmAdditionalOSDoorsPO() {
         btn.innerHTML = 'Create PO';
         modal.style.display = 'none';
     });
+}
+
+function removeAdditionalOSDoorsPO(orderId, workguruId) {
+    if (!confirm('Remove this OS Doors PO from the order? The PO itself will not be deleted.')) {
+        return;
+    }
+    fetch(`/order/${orderId}/remove-additional-os-doors-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ workguru_id: workguruId })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('OS Doors PO removed from order', 'success');
+            location.reload();
+        } else {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error removing PO: ' + error.message, 'danger');
+    });
+}
+
+
+// ─── Generic qty stepper for non-OS-Door inputs (accessories / glass / raumplus) ─
+// Walks from the clicked button to its sibling number input, clamps to min,
+// dispatches a `change` event so existing per-table listeners save the value.
+function genericQtyStep(btn, delta) {
+    const wrap = btn.closest('.qty-stepper-input');
+    if (!wrap) return;
+    const input = wrap.querySelector('input[type="number"]');
+    if (!input) return;
+    const min = parseInt(input.min) || 0;
+    const next = Math.max(min, (parseInt(input.value) || 0) + delta);
+    if (next === parseInt(input.value)) return;
+    input.value = next;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// ─── Board row read-only / edit toggle ─────────────────────────────────────
+// Rows render with `.row-readonly`; clicking the pencil unlocks inputs.
+// Clicking the (now check) icon re-locks. Existing change-event listeners
+// continue saving as the user edits — we only toggle visibility/interactivity.
+function toggleBoardRowEdit(btn) {
+    const row = btn.closest('tr');
+    if (!row) return;
+    const icon = btn.querySelector('i');
+    const isReadonly = row.classList.toggle('row-readonly');
+    if (isReadonly) {
+        // Just re-locked: blur any active input in this row to flush change events
+        const active = row.querySelector(':focus');
+        if (active) active.blur();
+        if (icon) { icon.classList.remove('bi-check-lg'); icon.classList.add('bi-pencil'); }
+        btn.title = 'Edit row';
+    } else {
+        if (icon) { icon.classList.remove('bi-pencil'); icon.classList.add('bi-check-lg'); }
+        btn.title = 'Done editing';
+        // Focus the first visible editable input
+        const first = row.querySelector('input[type="text"], input[type="number"]');
+        if (first) { first.focus(); first.select && first.select(); }
+    }
+}
+
+// ─── OS Doors quantity stepper ────────────────────────────────────────────
+function osDoorAdjustQty(osDoorId, delta) {
+    const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+    if (!row) return;
+    const input = row.querySelector('.os-door-qty-input');
+    let qty = Math.max(1, (parseInt(input.value) || 1) + delta);
+    input.value = qty;
+    recalcOsDoorTotal(row);
+    _osDoorSaveQty(osDoorId, qty);
+}
+
+function osDoorQtyChanged(osDoorId) {
+    const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+    if (!row) return;
+    const input = row.querySelector('.os-door-qty-input');
+    let qty = Math.max(1, parseInt(input.value) || 1);
+    input.value = qty;
+    recalcOsDoorTotal(row);
+    _osDoorSaveQty(osDoorId, qty);
+}
+
+function _osDoorSaveQty(osDoorId, qty) {
+    fetch('/stock-take/update-os-doors-batch/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ changes: { [osDoorId]: { quantity: qty } } })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (!result.success) showAlert('Error saving quantity: ' + (result.error || ''), 'danger');
+    })
+    .catch(() => showAlert('Error saving quantity', 'danger'));
+}
+
+// ─── OS Doors inline row editing ──────────────────────────────────────────
+function startOsDoorEdit(osDoorId) {
+    // Cancel any other row in edit mode first
+    document.querySelectorAll('tr[data-os-door-id].os-door-editing').forEach(r => {
+        const id = r.getAttribute('data-os-door-id');
+        if (id) cancelOsDoorEdit(parseInt(id));
+    });
+    const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+    if (!row) return;
+    row.classList.add('os-door-editing');
+    row.querySelectorAll('.osd-display').forEach(el => el.style.display = 'none');
+    row.querySelectorAll('.osd-edit-input').forEach(el => { el.style.display = ''; });
+    const viewBtn = row.querySelector('.btn-row-icon');
+    const editActions = row.querySelector('.os-door-edit-actions');
+    if (viewBtn) viewBtn.style.display = 'none';
+    if (editActions) editActions.style.display = 'flex';
+    const firstInput = row.querySelector('.osd-edit-input');
+    if (firstInput) { firstInput.focus(); firstInput.select(); }
+}
+
+function cancelOsDoorEdit(osDoorId) {
+    const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+    if (!row) return;
+    row.classList.remove('os-door-editing');
+    const pairs = [
+        ['.osd-display-door-style', '.osd-input-door-style'],
+        ['.osd-display-style-colour', '.osd-input-style-colour'],
+        ['.osd-display-height', '.osd-input-height'],
+        ['.osd-display-width', '.osd-input-width'],
+        ['.osd-display-colour', '.osd-input-colour'],
+        ['.os-door-cost-display', '.os-door-cost-input'],
+    ];
+    pairs.forEach(([dispSel, inpSel]) => {
+        const disp = row.querySelector(dispSel);
+        const inp = row.querySelector(inpSel);
+        if (disp && inp) inp.value = disp.textContent.replace('£', '').trim();
+    });
+    row.querySelectorAll('.osd-display').forEach(el => el.style.display = '');
+    row.querySelectorAll('.osd-edit-input').forEach(el => el.style.display = 'none');
+    const viewBtn = row.querySelector('.btn-row-icon');
+    const editActions = row.querySelector('.os-door-edit-actions');
+    if (viewBtn) viewBtn.style.display = '';
+    if (editActions) editActions.style.display = 'none';
+}
+
+function saveOsDoorInlineEdit(osDoorId) {
+    const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+    if (!row) return;
+    const costInput = row.querySelector('.os-door-cost-input');
+    const qtyInput = row.querySelector('.os-door-qty-input');
+    const doorStyleInput = row.querySelector('.osd-input-door-style');
+    const styleColourInput = row.querySelector('.osd-input-style-colour');
+    const heightInput = row.querySelector('.osd-input-height');
+    const widthInput = row.querySelector('.osd-input-width');
+    const colourInput = row.querySelector('.osd-input-colour');
+    const changes = {
+        cost_price: parseFloat(costInput ? costInput.value : 0) || 0,
+        quantity: Math.max(1, parseInt(qtyInput ? qtyInput.value : 1) || 1),
+        door_style: doorStyleInput ? doorStyleInput.value.trim() : '',
+        style_colour: styleColourInput ? styleColourInput.value.trim() : '',
+        height: heightInput ? parseFloat(heightInput.value) || 0 : 0,
+        width: widthInput ? parseFloat(widthInput.value) || 0 : 0,
+        colour: colourInput ? colourInput.value.trim() : '',
+    };
+    fetch('/stock-take/update-os-doors-batch/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ changes: { [osDoorId]: changes } })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            row.classList.remove('os-door-editing');
+            if (doorStyleInput) row.querySelector('.osd-display-door-style').textContent = changes.door_style;
+            if (styleColourInput) row.querySelector('.osd-display-style-colour').textContent = changes.style_colour;
+            if (heightInput) row.querySelector('.osd-display-height').textContent = Math.round(changes.height);
+            if (widthInput) row.querySelector('.osd-display-width').textContent = Math.round(changes.width);
+            if (colourInput) row.querySelector('.osd-display-colour').textContent = changes.colour;
+            const costDisplay = row.querySelector('.os-door-cost-display');
+            if (costDisplay) costDisplay.textContent = '£' + changes.cost_price.toFixed(2);
+            row.querySelectorAll('.osd-display').forEach(el => el.style.display = '');
+            row.querySelectorAll('.osd-edit-input').forEach(el => el.style.display = 'none');
+            const viewBtn = row.querySelector('.btn-row-icon');
+            const editActions = row.querySelector('.os-door-edit-actions');
+            if (viewBtn) viewBtn.style.display = '';
+            if (editActions) editActions.style.display = 'none';
+            recalcOsDoorTotal(row);
+            showAlert('Saved', 'success');
+        } else {
+            showAlert('Error: ' + (result.error || ''), 'danger');
+        }
+    })
+    .catch(() => showAlert('Error saving changes', 'danger'));
 }
 
 // Add Additional Boards PO to an order (via modal with DWG upload)

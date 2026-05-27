@@ -14,7 +14,7 @@
     
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body{% if user.is_authenticated and user.profile and not user.profile.dark_mode %} class="light-mode"{% endif %}>
     {% if is_impersonating %}
     <!-- Impersonation Banner -->
     <div class="impersonation-banner">
@@ -60,7 +60,7 @@
             {% endif %}
 
             <!-- Projects Section -->
-            {% if role_perms.orders.can_view or role_perms.customers.can_view or role_perms.remedials.can_view or role_perms.website_enquiries.can_view or is_role_admin %}
+            {% if role_perms.orders.can_view or role_perms.customers.can_view or role_perms.remedials.can_view or is_role_admin %}
             <div class="nav-section">
                 <div class="nav-section-header" onclick="toggleSection('projects')" title="Projects">
                     <span class="nav-label"><i class="bi bi-folder"></i><span class="nav-text">Projects</span></span>
@@ -72,9 +72,6 @@
                     {% endif %}
                     {% if role_perms.orders.can_view or is_role_admin %}
                     <a href="{% url 'ordering' %}" class="nav-link" title="Orders"><span class="nav-text">Orders</span></a>
-                    {% endif %}
-                    {% if role_perms.orders.can_view or is_role_admin %}
-                    <a href="{% url 'validation_history' %}" class="nav-link {% block nav_validation_history_active %}{% endblock %}" title="Validation History"><span class="nav-text">Validation History</span></a>
                     {% endif %}
                     {% if role_perms.customers.can_view or is_role_admin %}
                     <a href="{% url 'sales_list' %}" class="nav-link {% block nav_sales_active %}{% endblock %}" title="Sales"><span class="nav-text">Sales</span></a>
@@ -90,9 +87,6 @@
                     {% endif %}
                     {% if role_perms.customers.can_view or is_role_admin %}
                     <a href="{% url 'leads_list' %}" class="nav-link {% block nav_leads_active %}{% endblock %}" title="Contacts"><span class="nav-text">Contacts</span></a>
-                    {% endif %}
-                    {% if role_perms.website_enquiries.can_view or is_role_admin %}
-                    <a href="{% url 'website_enquiries_list' %}" class="nav-link {% block nav_enquiries_active %}{% endblock %}" title="Website Enquiries"><span class="nav-text">Website Enquiries</span></a>
                     {% endif %}
                 </div>
             </div>
@@ -264,15 +258,40 @@
                     <a href="{% url 'admin_activity_log' %}" class="nav-link {% block nav_admin_activity_log_active %}{% endblock %}" title="Activity Log"><span class="nav-text">Activity Log</span></a>
                     <a href="{% url 'admin_design_rules' %}" class="nav-link {% block nav_admin_design_rules_active %}{% endblock %}" title="Design Rules"><span class="nav-text">Design Rules</span></a>
                     <a href="/admin/" class="nav-link" title="Admin Panel" target="_blank"><span class="nav-text">Admin Panel</span></a>
+                    {% if role_perms.tickets.can_view or is_role_admin %}
+                    <a href="{% url 'tickets_list' %}" class="nav-link {% block nav_tickets_active %}{% endblock %}" title="Tickets"><span class="nav-text">Tickets{% if is_role_admin and open_ticket_count %} ({{ open_ticket_count }}){% endif %}</span>{% if is_role_admin and unread_ticket_count %}<span class="nav-badge unread">{{ unread_ticket_count }}</span>{% endif %}</a>
+                    {% endif %}
                 </div>
             </div>
             {% endif %}
 
-            <!-- Tickets -->
-            {% if role_perms.tickets.can_view or is_role_admin %}
-            <a href="{% url 'tickets_list' %}" class="nav-link single {% block nav_tickets_active %}{% endblock %}" title="Tickets">
-                <i class="bi bi-ticket-detailed"></i><span class="nav-text">Tickets{% if is_role_admin and open_ticket_count %} ({{ open_ticket_count }}){% endif %}</span>
-                {% if is_role_admin and unread_ticket_count %}<span class="nav-badge unread">{{ unread_ticket_count }}</span>{% endif %}
+            <!-- Uploads Section -->
+            <div class="nav-section">
+                <div class="nav-section-header" onclick="toggleSection('uploads')" title="Uploads">
+                    <span class="nav-label"><i class="bi bi-upload"></i><span class="nav-text">Uploads</span></span>
+                    <span class="section-arrow">▼</span>
+                </div>
+                <div class="nav-section-content" id="uploads-section">
+                    <a href="{% url 'fitter_upload' %}" class="nav-link {% block nav_upload_active %}{% endblock %}" title="Upload"><span class="nav-text">Upload</span></a>
+                    {% if role_perms.gallery.can_view or is_role_admin %}
+                    <a href="{% url 'upload_staging' %}" class="nav-link {% block nav_upload_staging_active %}{% endblock %}" title="Upload Staging"><span class="nav-text">Upload Staging</span></a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Standalone footer links -->
+
+            <!-- Validation History -->
+            {% if role_perms.orders.can_view or is_role_admin %}
+            <a href="{% url 'validation_history' %}" class="nav-link single {% block nav_validation_history_active %}{% endblock %}" title="Validation History">
+                <i class="bi bi-clock-history"></i><span class="nav-text">Validation History</span>
+            </a>
+            {% endif %}
+
+            <!-- Website Enquiries -->
+            {% if role_perms.website_enquiries.can_view or is_role_admin %}
+            <a href="{% url 'website_enquiries_list' %}" class="nav-link single {% block nav_enquiries_active %}{% endblock %}" title="Website Enquiries">
+                <i class="bi bi-globe"></i><span class="nav-text">Website Enquiries</span>
             </a>
             {% endif %}
 
@@ -287,18 +306,6 @@
             {% if role_perms.gallery.can_view or is_role_admin %}
             <a href="{% url 'gallery' %}" class="nav-link single {% block nav_gallery_active %}{% endblock %}" title="Gallery">
                 <i class="bi bi-images"></i><span class="nav-text">Gallery</span>
-            </a>
-            {% endif %}
-
-            <!-- Public Upload -->
-            <a href="{% url 'fitter_upload' %}" class="nav-link single {% block nav_upload_active %}{% endblock %}" title="Upload">
-                <i class="bi bi-plus-circle"></i><span class="nav-text">Upload</span>
-            </a>
-
-            <!-- Upload Staging -->
-            {% if role_perms.gallery.can_view or is_role_admin %}
-            <a href="{% url 'upload_staging' %}" class="nav-link single {% block nav_upload_staging_active %}{% endblock %}" title="Upload Staging">
-                <i class="bi bi-inboxes"></i><span class="nav-text">Upload Staging</span>
             </a>
             {% endif %}
 
@@ -577,16 +584,13 @@
             .catch(error => console.error('Error setting location:', error));
         }
 
-        // Set initial theme on page load
+        // Sync theme icon with current mode on DOM ready
         document.addEventListener('DOMContentLoaded', function() {
             {% if user.is_authenticated and user.profile %}
             const isDarkMode = {{ user.profile.dark_mode|lower }};
             if (!isDarkMode) {
-                document.body.classList.add('light-mode');
                 const icon = document.getElementById('themeIcon');
-                if (icon) {
-                    icon.className = 'bi bi-moon-fill';
-                }
+                if (icon) icon.className = 'bi bi-moon-fill';
             }
             {% endif %}
         });
@@ -727,25 +731,41 @@
     {% block extra_js %}{% endblock %}
 
     <script>
-    // ── Custom number spinners ──────────────────────────────
+    // ── Custom number spinners (site-wide ± stepper) ──────────────
+    // Wraps every <input type="number"> in a .qty-stepper-input pill with
+    // − / + buttons, so we get consistent UX and hide native browser spinners.
     document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('input[type="number"]').forEach(function(input) {
-            // Skip if already wrapped or hidden edit-mode inputs
+            // Skip if already wrapped (legacy .pnx-spinner-wrap or new .qty-stepper-input)
             if (input.closest('.pnx-spinner-wrap')) return;
+            if (input.closest('.qty-stepper-input')) return;
             if (input.classList.contains('edit-val')) return;
+            if (input.classList.contains('no-pnx-spinner')) return;
 
             var wrap = document.createElement('div');
-            wrap.className = 'pnx-spinner-wrap';
+            wrap.className = 'qty-stepper-input';
             input.parentNode.insertBefore(wrap, input);
+
+            var btnDown = document.createElement('button');
+            btnDown.type = 'button';
+            btnDown.className = 'qty-step-btn';
+            btnDown.setAttribute('tabindex', '-1');
+            btnDown.setAttribute('data-dir', '-1');
+            btnDown.innerHTML = '&#8722;'; // −
+            wrap.appendChild(btnDown);
+
+            input.classList.add('qty-step-value');
             wrap.appendChild(input);
 
-            var btns = document.createElement('div');
-            btns.className = 'pnx-spinner-btns';
-            btns.innerHTML = '<button type="button" class="pnx-spinner-btn" data-dir="1">&#x25B2;</button>'
-                           + '<button type="button" class="pnx-spinner-btn" data-dir="-1">&#x25BC;</button>';
-            wrap.appendChild(btns);
+            var btnUp = document.createElement('button');
+            btnUp.type = 'button';
+            btnUp.className = 'qty-step-btn';
+            btnUp.setAttribute('tabindex', '-1');
+            btnUp.setAttribute('data-dir', '1');
+            btnUp.innerHTML = '+';
+            wrap.appendChild(btnUp);
 
-            btns.querySelectorAll('.pnx-spinner-btn').forEach(function(btn) {
+            [btnDown, btnUp].forEach(function(btn) {
                 btn.addEventListener('click', function() {
                     var step = parseFloat(input.step) || 1;
                     var dir = parseInt(this.getAttribute('data-dir'));

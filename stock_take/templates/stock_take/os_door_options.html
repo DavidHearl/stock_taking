@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}OS Door Style & Colour Library{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/order_details.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 osd-library-page">
+    <div class="page-header mb-4 osd-library-header">
+        <div>
+            <h1><i class="bi bi-door-closed"></i> OS Door Style &amp; Colour Library</h1>
+            <p class="text-muted">Manage the reusable library of door styles and colours used across OS Doors purchase orders.</p>
+        </div>
+        <div id="osdLibraryMessage" class="osd-library-message" style="display:none;"></div>
+    </div>
+
+    <div class="card osd-library-section">
+        <div class="card-header">
+            <h3><i class="bi bi-door-open"></i> Door Styles <span class="badge badge-secondary" id="osdStylesCount">{{ styles|length }}</span></h3>
+            <div class="header-actions">
+                <button class="btn btn-sm btn-add-icon" type="button" onclick="openOsdAddModal('style')" title="Add Door Style">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="osdStylesList" class="egger-grid">
+                {% for option in styles %}
+                <div class="egger-tile osd-library-tile" data-option-id="{{ option.id }}">
+                    {% if option.image %}
+                    <img src="{{ option.image.url }}" alt="{{ option.name }}" loading="lazy" onclick="openEggerLightbox('{{ option.image.url }}')">
+                    {% else %}
+                    <div class="osd-library-placeholder"><i class="bi bi-image"></i></div>
+                    {% endif %}
+                    <div class="egger-tile-code">{{ option.name }}</div>
+                    <button type="button" class="osd-library-delete" title="Delete" onclick="deleteOsdOption({{ option.id }}, 'style', this)">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+                {% empty %}
+                <div class="raumplus-empty">No door styles yet. Click the + button to add one.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="card osd-library-section mt-3">
+        <div class="card-header">
+            <h3><i class="bi bi-palette"></i> Colours <span class="badge badge-secondary" id="osdColoursCount">{{ colours|length }}</span></h3>
+            <div class="header-actions">
+                <button class="btn btn-sm btn-add-icon" type="button" onclick="openOsdAddModal('colour')" title="Add Colour">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="osdColoursList" class="egger-grid">
+                {% for option in colours %}
+                <div class="egger-tile osd-library-tile" data-option-id="{{ option.id }}">
+                    {% if option.image %}
+                    <img src="{{ option.image.url }}" alt="{{ option.name }}" loading="lazy" onclick="openEggerLightbox('{{ option.image.url }}')">
+                    {% else %}
+                    <div class="osd-library-placeholder"><i class="bi bi-image"></i></div>
+                    {% endif %}
+                    <div class="egger-tile-code">{{ option.name }}</div>
+                    <button type="button" class="osd-library-delete" title="Delete" onclick="deleteOsdOption({{ option.id }}, 'colour', this)">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+                {% empty %}
+                <div class="raumplus-empty">No colours yet. Click the + button to add one.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Modal -->
+<div class="modal" id="osdAddModal">
+    <div class="modal-overlay" onclick="closeModal('osdAddModal')"></div>
+    <div class="modal-dialog" style="max-width: 460px;">
+        <div class="modal-header">
+            <h3 id="osdAddModalTitle"><i class="bi bi-plus-square"></i> Add</h3>
+            <button type="button" class="modal-close" onclick="closeModal('osdAddModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="osdAddType" value="">
+            <div class="form-group">
+                <label class="form-label" id="osdAddNameLabel">Name</label>
+                <input type="text" id="osdAddNameInput" class="form-input" placeholder="e.g. Chicago" autocomplete="off" onkeydown="handleOsdInputKey(event)">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Image</label>
+                <input type="file" id="osdAddImageInput" class="form-input" accept="image/*">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeModal('osdAddModal')">Cancel</button>
+            <button type="button" class="btn btn-save" id="osdAddSaveBtn" onclick="createOsdOptionFromModal()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Lightbox -->
+<div class="egger-lightbox" id="eggerLightbox" onclick="closeEggerLightbox()">
+    <img id="eggerLightboxImg" src="" alt="">
+</div>
+
+<script>
+const OSD_CSRF = '{{ csrf_token }}';
+
+function setOsdMsg(text, kind) {
+    const el = document.getElementById('osdLibraryMessage');
+    if (!el) return;
+    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = text;
+    el.className = 'osd-library-message ' + (kind === 'error' ? 'is-error' : 'is-success');
+    el.style.display = 'block';
+    if (kind !== 'error') setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+function openOsdAddModal(optionType) {
+    document.getElementById('osdAddType').value = optionType;
+    document.getElementById('osdAddNameInput').value = '';
+    document.getElementById('osdAddImageInput').value = '';
+    const isStyle = optionType === 'style';
+    document.getElementById('osdAddModalTitle').innerHTML = isStyle
+        ? '<i class="bi bi-plus-square"></i> Add Door Style'
+        : '<i class="bi bi-plus-square"></i> Add Colour';
+    document.getElementById('osdAddNameLabel').textContent = isStyle ? 'Style Name' : 'Colour Name';
+    openModal('osdAddModal');
+    setTimeout(() => document.getElementById('osdAddNameInput').focus(), 50);
+}
+
+function handleOsdInputKey(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        createOsdOptionFromModal();
+    }
+}
+
+function createOsdOptionFromModal() {
+    const optionType = document.getElementById('osdAddType').value;
+    const name = document.getElementById('osdAddNameInput').value.trim();
+    const imageInput = document.getElementById('osdAddImageInput');
+    const btn = document.getElementById('osdAddSaveBtn');
+    if (!name) { setOsdMsg('Enter a name first.', 'error'); return; }
+    if (!imageInput.files || !imageInput.files[0]) { setOsdMsg('Upload an image.', 'error'); return; }
+
+    btn.disabled = true;
+    const fd = new FormData();
+    fd.append('option_type', optionType);
+    fd.append('name', name);
+    fd.append('image', imageInput.files[0]);
+
+    fetch("{% url 'os_door_option_create' %}", {
+        method: 'POST',
+        headers: {'X-CSRFToken': OSD_CSRF},
+        body: fd,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) throw new Error(data.error || 'Failed to save.');
+        appendOsdTile(data.option);
+        closeModal('osdAddModal');
+        setOsdMsg(`${data.option.name} added.`, 'success');
+    })
+    .catch(err => setOsdMsg(err.message, 'error'))
+    .finally(() => { btn.disabled = false; });
+}
+
+function appendOsdTile(option) {
+    const isStyle = option.option_type === 'style';
+    const listId = isStyle ? 'osdStylesList' : 'osdColoursList';
+    const countId = isStyle ? 'osdStylesCount' : 'osdColoursCount';
+    const list = document.getElementById(listId);
+    const empty = list.querySelector('.raumplus-empty');
+    if (empty) empty.remove();
+
+    const tile = document.createElement('div');
+    tile.className = 'egger-tile osd-library-tile';
+    tile.dataset.optionId = option.id;
+    tile.innerHTML = `
+        <img src="${option.image_url}" alt="${option.name}" loading="lazy" onclick="openEggerLightbox('${option.image_url}')">
+        <div class="egger-tile-code">${option.name}</div>
+        <button type="button" class="osd-library-delete" title="Delete" onclick="deleteOsdOption(${option.id}, '${option.option_type}', this)">
+            <i class="bi bi-x"></i>
+        </button>`;
+    list.appendChild(tile);
+    const count = document.getElementById(countId);
+    if (count) count.textContent = parseInt(count.textContent || '0', 10) + 1;
+}
+
+function deleteOsdOption(optionId, optionType, btnEl) {
+    if (!confirm('Delete this entry?')) return;
+    fetch(`/os-door-options/${optionId}/delete/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': OSD_CSRF, 'X-Requested-With': 'XMLHttpRequest'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) throw new Error(data.error || 'Failed to delete.');
+        const tile = btnEl.closest('.osd-library-tile');
+        if (tile) tile.remove();
+        const countId = optionType === 'style' ? 'osdStylesCount' : 'osdColoursCount';
+        const count = document.getElementById(countId);
+        if (count) count.textContent = Math.max(0, parseInt(count.textContent || '0', 10) - 1);
+        setOsdMsg('Removed.', 'success');
+    })
+    .catch(err => setOsdMsg(err.message, 'error'));
+}
+
+function openEggerLightbox(url) {
+    const box = document.getElementById('eggerLightbox');
+    const img = document.getElementById('eggerLightboxImg');
+    if (!box || !img) return;
+    img.src = url;
+    box.style.display = 'flex';
+}
+function closeEggerLightbox() {
+    const box = document.getElementById('eggerLightbox');
+    if (box) box.style.display = 'none';
+}
+</script>
+{% endblock %}

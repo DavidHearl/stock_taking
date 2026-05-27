@@ -1858,7 +1858,6 @@
                         <tbody>
                         {% if os_doors_purchase_order %}
                         <tr>
-                            <td style="width:28px;"><span class="po-role-badge primary">P</span></td>
                             <td><a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}">{{ os_doors_purchase_order.display_number }}</a></td>
                             <td style="color:var(--text-secondary);">{{ os_doors_purchase_order.supplier_name|default:"-" }}</td>
                             <td><span class="customer-active-badge {% if os_doors_purchase_order.status == 'Approved' or os_doors_purchase_order.status == 'Received' %}active{% elif os_doors_purchase_order.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ os_doors_purchase_order.status|default:"-" }}</span></td>
@@ -1868,12 +1867,14 @@
                         {% endif %}
                         {% for apo in additional_os_doors_pos_list %}
                         <tr>
-                            <td style="width:28px;"><span class="po-role-badge additional">A</span></td>
                             <td><a href="{% url 'purchase_order_detail' apo.workguru_id %}">{{ apo.display_number }}</a></td>
                             <td style="color:var(--text-secondary);">{{ apo.supplier_name|default:"-" }}</td>
                             <td><span class="customer-active-badge {% if apo.status == 'Approved' or apo.status == 'Received' %}active{% elif apo.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ apo.status|default:"-" }}</span></td>
                             <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if apo.total %}£{{ apo.total|floatformat:2 }}{% else %}—{% endif %}</td>
-                            <td style="text-align:right;"><a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a></td>
+                            <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end;">
+                                <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;" onclick="removeAdditionalOSDoorsPO({{ order.id }}, {{ apo.workguru_id }})" title="Remove from order"><i class="bi bi-x-lg"></i></button>
+                            </td>
                         </tr>
                         {% endfor %}
                         </tbody>
@@ -2382,6 +2383,32 @@ function togglePoLinkSearch(rowId) {
     const isVisible = row.style.display !== 'none';
     row.style.display = isVisible ? 'none' : 'block';
     if (!isVisible) row.querySelector('input').focus();
+}
+
+function removeAdditionalOSDoorsPO(orderId, workguruId) {
+    if (!confirm('Remove this OS Doors PO from the order? The PO itself will not be deleted.')) {
+        return;
+    }
+    fetch(`/order/${orderId}/remove-additional-os-doors-po/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ workguru_id: workguruId })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Unknown'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error removing PO: ' + error.message);
+    });
 }
 
 let _poLinkSearchTimers = {};

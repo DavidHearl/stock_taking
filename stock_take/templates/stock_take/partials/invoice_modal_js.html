@@ -62,7 +62,7 @@ function modalSearchPO(q) {
                 const status = o.status ? ` <span style="opacity:.6;font-size:.75rem;">(${o.status})</span>` : '';
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
                              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
-                             onclick="selectModalPO('${o.id}','${String(label).replace(/'/g,"\\'")}')">
+                             onclick="selectModalPO('${o.id}','${String(label).replace(/'/g,"\\'")}','${o.po_type || 'supplier'}')">
                             <strong>${label}</strong>${supplier ? ` <span style="color:var(--text-secondary);"> – ${supplier}</span>` : ''}${status}
                         </div>`;
             }).join('');
@@ -72,17 +72,18 @@ function modalSearchPO(q) {
     }, 280);
 }
 
-function selectModalPO(id, label) {
+function selectModalPO(id, label, poType) {
     const input = document.getElementById('new-pinv-po-search');
     const dd = document.getElementById('new-pinv-po-dropdown');
     input.value = label;
     input.dataset.poId = id;
+    input.dataset.poType = poType || 'supplier';
     dd.style.display = 'none';
 }
 
 function clearModalPO() {
     const input = document.getElementById('new-pinv-po-search');
-    if (input) { input.value = ''; input.dataset.poId = ''; }
+    if (input) { input.value = ''; input.dataset.poId = ''; input.dataset.poType = ''; }
     const dd = document.getElementById('new-pinv-po-dropdown');
     if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
 }
@@ -382,6 +383,41 @@ function addFreightLine() {
     row.querySelector('.pinv-line-desc').value = 'Carriage';
     row.querySelector('.pinv-line-qty').value = '1';
     row.querySelector('.pinv-line-rate').focus();
+}
+
+function addDayRateLine() {
+    addModalLine();
+    const rows = document.querySelectorAll('.pinv-line-row');
+    const row = rows[rows.length - 1];
+    row.querySelector('.pinv-line-desc').value = 'Day Rate';
+    row.querySelector('.pinv-line-qty').value = '1';
+
+    const poInput = document.getElementById('new-pinv-po-search');
+    const poId    = poInput ? poInput.dataset.poId : '';
+    const poType  = poInput ? poInput.dataset.poType : '';
+
+    if (poId && poType === 'fitter') {
+        fetch(`/api/po-lines/?workguru_id=${encodeURIComponent(poId)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+        .then(r => r.json())
+        .then(data => {
+            const results = data.results || [];
+            if (results.length) {
+                const rate = parseFloat(results[0].order_price) || 0;
+                if (rate > 0) {
+                    row.querySelector('.pinv-line-rate').value  = rate.toFixed(2);
+                    row.querySelector('.pinv-line-total').value = rate.toFixed(2);
+                    recalcModalTotal();
+                }
+            }
+            row.querySelector('.pinv-line-rate').focus();
+        })
+        .catch(() => row.querySelector('.pinv-line-rate').focus());
+    } else {
+        row.querySelector('.pinv-line-rate').focus();
+    }
 }
 
 function recalcLineTotal(row) {

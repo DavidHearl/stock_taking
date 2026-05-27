@@ -16,70 +16,65 @@
 <div class="pinv-modal-overlay" id="create-invoice-modal" onclick="closeCreateModal(event)">
     <div class="pinv-modal-box" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <h3 style="margin:0;font-size:1rem;">Create Purchase Invoice</h3>
-            <button class="modal-close" onclick="closeCreateModal()"
-                    style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;">&times;</button>
+            <h3>Create Purchase Invoice</h3>
+            <button class="modal-close" onclick="closeCreateModal()">&times;</button>
         </div>
         <div class="pinv-modal-body" id="invoice-modal-body">
             <div class="pinv-form-panel">
 
             {% if attachment_mode == 'select' %}
             {# ── AP mode: email context + attachment radio list ────────────── #}
-            <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">
-                <div style="flex:1;min-width:0;">
-                    <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">From</div>
-                    <div id="modal-sender" style="font-size:0.82rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+            <div class="pinv-email-context">
+                <div class="pinv-email-context-field">
+                    <div class="pinv-email-context-label">From</div>
+                    <div id="modal-sender" class="pinv-email-context-value"></div>
                 </div>
-                <div style="flex:2;min-width:0;">
-                    <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Subject</div>
-                    <div id="modal-subject" style="font-size:0.82rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                <div class="pinv-email-context-field">
+                    <div class="pinv-email-context-label">Subject</div>
+                    <div id="modal-subject" class="pinv-email-context-value"></div>
                 </div>
             </div>
             <div>
-                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                    <label class="pinv-label" style="margin:0;">Attachment</label>
-                    <span id="modal-parse-status" style="font-size:0.72rem;color:var(--text-secondary);"></span>
+                <div class="pinv-attachment-label-row">
+                    <label class="pinv-label">Attachment</label>
+                    <span id="modal-parse-status" class="pinv-parse-status"></span>
                 </div>
                 <div id="modal-attachment-list" class="apay-att-list"></div>
             </div>
             {% else %}
             {# ── Default: file-upload zone ──────────────────────────────────── #}
             <div>
-                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                    <label class="pinv-label" style="margin:0;">Invoice PDF / Attachment</label>
-                    <span style="font-size:0.72rem;color:var(--text-secondary);">Upload first to auto-fill fields below</span>
+                <div class="pinv-attachment-label-row">
+                    <label class="pinv-label">Invoice PDF / Attachment</label>
+                    <span class="pinv-parse-status">Upload first to auto-fill fields below</span>
                 </div>
-                <div id="modal-attachment-zone" class="pinv-upload-zone" style="padding:10px;cursor:pointer;"
+                <div id="modal-attachment-zone" class="pinv-upload-zone"
                      onclick="document.getElementById('modal-attachment-input').click()"
                      ondragover="event.preventDefault(); this.classList.add('drag-over');"
                      ondragleave="this.classList.remove('drag-over');"
                      ondrop="event.preventDefault(); this.classList.remove('drag-over'); handleDroppedFile(event);">
-                    <i class="bi bi-cloud-upload" id="modal-attachment-icon" style="font-size:1rem;"></i>
-                    <span id="modal-attachment-name" style="font-size:0.82rem;">Click or drag &amp; drop to attach a file</span>
-                    <input type="file" id="modal-attachment-input" style="display:none;"
+                    <i class="bi bi-cloud-upload" id="modal-attachment-icon"></i>
+                    <span id="modal-attachment-name">Click or drag &amp; drop to attach a file</span>
+                    <input type="file" id="modal-attachment-input"
                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onchange="handleModalAttachment(this)">
                 </div>
             </div>
             {% endif %}
 
-            <hr style="border-color:var(--border-color);">
+            <hr>
             <div class="pinv-form-rows">
                 <div class="pinv-form-row">
                     <label class="pinv-label">Invoice Number *</label>
-                    <div style="flex:1;min-width:0;">
-                        <input type="text" id="new-pinv-number" placeholder="e.g. INVOICE-047" class="pinv-input" style="width:100%;box-sizing:border-box;" oninput="checkDuplicateInvoiceNumber(this.value)">
-                        <div id="modal-duplicate-warning" style="display:none;margin-top:5px;padding:8px 10px;background:rgba(220,53,69,.08);border:1px solid rgba(220,53,69,.35);border-radius:6px;font-size:0.78rem;color:#dc3545;">
-                            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:space-between;">
+                    <div class="pinv-input-wrap">
+                        <input type="text" id="new-pinv-number" placeholder="e.g. INVOICE-047" class="pinv-input" oninput="checkDuplicateInvoiceNumber(this.value)">
+                        <div id="modal-duplicate-warning" class="pinv-duplicate-warning">
+                            <div class="pinv-duplicate-inner">
                                 <span><i class="bi bi-exclamation-triangle-fill"></i> <span id="modal-duplicate-msg"></span></span>
-                                <div style="display:flex;gap:6px;flex-shrink:0;">
-                                    <a id="modal-duplicate-view-link" href="#" target="_blank"
-                                       style="font-size:0.75rem;font-weight:600;color:#dc3545;text-decoration:none;padding:3px 8px;border:1px solid rgba(220,53,69,.4);border-radius:4px;white-space:nowrap;"
-                                       onmouseover="this.style.background='rgba(220,53,69,.1)'" onmouseout="this.style.background=''">
+                                <div class="pinv-dup-actions">
+                                    <a id="modal-duplicate-view-link" href="#" target="_blank" class="pinv-dup-link">
                                         <i class="bi bi-box-arrow-up-right"></i> View
                                     </a>
-                                    <button type="button" id="modal-duplicate-process-btn"
-                                            style="font-size:0.75rem;font-weight:600;color:#fff;background:#dc3545;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;white-space:nowrap;"
-                                            onmouseover="this.style.background='#b02a37'" onmouseout="this.style.background='#dc3545'"
+                                    <button type="button" id="modal-duplicate-process-btn" class="pinv-dup-process"
                                             onclick="linkDuplicateAndProcess()">
                                         <i class="bi bi-check-lg"></i> Mark as Processed
                                     </button>
@@ -94,18 +89,14 @@
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Supplier / From</label>
-                    <div style="flex:1;min-width:0;position:relative;">
+                    <div class="pinv-input-wrap">
                         <input type="text" id="new-pinv-supplier" placeholder="Search suppliers…"
-                               class="pinv-input" style="width:100%;box-sizing:border-box;"
+                               class="pinv-input"
                                autocomplete="off" oninput="modalSearchSupplier(this.value)"
                                onblur="setTimeout(validateModalSupplier, 200)"
                                data-supplier-id="">
-                        <div id="new-pinv-supplier-dropdown"
-                             style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
-                                    background:var(--bg-primary);border:1px solid var(--border-color);
-                                    border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
-                                    max-height:200px;overflow-y:auto;margin-top:2px;"></div>
-                        <div id="new-pinv-supplier-warning" style="display:none;margin-top:4px;font-size:0.75rem;color:var(--danger-color);"><i class="bi bi-exclamation-triangle-fill"></i> Supplier not found — invoice will be saved without a linked supplier record.</div>
+                        <div id="new-pinv-supplier-dropdown" class="pinv-autocomplete-dd"></div>
+                        <div id="new-pinv-supplier-warning" class="pinv-supplier-warning"><i class="bi bi-exclamation-triangle-fill"></i> Supplier not found — invoice will be saved without a linked supplier record.</div>
                     </div>
                 </div>
                 <div class="pinv-form-row">
@@ -114,34 +105,29 @@
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Purchase Order</label>
-                    <div style="flex:1;min-width:0;display:flex;gap:6px;">
-                        <div style="flex:1;min-width:0;position:relative;">
+                    <div class="pinv-po-row">
+                        <div class="pinv-input-wrap">
                             <input type="text" id="new-pinv-po-search" placeholder="Search order number…"
-                                   class="pinv-input" style="width:100%;box-sizing:border-box;"
+                                   class="pinv-input"
                                    autocomplete="off" oninput="modalSearchPO(this.value)" data-po-id="">
-                            <div id="new-pinv-po-dropdown"
-                                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
-                                        background:var(--bg-primary);border:1px solid var(--border-color);
-                                        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
-                                        max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                            <div id="new-pinv-po-dropdown" class="pinv-autocomplete-dd"></div>
                         </div>
-                        <div style="position:relative;flex-shrink:0;">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" style="padding:0 10px;font-size:1.1rem;line-height:1;"
+                        <div class="pinv-po-kebab-wrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
                                     onclick="toggleInvoicePoKebab(event)" title="PO options">&#8942;</button>
-                            <div id="invoice-po-kebab-menu"
-                                 style="display:none;position:absolute;top:100%;right:0;z-index:400;min-width:180px;
-                                        background:var(--bg-secondary);border:1px solid var(--border-color);
-                                        border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:4px 0;margin-top:4px;">                                <button type="button" class="inv-po-kebab-item" onclick="closeInvoicePoKebab(); pullPOLines()">
+                            <div id="invoice-po-kebab-menu" class="pinv-po-kebab-menu">
+                                <button type="button" class="inv-po-kebab-item" onclick="closeInvoicePoKebab(); pullPOLines()">
                                     <i class="bi bi-download"></i> Pull lines from PO
                                 </button>
-                                <div style="height:1px;background:var(--border-color);margin:4px 0;"></div>                                <a href="{% url 'purchase_orders_list' %}?new=1" target="_blank"
+                                <div class="pinv-po-kebab-div"></div>
+                                <a href="{% url 'purchase_orders_list' %}?new=1" target="_blank"
                                    class="inv-po-kebab-item" onclick="closeInvoicePoKebab()">
                                     <i class="bi bi-plus-lg"></i> New PO
                                 </a>
                                 <button type="button" class="inv-po-kebab-item" onclick="closeInvoicePoKebab(); openInlineOPOModal()">
                                     <i class="bi bi-plus-lg"></i> New OPO
                                 </button>
-                                <div style="height:1px;background:var(--border-color);margin:4px 0;"></div>
+                                <div class="pinv-po-kebab-div"></div>
                                 <button type="button" class="inv-po-kebab-item" onclick="closeInvoicePoKebab(); openInlinePoFromLines()">
                                     <i class="bi bi-magic"></i> PO from Lines
                                 </button>
@@ -154,18 +140,18 @@
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Invoice Date</label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="date" id="new-pinv-date" class="pinv-input" style="flex:1;min-width:0;"
+                    <div class="pinv-date-row">
+                        <input type="date" id="new-pinv-date" class="pinv-input"
                                oninput="autoSetDueDate(this.value)">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
                                 onclick="document.getElementById('new-pinv-date').value=todayISO()">Today</button>
                     </div>
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Due Date</label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="date" id="new-pinv-due-date" class="pinv-input" style="flex:1;min-width:0;">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                    <div class="pinv-date-row">
+                        <input type="date" id="new-pinv-due-date" class="pinv-input">
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
                                 onclick="document.getElementById('new-pinv-due-date').value=todayISO()">Today</button>
                     </div>
                 </div>
@@ -179,12 +165,10 @@
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">Currency</label>
-                    <div style="display:flex;gap:6px;flex-wrap:nowrap;">
-                        <button type="button" id="modal-btn-gbp" class="btn btn-sm"
-                                style="flex:1;white-space:nowrap;background:var(--primary-color);color:#fff;border:1px solid var(--border-color);border-radius:999px;padding:5px 12px;"
+                    <div class="pinv-currency-row">
+                        <button type="button" id="modal-btn-gbp" class="pinv-currency-btn active"
                                 onclick="setModalCurrency('GBP')">&#163; GBP</button>
-                        <button type="button" id="modal-btn-eur" class="btn btn-sm"
-                                style="flex:1;white-space:nowrap;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:999px;padding:5px 12px;"
+                        <button type="button" id="modal-btn-eur" class="pinv-currency-btn"
                                 onclick="setModalCurrency('EUR')">€ EUR</button>
                     </div>
                 </div>
@@ -193,58 +177,58 @@
                     <input type="text" id="new-pinv-notes" placeholder="Optional notes" class="pinv-input">
                 </div>
             </div>
-            <hr style="border-color:var(--border-color);">
+            <hr>
             <div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                    <label class="pinv-label" style="margin:0;">Line Items</label>
-                    <div style="display:flex;gap:6px;">
-                        <button type="button" class="pinv-btn-sm" style="background:var(--bg-secondary);color:var(--text-secondary);" onclick="addFreightLine()">
+                <div class="pinv-lines-header">
+                    <label class="pinv-label">Line Items</label>
+                    <div class="pinv-lines-btn-group">
+                        <button type="button" class="pinv-btn-sm secondary" onclick="addFreightLine()">
                             <i class="bi bi-truck"></i> Freight
+                        </button>
+                        <button type="button" class="pinv-btn-sm secondary" onclick="addDayRateLine()">
+                            <i class="bi bi-calendar-day"></i> Day Rate
                         </button>
                         <button type="button" class="pinv-btn-sm" onclick="addModalLine()">
                             <i class="bi bi-plus-lg"></i> Add Line
                         </button>
                     </div>
                 </div>
-                <div style="display:flex;gap:6px;align-items:center;padding:0 0 5px;border-bottom:1px solid var(--border-color);margin-bottom:4px;">
-                    <span style="flex:2;min-width:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">Description</span>
-                    <span style="width:50px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Qty</span>
-                    <span style="width:90px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Unit Price</span>
-                    <span style="width:90px;flex-shrink:0;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);text-align:right;">Line Total</span>
-                    <span style="width:62px;flex-shrink:0;"></span>
+                <div class="pinv-line-col-headers">
+                    <span class="pinv-col-hdr desc">Description</span>
+                    <span class="pinv-col-hdr qty">Qty</span>
+                    <span class="pinv-col-hdr unit">Unit Price</span>
+                    <span class="pinv-col-hdr total">Line Total</span>
+                    <span class="pinv-col-hdr actions"></span>
                 </div>
                 <div id="modal-lines"></div>
             </div>
-            <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-color);">
-                <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:6px;">
-                    <label style="display:flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-secondary);cursor:pointer;user-select:none;">
-                        <input type="checkbox" id="modal-vat-enabled" onchange="recalcModalTotal()" style="cursor:pointer;">
+            <div class="pinv-vat-section">
+                <div class="pinv-vat-controls">
+                    <label class="pinv-vat-label">
+                        <input type="checkbox" id="modal-vat-enabled" onchange="recalcModalTotal()">
                         Apply VAT
                     </label>
-                    <div style="display:inline-flex;align-items:stretch;border:1px solid var(--border-color);border-radius:5px;overflow:hidden;background:var(--bg-primary);">
+                    <div class="pinv-vat-spinner">
                         <button type="button"
-                                onclick="var i=document.getElementById('modal-vat-rate');i.value=Math.max(0,parseFloat(i.value||0)-1);recalcModalTotal();"
-                                style="border:none;border-right:1px solid var(--border-color);background:none;padding:0 7px;cursor:pointer;color:var(--text-secondary);font-size:1rem;line-height:1;">&#8722;</button>
+                                onclick="var i=document.getElementById('modal-vat-rate');i.value=Math.max(0,parseFloat(i.value||0)-1);recalcModalTotal();">&#8722;</button>
                         <input type="number" id="modal-vat-rate" value="20" min="0" max="100" step="1"
-                               style="width:36px;padding:3px 2px;font-size:0.82rem;text-align:center;background:transparent;border:none;color:var(--text-primary);-moz-appearance:textfield;appearance:textfield;"
                                oninput="recalcModalTotal()">
                         <button type="button"
-                                onclick="var i=document.getElementById('modal-vat-rate');i.value=Math.min(100,parseFloat(i.value||0)+1);recalcModalTotal();"
-                                style="border:none;border-left:1px solid var(--border-color);background:none;padding:0 7px;cursor:pointer;color:var(--text-secondary);font-size:1rem;line-height:1;">&#43;</button>
+                                onclick="var i=document.getElementById('modal-vat-rate');i.value=Math.min(100,parseFloat(i.value||0)+1);recalcModalTotal();">&#43;</button>
                     </div>
-                    <span style="font-size:0.78rem;color:var(--text-secondary);">%</span>
+                    <span class="pinv-vat-pct">%</span>
                 </div>
-                <div id="modal-net-row" style="display:none;justify-content:flex-end;align-items:baseline;gap:8px;margin-bottom:3px;">
-                    <span style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">Net</span>
-                    <span id="modal-net-total" style="font-size:0.9rem;font-weight:500;min-width:90px;text-align:right;">&pound;0.00</span>
+                <div id="modal-net-row" class="pinv-subtotal-row">
+                    <span class="pinv-subtotal-label">Net</span>
+                    <span id="modal-net-total" class="pinv-subtotal-amount">&pound;0.00</span>
                 </div>
-                <div id="modal-vat-row" style="display:none;justify-content:flex-end;align-items:baseline;gap:8px;margin-bottom:3px;">
-                    <span id="modal-vat-label" style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">VAT (20%)</span>
-                    <span id="modal-vat-amount" style="font-size:0.9rem;font-weight:500;min-width:90px;text-align:right;">&pound;0.00</span>
+                <div id="modal-vat-row" class="pinv-subtotal-row">
+                    <span id="modal-vat-label" class="pinv-subtotal-label">VAT (20%)</span>
+                    <span id="modal-vat-amount" class="pinv-subtotal-amount">&pound;0.00</span>
                 </div>
-                <div style="display:flex;justify-content:flex-end;align-items:baseline;gap:8px;">
-                    <span style="font-size:0.78rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">Invoice Total</span>
-                    <span id="modal-total" style="font-size:1rem;font-weight:700;min-width:90px;text-align:right;">&pound;0.00</span>
+                <div class="pinv-total-row">
+                    <span class="pinv-subtotal-label">Invoice Total</span>
+                    <span id="modal-total">&pound;0.00</span>
                 </div>
             </div>
 
@@ -263,28 +247,24 @@
 </div>
 
 {# Portal for line-row kebab menus — position:fixed so not clipped by modal overflow #}
-<div id="pinv-kebab-portal" style="display:none;position:fixed;z-index:9999;"></div>
+<div id="pinv-kebab-portal"></div>
 
 {# ─── Inline OPO Quick-Create Modal ────────────────────────────────────────── #}
-<div class="pinv-modal-overlay" id="inline-opo-modal" style="z-index:2500;" onclick="closeInlineOPOModal(event)">
-    <div class="pinv-modal-box" style="max-width:520px;" onclick="event.stopPropagation()">
+<div class="pinv-modal-overlay" id="inline-opo-modal" onclick="closeInlineOPOModal(event)">
+    <div class="pinv-modal-box" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <h3 style="margin:0;font-size:1rem;"><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
-            <button type="button" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;" onclick="closeInlineOPOModal()">&times;</button>
+            <h3><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
+            <button type="button" class="modal-close" onclick="closeInlineOPOModal()">&times;</button>
         </div>
         <div class="pinv-modal-body">
             <div class="pinv-form-rows">
                 <div class="pinv-form-row">
-                    <label class="pinv-label">Supplier <span style="color:var(--danger-color);">*</span></label>
-                    <div style="position:relative;flex:1;min-width:0;">
-                        <input type="text" id="iopo-supplier" class="pinv-input" style="width:100%;box-sizing:border-box;"
+                    <label class="pinv-label">Supplier <span class="pinv-required">*</span></label>
+                    <div class="pinv-input-wrap">
+                        <input type="text" id="iopo-supplier" class="pinv-input"
                                placeholder="Type to search…" autocomplete="off"
                                oninput="iopoSearchSupplier(this.value)">
-                        <div id="iopo-supplier-dd"
-                             style="display:none;position:absolute;top:100%;left:0;right:0;z-index:2600;
-                                    background:var(--bg-primary);border:1px solid var(--border-color);
-                                    border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
-                                    max-height:180px;overflow-y:auto;margin-top:2px;"></div>
+                        <div id="iopo-supplier-dd" class="pinv-autocomplete-dd"></div>
                     </div>
                 </div>
                 <div class="pinv-form-row">
@@ -297,9 +277,9 @@
                 </div>
                 <div class="pinv-form-row">
                     <label class="pinv-label">PO Date</label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="date" id="iopo-date" class="pinv-input" style="flex:1;">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="document.getElementById('iopo-date').value=todayISO()">Today</button>
+                    <div class="pinv-date-row">
+                        <input type="date" id="iopo-date" class="pinv-input">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('iopo-date').value=todayISO()">Today</button>
                     </div>
                 </div>
                 <div class="pinv-form-row">
@@ -307,10 +287,10 @@
                     <input type="number" id="iopo-net" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="iopoCalcGross()">
                 </div>
                 <div class="pinv-form-row">
-                    <label class="pinv-label">VAT (£)</label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="number" id="iopo-vat" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="iopoCalcGross()" style="flex:1;">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="iopoCalcVAT()">20%</button>
+                    <label class="pinv-label">VAT (&pound;)</label>
+                    <div class="pinv-date-row">
+                        <input type="number" id="iopo-vat" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="iopoCalcGross()">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="iopoCalcVAT()">20%</button>
                     </div>
                 </div>
                 <div class="pinv-form-row">
@@ -326,14 +306,14 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="pinv-form-row" style="align-items:flex-start;">
-                    <label class="pinv-label" style="padding-top:6px;">Description</label>
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Description</label>
                     <textarea id="iopo-description" class="pinv-input" rows="2" placeholder="Brief description…"></textarea>
                 </div>
             </div>
-            <div id="iopo-error" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(220,53,69,.08);border:1px solid rgba(220,53,69,.35);border-radius:6px;font-size:0.82rem;color:#dc3545;"></div>
+            <div id="iopo-error" class="pinv-error-msg"></div>
         </div>
-        <div class="pinv-modal-footer" style="justify-content:flex-end;">
+        <div class="pinv-modal-footer">
             <button type="button" class="btn-cancel" onclick="closeInlineOPOModal()">Cancel</button>
             <button type="button" class="btn-save" id="iopo-submit-btn" onclick="submitInlineOPO()">
                 <i class="bi bi-check-lg"></i> Create OPO

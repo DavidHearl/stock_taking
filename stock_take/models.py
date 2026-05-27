@@ -530,6 +530,12 @@ class Order(models.Model):
     materials_completed = models.BooleanField(default=False, help_text='Materials delivered/ready')
     paperwork_completed = models.BooleanField(default=False, help_text='Paperwork completed')
 
+    @property
+    def customer_name(self):
+        """Return the customer's full name, using legacy first/last name fields."""
+        parts = [self.first_name, self.last_name]
+        return ' '.join(p for p in parts if p).strip()
+
     def time_allowance(self):
         if not self.fit_date or not self.order_date:
             return None
@@ -2284,6 +2290,10 @@ class MailboxEmail(models.Model):
         choices=[('', 'All'), ('rjl', 'RJL'), ('group', 'Group'), ('statements', 'Statements')],
         help_text='Company entity tab this email is routed to',
     )
+    is_priority = models.BooleanField(
+        default=False, db_index=True,
+        help_text='True if the email matches a priority rule and must be processed immediately',
+    )
 
     class Meta:
         ordering = ['-received_at']
@@ -2335,7 +2345,7 @@ class MailboxExemption(models.Model):
 class MailboxEmailFilter(models.Model):
     """Routing rule: emails whose sender matches a pattern are assigned to a tab."""
 
-    TAB_CHOICES = [('rjl', 'RJL'), ('group', 'Group')]
+    TAB_CHOICES = [('rjl', 'RJL'), ('group', 'Group'), ('priority', 'Priority')]
 
     email_pattern = models.CharField(
         max_length=254, unique=True,
@@ -3037,6 +3047,34 @@ class RaumplusOption(models.Model):
     option_type = models.CharField(max_length=20, choices=OPTION_TYPE_CHOICES, db_index=True)
     name = models.CharField(max_length=120)
     image = models.ImageField(upload_to='raumplus_options/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['option_type', 'name']
+        unique_together = [('option_type', 'name')]
+
+    def save(self, *args, **kwargs):
+        self.name = (self.name or '').strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_option_type_display()}: {self.name}"
+
+
+class OSDoorOption(models.Model):
+    """Library of OS Door styles and colours, each with an image. Mirrors RaumplusOption."""
+
+    OPTION_STYLE = 'style'
+    OPTION_COLOUR = 'colour'
+    OPTION_TYPE_CHOICES = [
+        (OPTION_STYLE, 'Door Style'),
+        (OPTION_COLOUR, 'Colour'),
+    ]
+
+    option_type = models.CharField(max_length=20, choices=OPTION_TYPE_CHOICES, db_index=True)
+    name = models.CharField(max_length=120)
+    image = models.ImageField(upload_to='os_door_options/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

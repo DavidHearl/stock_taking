@@ -60,7 +60,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
     </a>
 
     <!-- Bulk action bar (shown when rows are selected) -->
-    <div class="apay-bulk-bar" id="bulk-bar" style="display:none;">
+    <div class="apay-bulk-bar" id="bulk-bar">
         <span class="apay-bulk-count" id="bulk-count">0 selected</span>
         <div class="apay-bulk-actions">
             <button class="apay-bulk-btn ignore" onclick="bulkAction('ignore')"><i class="bi bi-slash-circle"></i> Ignore</button>
@@ -107,18 +107,15 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
             <button class="apay-kebab-btn" id="kebab-btn" onclick="toggleKebab(event)" title="Options">
                 <i class="bi bi-three-dots-vertical"></i>
             </button>
-            <div class="apay-kebab-menu" id="kebab-menu" style="display:none;">
-                <button class="apay-kebab-item" onclick="openExemptionModal(); closeKebab();">
-                    <i class="bi bi-funnel"></i> Manage Exemption List
-                </button>
-                <button class="apay-kebab-item" onclick="openEmailFilterModal(); closeKebab();">
-                    <i class="bi bi-diagram-3"></i> Manage Email Filters
+            <div class="apay-kebab-menu" id="kebab-menu">
+                <button class="apay-kebab-item" onclick="openInboxRulesModal(); closeKebab();">
+                    <i class="bi bi-gear"></i> Manage Inbox Rules
                 </button>
                 <button class="apay-kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
                     <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
                 </button>
                 {% if is_configured %}
-                <hr style="margin:4px 0;border-color:var(--border-color);">
+                <hr>
                 <button class="apay-kebab-item" onclick="fullResync(); closeKebab();" title="Re-fetch all emails from the mailbox (ignores date filters)">
                     <i class="bi bi-arrow-clockwise"></i> Full Resync
                 </button>
@@ -135,23 +132,22 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
     <table class="apay-table" id="apay-table">
         <thead>
             <tr>
-                <th style="width:40px; text-align:center;">
+                <th class="apay-th-check">
                     <input type="checkbox" id="select-all" title="Select all" onchange="toggleSelectAll(this)">
                 </th>
-                <th style="width:36px;"></th>
-                <th style="width:180px;">From</th>
-                <th>Subject</th>
-                <th style="width:80px; text-align:center;">PO</th>
-                <th style="width:130px;">Received</th>
-                <th style="width:220px; text-align:center;">Attachments</th>
-                <th style="width:46px; text-align:center;">Status</th>
-                <th style="width:90px; text-align:center;">Action</th>
+                <th class="apay-th-expand"></th>
+                <th class="apay-th-from">From</th>
+                <th class="apay-th-po">PO</th>
+                <th class="apay-th-date">Received</th>
+                <th class="apay-th-att">Attachments</th>
+                <th class="apay-th-status">Status</th>
+                <th class="apay-th-action">Action</th>
             </tr>
         </thead>
         <tbody>
             {% for email in emails %}
-            <tr class="apay-row {% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% endif %}" id="email-row-{{ email.id }}" data-matched="{% if email.purchase_invoice %}1{% else %}0{% endif %}">
-                <td style="text-align:center;">
+            <tr class="apay-row {% if email.is_priority and not email.is_processed %}priority {% endif %}{% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% endif %}" id="email-row-{{ email.id }}" data-matched="{% if email.purchase_invoice %}1{% else %}0{% endif %}">
+                <td class="apay-td-center">
                     <input type="checkbox" class="apay-row-check" value="{{ email.id }}" onchange="updateBulkBar()">
                 </td>
                 <td class="apay-expand-cell">
@@ -159,18 +155,18 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                         <i class="bi bi-chevron-right" id="expand-icon-{{ email.id }}"></i>
                     </button>
                 </td>
-                <td class="apay-from-cell">{{ email.sender_email|default:"(unknown)" }}</td>
-                <td>
-                    <div class="apay-subject" title="{{ email.body_preview }}">{{ email.subject|default:"(no subject)" }}</div>
+                <td class="apay-from-cell">
+                    <div class="apay-from-email" title="{{ email.sender_email }}">{% if email.is_priority and not email.is_processed %}<i class="bi bi-lightning-fill apay-priority-badge" title="Priority — process immediately"></i>{% endif %}{{ email.sender_email|default:"(unknown)" }}</div>
+                    <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}</div>
                 </td>
-                <td style="text-align:center;">
+                <td class="apay-td-center">
                     {% if email.po_match %}
                     <a href="{% url 'purchase_order_detail' email.po_match.workguru_id %}"
                        class="apay-po-badge {% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% else %}apay-po-badge--approved{% endif %}"
                        title="{{ email.po_match.supplier_name }} – {{ email.po_match.status }}"
                        target="_blank">{{ email.po_match.display_number|default:email.po_match.workguru_id }}</a>
                     {% else %}
-                    <span style="color:var(--text-muted)">&ndash;</span>
+                    <span class="apay-no-match">&ndash;</span>
                     {% endif %}
                 </td>
                 <td class="apay-date">
@@ -178,20 +174,19 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                     {{ email.received_at|date:"d M Y" }}<span class="apay-time"> {{ email.received_at|date:"H:i" }}</span>
                     {% else %}&ndash;{% endif %}
                 </td>
-                <td style="text-align:center;">
+                <td class="apay-td-center">
                     {% if email.attachment_list %}
                     {% if email.attachment_list|length > 2 %}
-                    <div style="position:relative;display:inline-block;">
+                    <div class="apay-att-overflow-wrap">
                         <button class="apay-att-overflow-btn" onclick="toggleAttDropdown(event,this)" title="{{ email.attachment_list|length }} attachments">
                             <i class="bi bi-paperclip"></i> {{ email.attachment_list|length }}
                         </button>
-                        <div class="apay-att-overflow-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:600;min-width:240px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.2);padding:4px 0;">
+                        <div class="apay-att-overflow-menu">
                             {% for att in email.attachment_list %}
                             <a href="/accounts-payable/{{ email.id }}/attachment/{{ att.id }}/" target="_blank"
-                               style="display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:0.8rem;color:var(--text-primary);text-decoration:none;"
-                               onmouseover="this.style.background='var(--bg-primary)'" onmouseout="this.style.background=''">
-                                <i class="bi {% if 'pdf' in att.content_type %}bi-file-earmark-pdf{% else %}bi-file-earmark{% endif %}" style="flex-shrink:0;{% if 'pdf' in att.content_type %}color:#dc3545;{% endif %}"></i>
-                                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ att.name }}</span>
+                               class="apay-att-overflow-link {% if 'pdf' in att.content_type %}pdf{% endif %}">
+                                <i class="bi {% if 'pdf' in att.content_type %}bi-file-earmark-pdf{% else %}bi-file-earmark{% endif %}"></i>
+                                <span class="apay-att-overflow-name">{{ att.name }}</span>
                             </a>
                             {% endfor %}
                         </div>
@@ -213,7 +208,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                     <span class="apay-att-none"><i class="bi bi-dash"></i></span>
                     {% endif %}
                 </td>
-                <td style="text-align:center;">
+                <td class="apay-td-center">
                     {% if email.is_processed %}
                     <span class="apay-status processed" title="{% if email.processed_by %}Processed by {{ email.processed_by.get_full_name|default:email.processed_by.username }}{% else %}Processed{% endif %}"><i class="bi bi-check-circle-fill"></i></span>
                     {% elif email.is_ignored %}
@@ -259,7 +254,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                                 data-sender-name="{{ email.sender_name }}"
                                 data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
                                 data-attachments="{{ email.attachment_names }}"
-                                {% if email.po_match %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}"{% endif %}
+                                {% if email.po_match %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}" data-po-type="{{ email.po_match.po_type|default:'supplier' }}"{% endif %}
                                 title="Create purchase invoice"
                                 onclick="openCreateModal(this)">
                             <i class="bi bi-plus-circle-fill"></i>
@@ -283,8 +278,8 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                     </div>
                 </td>
             </tr>
-            <tr class="apay-detail-row" id="detail-row-{{ email.id }}" style="display:none;">
-                <td colspan="9" class="apay-detail-cell">
+            <tr class="apay-detail-row" id="detail-row-{{ email.id }}" style="display:none">
+                <td colspan="8" class="apay-detail-cell">
                     <div class="apay-detail-panel">
                         <div class="apay-detail-grid">
                             <div class="apay-detail-item">
@@ -350,55 +345,79 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
     <span id="filter-toast-msg"></span>
 </div>
 
-<!-- Email Filter Modal -->
-<div id="email-filter-modal" class="modal-overlay" style="display:none;">
-    <div class="modal-dialog" style="max-width:600px;">
+<!-- Inbox Rules Modal (combined: Priority / Routing / Exemptions) -->
+<div id="inbox-rules-modal" class="modal-overlay" onclick="closeInboxRulesModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <h3><i class="bi bi-diagram-3"></i> Email Routing Filters</h3>
-            <button class="modal-close" onclick="closeEmailFilterModal()"><i class="bi bi-x-lg"></i></button>
+            <h3><i class="bi bi-gear"></i> Inbox Rules</h3>
+            <button class="modal-close" onclick="closeInboxRulesModal()"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="modal-body">
-            <p style="font-size:0.85rem;color:var(--text-secondary);margin:0 0 var(--sp-3);">
-                Route incoming emails to the <strong>RJL</strong> or <strong>Group</strong> tab based on sender address.
-                Use <code>@domain.com</code> to match an entire domain, or a full email address for an exact match.
-                Rules are applied automatically during sync and to existing untagged emails when added.
-            </p>
-            <div class="apay-exempt-add">
-                <input type="text" id="filter-pattern-input" placeholder="e.g. @rjl.com or supplier@example.com" class="apay-exempt-input">
-                <select id="filter-tab-select" class="apay-exempt-input" style="max-width:110px;">
-                    <option value="rjl">RJL</option>
-                    <option value="group">Group</option>
-                </select>
-                <button class="apay-btn" onclick="addEmailFilter()" style="flex-shrink:0;">
-                    <i class="bi bi-plus-lg"></i> Add
+            <div class="apay-rules-tabs">
+                <button class="apay-rules-tab active" id="rules-tab-priority" onclick="switchRulesTab('priority')">
+                    <i class="bi bi-lightning-fill"></i> Priority
+                </button>
+                <button class="apay-rules-tab" id="rules-tab-routing" onclick="switchRulesTab('routing')">
+                    <i class="bi bi-diagram-3"></i> Routing
+                </button>
+                <button class="apay-rules-tab" id="rules-tab-exemptions" onclick="switchRulesTab('exemptions')">
+                    <i class="bi bi-funnel"></i> Exemptions
                 </button>
             </div>
-            <div id="email-filter-list" class="apay-exempt-list">
-                <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Exemption List Modal -->
-<div id="exemption-modal" class="modal-overlay" style="display:none;">
-    <div class="modal-dialog" style="max-width:560px;">
-        <div class="modal-header">
-            <h3><i class="bi bi-funnel"></i> Sender Exemption List</h3>
-            <button class="modal-close" onclick="closeExemptionModal()"><i class="bi bi-x-lg"></i></button>
-        </div>
-        <div class="modal-body">
-            <p style="font-size:0.85rem;color:var(--text-secondary);margin:0 0 var(--sp-3);">
-                Emails from exempted addresses will be silently skipped during sync.
-            </p>
-            <div class="apay-exempt-add">
-                <input type="email" id="exempt-email-input" placeholder="email@example.com" class="apay-exempt-input">
-                <button class="apay-btn" onclick="addExemption()" style="flex-shrink:0;">
-                    <i class="bi bi-plus-lg"></i> Add
-                </button>
+            <!-- Priority panel -->
+            <div id="rules-panel-priority" class="apay-rules-panel">
+                <p>
+                    Emails from matching senders are pinned to the <strong>top of the inbox</strong> and highlighted in red — they must be processed immediately.
+                    Use <code>@domain.com</code> for an entire domain, or a full address for an exact match.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="text" id="priority-pattern-input" placeholder="e.g. @hmrc.gov.uk or urgent@supplier.com" class="apay-exempt-input">
+                    <button class="apay-btn" onclick="addPriorityFilter()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="priority-filter-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
             </div>
-            <div id="exemption-list" class="apay-exempt-list">
-                <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+
+            <!-- Routing panel -->
+            <div id="rules-panel-routing" class="apay-rules-panel">
+                <p>
+                    Route incoming emails to the <strong>RJL</strong> or <strong>Group</strong> tab based on sender address.
+                    Use <code>@domain.com</code> to match an entire domain, or a full email address for an exact match.
+                    Rules are applied automatically during sync and to existing untagged emails when added.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="text" id="filter-pattern-input" placeholder="e.g. @rjl.com or supplier@example.com" class="apay-exempt-input">
+                    <select id="filter-tab-select" class="apay-exempt-input">
+                        <option value="rjl">RJL</option>
+                        <option value="group">Group</option>
+                    </select>
+                    <button class="apay-btn" onclick="addEmailFilter()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="email-filter-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
+            </div>
+
+            <!-- Exemptions panel -->
+            <div id="rules-panel-exemptions" class="apay-rules-panel">
+                <p>
+                    Emails from exempted addresses will be silently skipped during sync.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="email" id="exempt-email-input" placeholder="email@example.com" class="apay-exempt-input">
+                    <button class="apay-btn" onclick="addExemption()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="exemption-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -407,48 +426,43 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 {% include 'stock_take/partials/invoice_modal.html' with attachment_mode='select' %}
 
 <!-- Link Existing Invoice Modal -->
-<div class="modal-overlay" id="link-invoice-modal" style="display:none;" onclick="closeLinkModal(event)">
-    <div class="modal-dialog" style="max-width:540px;" onclick="event.stopPropagation()">
+<div class="modal-overlay" id="link-invoice-modal" onclick="closeLinkModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-link-45deg"></i> Link Existing Invoice</h3>
             <button class="modal-close" onclick="closeLinkModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-color);margin-bottom:14px;">
-                <div style="flex:1;min-width:0;">
-                    <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">From</div>
-                    <div id="link-modal-sender" style="font-size:0.82rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+            <div class="apay-link-from-row">
+                <div class="apay-link-from-col">
+                    <div class="apay-link-field-label">From</div>
+                    <div id="link-modal-sender"></div>
                 </div>
-                <div style="flex:2;min-width:0;">
-                    <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Subject</div>
-                    <div id="link-modal-subject" style="font-size:0.82rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                <div class="apay-link-from-col wide">
+                    <div class="apay-link-field-label">Subject</div>
+                    <div id="link-modal-subject"></div>
                 </div>
             </div>
-            <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 10px;">Search for an existing purchase invoice to link to this email and mark it as processed.</p>
-            <div style="position:relative;margin-bottom:10px;">
+            <p class="apay-link-hint">Search for an existing purchase invoice to link to this email and mark it as processed.</p>
+            <div class="apay-link-search-wrap">
                 <input type="text" id="link-inv-search"
-                       style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:0.875rem;"
                        placeholder="Invoice number or supplier name…"
                        autocomplete="off"
                        oninput="searchForLinkInvoice(this.value)">
-                <div id="link-inv-results"
-                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
-                            background:var(--bg-primary);border:1px solid var(--border-color);
-                            border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);
-                            max-height:260px;overflow-y:auto;margin-top:2px;"></div>
+                <div id="link-inv-results"></div>
             </div>
-            <div id="link-inv-selected" style="display:none;padding:10px 12px;background:var(--success-subtle, rgba(40,167,69,.08));border:1px solid var(--success-color, #28a745);border-radius:6px;font-size:0.85rem;">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div id="link-inv-selected">
+                <div class="apay-link-sel-header">
                     <div>
-                        <span style="font-weight:600;" id="link-sel-number"></span>
-                        <span style="color:var(--text-secondary);margin-left:8px;" id="link-sel-supplier"></span>
+                        <span id="link-sel-number"></span>
+                        <span id="link-sel-supplier"></span>
                     </div>
-                    <div style="text-align:right;">
-                        <span style="font-size:0.75rem;color:var(--text-secondary);" id="link-sel-date"></span>
-                        <span style="margin-left:8px;font-weight:600;" id="link-sel-total"></span>
+                    <div class="apay-link-sel-meta">
+                        <span id="link-sel-date"></span>
+                        <span id="link-sel-total"></span>
                     </div>
                 </div>
-                <button type="button" style="background:none;border:none;color:var(--text-secondary);font-size:0.75rem;cursor:pointer;padding:4px 0 0;" onclick="clearLinkSelection()"><i class="bi bi-x"></i> Clear selection</button>
+                <button type="button" class="apay-link-clear-btn" onclick="clearLinkSelection()"><i class="bi bi-x"></i> Clear selection</button>
             </div>
         </div>
         <div class="modal-footer">
@@ -604,22 +618,20 @@ function searchForLinkInvoice(q) {
         .then(r => r.json())
         .then(data => {
             if (!data.results || !data.results.length) {
-                results.innerHTML = '<div style="padding:10px 12px;font-size:0.82rem;color:var(--text-muted);">No invoices found</div>';
+                results.innerHTML = '<div class="link-inv-result-empty">No invoices found</div>';
                 results.style.display = 'block';
                 return;
             }
             results.innerHTML = data.results.map(inv => `
                 <div class="link-inv-result-row"
-                     onclick="selectLinkInvoice(${inv.id}, '${escLinkHtml(inv.invoice_number)}', '${escLinkHtml(inv.supplier_name)}', '${inv.date}', '£${parseFloat(inv.total).toFixed(2)}')"
-                     style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;"
-                     onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+                     onclick="selectLinkInvoice(${inv.id}, '${escLinkHtml(inv.invoice_number)}', '${escLinkHtml(inv.supplier_name)}', '${inv.date}', '£${parseFloat(inv.total).toFixed(2)}')">
                     <div>
-                        <strong style="font-size:0.85rem;">${escLinkHtml(inv.invoice_number)}</strong>
-                        <span style="font-size:0.78rem;color:var(--text-secondary);margin-left:8px;">${escLinkHtml(inv.supplier_name)}</span>
+                        <strong>${escLinkHtml(inv.invoice_number)}</strong>
+                        <span class="link-inv-result-supplier">${escLinkHtml(inv.supplier_name)}</span>
                     </div>
-                    <div style="text-align:right;flex-shrink:0;">
-                        <span style="font-size:0.75rem;color:var(--text-secondary);">${inv.date}</span>
-                        <span style="font-size:0.85rem;font-weight:600;margin-left:8px;">£${parseFloat(inv.total).toFixed(2)}</span>
+                    <div class="link-inv-result-meta">
+                        <span class="link-inv-result-date">${inv.date}</span>
+                        <span class="link-inv-result-total">£${parseFloat(inv.total).toFixed(2)}</span>
                     </div>
                 </div>`).join('');
             results.style.display = 'block';
@@ -703,9 +715,10 @@ function openCreateModal(btn) {
     document.getElementById('new-pinv-notes').value = '';
     setModalCurrency('GBP');
     // Pre-fill PO if the email has a matched PO
-    const prePoId = btn.dataset.poId || '';
+    const prePoId    = btn.dataset.poId    || '';
     const prePoLabel = btn.dataset.poLabel || '';
-    if (prePoId) selectModalPO(prePoId, prePoLabel || prePoId);;
+    const prePoType  = btn.dataset.poType  || '';
+    if (prePoId) selectModalPO(prePoId, prePoLabel || prePoId, prePoType);;
     fetch('/api/next-invoice-number/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
         .then(r => r.json())
         .then(d => {
@@ -728,7 +741,7 @@ function openCreateModal(btn) {
             const size = formatBytes(a.size);
             const attId = a.id;
             return `<div class="apay-att-option-row">
-                <label class="apay-att-option" style="flex:1;min-width:0;">
+                <label class="apay-att-option">
                     <input type="radio" name="modal_att_id" value="${attId}" ${i === 0 ? 'checked' : ''}
                            onchange="onAttachmentChange(this, '${a.name.replace(/'/g, "\\'")}', ${isPdf})">
                     <i class="bi ${icon}"></i>
@@ -754,7 +767,7 @@ function openCreateModal(btn) {
             autoPopulateFromFilename(first.name);
         }
     } else {
-        list.innerHTML = '<p style="font-size:0.82rem;color:var(--text-muted);margin:4px 0;">No attachments on this email.</p>';
+        list.innerHTML = '<p class="apay-att-no-message">No attachments on this email.</p>';
     }
 
     addModalLine();
@@ -1027,14 +1040,119 @@ function bulkAction(action) {
     .catch(() => alert('Network error'));
 }
 
+// ── Inbox Rules combined modal ────────────────────────────────────────────────
+function openInboxRulesModal(tab) {
+    document.getElementById('inbox-rules-modal').style.display = 'flex';
+    switchRulesTab(tab || 'priority');
+}
+function closeInboxRulesModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('inbox-rules-modal').style.display = 'none';
+}
+function switchRulesTab(tab) {
+    ['priority', 'routing', 'exemptions'].forEach(t => {
+        document.getElementById('rules-tab-' + t).classList.toggle('active', t === tab);
+        document.getElementById('rules-panel-' + t).style.display = t === tab ? 'block' : 'none';
+    });
+    if (tab === 'priority') loadPriorityFilters();
+    if (tab === 'routing') loadEmailFilters();
+    if (tab === 'exemptions') loadExemptions();
+}
+
+// Backwards-compat shims (in case anything still calls the old names)
+function openExemptionModal() { openInboxRulesModal('exemptions'); }
+function closeExemptionModal() { closeInboxRulesModal(); }
+function openEmailFilterModal() { openInboxRulesModal('routing'); }
+function closeEmailFilterModal() { closeInboxRulesModal(); }
+
+// ── Priority filters ──────────────────────────────────────────────────────────
+function loadPriorityFilters() {
+    const list = document.getElementById('priority-filter-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_email_filters" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        const filters = (data.filters || []).filter(f => f.tab === 'priority');
+        if (!filters.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No priority rules defined yet.</div>';
+            return;
+        }
+        list.innerHTML = filters.map(f => `
+            <div class="apay-exempt-row" id="priority-row-${f.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${f.email_pattern}</span>
+                    ${f.note ? `<span class="apay-exempt-note">${f.note}</span>` : ''}
+                </div>
+                <button class="apay-icon-btn" title="Apply now" onclick="runPriorityFilter(${f.id})">
+                    <i class="bi bi-play-fill"></i>
+                </button>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removePriorityFilter(${f.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addPriorityFilter() {
+    const patternInput = document.getElementById('priority-pattern-input');
+    const pattern = patternInput.value.trim();
+    if (!pattern) { patternInput.focus(); return; }
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email_pattern: pattern, tab: 'priority' }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            patternInput.value = '';
+            loadPriorityFilters();
+            if (data.applied_to > 0) {
+                showFilterToast(`Priority rule saved — flagged <strong>${data.applied_to}</strong> email(s).`);
+            }
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function runPriorityFilter(id) {
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showFilterToast(`Priority rule applied to <strong>${data.applied_to}</strong> email(s).`);
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removePriorityFilter(id) {
+    if (!confirm('Remove this priority rule?')) return;
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('priority-row-' + id);
+            if (row) row.remove();
+            if (!document.querySelector('#priority-filter-list .apay-exempt-row')) {
+                document.getElementById('priority-filter-list').innerHTML = '<div class="apay-exempt-empty">No priority rules defined yet.</div>';
+            }
+        }
+    });
+}
+
 // ── Exemption modal ───────────────────────────────────────────────────────────
-function openExemptionModal() {
-    document.getElementById('exemption-modal').style.display = 'flex';
-    loadExemptions();
-}
-function closeExemptionModal() {
-    document.getElementById('exemption-modal').style.display = 'none';
-}
 
 function loadExemptions() {
     const list = document.getElementById('exemption-list');
@@ -1099,14 +1217,7 @@ function removeExemption(email, rowId) {
     });
 }
 
-// ── Email filter modal ────────────────────────────────────────────────────────
-function openEmailFilterModal() {
-    document.getElementById('email-filter-modal').style.display = 'flex';
-    loadEmailFilters();
-}
-function closeEmailFilterModal() {
-    document.getElementById('email-filter-modal').style.display = 'none';
-}
+// ── Email filter modal (routing tab) ─────────────────────────────────────────
 
 function loadEmailFilters() {
     const list = document.getElementById('email-filter-list');
@@ -1114,11 +1225,12 @@ function loadEmailFilters() {
     fetch('{% url "manage_email_filters" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
     .then(r => r.json())
     .then(data => {
-        if (!data.filters.length) {
+        const filters = (data.filters || []).filter(f => f.tab !== 'priority');
+        if (!filters.length) {
             list.innerHTML = '<div class="apay-exempt-empty">No filters defined yet.</div>';
             return;
         }
-        list.innerHTML = data.filters.map(f => `
+        list.innerHTML = filters.map(f => `
             <div class="apay-exempt-row" id="filter-row-${f.id}">
                 <div class="apay-exempt-info">
                     <span class="apay-exempt-addr">${f.email_pattern}</span>

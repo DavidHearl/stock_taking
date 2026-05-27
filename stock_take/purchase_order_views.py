@@ -387,7 +387,33 @@ def purchase_orders_list(request):
         ).values('id', 'last_name', 'sale_number'):
             name_to_order[o['last_name']] = o
 
-    # Strategy 3: product allocations
+    # Strategy 3: project_number -> Order.sale_number (most reliable for customer POs)
+    project_num_to_order = {}
+    project_numbers = list(
+        queryset.exclude(project_number__isnull=True)
+        .exclude(project_number='')
+        .values_list('project_number', flat=True)
+        .distinct()
+    )
+    if project_numbers:
+        for o in Order.objects.filter(
+            sale_number__in=project_numbers
+        ).values('id', 'sale_number'):
+            project_num_to_order[o['sale_number']] = o
+
+    # Strategy 4: PurchaseOrderProject rows already seeded with a resolved order FK
+    proj_order_map = {}  # po pk -> {'id': order_id, 'sale_number': ...}
+    for p in PurchaseOrderProject.objects.filter(
+        purchase_order__in=queryset,
+        project_type='customer',
+        order__isnull=False,
+    ).select_related('order').values('purchase_order_id', 'order__id', 'order__sale_number'):
+        proj_order_map[p['purchase_order_id']] = {
+            'id': p['order__id'],
+            'sale_number': p['order__sale_number'],
+        }
+
+    # Strategy 5: product allocations
     alloc_map = {}
     alloc_qs = ProductCustomerAllocation.objects.filter(
         product__purchase_order__in=queryset
@@ -422,8 +448,12 @@ def purchase_orders_list(request):
         if not po.project_name and po.pk in stock_po_ids:
             po.project_name = 'Stock'
         info = wg_id_to_order.get(po.project_id)
+        if not info and po.project_number:
+            info = project_num_to_order.get(po.project_number)
         if not info and po.project_name:
             info = name_to_order.get(po.project_name)
+        if not info:
+            info = proj_order_map.get(po.pk)
         if not info:
             info = alloc_map.get(po.pk)
         po.linked_order_info = info
@@ -1129,6 +1159,84 @@ def purchase_order_save(request, po_id):
         po.total = line_total_sum
         po.save(update_fields=['total'])
     
+    return JsonResponse({'success': True, 'total': str(po.total)})
+
+
+@login_required
+def purchase_order_recalculate_total(request, po_id):
+    """Recalculate a PO's total.
+
+    For OS Doors POs (detected by order.os_doors_po or door.po_number),
+    rebuilds product lines from the linked order's door items then sums.
+    For all other POs, sums existing product line totals.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from decimal import Decimal
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    # ── OS Doors detection ────────────────────────────────────────────────────
+    linked_order = None
+    doors_qs = None
+
+    if po.display_number:
+        # Primary OS doors PO: order.os_doors_po == this PO's display_number
+        linked_order = Order.objects.filter(os_doors_po=po.display_number).first()
+        if linked_order:
+            doors_qs = linked_order.os_doors.filter(
+                Q(po_number='') | Q(po_number__isnull=True) | Q(po_number=po.display_number)
+            )
+        else:
+            # Additional OS doors PO: individual doors are tagged with this PO number
+            first_door = OSDoor.objects.filter(po_number=po.display_number).select_related('customer').first()
+            if first_door:
+                linked_order = first_door.customer
+                doors_qs = linked_order.os_doors.filter(po_number=po.display_number)
+
+    if doors_qs is not None and doors_qs.exists():
+        po.products.all().delete()
+        total = Decimal('0')
+        for idx, door in enumerate(doors_qs.order_by('door_style', 'colour')):
+            unit_price = door.cost_price if door.cost_price else Decimal('0')
+            qty = Decimal(str(door.quantity))
+            line_total = unit_price * qty
+            total += line_total
+            PurchaseOrderProduct.objects.create(
+                purchase_order=po,
+                sku=door.door_style,
+                name=f'{door.door_style} - {door.style_colour} ({float(door.height):.0f}x{float(door.width):.0f}mm) {door.colour}',
+                description=door.item_description or '',
+                order_price=unit_price,
+                order_quantity=qty,
+                quantity=qty,
+                line_total=line_total,
+                sort_order=idx,
+            )
+        po.total = total
+        po.save(update_fields=['total'])
+        return JsonResponse({'success': True, 'total': str(po.total)})
+
+    # ── Standard: sum existing product lines ──────────────────────────────────
+    # First fix any stale line_total values (order_price * order_quantity != line_total)
+    products_to_update = []
+    for product in po.products.all():
+        computed = product.order_price * product.order_quantity
+        if computed != product.line_total:
+            product.line_total = computed
+            products_to_update.append(product)
+    if products_to_update:
+        from django.db import transaction
+        with transaction.atomic():
+            for p in products_to_update:
+                p.save(update_fields=['line_total'])
+
+    line_total_sum = po.products.aggregate(total=Sum('line_total'))['total']
+    if line_total_sum is not None:
+        po.total = line_total_sum
+        po.save(update_fields=['total'])
+
     return JsonResponse({'success': True, 'total': str(po.total)})
 
 
@@ -3542,6 +3650,56 @@ def add_additional_os_doors_po(request, order_id):
 
 
 @login_required
+def change_additional_os_doors_po(request, order_id):
+    """Replace an additional OS Doors PO with a different existing PO."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+    order = get_object_or_404(Order, id=order_id)
+    try:
+        data = json.loads(request.body)
+        old_workguru_id = data.get('old_workguru_id')
+        new_display_number = data.get('new_display_number')
+        if not old_workguru_id or not new_display_number:
+            return JsonResponse({'success': False, 'error': 'old_workguru_id and new_display_number required'})
+
+        old_po = PurchaseOrder.objects.get(workguru_id=old_workguru_id)
+        new_po = PurchaseOrder.objects.filter(display_number=new_display_number).first() or \
+                 PurchaseOrder.objects.get(number=new_display_number)
+        order.additional_os_doors_pos.remove(old_po)
+        order.additional_os_doors_pos.add(new_po)
+        # Move OS Door rows from old PO to new PO so they remain visible
+        OSDoor.objects.filter(customer=order, po_number=old_po.display_number).update(po_number=new_po.display_number)
+        return JsonResponse({'success': True, 'po_number': new_po.display_number})
+    except PurchaseOrder.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Purchase Order not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def remove_additional_os_doors_po(request, order_id):
+    """Remove a PurchaseOrder from the order's additional_os_doors_pos M2M."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+    order = get_object_or_404(Order, id=order_id)
+    try:
+        data = json.loads(request.body)
+        workguru_id = data.get('workguru_id')
+        if not workguru_id:
+            return JsonResponse({'success': False, 'error': 'workguru_id required'})
+
+        po = PurchaseOrder.objects.get(workguru_id=workguru_id)
+        order.additional_os_doors_pos.remove(po)
+        return JsonResponse({'success': True})
+    except PurchaseOrder.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Purchase Order not found'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
 def create_raumplus_po(request):
     """Create a Purchase Order from the Raumplus shortage modal (JSON POST)."""
     if request.method != 'POST':
@@ -4054,7 +4212,11 @@ def order_search(request):
 @login_required
 @login_required
 def po_lines_api(request):
-    """Return line items (products) for a PO identified by workguru_id query param."""
+    """Return line items for a PO identified by workguru_id query param.
+
+    For fitter POs, returns timesheet entries and expenses as line items.
+    For supplier POs, returns product lines as before.
+    """
     workguru_id = request.GET.get('workguru_id', '').strip()
     if not workguru_id:
         return JsonResponse({'error': 'workguru_id required'}, status=400)
@@ -4062,6 +4224,68 @@ def po_lines_api(request):
         po = PurchaseOrder.objects.get(workguru_id=workguru_id)
     except PurchaseOrder.DoesNotExist:
         return JsonResponse({'error': 'PO not found'}, status=404)
+
+    if po.po_type == 'fitter':
+        results = []
+
+        # Timesheets — only direct timesheets (not PI-sourced, those belong to another invoice)
+        timesheets = (
+            po.timesheets
+            .filter(purchase_invoice_line__isnull=True)
+            .select_related('order', 'fitter')
+            .order_by('order__sale_number', 'date')
+        )
+        for ts in timesheets:
+            order_label = ''
+            if ts.order:
+                customer = ts.order.customer_name
+                order_label = ts.order.sale_number
+                if customer:
+                    order_label += f' \u2014 {customer}'
+            fitter_name = ts.fitter.name if ts.fitter else ''
+            parts = []
+            if fitter_name:
+                parts.append(fitter_name)
+            if order_label:
+                parts.append(order_label)
+            if ts.description:
+                parts.append(ts.description)
+            results.append({
+                'id': None,
+                'description': ' | '.join(parts) if parts else 'Timesheet',
+                'quantity': float(ts.hours or 0),
+                'order_price': float(ts.hourly_rate or 0),
+            })
+
+        # Expenses
+        expenses = (
+            po.expenses
+            .select_related('order')
+            .order_by('date')
+        )
+        for exp in expenses:
+            order_label = ''
+            if exp.order:
+                customer = exp.order.customer_name
+                order_label = exp.order.sale_number
+                if customer:
+                    order_label += f' \u2014 {customer}'
+            exp_type = exp.get_expense_type_display()
+            parts = [exp_type]
+            if order_label:
+                parts.append(order_label)
+            if exp.description:
+                parts.append(exp.description)
+            results.append({
+                'id': None,
+                'description': ' | '.join(parts),
+                'quantity': 1,
+                'order_price': float(exp.amount or 0),
+            })
+
+        return JsonResponse({'results': results, 'freight_cost': 0.0})
+
+    # Supplier PO: return product lines
     results = []
     for p in po.products.order_by('sort_order', 'id'):
         label = p.name or p.description or p.sku or ''
@@ -4101,6 +4325,7 @@ def purchase_order_search(request):
             'supplier_name': po.supplier_name or '',
             'project_number': po.project_number or '',
             'status': po.status or '',
+            'po_type': po.po_type or 'supplier',
         })
 
     return JsonResponse({'results': results})

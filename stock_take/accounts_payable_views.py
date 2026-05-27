@@ -31,7 +31,19 @@ from .services import graph_api
 logger = logging.getLogger(__name__)
 
 
-_MATCHABLE_STATUSES = ('Approved', 'Received', 'Partially Received')
+_MATCHABLE_STATUSES = ('Draft', 'Approved', 'Received', 'Partially Received')
+
+# Free/personal email domains — the local-part (username) of these addresses
+# is a personal identifier, not a company name, so word-split supplier matching
+# against them produces false positives.
+_PERSONAL_DOMAINS = frozenset({
+    'gmail.com', 'googlemail.com',
+    'hotmail.com', 'hotmail.co.uk', 'hotmail.fr', 'hotmail.de', 'hotmail.es',
+    'outlook.com', 'live.com', 'live.co.uk', 'live.fr', 'msn.com',
+    'yahoo.com', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.ie',
+    'icloud.com', 'me.com', 'mac.com',
+    'aol.com', 'protonmail.com', 'proton.me',
+})
 
 
 def _find_po_matches(emails):
@@ -41,7 +53,10 @@ def _find_po_matches(emails):
     Matching uses two signals:
     1. A PO number (3-6 digits, optionally prefixed PO/PO#) found in the
        email subject.
-    2. The PO supplier name containing a word from the sender name / email.
+    2. The PO supplier name found in the sender display name or email domain.
+       The email local-part (username) is intentionally excluded — matching
+       against it causes false positives (e.g. "stuartstevenson202@hotmail.co.uk"
+       incorrectly matching a supplier called "Stuart Stevenson").
     """
     candidates = [e for e in emails if not e.is_processed and not e.is_ignored]
     if not candidates:
@@ -50,7 +65,7 @@ def _find_po_matches(emails):
     pos = list(
         PurchaseOrder.objects
         .filter(status__in=_MATCHABLE_STATUSES)
-        .values('id', 'workguru_id', 'display_number', 'number', 'supplier_name', 'status', 'total')
+        .values('id', 'workguru_id', 'display_number', 'number', 'supplier_name', 'status', 'total', 'po_type')
     )
     if not pos:
         return {}
@@ -84,21 +99,36 @@ def _find_po_matches(emails):
                 po = po_by_number[key]
                 found[po['id']] = po
 
-        # Signal 2: supplier name in sender text — require the full name or
-        # at least 2 significant words to match (single-word matches cause too
-        # many false positives with common words).
-        sender_text = f"{email.sender_name} {email.sender_email}".lower()
+        # Signal 2: supplier name in sender display name / email domain.
+        # We deliberately use only the domain portion of the email address
+        # (not the local-part/username) to avoid false positives from personal
+        # email addresses whose username happens to contain supplier name words.
+        sender_domain = ''
+        if '@' in (email.sender_email or ''):
+            sender_domain = email.sender_email.split('@', 1)[1].lower()
+        is_personal = sender_domain in _PERSONAL_DOMAINS
+
+        # For personal domains, match only against the display name.
+        # For business domains, also include the domain itself (e.g.
+        # "firstglass.ie" will match supplier "First Glass").
+        if is_personal:
+            sender_text = (email.sender_name or '').lower()
+        else:
+            sender_text = f"{email.sender_name} {sender_domain}".lower()
+
         for po in pos:
             if po['id'] in found:
                 continue
             sname = (po['supplier_name'] or '').strip().lower()
             if not sname:
                 continue
-            # Try full name first
+            # Full name must be present in sender text (works for both signal types)
             if sname in sender_text:
                 found[po['id']] = po
-            else:
-                # Require at least 2 significant words (≥4 chars) to match
+            elif not is_personal:
+                # Word-split matching only for business domains to avoid matching
+                # personal names against supplier names on free email services.
+                # Require at least 2 significant words (≥4 chars) to match.
                 words = [w for w in sname.split() if len(w) >= 4]
                 if len(words) >= 2 and sum(1 for w in words if w in sender_text) >= 2:
                     found[po['id']] = po
@@ -123,8 +153,8 @@ def accounts_payable_inbox(request):
     if entity_tab in ('rjl', 'group', 'statements'):
         emails = emails.filter(tab=entity_tab)
     else:
-        # Default 'All' tab: unrouted emails only (excludes statements)
-        emails = emails.filter(tab='')
+        # Default 'All' tab: all emails excluding statements
+        emails = emails.exclude(tab='statements')
 
     # Status filter — default to 'unprocessed'
     status_filter = request.GET.get('status', 'unprocessed')
@@ -161,7 +191,7 @@ def accounts_payable_inbox(request):
     unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False).count()
     processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True).count()
     ignored = MailboxEmail.objects.filter(is_ignored=True).count()
-    total_count = MailboxEmail.objects.filter(tab='').count()
+    total_count = MailboxEmail.objects.exclude(tab='statements').count()
     rjl_count = MailboxEmail.objects.filter(tab='rjl', is_ignored=False).count()
     group_count = MailboxEmail.objects.filter(tab='group', is_ignored=False).count()
     statements_count = MailboxEmail.objects.filter(tab='statements', is_ignored=False).count()
@@ -170,14 +200,15 @@ def accounts_payable_inbox(request):
         last=db_models.Max('synced_at')
     )['last']
 
+    emails = emails.order_by('-is_priority', '-received_at')
     paginator = Paginator(emails, 50)
     page_number = request.GET.get('page', 1)
     page_obj = paginator.get_page(page_number)
 
     email_po_matches = _find_po_matches(page_obj.object_list)
 
-    # Annotate each email with the single best PO match (Received > Approved)
-    _STATUS_PRIORITY = {'Received': 0, 'Partially Received': 1, 'Approved': 2}
+    # Annotate each email with the single best PO match (Draft/Approved > Partially Received > Received)
+    _STATUS_PRIORITY = {'Draft': 0, 'Approved': 1, 'Partially Received': 2, 'Received': 3}
     for email in page_obj.object_list:
         matched = email_po_matches.get(email.id, [])
         if matched:
@@ -589,8 +620,12 @@ def _apply_email_tab_filter(email_obj):
         else:
             matched = (pattern == sender)
         if matched:
-            email_obj.tab = f.tab
-            email_obj.save(update_fields=['tab'])
+            if f.tab == 'priority':
+                email_obj.is_priority = True
+                email_obj.save(update_fields=['is_priority'])
+            else:
+                email_obj.tab = f.tab
+                email_obj.save(update_fields=['tab'])
             return
 
 
@@ -621,8 +656,8 @@ def manage_email_filters(request):
         note = (data.get('note') or '').strip()
         if not pattern:
             return JsonResponse({'success': False, 'error': 'email_pattern required'}, status=400)
-        if tab not in ('rjl', 'group'):
-            return JsonResponse({'success': False, 'error': 'tab must be rjl or group'}, status=400)
+        if tab not in ('rjl', 'group', 'priority'):
+            return JsonResponse({'success': False, 'error': 'tab must be rjl, group, or priority'}, status=400)
         f, _ = MailboxEmailFilter.objects.update_or_create(
             email_pattern=pattern,
             defaults={'tab': tab, 'note': note},
@@ -636,8 +671,12 @@ def manage_email_filters(request):
             else:
                 matched = (pattern == sender)
             if matched:
-                email_obj.tab = tab
-                email_obj.save(update_fields=['tab'])
+                if tab == 'priority':
+                    email_obj.is_priority = True
+                    email_obj.save(update_fields=['is_priority'])
+                else:
+                    email_obj.tab = tab
+                    email_obj.save(update_fields=['tab'])
                 updated += 1
         return JsonResponse({'success': True, 'id': f.id, 'applied_to': updated})
 
@@ -655,8 +694,12 @@ def manage_email_filters(request):
             else:
                 matched = (f.email_pattern == sender)
             if matched:
-                email_obj.tab = f.tab
-                email_obj.save(update_fields=['tab'])
+                if f.tab == 'priority':
+                    email_obj.is_priority = True
+                    email_obj.save(update_fields=['is_priority'])
+                else:
+                    email_obj.tab = f.tab
+                    email_obj.save(update_fields=['tab'])
                 updated += 1
         return JsonResponse({'success': True, 'applied_to': updated})
 

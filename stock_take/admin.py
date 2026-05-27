@@ -12,6 +12,7 @@ from .models import (
     PurchaseOrderProject, ProductCustomerAllocation, Invoice, InvoiceLineItem, InvoicePayment,
     PurchaseInvoice, PurchaseInvoiceLineItem, GalleryImage, Ticket, ClaimDocument,
     PriceHistory, ActivityLog, RaumplusDraftOrder, MobileDevice, PhoneTemplate,
+    OSDoorOption,
 )
 
 @admin.register(Customer)
@@ -595,6 +596,14 @@ class RaumplusDraftOrderAdmin(admin.ModelAdmin):
     search_fields = ['name']
     readonly_fields = ['created_at', 'updated_at']
     raw_id_fields = ['created_by']
+
+
+@admin.register(OSDoorOption)
+class OSDoorOptionAdmin(admin.ModelAdmin):
+    list_display = ['option_type', 'name', 'updated_at']
+    list_filter = ['option_type']
+    search_fields = ['name']
+    readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(PhoneTemplate)
