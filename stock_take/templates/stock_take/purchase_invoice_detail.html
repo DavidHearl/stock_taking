@@ -296,13 +296,16 @@
                                oninput="markLineDirty({{ line.id }})">
                     </td>
                     <td>
-                        <input type="number" class="pinv-cell-input line-qty"
-                               value="{{ line.quantity|floatformat:2 }}" step="0.01" min="0"
-                               style="text-align:right;"
-                               oninput="markLineDirty({{ line.id }})">
+                        <div class="qty-stepper-input pinv-qty-stepper">
+                            <button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStep(this,-1,{{ line.id }})">&#8722;</button>
+                            <input type="number" class="pinv-cell-input line-qty qty-step-value no-pnx-spinner"
+                                   value="{{ line.quantity|floatformat:2 }}" step="1" min="0"
+                                   oninput="markLineDirty({{ line.id }})">
+                            <button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStep(this,1,{{ line.id }})">+</button>
+                        </div>
                     </td>
                     <td>
-                        <input type="number" class="pinv-cell-input line-rate"
+                        <input type="number" class="pinv-cell-input line-rate no-pnx-spinner"
                                value="{{ line.rate|floatformat:2 }}" step="0.01" min="0"
                                style="text-align:right;"
                                oninput="markLineDirty({{ line.id }})">
@@ -363,8 +366,14 @@
                 <tr id="new-line-row" style="display:none;">
                     <td><input type="text" class="pinv-cell-input" id="new-desc" placeholder="Description"></td>
                     <td><input type="date" class="pinv-cell-input" id="new-date" value=""></td>
-                    <td><input type="number" class="pinv-cell-input" id="new-qty" value="1" step="0.01" min="0" style="text-align:right;"></td>
-                    <td><input type="number" class="pinv-cell-input" id="new-rate" value="" step="0.01" style="text-align:right;" placeholder="Rate"></td>
+                    <td>
+                        <div class="qty-stepper-input pinv-qty-stepper">
+                            <button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStepNew(this,-1)">&#8722;</button>
+                            <input type="number" class="pinv-cell-input qty-step-value no-pnx-spinner" id="new-qty" value="1" step="1" min="0">
+                            <button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStepNew(this,1)">+</button>
+                        </div>
+                    </td>
+                    <td><input type="number" class="pinv-cell-input no-pnx-spinner" id="new-rate" value="" step="0.01" style="text-align:right;" placeholder="Rate"></td>
                     <td class="number-cell">—</td>
                     <td>
                         <div class="order-search-wrap">
@@ -1019,8 +1028,8 @@ function buildLineHTML(line) {
     return `
         <td><input type="text" class="pinv-cell-input line-desc" value="${escHtml(line.description)}" oninput="markLineDirty(${line.id})"></td>
         <td><input type="date" class="pinv-cell-input line-date" value="${line.line_date || ''}" oninput="markLineDirty(${line.id})"></td>
-        <td><input type="number" class="pinv-cell-input line-qty" value="${line.quantity}" step="0.01" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
-        <td><input type="number" class="pinv-cell-input line-rate" value="${line.rate}" step="0.01" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
+        <td><div class="qty-stepper-input pinv-qty-stepper"><button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStep(this,-1,${line.id})">&#8722;</button><input type="number" class="pinv-cell-input line-qty qty-step-value no-pnx-spinner" value="${line.quantity}" step="1" min="0" oninput="markLineDirty(${line.id})"><button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStep(this,1,${line.id})">+</button></div></td>
+        <td><input type="number" class="pinv-cell-input line-rate no-pnx-spinner" value="${line.rate}" step="0.01" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
         <td class="number-cell line-total-cell" id="line-total-${line.id}">${_curSpan()}${parseFloat(line.line_total).toFixed(2)}</td>
         <td>
             <div class="order-search-wrap">
@@ -1056,6 +1065,19 @@ function buildLineHTML(line) {
         </td>
     `;
 }
+
+// ── Invoice line qty steppers ──────────────────────────────────
+function pinvStep(btn, dir, lineId) {
+    const input = dir < 0 ? btn.nextElementSibling : btn.previousElementSibling;
+    const step = parseFloat(input.step) || 1;
+    const min = input.min !== '' ? parseFloat(input.min) : -Infinity;
+    let val = (parseFloat(input.value) || 0) + step * dir;
+    if (val < min) val = min;
+    input.value = val;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (lineId != null) markLineDirty(lineId);
+}
+function pinvStepNew(btn, dir) { pinvStep(btn, dir, null); }
 
 // ── Mark line dirty (show save button) ────────────────────────
 function markLineDirty(lineId) {
@@ -2113,7 +2135,7 @@ _syncCurrencyBtns('{{ invoice.currency|default:"GBP" }}');
             <label style="display:flex;flex-direction:column;gap:4px;font-size:0.82rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;">
                 GL Account Code
                 <input id="xero-gl-code" type="text" list="xero-gl-datalist"
-                       placeholder="e.g. B1001"
+                       value="B1001" placeholder="e.g. B1001"
                        style="font-size:0.875rem;padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);">
                 <datalist id="xero-gl-datalist">
                     {% for gl in opo_gl_codes %}

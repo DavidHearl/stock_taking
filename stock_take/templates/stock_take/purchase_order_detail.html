@@ -436,19 +436,27 @@
                             <input class="po-edit-input po-edit-val" data-field="name" value="{{ product.name|default:'' }}" style="display:none;">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_price" type="number" step="0.01" value="{{ product.order_price|floatformat:2 }}" oninput="recalcRowLineTotal(this);markProductsDirty()">
+                            <input class="po-edit-input po-edit-val po-edit-number no-pnx-spinner" data-field="order_price" type="number" step="0.01" value="{{ product.order_price|floatformat:2 }}" oninput="recalcRowLineTotal(this);markProductsDirty()">
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="order_quantity" type="number" step="{{ product.stock_item.pack_size|default:1 }}" min="{{ product.stock_item.pack_size|default:1 }}" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this);markProductsDirty()">
+                            <div class="qty-stepper-input po-qty-stepper">
+                                <button type="button" class="qty-step-btn" tabindex="-1" onclick="poStep(this,-1)">&#8722;</button>
+                                <input class="po-edit-input po-edit-val qty-step-value no-pnx-spinner" data-field="order_quantity" type="number" step="{{ product.stock_item.pack_size|default:1 }}" min="{{ product.stock_item.pack_size|default:1 }}" value="{{ product.order_quantity|floatformat:0 }}" oninput="recalcRowLineTotal(this);markProductsDirty()">
+                                <button type="button" class="qty-step-btn" tabindex="-1" onclick="poStep(this,1)">+</button>
+                            </div>
                         </td>
                         <td class="text-center">
                             {% if product.stock_item and product.stock_item.pack_size > 1 %}<span class="po-pack-badge">Pack: {{ product.stock_item.pack_size }}</span>{% else %}-{% endif %}
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="received_quantity" type="number" step="1" value="{{ product.received_quantity|floatformat:0 }}" oninput="markProductsDirty()">
+                            <div class="qty-stepper-input po-qty-stepper">
+                                <button type="button" class="qty-step-btn" tabindex="-1" onclick="poStep(this,-1)">&#8722;</button>
+                                <input class="po-edit-input po-edit-val qty-step-value no-pnx-spinner" data-field="received_quantity" type="number" step="1" min="0" value="{{ product.received_quantity|floatformat:0 }}" oninput="markProductsDirty()">
+                                <button type="button" class="qty-step-btn" tabindex="-1" onclick="poStep(this,1)">+</button>
+                            </div>
                         </td>
                         <td class="text-right">
-                            <input class="po-edit-input po-edit-val po-edit-number" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price|floatformat:2 }}" oninput="markProductsDirty()">
+                            <input class="po-edit-input po-edit-val po-edit-number no-pnx-spinner" data-field="invoice_price" type="number" step="0.01" value="{{ product.invoice_price|floatformat:2 }}" oninput="markProductsDirty()">
                         </td>
                         <td class="text-right">
                             <span class="po-line-total-display">£{{ product.line_total|floatformat:2 }}</span>
@@ -2274,6 +2282,18 @@ function calcNewLineTotal() {
     const price = parseFloat(document.getElementById('new-order-price').value) || 0;
     const qty = parseFloat(document.getElementById('new-order-qty').value) || 0;
     document.getElementById('new-line-total').textContent = '£' + (price * qty).toFixed(2);
+}
+
+function poStep(btn, dir) {
+    const input = dir < 0 ? btn.nextElementSibling : btn.previousElementSibling;
+    const step = parseFloat(input.step) || 1;
+    const min = input.min !== '' ? parseFloat(input.min) : -Infinity;
+    const max = input.max !== '' ? parseFloat(input.max) : Infinity;
+    let val = (parseFloat(input.value) || 0) + step * dir;
+    if (val < min) val = min;
+    if (val > max) val = max;
+    input.value = val;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function recalcRowLineTotal(input) {

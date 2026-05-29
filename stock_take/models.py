@@ -2435,6 +2435,11 @@ class PurchaseInvoiceLineItem(models.Model):
         related_name='purchase_invoice_lines',
         help_text='Which job/order this line cost is allocated to',
     )
+    po_product   = models.ForeignKey(
+        'PurchaseOrderProduct', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='invoice_lines',
+        help_text='PO product line this invoice line was created from',
+    )
     sort_order   = models.IntegerField(default=0)
 
     class Meta:

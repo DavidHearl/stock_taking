@@ -826,8 +826,14 @@ def create_purchase_invoice(request):
                     pass
             if po_product_id:
                 try:
-                    PurchaseOrderProduct.objects.filter(id=int(po_product_id)).update(invoice_price=rate)
-                except (ValueError, TypeError):
+                    pop = PurchaseOrderProduct.objects.get(id=int(po_product_id))
+                    line.po_product = pop
+                    line.save(update_fields=['po_product'])
+                    # Always update invoice_price to the latest invoiced rate.
+                    # Surcharges and other lines may legitimately differ across split invoices.
+                    pop.invoice_price = rate
+                    pop.save(update_fields=['invoice_price'])
+                except (PurchaseOrderProduct.DoesNotExist, ValueError, TypeError):
                     pass
             # Auto-create installation timesheet if allocated to an order
             _sync_timesheet_for_pi_line(line)

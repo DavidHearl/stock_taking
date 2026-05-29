@@ -21,10 +21,10 @@ function todayISO() {
 
 function autoSetDueDate(invoiceDateVal) {
     // Set due date to the last day of the month following the invoice date.
-    // e.g. 15/05/2026 → 30/06/2026
+    // e.g. 21/04/2026 → 31/05/2026
     if (!invoiceDateVal) return;
     const dueDateEl = document.getElementById('new-pinv-due-date');
-    if (!dueDateEl || dueDateEl.value) return; // don't overwrite if already set
+    if (!dueDateEl) return;
     const [y, m] = invoiceDateVal.split('-').map(Number);
     // First day of the month after next (two months ahead), then subtract one day
     const lastDay = new Date(y, m + 1, 0); // month+1 is 0-indexed, day 0 = last day of prev month
@@ -958,20 +958,107 @@ function pullPOLines() {
     .then(data => {
         const results = data.results || [];
         if (!results.length) { alert('No line items found on this purchase order.'); return; }
-        // Clear existing lines
+
+        // ── Snapshot existing rows so we can preserve unmatched ones (e.g. surcharges) ──
+        const existingRows = Array.from(document.querySelectorAll('.pinv-line-row'));
+        const existingSnapshots = existingRows.map(row => ({
+            desc:        (row.querySelector('.pinv-line-desc')?.value  || '').trim(),
+            qty:         parseFloat(row.querySelector('.pinv-line-qty')?.value  || 0),
+            rate:        parseFloat(row.querySelector('.pinv-line-rate')?.value || 0),
+            total:       row.querySelector('.pinv-line-total')?.value || '',
+            poProductId: row.dataset.poProductId || '',
+            isCarriage:  row.dataset.isCarriage  || '',
+            isSurcharge: row.dataset.isSurcharge || '',
+        }));
+
+        // Clear and rebuild
         document.getElementById('modal-lines').innerHTML = '';
         modalLineCount = 0;
+
+        // Normalise a description for loose matching (lowercase, collapse whitespace)
+        const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+        // Extract 3-4 digit integers — panel dimensions like 2206, 599, 210, 458 etc.
+        // Used to match cryptic PDF descriptions ("2206 599 1 280.85") to PO names ("(2206×599mm)").
+        const extractDims = s => new Set((s.match(/\b\d{3,4}\b/g) || []));
+        const countSharedDims = (a, b) => { let n = 0; for (const d of a) if (b.has(d)) n++; return n; };
+
+        // Track which existing snapshots were matched to a PO line
+        const matchedExistingIndices = new Set();
+
         results.forEach(item => {
+            const orderQty    = parseFloat(item.quantity || 1);
+            const invoicedQty = parseFloat(item.invoiced_qty || 0);
+            const remaining   = Math.max(0, orderQty - invoicedQty);
+            const rate        = parseFloat(item.order_price || 0);
+            const itemNorm    = norm(item.description || item.name || '');
+            const itemDims    = extractDims(itemNorm);
+
+            // Try to find a matching existing row:
+            //   1. Exact or containment description match
+            //   2. Same unit rate
+            //   3. 2+ shared 3-4 digit integers (panel dimensions, e.g. 2206 and 599 in "2206 599 1 280.85" vs "(2206×599mm)")
+            let matchIdx = -1;
+            for (let i = 0; i < existingSnapshots.length; i++) {
+                if (matchedExistingIndices.has(i)) continue;
+                const snap = existingSnapshots[i];
+                if (snap.poProductId) continue; // already linked to a PO product, skip
+                const snapNorm  = norm(snap.desc);
+                // Accept exact, or containment in either direction (e.g. "surcharge" ⊆ "surcharge from invoice INV-xxx")
+                const descMatch = itemNorm && snapNorm && (
+                    snapNorm === itemNorm ||
+                    itemNorm.includes(snapNorm) ||
+                    snapNorm.includes(itemNorm)
+                );
+                const rateMatch = rate > 0 && snap.rate === rate;
+                const dimMatch  = countSharedDims(itemDims, extractDims(snapNorm)) >= 2;
+                if (descMatch || rateMatch || dimMatch) { matchIdx = i; break; }
+            }
+
             addModalLine();
             const rows = document.querySelectorAll('.pinv-line-row');
-            const row = rows[rows.length - 1];
-            const qty  = parseFloat(item.quantity || 1);
-            const rate = parseFloat(item.order_price || 0);
-            row.querySelector('.pinv-line-desc').value  = item.description || item.name || '';
-            row.querySelector('.pinv-line-qty').value   = qty;
-            row.querySelector('.pinv-line-rate').value  = rate.toFixed(2);
-            row.querySelector('.pinv-line-total').value = (qty * rate).toFixed(2);
+            const row  = rows[rows.length - 1];
+
+            if (matchIdx !== -1) {
+                // Description from the PO (clean product name), financial values from the invoice PDF
+                const snap = existingSnapshots[matchIdx];
+                matchedExistingIndices.add(matchIdx);
+                const invoiceQty   = snap.qty > 0 ? snap.qty : remaining;
+                const invoiceRate  = snap.rate > 0 ? snap.rate : rate;
+                const invoiceTotal = snap.total || (invoiceQty * invoiceRate).toFixed(2);
+                row.querySelector('.pinv-line-desc').value  = item.description || item.name || snap.desc || '';
+                row.querySelector('.pinv-line-qty').value   = invoiceQty;
+                row.querySelector('.pinv-line-rate').value  = invoiceRate.toFixed(2);
+                row.querySelector('.pinv-line-total').value = invoiceTotal;
+            } else {
+                row.querySelector('.pinv-line-desc').value  = item.description || item.name || '';
+                row.querySelector('.pinv-line-qty').value   = remaining;
+                row.querySelector('.pinv-line-rate').value  = rate.toFixed(2);
+                row.querySelector('.pinv-line-total').value = (remaining * rate).toFixed(2);
+            }
             row.dataset.poProductId = item.id;
+            if (invoicedQty > 0) {
+                const label = remaining <= 0
+                    ? `Fully invoiced (${invoicedQty} of ${orderQty}) — adjust qty if this invoice covers an additional charge`
+                    : `${invoicedQty} of ${orderQty} already invoiced`;
+                row.title = label;
+                row.classList.add('pinv-line-partial');
+            }
+        });
+
+        // Append any existing rows that were NOT matched to a PO line (e.g. surcharges from PDF)
+        existingSnapshots.forEach((snap, i) => {
+            if (matchedExistingIndices.has(i)) return;
+            addModalLine();
+            const rows = document.querySelectorAll('.pinv-line-row');
+            const row  = rows[rows.length - 1];
+            row.querySelector('.pinv-line-desc').value  = snap.desc;
+            row.querySelector('.pinv-line-qty').value   = snap.qty;
+            row.querySelector('.pinv-line-rate').value  = snap.rate.toFixed(2);
+            row.querySelector('.pinv-line-total').value = snap.total;
+            if (snap.poProductId) row.dataset.poProductId = snap.poProductId;
+            if (snap.isCarriage)  row.dataset.isCarriage  = snap.isCarriage;
+            if (snap.isSurcharge) row.dataset.isSurcharge = snap.isSurcharge;
         });
         if (data.freight_cost && parseFloat(data.freight_cost) > 0) {
             addModalLine();

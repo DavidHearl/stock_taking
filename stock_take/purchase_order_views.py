@@ -4,7 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Sum, Q
 from django.core.mail import EmailMessage
 from django.conf import settings
-from .models import BoardsPO, Expense, Fitter, Order, OSDoor, PNXItem, PriceHistory, PurchaseInvoice, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, Timesheet, log_activity
+from .models import BoardsPO, Expense, Fitter, Order, OSDoor, PNXItem, PriceHistory, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, Timesheet, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
 import logging
 import requests
@@ -1285,17 +1285,23 @@ def purchase_order_unreceive(request, po_id):
             if product.received_quantity > 0:
                 delta = int(product.received_quantity)
                 if product.stock_item and delta > 0:
-                    product.stock_item.quantity = max(0, product.stock_item.quantity - delta)
-                    product.stock_item.save(update_fields=['quantity'])
-                    StockHistory.objects.create(
-                        stock_item=product.stock_item,
-                        quantity=product.stock_item.quantity,
-                        change_amount=-delta,
-                        change_type='adjustment',
-                        reference=po.display_number,
-                        notes=f'Unreceive: reversed {delta} via {po.display_number} ({product.sku})',
-                        created_by=request.user,
-                    )
+                    try:
+                        product.stock_item.quantity = max(0, product.stock_item.quantity - delta)
+                        product.stock_item.save(update_fields=['quantity'])
+                        StockHistory.objects.create(
+                            stock_item=product.stock_item,
+                            quantity=product.stock_item.quantity,
+                            change_amount=-delta,
+                            change_type='adjustment',
+                            reference=po.display_number or '',
+                            notes=f'Unreceive: reversed {delta} via {po.display_number} ({product.sku})',
+                            created_by=request.user,
+                        )
+                    except Exception as stock_exc:
+                        logger.error(
+                            'purchase_order_unreceive: stock update failed for product %s: %s',
+                            product.id, stock_exc,
+                        )
                 product.received_quantity = 0
                 product.save(update_fields=['received_quantity'])
 
@@ -1381,12 +1387,20 @@ def _do_receive_po(request, po, data):
                 received_items += 1
 
     # ── Regular product lines ───────────────────────────────────────────────
+    from decimal import Decimal
     if not is_carnehill:
         all_products = list(po.products.select_related('stock_item').all())
+        logger.info(
+            '_do_receive_po: po=%s quantities=%s products=%s',
+            po.display_number,
+            quantities,
+            [(p.id, float(p.order_quantity), float(p.received_quantity)) for p in all_products],
+        )
         for product in all_products:
             # Determine if this product is selected and how much to receive
             if quantities is not None:
                 if product.id not in quantities:
+                    logger.debug('_do_receive_po: skip product %s (not in quantities)', product.id)
                     continue  # not ticked in the receive modal
                 qty_to_receive = quantities[product.id]
             elif selective and product.id not in selected_ids:
@@ -1395,6 +1409,10 @@ def _do_receive_po(request, po, data):
                 qty_to_receive = None  # receive all remaining
 
             if product.received_quantity >= product.order_quantity:
+                logger.debug(
+                    '_do_receive_po: skip product %s (already received %s/%s)',
+                    product.id, product.received_quantity, product.order_quantity,
+                )
                 continue  # already fully received
 
             remaining = float(product.order_quantity) - float(product.received_quantity)
@@ -1403,21 +1421,30 @@ def _do_receive_po(request, po, data):
             if delta <= 0:
                 continue
 
-            from decimal import Decimal
             product.received_quantity = Decimal(str(float(product.received_quantity) + delta))
             product.save(update_fields=['received_quantity'])
+            logger.info('_do_receive_po: received product %s delta=%s new_qty=%s', product.id, delta, product.received_quantity)
+
+            # Update linked stock item — wrapped separately so a failure here
+            # does not roll back the received_quantity save above.
             if product.stock_item:
-                product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
-                product.stock_item.save(update_fields=['quantity'])
-                StockHistory.objects.create(
-                    stock_item=product.stock_item,
-                    quantity=product.stock_item.quantity,
-                    change_amount=int(delta),
-                    change_type='purchase',
-                    reference=po.display_number,
-                    notes=f'Received {int(delta)} via {po.display_number} ({product.sku})',
-                    created_by=request.user,
-                )
+                try:
+                    product.stock_item.quantity = max(0, product.stock_item.quantity + int(delta))
+                    product.stock_item.save(update_fields=['quantity'])
+                    StockHistory.objects.create(
+                        stock_item=product.stock_item,
+                        quantity=product.stock_item.quantity,
+                        change_amount=int(delta),
+                        change_type='purchase',
+                        reference=po.display_number or '',
+                        notes=f'Received {int(delta)} via {po.display_number} ({product.sku})',
+                        created_by=request.user,
+                    )
+                except Exception as stock_exc:
+                    logger.error(
+                        '_do_receive_po: stock update failed for product %s: %s',
+                        product.id, stock_exc,
+                    )
             received_items += 1
 
     # ── Determine new status ────────────────────────────────────────────────
@@ -4291,6 +4318,7 @@ def po_lines_api(request):
         label = p.name or p.description or p.sku or ''
         if p.sku and p.name and p.sku != p.name:
             label = f'{p.sku} – {p.name}'
+        invoiced_qty = p.invoice_lines.aggregate(t=Sum('quantity'))['t'] or 0
         results.append({
             'id': p.id,
             'sku': p.sku,
@@ -4298,6 +4326,7 @@ def po_lines_api(request):
             'description': label,
             'order_price': float(p.order_price),
             'quantity': float(p.order_quantity or p.quantity or 1),
+            'invoiced_qty': float(invoiced_qty),
         })
     return JsonResponse({'results': results, 'freight_cost': float(po.freight_cost)})
 
