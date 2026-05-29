@@ -516,6 +516,45 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
         if line_items_found:
             extracted['line_items'] = line_items_found
 
+        # ── YOUR REFERENCE / PO auto-match ──────────────────────────────────
+        # Suppliers often quote our PO number back to us.
+        # e.g. OS Doors: "YOUR REFERENCE: PO1668 - Raymond Lusty (42079"
+        your_ref_m = re.search(
+            r'(?:YOUR\s+REFERENCE|Your\s+Ref(?:erence)?'
+            r'|Cust(?:omer)?\.?\s*(?:Order\s*)?(?:P\.?O\.?|Ref(?:erence)?))[:\s]+([^\n]{1,120})',
+            full_text, re.IGNORECASE,
+        )
+        if your_ref_m:
+            extracted['your_reference'] = your_ref_m.group(1).strip()
+
+        # Extract a PO\d+ token from the reference label first, then fall back
+        # to searching the whole text.
+        po_candidate = None
+        ref_text = extracted.get('your_reference', '')
+        _po_in_ref = re.search(r'\bPO[-\s]?(\d{3,})\b', ref_text, re.IGNORECASE)
+        if _po_in_ref:
+            po_candidate = f"PO{_po_in_ref.group(1)}"
+        else:
+            _po_in_text = re.search(r'\bPO(\d{3,})\b', full_text, re.IGNORECASE)
+            if _po_in_text:
+                po_candidate = f"PO{_po_in_text.group(1)}"
+
+        if po_candidate:
+            try:
+                po = PurchaseOrder.objects.filter(
+                    Q(display_number__iexact=po_candidate) | Q(number__iexact=po_candidate)
+                ).first()
+                if po:
+                    extracted['suggested_po'] = {
+                        'workguru_id': po.workguru_id,
+                        'display_number': po.display_number or po.number or str(po.workguru_id),
+                        'supplier_name': po.supplier_name or '',
+                        'status': po.status or '',
+                        'po_type': po.po_type,
+                    }
+            except Exception:
+                pass
+
         return extracted
 
     except Exception as exc:

@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
-from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, PurchaseOrderProduct, EnabledGLCode, OverheadPurchaseOrder
+from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, PurchaseOrderProduct, EnabledGLCode, OverheadPurchaseOrder, SupplierEmailRule
 from .permissions import page_permission_required
 from .purchase_invoice_views import _extract_pdf_fields, _parse_date, _parse_decimal
 from .services import graph_api
@@ -46,17 +46,19 @@ _PERSONAL_DOMAINS = frozenset({
 })
 
 
-def _find_po_matches(emails):
+def _find_po_matches(emails, supplier_rules=None):
     """Return {email.id: [po_dict, ...]} for unprocessed emails that have
     a potential PO match (Approved / Received / Partially Received).
 
-    Matching uses two signals:
+    Matching uses three signals:
     1. A PO number (3-6 digits, optionally prefixed PO/PO#) found in the
        email subject.
     2. The PO supplier name found in the sender display name or email domain.
        The email local-part (username) is intentionally excluded — matching
        against it causes false positives (e.g. "stuartstevenson202@hotmail.co.uk"
        incorrectly matching a supplier called "Stuart Stevenson").
+    3. A SupplierEmailRule maps the sender's address/domain to a known supplier
+       name, which is then matched against PO supplier names.
     """
     candidates = [e for e in emails if not e.is_processed and not e.is_ignored]
     if not candidates:
@@ -136,6 +138,24 @@ def _find_po_matches(emails):
         if found:
             result[email.id] = list(found.values())
 
+        # Signal 3: SupplierEmailRule maps this sender to a known supplier.
+        # Used when the domain alone doesn't text-match the supplier name
+        # (e.g. financedept@osdoors.com → "O & S Doors").
+        if not found and supplier_rules:
+            addr = (email.sender_email or '').lower()
+            resolved_name = supplier_rules.get(addr, '')
+            if not resolved_name and '@' in addr:
+                resolved_name = supplier_rules.get('@' + addr.split('@', 1)[1], '')
+            if resolved_name:
+                rname = resolved_name.strip().lower()
+                for po in pos:
+                    if po['id'] in found:
+                        continue
+                    if (po['supplier_name'] or '').strip().lower() == rname:
+                        found[po['id']] = po
+            if found:
+                result[email.id] = list(found.values())
+
     return result
 
 
@@ -146,7 +166,7 @@ def accounts_payable_inbox(request):
     """Display the Accounts Payable shared mailbox inbox."""
     mailbox = graph_api._get_settings()['mailbox']
 
-    emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by').all()
+    emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by', 'matched_po').all()
 
     # Entity tab filter (All / RJL / Group / Statements)
     entity_tab = request.GET.get('tab', '')
@@ -176,6 +196,10 @@ def accounts_payable_inbox(request):
         )
 
     matched_only = request.GET.get('matched_only', '') == '1'
+
+    # Build supplier rules once — used by both _find_po_matches and supplier annotation
+    _supplier_rules = {r.email_pattern.lower(): r.supplier_name for r in SupplierEmailRule.objects.all()}
+
     if matched_only:
         # Use a fresh queryset (no select_related) so .only() doesn't conflict
         # with the deferred traversal restriction on processed_by.
@@ -183,7 +207,7 @@ def accounts_payable_inbox(request):
             MailboxEmail.objects.filter(is_processed=False, is_ignored=False)
             .only('id', 'subject', 'sender_name', 'sender_email', 'attachment_names')
         )
-        email_po_matches_all = _find_po_matches(lightweight)
+        email_po_matches_all = _find_po_matches(lightweight, supplier_rules=_supplier_rules)
         matched_ids = list(email_po_matches_all.keys())
         emails = emails.filter(id__in=matched_ids)
 
@@ -205,9 +229,10 @@ def accounts_payable_inbox(request):
     page_number = request.GET.get('page', 1)
     page_obj = paginator.get_page(page_number)
 
-    email_po_matches = _find_po_matches(page_obj.object_list)
+    email_po_matches = _find_po_matches(page_obj.object_list, supplier_rules=_supplier_rules)
 
-    # Annotate each email with the single best PO match (Draft/Approved > Partially Received > Received)
+    # Annotate each email with the single best PO match
+    # Priority: Draft < Approved < Partially Received < Received
     _STATUS_PRIORITY = {'Draft': 0, 'Approved': 1, 'Partially Received': 2, 'Received': 3}
     for email in page_obj.object_list:
         matched = email_po_matches.get(email.id, [])
@@ -221,6 +246,24 @@ def accounts_payable_inbox(request):
         else:
             email.po_match = None
             email.po_match_class = ''
+
+    # Annotate each email with a matched supplier name from SupplierEmailRule
+    # (_supplier_rules already built above — reuse it here)
+
+    def _match_supplier(sender_email):
+        if not sender_email:
+            return ''
+        addr = sender_email.lower()
+        if addr in _supplier_rules:
+            return _supplier_rules[addr]
+        if '@' in addr:
+            domain_key = '@' + addr.split('@', 1)[1]
+            if domain_key in _supplier_rules:
+                return _supplier_rules[domain_key]
+        return ''
+
+    for email in page_obj.object_list:
+        email.matched_supplier = _match_supplier(email.sender_email)
 
     return render(request, 'stock_take/accounts_payable.html', {
         'emails': page_obj,
@@ -413,6 +456,7 @@ def create_invoice_from_email(request, email_id):
 
     # Create the invoice with all form fields
     total_val = _parse_decimal(data.get('total', '0'))
+    vat_rate  = _parse_decimal(data.get('vat_rate', '0'))
     invoice = PurchaseInvoice.objects.create(
         invoice_number=invoice_number,
         reference=(data.get('reference') or '').strip(),
@@ -422,6 +466,7 @@ def create_invoice_from_email(request, email_id):
         due_date=_parse_date(data.get('due_date', '')),
         status=data.get('status', 'Draft'),
         total=total_val,
+        vat_rate=vat_rate if vat_rate > 0 else None,
         notes=(data.get('notes') or '').strip(),
         currency=(data.get('currency') or 'GBP').strip().upper() or 'GBP',
         created_by=request.user.get_full_name() or request.user.username,
@@ -460,9 +505,10 @@ def create_invoice_from_email(request, email_id):
 
     # Recalculate total from lines if no flat total was provided
     if total_val == 0:
-        line_total = invoice.line_items.aggregate(t=db_models.Sum('line_total'))['t']
+        line_total = invoice.line_items.aggregate(t=db_models.Sum('line_total'))['t'] or 0
         if line_total:
-            invoice.total = line_total
+            gross = line_total * (1 + vat_rate / 100) if vat_rate and vat_rate > 0 else line_total
+            invoice.total = gross
             invoice.save(update_fields=['total'])
 
     # Download and attach the file from Graph API
@@ -480,12 +526,27 @@ def create_invoice_from_email(request, email_id):
 
     # Link purchase order if provided
     po_id = (data.get('purchase_order_id') or '').strip()
+    linked_po = None
     if po_id:
         from .models import PurchaseOrder
         try:
-            invoice.purchase_orders.add(PurchaseOrder.objects.get(workguru_id=po_id))
+            linked_po = PurchaseOrder.objects.get(workguru_id=po_id)
+            invoice.purchase_orders.add(linked_po)
         except PurchaseOrder.DoesNotExist:
             pass
+
+    # Add surcharge as a product line on the linked PO
+    surcharge_cost = _parse_decimal(data.get('surcharge_cost', '0'))
+    if surcharge_cost > 0 and linked_po is not None:
+        PurchaseOrderProduct.objects.create(
+            purchase_order=linked_po,
+            name='Surcharge',
+            description=f'Surcharge from invoice {invoice_number}',
+            order_price=surcharge_cost,
+            order_quantity=1,
+            quantity=1,
+            line_total=surcharge_cost,
+        )
 
     # Link email → invoice
     email.purchase_invoice = invoice
@@ -526,7 +587,98 @@ def parse_email_attachment(request, email_id, attachment_id):
         return JsonResponse({'success': False, 'error': f'Could not download attachment: {err}'})
 
     extracted = _extract_pdf_fields(content)
+
+    # Persist PO match back to the email so it shows in the inbox column
+    spo = extracted.get('suggested_po')
+    if spo and not email.matched_po_id:
+        try:
+            po_obj = PurchaseOrder.objects.get(workguru_id=spo['workguru_id'])
+            email.matched_po = po_obj
+            email.save(update_fields=['matched_po'])
+        except PurchaseOrder.DoesNotExist:
+            pass
+
     return JsonResponse({'success': True, 'extracted': extracted})
+
+
+# ── Scan email attachment for PO reference ─────────────────────────────────
+
+@login_required
+def scan_email_attachment_po(request, email_id):
+    """Download the first PDF attachment of an email, extract the PO reference,
+    save it to MailboxEmail.matched_po, and return the PO data as JSON.
+    Called automatically from the AP inbox page for unscanned emails.
+    Accepts optional JSON body ``{"force": true}`` to re-scan even if already matched.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    email = get_object_or_404(MailboxEmail, id=email_id)
+
+    # Check if caller wants to force a rescan
+    force = False
+    try:
+        body = json.loads(request.body)
+        force = bool(body.get('force', False))
+    except Exception:
+        pass
+
+    # If already scanned and not forcing, just return the stored result
+    if email.matched_po_id and not force:
+        po = email.matched_po
+        return JsonResponse({'success': True, 'po': {
+            'workguru_id': po.workguru_id,
+            'display_number': po.display_number or po.number or str(po.workguru_id),
+            'supplier_name': po.supplier_name or '',
+            'status': po.status or '',
+            'po_type': po.po_type,
+        }})
+
+    # Clear any previously stored match when forcing a rescan
+    if force and email.matched_po_id:
+        email.matched_po = None
+        email.save(update_fields=['matched_po'])
+
+    pdf_att = next(
+        (
+            a for a in email.attachment_list
+            if 'pdf' in (a.get('content_type') or '').lower()
+            or (a.get('name') or '').lower().endswith('.pdf')
+        ),
+        None,
+    )
+    if not pdf_att:
+        return JsonResponse({'success': True, 'po': None})
+
+    mailbox = graph_api._get_settings()['mailbox']
+    content, _filename, _ct, err = graph_api.download_attachment(
+        mailbox, email.graph_message_id, pdf_att['id']
+    )
+    if err:
+        return JsonResponse({'success': False, 'error': str(err)})
+
+    extracted = _extract_pdf_fields(content)
+    spo = extracted.get('suggested_po')
+    if not spo:
+        return JsonResponse({
+            'success': True,
+            'po': None,
+            '_debug_text': extracted.get('_raw_text', '')[:500],
+        })
+
+    try:
+        po = PurchaseOrder.objects.get(workguru_id=spo['workguru_id'])
+        email.matched_po = po
+        email.save(update_fields=['matched_po'])
+        return JsonResponse({'success': True, 'po': {
+            'workguru_id': po.workguru_id,
+            'display_number': po.display_number or po.number or str(po.workguru_id),
+            'supplier_name': po.supplier_name or '',
+            'status': po.status or '',
+            'po_type': po.po_type,
+        }})
+    except PurchaseOrder.DoesNotExist:
+        return JsonResponse({'success': True, 'po': None})
 
 
 # ── Ignore email ──────────────────────────────────────────────────────────────
@@ -544,6 +696,18 @@ def ignore_email(request, email_id):
     email.is_ignored = data.get('ignore', True)
     email.save(update_fields=['is_ignored'])
     return JsonResponse({'success': True, 'is_ignored': email.is_ignored})
+
+
+# ── Delete email ──────────────────────────────────────────────────────────────
+
+@login_required
+def delete_email(request, email_id):
+    """Permanently delete an inbox email record."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    email = get_object_or_404(MailboxEmail, id=email_id)
+    email.delete()
+    return JsonResponse({'success': True})
 
 # ── Mark email as filed (statements) ─────────────────────────────────────
 
@@ -627,6 +791,55 @@ def _apply_email_tab_filter(email_obj):
                 email_obj.tab = f.tab
                 email_obj.save(update_fields=['tab'])
             return
+
+
+# ── Supplier matching rules ───────────────────────────────────────────────────
+
+@login_required
+@page_permission_required('accounts_payable')
+def manage_supplier_rules(request):
+    """GET: return all SupplierEmailRule records.
+    POST {action:'add', email_pattern, supplier_name, note}: create/update a rule.
+    POST {action:'remove', id}: delete a rule.
+    """
+    if request.method == 'GET':
+        rules = list(
+            SupplierEmailRule.objects
+            .values('id', 'email_pattern', 'supplier_name', 'note')
+            .order_by('email_pattern')
+        )
+        return JsonResponse({'rules': rules})
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    action = data.get('action', '')
+
+    if action == 'add':
+        pattern = (data.get('email_pattern') or '').strip().lower()
+        supplier = (data.get('supplier_name') or '').strip()
+        note = (data.get('note') or '').strip()
+        if not pattern:
+            return JsonResponse({'success': False, 'error': 'email_pattern required'}, status=400)
+        if not supplier:
+            return JsonResponse({'success': False, 'error': 'supplier_name required'}, status=400)
+        rule, _ = SupplierEmailRule.objects.update_or_create(
+            email_pattern=pattern,
+            defaults={'supplier_name': supplier, 'note': note},
+        )
+        return JsonResponse({'success': True, 'id': rule.id})
+
+    if action == 'remove':
+        rule_id = data.get('id')
+        SupplierEmailRule.objects.filter(id=rule_id).delete()
+        return JsonResponse({'success': True})
+
+    return JsonResponse({'success': False, 'error': 'Unknown action'}, status=400)
 
 
 # ── Email filter management ───────────────────────────────────────────────────

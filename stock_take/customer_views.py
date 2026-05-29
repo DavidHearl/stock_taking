@@ -1492,6 +1492,10 @@ def sale_detail(request, pk):
     else:
         context['sale_purchase_orders'] = []
 
+    _status = (sale.status or '').lower()
+    context['hero_sale_badge_text'] = (sale.status or 'unknown').upper()
+    context['hero_sale_badge_class'] = 'active' if _status in ('open', 'won') else ('danger' if _status in ('dead', 'cancelled') else 'inactive')
+
     return render(request, 'stock_take/sale_detail.html', context)
 
 

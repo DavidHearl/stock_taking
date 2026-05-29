@@ -109,7 +109,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
             </button>
             <div class="apay-kebab-menu" id="kebab-menu">
                 <button class="apay-kebab-item" onclick="openInboxRulesModal(); closeKebab();">
-                    <i class="bi bi-gear"></i> Manage Inbox Rules
+                    <i class="bi bi-gear"></i> Rules
                 </button>
                 <button class="apay-kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
                     <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
@@ -159,12 +159,21 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                     <div class="apay-from-email" title="{{ email.sender_email }}">{% if email.is_priority and not email.is_processed %}<i class="bi bi-lightning-fill apay-priority-badge" title="Priority — process immediately"></i>{% endif %}{{ email.sender_email|default:"(unknown)" }}</div>
                     <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}</div>
                 </td>
-                <td class="apay-td-center">
-                    {% if email.po_match %}
+                <td class="apay-td-center" id="po-cell-{{ email.id }}">
+                    {% if email.matched_po %}
+                    <a href="{% url 'purchase_order_detail' email.matched_po.workguru_id %}"
+                       class="apay-po-badge {% if email.matched_po.status == 'Received' or email.matched_po.status == 'Partially Received' %}apay-po-badge--received{% elif email.matched_po.status == 'Draft' %}apay-po-badge--draft{% else %}apay-po-badge--approved{% endif %}"
+                       title="{{ email.matched_po.supplier_name }} &ndash; {{ email.matched_po.status }}"
+                       target="_blank">{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}</a>
+                    {% elif email.po_match %}
                     <a href="{% url 'purchase_order_detail' email.po_match.workguru_id %}"
-                       class="apay-po-badge {% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% else %}apay-po-badge--approved{% endif %}"
-                       title="{{ email.po_match.supplier_name }} – {{ email.po_match.status }}"
+                       class="apay-po-badge {% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% elif email.po_match.status == 'Draft' %}apay-po-badge--draft{% else %}apay-po-badge--approved{% endif %}"
+                       title="{{ email.po_match.supplier_name }} &ndash; {{ email.po_match.status }}"
                        target="_blank">{{ email.po_match.display_number|default:email.po_match.workguru_id }}</a>
+                    {% elif not email.is_processed and email.has_pdf %}
+                    <span class="apay-po-scan-pending" data-scan-id="{{ email.id }}">
+                        <span class="apay-po-scan-dot"></span>
+                    </span>
                     {% else %}
                     <span class="apay-no-match">&ndash;</span>
                     {% endif %}
@@ -226,20 +235,40 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                             <i class="bi bi-receipt"></i>
                         </a>
                         {% endif %}
-                        <button class="apay-icon-btn unprocess"
-                                data-email-id="{{ email.id }}"
-                                title="Mark as unprocessed"
-                                onclick="unprocessEmail(this)">
-                            <i class="bi bi-arrow-counterclockwise"></i>
-                        </button>
+                        <div class="apay-row-kebab-wrap">
+                            <button class="apay-row-kebab-btn" onclick="toggleRowKebab(this, event)" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="apay-row-kebab-menu">
+                                <button class="apay-row-kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        onclick="closeRowKebab(this); unprocessEmail(this)">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Unprocess
+                                </button>
+                                <button class="apay-row-kebab-item danger"
+                                        onclick="closeRowKebab(this); deleteEmail({{ email.id }})">
+                                    <i class="bi bi-trash3"></i> Delete
+                                </button>
+                            </div>
+                        </div>
                         {% elif email.is_ignored %}
-                        <button class="apay-icon-btn unignore"
-                                data-email-id="{{ email.id }}"
-                                title="Restore email"
-                                onclick="unignoreEmail(this)">
-                            <i class="bi bi-arrow-counterclockwise"></i>
-                        </button>
-                        {% elif not email.is_processed %}
+                        <div class="apay-row-kebab-wrap">
+                            <button class="apay-row-kebab-btn" onclick="toggleRowKebab(this, event)" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="apay-row-kebab-menu">
+                                <button class="apay-row-kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        onclick="closeRowKebab(this); unignoreEmail(this)">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Restore
+                                </button>
+                                <button class="apay-row-kebab-item danger"
+                                        onclick="closeRowKebab(this); deleteEmail({{ email.id }})">
+                                    <i class="bi bi-trash3"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                        {% else %}
                         {% if email.tab == 'statements' %}
                         <button class="apay-icon-btn create"
                                 data-email-id="{{ email.id }}"
@@ -254,26 +283,42 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                                 data-sender-name="{{ email.sender_name }}"
                                 data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
                                 data-attachments="{{ email.attachment_names }}"
-                                {% if email.po_match %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}" data-po-type="{{ email.po_match.po_type|default:'supplier' }}"{% endif %}
+                                data-matched-supplier="{{ email.matched_supplier|default:'' }}"
+                                {% if email.matched_po %}data-po-id="{{ email.matched_po.workguru_id }}" data-po-label="{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}" data-po-type="{{ email.matched_po.po_type|default:'supplier' }}"{% elif email.po_match %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}" data-po-type="{{ email.po_match.po_type|default:'supplier' }}"{% endif %}
                                 title="Create purchase invoice"
                                 onclick="openCreateModal(this)">
                             <i class="bi bi-plus-circle-fill"></i>
                         </button>
                         {% endif %}
-                        <button class="apay-icon-btn link-inv"
-                                data-email-id="{{ email.id }}"
-                                data-sender="{{ email.sender_name }}{% if email.sender_name and email.sender_email %} ({{ email.sender_email }}){% else %}{{ email.sender_email }}{% endif %}"
-                                data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
-                                title="Link to existing invoice"
-                                onclick="openLinkModal(this)">
-                            <i class="bi bi-link-45deg"></i>
-                        </button>
-                        <button class="apay-icon-btn ignore"
-                                data-email-id="{{ email.id }}"
-                                title="Ignore this email"
-                                onclick="ignoreEmail(this)">
-                            <i class="bi bi-slash-circle-fill"></i>
-                        </button>
+                        <div class="apay-row-kebab-wrap">
+                            <button class="apay-row-kebab-btn" onclick="toggleRowKebab(this, event)" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="apay-row-kebab-menu">
+                                {% if email.has_pdf %}
+                                <button class="apay-row-kebab-item"
+                                        onclick="closeRowKebab(this); rescanEmailPO({{ email.id }})">
+                                    <i class="bi bi-arrow-repeat"></i> Rescan PDF
+                                </button>
+                                {% endif %}
+                                <button class="apay-row-kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        data-sender="{{ email.sender_name }}{% if email.sender_name and email.sender_email %} ({{ email.sender_email }}){% else %}{{ email.sender_email }}{% endif %}"
+                                        data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
+                                        onclick="closeRowKebab(this); openLinkModal(this)">
+                                    <i class="bi bi-link-45deg"></i> Link to Invoice
+                                </button>
+                                <button class="apay-row-kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        onclick="closeRowKebab(this); ignoreEmail(this)">
+                                    <i class="bi bi-slash-circle"></i> Ignore
+                                </button>
+                                <button class="apay-row-kebab-item danger"
+                                        onclick="closeRowKebab(this); deleteEmail({{ email.id }})">
+                                    <i class="bi bi-trash3"></i> Delete
+                                </button>
+                            </div>
+                        </div>
                         {% endif %}
                     </div>
                 </td>
@@ -349,7 +394,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 <div id="inbox-rules-modal" class="modal-overlay" onclick="closeInboxRulesModal(event)">
     <div class="modal-dialog" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <h3><i class="bi bi-gear"></i> Inbox Rules</h3>
+            <h3><i class="bi bi-gear"></i> Rules</h3>
             <button class="modal-close" onclick="closeInboxRulesModal()"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="modal-body">
@@ -362,6 +407,9 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 </button>
                 <button class="apay-rules-tab" id="rules-tab-exemptions" onclick="switchRulesTab('exemptions')">
                     <i class="bi bi-funnel"></i> Exemptions
+                </button>
+                <button class="apay-rules-tab" id="rules-tab-suppliers" onclick="switchRulesTab('suppliers')">
+                    <i class="bi bi-person-check"></i> Suppliers
                 </button>
             </div>
 
@@ -416,6 +464,30 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                     </button>
                 </div>
                 <div id="exemption-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
+            </div>
+
+            <!-- Suppliers panel -->
+            <div id="rules-panel-suppliers" class="apay-rules-panel">
+                <p>
+                    When a sender matches a rule, the <strong>supplier field</strong> in the Create Invoice
+                    modal is pre-filled automatically. Use <code>@domain.com</code> to match an entire
+                    domain, or a full address for an exact match.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="text" id="srule-pattern-input" placeholder="e.g. @osdoors.com or finance@supplier.com" class="apay-exempt-input">
+                    <select id="srule-supplier-select" class="apay-exempt-input">
+                        <option value="">— Select supplier —</option>
+                        {% for s in suppliers %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="apay-btn" onclick="addSupplierRule()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="supplier-rule-list" class="apay-exempt-list">
                     <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
                 </div>
             </div>
@@ -706,7 +778,12 @@ function openCreateModal(btn) {
     document.getElementById('modal-parse-status').textContent = '';
     clearModalPO();
     clearModalSupplier();
-    document.getElementById('new-pinv-supplier').value = senderName;
+    const matchedSupplier = btn.dataset.matchedSupplier || '';
+    if (matchedSupplier) {
+        prefillMatchedSupplier(matchedSupplier);
+    } else {
+        document.getElementById('new-pinv-supplier').value = senderName;
+    }
     document.getElementById('new-pinv-reference').value = '';
     document.getElementById('new-pinv-supplier-ref').value = '';
     document.getElementById('new-pinv-date').value = '';
@@ -781,6 +858,25 @@ function closeCreateModal(e) {
     currentAttachmentId = null;
 }
 
+function prefillMatchedSupplier(name) {
+    if (!name) return;
+    fetch(`/api/supplier-search/?q=${encodeURIComponent(name)}`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        const results = data.results || [];
+        const exact = results.find(s => s.name.toLowerCase() === name.toLowerCase());
+        if (exact) {
+            selectModalSupplier(exact.name, exact.vat_rate !== undefined ? exact.vat_rate : null);
+        } else {
+            selectModalSupplier(name, null);
+        }
+    })
+    .catch(() => selectModalSupplier(name, null));
+}
+
 function onAttachmentChange(radio, filename, isPdf) {
     currentAttachmentId = radio.value;
     if (isPdf) {
@@ -832,6 +928,14 @@ function parseEmailAttachment(attachmentId) {
             });
             recalcModalTotal();
         }
+
+        // Auto-fill PO field when the PDF contains a matched PO reference
+        if (ex.suggested_po) {
+            const spo = ex.suggested_po;
+            selectModalPO(spo.workguru_id, spo.display_number, spo.po_type || 'supplier');
+            statusEl.textContent = `\u2713 PO matched: ${spo.display_number}${spo.supplier_name ? ' – ' + spo.supplier_name : ''}`;
+            setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
+        }
     })
     .catch(() => { statusEl.textContent = ''; });
 }
@@ -847,7 +951,7 @@ function submitCreateInvoice() {
         const rate     = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
         const ordInp   = row.querySelector('.pinv-line-order-input');
         const orderId  = ordInp ? (ordInp.dataset.orderId || null) : null;
-        if (desc) lineItems.push({ description: desc, quantity: qty, rate, order_id: orderId, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1' });
+        if (desc) lineItems.push({ description: desc, quantity: qty, rate, order_id: orderId, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1', is_surcharge: row.dataset.isSurcharge === '1' });
     });
 
     const fd = new FormData();
@@ -868,6 +972,8 @@ function submitCreateInvoice() {
     if (currentAttachmentId) fd.append('attachment_id', currentAttachmentId);
     const carriageLine = lineItems.find(li => li.is_carriage);
     if (carriageLine) fd.append('freight_cost', (carriageLine.quantity || 1) * carriageLine.rate);
+    const surchargeLine = lineItems.find(li => li.is_surcharge);
+    if (surchargeLine) fd.append('surcharge_cost', (surchargeLine.quantity || 1) * surchargeLine.rate);
 
     lineItems.forEach((li, i) => {
         fd.append(`line_desc_${i}`, li.description);
@@ -1050,13 +1156,14 @@ function closeInboxRulesModal(e) {
     document.getElementById('inbox-rules-modal').style.display = 'none';
 }
 function switchRulesTab(tab) {
-    ['priority', 'routing', 'exemptions'].forEach(t => {
+    ['priority', 'routing', 'exemptions', 'suppliers'].forEach(t => {
         document.getElementById('rules-tab-' + t).classList.toggle('active', t === tab);
         document.getElementById('rules-panel-' + t).style.display = t === tab ? 'block' : 'none';
     });
     if (tab === 'priority') loadPriorityFilters();
     if (tab === 'routing') loadEmailFilters();
     if (tab === 'exemptions') loadExemptions();
+    if (tab === 'suppliers') loadSupplierRules();
 }
 
 // Backwards-compat shims (in case anything still calls the old names)
@@ -1313,5 +1420,218 @@ function showFilterToast(message) {
     clearTimeout(toast._hideTimer);
     toast._hideTimer = setTimeout(() => toast.classList.remove('visible'), 4000);
 }
+
+// ── Supplier Matching Rules ───────────────────────────────────────────────────
+function openSupplierRulesModal() { openInboxRulesModal('suppliers'); }
+function closeSupplierRulesModal() { closeInboxRulesModal(); }
+
+function loadSupplierRules() {
+    const list = document.getElementById('supplier-rule-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_supplier_rules" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        const rules = data.rules || [];
+        if (!rules.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No supplier rules defined yet.</div>';
+            return;
+        }
+        list.innerHTML = rules.map(r => `
+            <div class="apay-exempt-row" id="srule-row-${r.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${r.email_pattern}</span>
+                    <span class="apay-exempt-note">&rarr; ${r.supplier_name}</span>
+                    ${r.note ? `<span class="apay-exempt-note" style="color:var(--text-muted)">${r.note}</span>` : ''}
+                </div>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removeSupplierRule(${r.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addSupplierRule() {
+    const patternInput   = document.getElementById('srule-pattern-input');
+    const supplierSelect = document.getElementById('srule-supplier-select');
+    const pattern  = patternInput.value.trim();
+    const supplier = supplierSelect.value;
+    if (!pattern)  { patternInput.focus();   return; }
+    if (!supplier) { supplierSelect.focus(); return; }
+
+    fetch('{% url "manage_supplier_rules" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email_pattern: pattern, supplier_name: supplier }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            patternInput.value   = '';
+            supplierSelect.value = '';
+            loadSupplierRules();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removeSupplierRule(id) {
+    if (!confirm('Remove this supplier rule?')) return;
+    fetch('{% url "manage_supplier_rules" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('srule-row-' + id);
+            if (row) row.remove();
+            if (!document.querySelector('#supplier-rule-list .apay-exempt-row')) {
+                document.getElementById('supplier-rule-list').innerHTML = '<div class="apay-exempt-empty">No supplier rules defined yet.</div>';
+            }
+        }
+    });
+}
+
+// ── Per-row kebab menu ────────────────────────────────────────────────────────
+function toggleRowKebab(btn, e) {
+    if (e) e.stopPropagation();
+    const menu = btn.nextElementSibling;
+    const isOpen = menu.classList.contains('open');
+    document.querySelectorAll('.apay-row-kebab-menu.open').forEach(m => m.classList.remove('open'));
+    if (!isOpen) menu.classList.add('open');
+}
+
+function closeRowKebab(itemBtn) {
+    const menu = itemBtn.closest('.apay-row-kebab-menu');
+    if (menu) menu.classList.remove('open');
+}
+
+document.addEventListener('click', function () {
+    document.querySelectorAll('.apay-row-kebab-menu.open').forEach(m => m.classList.remove('open'));
+});
+
+function rescanEmailPO(emailId) {
+    const cell = document.getElementById('po-cell-' + emailId);
+    if (cell) {
+        cell.innerHTML = '<span class="apay-po-scan-pending"><span class="apay-po-scan-dot"></span></span>';
+    }
+    console.log(`[AP rescan] Email ${emailId}: POSTing force rescan…`);
+    fetch(`/accounts-payable/${emailId}/scan-po/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ force: true }),
+    })
+    .then(r => {
+        console.log(`[AP rescan] Email ${emailId}: HTTP ${r.status}`);
+        return r.json().then(data => ({ status: r.status, data }));
+    })
+    .then(({ status, data }) => {
+        console.log(`[AP rescan] Email ${emailId}: response`, data);
+        if (!cell) return;
+        if (status === 200 && data.success && data.po) {
+            const po = data.po;
+            const cls = (po.status === 'Received' || po.status === 'Partially Received')
+                ? 'apay-po-badge--received'
+                : po.status === 'Draft' ? 'apay-po-badge--draft' : 'apay-po-badge--approved';
+            const supplier = po.supplier_name ? ` \u2013 ${po.supplier_name}` : '';
+            cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
+                class="apay-po-badge ${cls}"
+                title="${po.status}${supplier}"
+                target="_blank">${po.display_number || po.workguru_id}</a>`;
+            const createBtn = document.querySelector(
+                `button.apay-icon-btn.create[data-email-id="${emailId}"]`
+            );
+            if (createBtn) {
+                createBtn.dataset.poId = po.workguru_id;
+                createBtn.dataset.poLabel = po.display_number || po.workguru_id;
+                createBtn.dataset.poType = po.po_type || 'supplier';
+            }
+        } else {
+            const reason = data.error
+                ? `error: ${data.error}`
+                : (data.po === null
+                    ? 'no PO matched. PDF text preview: ' + (data._debug_text || '(empty)')
+                    : 'unknown response shape');
+            console.warn(`[AP rescan] Email ${emailId}: ${reason}`);
+            cell.innerHTML = `<span class="apay-att-none" title="${(data.error || 'No PO found in PDF').replace(/"/g, '&quot;')}"><i class="bi bi-dash"></i></span>`;
+        }
+    })
+    .catch(err => {
+        console.error(`[AP rescan] Email ${emailId}: fetch failed`, err);
+        if (cell) cell.innerHTML = '<span class="apay-att-none" title="Network error"><i class="bi bi-dash"></i></span>';
+    });
+}
+
+function deleteEmail(emailId) {
+    if (!confirm('Delete this email from the inbox? This cannot be undone.')) return;
+    fetch(`/accounts-payable/${emailId}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('email-row-' + emailId);
+            const detailRow = document.getElementById('detail-row-' + emailId);
+            [row, detailRow].forEach(el => {
+                if (el) {
+                    el.style.transition = 'opacity 0.25s';
+                    el.style.opacity = '0';
+                    setTimeout(() => el.remove(), 260);
+                }
+            });
+        }
+    });
+}
+
+// ── Auto-scan PDF attachments for PO references ───────────────────────────────
+// For each inbox row that has a PDF but no stored PO match, fire a scan request
+// sequentially (one at a time) so the PO column fills in without a page reload.
+(function () {
+    const pending = Array.from(document.querySelectorAll('[data-scan-id]'))
+                         .map(el => el.dataset.scanId);
+    if (!pending.length) return;
+
+    function poStatusClass(status) {
+        if (status === 'Received' || status === 'Partially Received') return 'apay-po-badge--received';
+        if (status === 'Draft') return 'apay-po-badge--draft';
+        return 'apay-po-badge--approved';
+    }
+
+    function scanNext() {
+        const emailId = pending.shift();
+        if (!emailId) return;
+
+        fetch(`/accounts-payable/${emailId}/scan-po/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(r => r.json())
+        .then(data => {
+            const cell = document.getElementById('po-cell-' + emailId);
+            if (cell && data.success && data.po) {
+                const po = data.po;
+                const cls = poStatusClass(po.status);
+                const label = po.display_number || po.workguru_id;
+                const supplier = po.supplier_name ? ` – ${po.supplier_name}` : '';
+                cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
+                    class="apay-po-badge ${cls}"
+                    title="${po.status}${supplier}"
+                    target="_blank">${label}</a>`;
+            } else if (cell) {
+                const spinner = cell.querySelector('.apay-po-scan-pending');
+                if (spinner) spinner.remove();
+            }
+            setTimeout(scanNext, 150);
+        })
+        .catch(() => setTimeout(scanNext, 600));
+    }
+
+    // Stagger start slightly so the page is fully rendered first
+    setTimeout(scanNext, 800);
+}());
 </script>
 {% endblock %}

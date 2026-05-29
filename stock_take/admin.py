@@ -12,7 +12,7 @@ from .models import (
     PurchaseOrderProject, ProductCustomerAllocation, Invoice, InvoiceLineItem, InvoicePayment,
     PurchaseInvoice, PurchaseInvoiceLineItem, GalleryImage, Ticket, ClaimDocument,
     PriceHistory, ActivityLog, RaumplusDraftOrder, MobileDevice, PhoneTemplate,
-    OSDoorOption,
+    OSDoorOption, MailboxEmailFilter, SupplierEmailRule,
 )
 
 @admin.register(Customer)
@@ -494,8 +494,19 @@ class ProductCustomerAllocationAdmin(admin.ModelAdmin):
 class InvoiceLineItemInline(admin.TabularInline):
     model = InvoiceLineItem
     extra = 0
-    fields = ['name', 'quantity', 'rate', 'line_total']
-    readonly_fields = ['line_total']
+
+
+@admin.register(MailboxEmailFilter)
+class MailboxEmailFilterAdmin(admin.ModelAdmin):
+    list_display = ['email_pattern', 'tab', 'note', 'created_at']
+    search_fields = ['email_pattern', 'note']
+    list_filter = ['tab']
+
+
+@admin.register(SupplierEmailRule)
+class SupplierEmailRuleAdmin(admin.ModelAdmin):
+    list_display = ['email_pattern', 'supplier_name', 'note', 'created_at']
+    search_fields = ['email_pattern', 'supplier_name', 'note']
 
 
 @admin.register(Invoice)

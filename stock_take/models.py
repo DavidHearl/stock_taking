@@ -738,6 +738,21 @@ class PNXItem(models.Model):
         return area_sqm * self.cnt * price_per_sqm
 
 
+class OrderNote(models.Model):
+    order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='notes')
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='order_notes'
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Note on {self.order.sale_number} at {self.created_at:%d %b %Y %H:%M}'
+
+
 class OSDoor(models.Model):
     customer = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='os_doors')
     door_style = models.CharField(max_length=100)
@@ -2294,6 +2309,13 @@ class MailboxEmail(models.Model):
         default=False, db_index=True,
         help_text='True if the email matches a priority rule and must be processed immediately',
     )
+    matched_po = models.ForeignKey(
+        'PurchaseOrder',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='matched_emails',
+        help_text='Specific PO matched from PDF scan of the email attachment',
+    )
 
     class Meta:
         ordering = ['-received_at']
@@ -2365,6 +2387,34 @@ class MailboxEmailFilter(models.Model):
 
     def __str__(self):
         return f'{self.email_pattern} → {self.get_tab_display()}'
+
+
+class SupplierEmailRule(models.Model):
+    """Rule to auto-match a sender email address to a supplier name.
+
+    When an email arrives in the AP inbox and the sender matches a rule,
+    the supplier field in the Create Purchase Invoice modal is pre-filled
+    automatically, saving the user from typing it manually.
+    """
+
+    email_pattern = models.CharField(
+        max_length=254, unique=True,
+        help_text='Full email address (user@domain.com) or domain suffix (@domain.com) to match against the sender',
+    )
+    supplier_name = models.CharField(
+        max_length=255,
+        help_text='Supplier name to pre-fill when a sender matches this rule',
+    )
+    note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['email_pattern']
+        verbose_name = 'Supplier Email Rule'
+        verbose_name_plural = 'Supplier Email Rules'
+
+    def __str__(self):
+        return f'{self.email_pattern} → {self.supplier_name}'
 
 
 class PurchaseInvoiceLineItem(models.Model):

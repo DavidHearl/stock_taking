@@ -5909,15 +5909,18 @@ def update_sale_info(request, order_id):
         from datetime import datetime
         data = json.loads(request.body)
         
-        order.sale_number = data.get('sale_number', '')
-        order.customer_number = data.get('customer_number', '')
+        if 'sale_number' in data:
+            order.sale_number = data.get('sale_number', '')
+        if 'customer_number' in data:
+            order.customer_number = data.get('customer_number', '')
         
         # Handle designer field
-        designer_id = data.get('designer_id')
-        if designer_id:
-            order.designer = Designer.objects.get(id=designer_id)
-        else:
-            order.designer = None
+        if 'designer_id' in data:
+            designer_id = data.get('designer_id')
+            if designer_id:
+                order.designer = Designer.objects.get(id=designer_id)
+            else:
+                order.designer = None
         
         # Parse dates — an empty string explicitly clears the date
         if data.get('order_date'):
@@ -6664,12 +6667,34 @@ def _build_order_context(order, request):
 
     def process_pnx_items(bpo, sale_number, price):
         from django.db.models import Q
+        import re
         items = list(bpo.pnx_items.filter(
             Q(customer__icontains=sale_number) | Q(customer='') | Q(customer__isnull=True)
         ))
         for item in items:
             item.calculated_cost = item.get_cost(price)
         total = sum(item.calculated_cost for item in items)
+
+        # Batch-lookup colour swatch images for unique Egger codes used in this PO.
+        egger_code_re = re.compile(r'^SHT_MFC_EGG_([A-Za-z0-9]+)_')
+        item_codes = {}
+        for item in items:
+            m = egger_code_re.match(item.matname or '')
+            item_codes[item] = m.group(1) if m else None
+        unique_codes = {c for c in item_codes.values() if c}
+        colour_image_map = {}
+        if unique_codes:
+            prefix_q = Q()
+            for c in unique_codes:
+                prefix_q |= Q(sku__startswith=f'SHT_MFC_EGG_{c}_')
+            swatch_items = StockItem.objects.filter(prefix_q).exclude(image='').exclude(image__isnull=True).only('sku', 'image')
+            for si in swatch_items:
+                m = egger_code_re.match(si.sku)
+                if m and si.image:
+                    code = m.group(1)
+                    if code not in colour_image_map:
+                        colour_image_map[code] = si.image.url
+
         for item in items:
             w = int(item.cwidth)
             if w in STANDARD_WIDTHS:
@@ -6682,6 +6707,8 @@ def _build_order_context(order, request):
                 item.is_standard_board = False
                 item.stock_quantity = None
                 item.sort_key = (1, w)
+            code = item_codes.get(item)
+            item.colour_image_url = colour_image_map.get(code) if code else None
         items.sort(key=lambda x: x.sort_key)
         return items, total
 
@@ -6845,6 +6872,9 @@ def _build_order_context(order, request):
 
     anthill_sales = order.anthill_sale.select_related('customer').order_by('-activity_date')
 
+    from .models import OrderNote
+    order_notes = list(OrderNote.objects.filter(order=order).select_related('created_by').order_by('-created_at'))
+
     from django.core.cache import cache as _cache
     unique_materials = _cache.get('order_ctx_unique_materials')
     if unique_materials is None:
@@ -6913,6 +6943,7 @@ def _build_order_context(order, request):
         'purchase_invoice_cost': purchase_invoice_cost,
         'purchase_invoice_ts_cost': purchase_invoice_ts_cost,
         'anthill_sales': anthill_sales,
+        'order_notes': order_notes,
         'board_materials_json': json.dumps(unique_materials),
         'order_materials_json': json.dumps(order_materials),
     }
@@ -6920,148 +6951,70 @@ def _build_order_context(order, request):
 
 @login_required
 def order_details(request, order_id):
-    """Display and edit order details, including boards PO assignment"""
+    """Order detail entry point.
+
+    The sale_detail page is the single canonical view for an order; this URL exists
+    only as a redirect shim and a POST endpoint for forms inside the order tab
+    (form action="{% url 'order_details' order.id %}").
+    """
+    from django.urls import reverse
     order = get_object_or_404(Order, id=order_id)
 
-    # Handle POST actions before any redirect so that form submissions
-    # (e.g. adding an OS door) from the combined sale+order page work correctly.
+    # Resolve the linked AnthillSale (FK first, sale_number fallback) — this is where
+    # the user should land.
+    linked_sale = order.anthill_sale.first()
+    if not linked_sale and order.sale_number:
+        from .models import AnthillSale as _AnthillSale
+        linked_sale = _AnthillSale.objects.filter(anthill_activity_id=order.sale_number).first()
+
+    sale_target = (
+        reverse('sale_detail', args=[linked_sale.pk]) + '?tab=order'
+        if linked_sale else None
+    )
+
+    # Handle POST actions from the order tab (OS door add, OrderForm update).
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         if 'door_style' in request.POST:
             os_door_form = OSDoorForm(request.POST)
             if os_door_form.is_valid():
                 os_door = os_door_form.save(commit=False)
                 os_door.customer = order
                 os_door.save()
+                if is_ajax:
+                    return JsonResponse({'success': True, 'id': os_door.id})
                 messages.success(request, 'OS Door added successfully.')
             else:
+                if is_ajax:
+                    return JsonResponse({'success': False, 'errors': os_door_form.errors.as_text()}, status=400)
                 messages.error(request, 'Failed to add OS Door: ' + str(os_door_form.errors))
-            # Redirect back to wherever the user came from (sale_detail or order_details)
-            referer = request.META.get('HTTP_REFERER', '')
-            if referer:
-                return redirect(referer)
-            return redirect('order_details', order_id=order_id)
-
-    # If this order is linked to an AnthillSale, redirect to the combined sale+order view.
-    # First check the FK relation, then fall back to matching via sale_number.
-    linked_sale = order.anthill_sale.first()
-    if not linked_sale and order.sale_number:
-        from .models import AnthillSale as _AnthillSale
-        linked_sale = _AnthillSale.objects.filter(anthill_activity_id=order.sale_number).first()
-    if linked_sale:
-        return redirect('sale_detail', pk=linked_sale.pk)
-
-    # Get or create workflow progress for this order
-    from .models import OrderWorkflowProgress, WorkflowStage, TaskCompletion
-    workflow_progress, created = OrderWorkflowProgress.objects.get_or_create(
-        order=order,
-        defaults={'current_stage': WorkflowStage.objects.first()}
-    )
-    
-    # Get all available workflow stages
-    workflow_stages = WorkflowStage.objects.all().prefetch_related('tasks')
-    
-    # Get task completions for current stage
-    task_completions = {}
-    if workflow_progress.current_stage:
-        for task in workflow_progress.current_stage.tasks.all():
-            completion, _ = TaskCompletion.objects.get_or_create(
-                order_progress=workflow_progress,
-                task=task
-            )
-            task_completions[task.id] = completion
-    
-    # Group stages by phase for workflow modal
-    phases = [
-        ('enquiry', 'Enquiry'),
-        ('lead', 'Lead'),
-        ('sale', 'Sale'),
-    ]
-    stages_by_phase = {}
-    for phase_code, phase_display in phases:
-        stages_by_phase[phase_code] = workflow_stages.filter(phase=phase_code)
-    
-    # Get price per square meter from session, default to 12
-    price_per_sqm_str = request.session.get('price_per_sqm', '12')
-    price_per_sqm = float(price_per_sqm_str)
-    
-    if request.method == 'POST':
-        # OS door POST is handled before the linked_sale redirect above.
-        # Any remaining POST here is an OrderForm update.
-        form = OrderForm(request.POST, instance=order)
-        if form.is_valid():
-            form.save()
-            messages.success(request, f'Order {order.sale_number} updated successfully.')
-            return redirect('order_details', order_id=order_id)
-    else:
-        form = OrderForm(instance=order)
-    
-    # Initialize OS door form with pre-populated data if existing OS doors exist
-    if order.os_doors.exists():
-        # Get the most recent OS door item to pre-populate form
-        latest_os_door = order.os_doors.order_by('-id').first()
-        os_door_form = OSDoorForm(initial={
-            'door_style': latest_os_door.door_style,
-            'style_colour': latest_os_door.style_colour,
-            'colour': latest_os_door.colour,
-            'height': latest_os_door.height,
-            'width': latest_os_door.width,
-            'item_description': latest_os_door.item_description,
-        })
-    else:
-        os_door_form = OSDoorForm()
-    
-    # Get other orders with the same boards PO (excluding current order)
-    other_orders = []
-    if order.boards_po:
-        other_orders = Order.objects.filter(boards_po=order.boards_po).exclude(id=order.id)
-    
-    # Build list of ALL boards POs (primary + additional)
-    all_boards_pos_list = []
-    if order.boards_po:
-        all_boards_pos_list.append(order.boards_po)
-    all_boards_pos_list.extend(list(order.additional_boards_pos.all()))
-    
-    # Standard stock board widths (all 2800mm length)
-    STANDARD_WIDTHS = {79, 250, 500, 680, 750, 1000}
-    WIDTH_ORDER = {w: i for i, w in enumerate(sorted(STANDARD_WIDTHS))}
-    
-    def process_pnx_items(bpo, sale_number, price):
-        """Process PNX items for a single BoardsPO, returning annotated sorted list and total cost."""
-        from django.db.models import Q
-        items = list(bpo.pnx_items.filter(
-            Q(customer__icontains=sale_number) | Q(customer='') | Q(customer__isnull=True)
-        ))
-        for item in items:
-            item.calculated_cost = item.get_cost(price)
-        total = sum(item.calculated_cost for item in items)
-        for item in items:
-            w = int(item.cwidth)
-            if w in STANDARD_WIDTHS:
-                item.is_standard_board = True
-                sku_prefix = f"{item.matname}{w}"
-                stock_item = StockItem.objects.filter(sku=sku_prefix).first()
-                item.stock_quantity = stock_item.quantity if stock_item else 0
-                item.sort_key = (0, WIDTH_ORDER.get(w, 999))
+        else:
+            form = OrderForm(request.POST, instance=order)
+            if form.is_valid():
+                form.save()
+                messages.success(request, f'Order {order.sale_number} updated successfully.')
             else:
-                item.is_standard_board = False
-                item.stock_quantity = None
-                item.sort_key = (1, w)
-        items.sort(key=lambda x: x.sort_key)
-        return items, total
+                messages.error(request, 'Failed to update order: ' + str(form.errors))
 
-    ctx = _build_order_context(order, request)
+        referer = request.META.get('HTTP_REFERER', '')
+        if referer:
+            return redirect(referer)
+        if sale_target:
+            return redirect(sale_target)
+        return redirect('dashboard')
 
-    if ctx.get('_skip_items_removed', 0) > 0:
-        messages.info(request, f"Automatically removed {ctx['_skip_items_removed']} items from skip lists.")
+    # GET: always send the user to the combined sale_detail page.
+    if sale_target:
+        return redirect(sale_target)
 
-    # If this order has a linked sale, redirect to the combined sale page (sale is the anchor)
-    anthill_sales = ctx['anthill_sales']
-    primary_sale = anthill_sales.first()
-    if primary_sale:
-        from django.urls import reverse
-        return redirect(reverse('sale_detail', args=[primary_sale.pk]) + '?tab=order')
+    # Orphan order (no linked sale) — treated as a bug/legacy state.
+    messages.error(
+        request,
+        f"Order {order.sale_number or order.id} has no linked Anthill sale "
+        "and cannot be displayed. Please link a sale to view it."
+    )
+    return redirect('dashboard')
 
-    return render(request, 'stock_take/order_details.html', ctx)
 
 def completed_stock_takes(request):
     """Display completed stock takes with analytics and filtering"""
@@ -10441,6 +10394,38 @@ def delete_skip_item(request, skip_item_id):
             return redirect('order_details', order_id=order_id)
         return JsonResponse({'success': True})
     return JsonResponse({'success': False, 'error': 'Method not allowed'})
+
+
+@login_required
+@require_POST
+def add_order_note(request, order_id):
+    """Add a note to an order, returns the new note as JSON."""
+    from .models import OrderNote
+    order = get_object_or_404(Order, id=order_id)
+    text = request.POST.get('text', '').strip()
+    if not text:
+        return JsonResponse({'success': False, 'error': 'Note text is required.'}, status=400)
+    note = OrderNote.objects.create(order=order, text=text, created_by=request.user)
+    return JsonResponse({
+        'success': True,
+        'note': {
+            'id': note.id,
+            'text': note.text,
+            'created_at': note.created_at.strftime('%d %b %Y %H:%M'),
+            'created_by': note.created_by.get_full_name() or note.created_by.username if note.created_by else '',
+        }
+    })
+
+
+@login_required
+@require_POST
+def delete_order_note(request, note_id):
+    """Delete an order note."""
+    from .models import OrderNote
+    note = get_object_or_404(OrderNote, id=note_id)
+    note.delete()
+    return JsonResponse({'success': True})
+
 
 @login_required
 def download_processed_csv(request, order_id):

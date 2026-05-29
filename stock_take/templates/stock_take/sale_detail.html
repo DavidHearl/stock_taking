@@ -24,9 +24,9 @@
 
     <!-- ===== CUSTOMER HERO CARD ===== -->
     {% if sale.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class %}
     {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class %}
     {% endif %}
 
     <div class="sale-page-layout">
@@ -138,6 +138,9 @@
         <button class="detail-tab {% if active_tab == 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('purchase_orders')" data-tab="purchase_orders">
             Purchase Orders{% if sale_purchase_orders %} <span class="tab-count">{{ sale_purchase_orders|length }}</span>{% endif %}
         </button>
+        <button class="detail-tab {% if active_tab == 'notes' %}active{% endif %}" onclick="switchDetailTab('notes')" data-tab="notes">
+            Notes{% if order_notes %} <span class="tab-count">{{ order_notes|length }}</span>{% endif %}
+        </button>
     </div>
 
     <!-- ===== SALE TAB PANEL ===== -->
@@ -155,59 +158,11 @@
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
                         <h3>Sale Details</h3>
-                        <div class="header-actions">
-                            <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' or sale.status == 'cancelled' %}danger{% else %}inactive{% endif %}">
-                                {{ sale.status|default:"Unknown" }}
-                            </span>
-                        </div>
                     </div>
                     <div class="card-body padded">
                         <div id="save-notification" class="save-notification" style="display:none;"></div>
                         <div class="info-display">
-                            <div class="field-row-sb">
-                                <div class="field-label">Contract Number</div>
-                                <div class="field-value field-value-large view-val">{{ sale.contract_number|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="contract_number" value="{{ sale.contract_number|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Activity ID</div>
-                                <div class="field-value view-val">{{ sale.anthill_activity_id }}</div>
-                                <input class="customer-edit-input edit-val" data-field="anthill_activity_id" value="{{ sale.anthill_activity_id|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Sale Value</div>
-                                <div class="field-value field-value-large view-val">{% if sale.sale_value %}£{{ sale.sale_value|floatformat:2|intcomma }}{% else %}-{% endif %}</div>
-                                <input class="customer-edit-input edit-val" data-field="sale_value" value="{{ sale.sale_value|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Date</div>
-                                <div class="field-value">{{ sale.activity_date|date:"d M Y H:i"|default:"-" }}</div>
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Location</div>
-                                <div class="field-value view-val">{{ sale.location|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="location" value="{{ sale.location|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Assigned To</div>
-                                <div class="field-value view-val">{{ sale.assigned_to_name|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="assigned_to_name" value="{{ sale.assigned_to_name|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Source</div>
-                                <div class="field-value view-val">{{ sale.source|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="source" value="{{ sale.source|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Status</div>
-                                <div class="field-value view-val">{{ sale.status|default:"-" }}</div>
-                                <select class="customer-edit-input edit-val" data-field="status" style="display:none;">
-                                    <option value="open" {% if sale.status == 'open' %}selected{% endif %}>Open</option>
-                                    <option value="won" {% if sale.status == 'won' %}selected{% endif %}>Won</option>
-                                    <option value="dead" {% if sale.status == 'dead' %}selected{% endif %}>Dead</option>
-                                    <option value="cancelled" {% if sale.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
-                                </select>
-                            </div>
+                            {% include "stock_take/partials/sale_details_card_body.html" with sd_sale=sale sd_editable=True sd_order_editable=True %}
                         </div>
                     </div>
                 </div>
@@ -1339,19 +1294,26 @@
 
             // ── Edit / Save / Cancel ─────────────────────────────────────────
             const SALE_SAVE_URL = "{% url 'sale_save' sale.pk %}";
+            const ORDER_ID = {% if order %}{{ order.id }}{% else %}null{% endif %};
             const INVOICE_DETAIL_URL = "{% url 'invoices_list' %}";
 
+            function _activePanel() {
+                return document.querySelector('.detail-tab-panel.active') || document;
+            }
+
             function toggleEditMode() {
-                document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
-                document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
+                const panel = _activePanel();
+                panel.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
+                panel.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
                 document.getElementById('btn-edit').style.display = 'none';
                 document.getElementById('btn-save').style.display = 'inline-flex';
                 document.getElementById('btn-cancel').style.display = 'inline-flex';
             }
 
             function cancelEdit() {
-                document.querySelectorAll('.view-val').forEach(el => el.style.display = '');
-                document.querySelectorAll('.edit-val').forEach(el => {
+                const panel = _activePanel();
+                panel.querySelectorAll('.view-val').forEach(el => el.style.display = '');
+                panel.querySelectorAll('.edit-val').forEach(el => {
                     el.style.display = 'none';
                     if (el.tagName === 'SELECT') {
                         el.querySelectorAll('option').forEach(o => { o.selected = o.defaultSelected; });
@@ -1365,44 +1327,69 @@
             }
 
             function saveSale() {
-                const data = {};
-                document.querySelectorAll('.edit-val[data-field]').forEach(input => {
-                    data[input.getAttribute('data-field')] = input.value;
+                const panel = _activePanel();
+                const saleData = {};
+                panel.querySelectorAll('.edit-val[data-field]').forEach(input => {
+                    if (!input.dataset.model) {
+                        saleData[input.getAttribute('data-field')] = input.value;
+                    }
                 });
 
                 const btn = document.getElementById('btn-save');
                 btn.disabled = true;
                 btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Saving\u2026';
 
-                fetch(SALE_SAVE_URL, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
-                    body: JSON.stringify(data),
-                })
-                .then(r => r.json())
-                .then(result => {
-                    const notif = document.getElementById('save-notification');
-                    if (result.success) {
-                        notif.className = 'save-notification success';
-                        notif.innerHTML = '<i class="bi bi-check-circle"></i> Changes saved';
-                        notif.style.display = 'flex';
-                        setTimeout(() => location.reload(), 800);
-                    } else {
+                const saves = [
+                    fetch(SALE_SAVE_URL, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                        body: JSON.stringify(saleData),
+                    })
+                ];
+
+                if (ORDER_ID) {
+                    const orderData = {};
+                    panel.querySelectorAll('.edit-val[data-model="order"][data-field]').forEach(input => {
+                        orderData[input.getAttribute('data-field')] = input.value;
+                    });
+                    if (Object.keys(orderData).length > 0) {
+                        saves.push(
+                            fetch(`/order/${ORDER_ID}/update-sale/`, {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                                body: JSON.stringify(orderData),
+                            })
+                        );
+                    }
+                }
+
+                Promise.all(saves)
+                    .then(responses => Promise.all(responses.map(r => r.json())))
+                    .then(results => {
+                        const notif = document.getElementById('save-notification');
+                        const allOk = results.every(r => r.success);
+                        if (allOk) {
+                            notif.className = 'save-notification success';
+                            notif.innerHTML = '<i class="bi bi-check-circle"></i> Changes saved';
+                            notif.style.display = 'flex';
+                            setTimeout(() => location.reload(), 800);
+                        } else {
+                            const errMsg = results.map(r => r.error).filter(Boolean).join('; ');
+                            notif.className = 'save-notification error';
+                            notif.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + (errMsg || 'Save failed');
+                            notif.style.display = 'flex';
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+                        }
+                    })
+                    .catch(() => {
+                        const notif = document.getElementById('save-notification');
                         notif.className = 'save-notification error';
-                        notif.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + (result.error || 'Save failed');
+                        notif.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error';
                         notif.style.display = 'flex';
                         btn.disabled = false;
                         btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
-                    }
-                })
-                .catch(() => {
-                    const notif = document.getElementById('save-notification');
-                    notif.className = 'save-notification error';
-                    notif.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error';
-                    notif.style.display = 'flex';
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
-                });
+                    });
             }
 
             // ── Xero Link (used inside combined modal) ─────────────────────
@@ -1930,6 +1917,107 @@
         </div>
     </div><!-- /.tab-panel-purchase_orders -->
 
+    <!-- ===== NOTES TAB PANEL ===== -->
+    {% if order %}
+    <div id="tab-panel-notes" class="detail-tab-panel {% if active_tab == 'notes' %}active{% endif %}">
+        <div class="order-notes-wrap">
+            <div class="order-notes-list" id="order-notes-list">
+                {% for note in order_notes %}
+                <div class="order-note-item" id="note-{{ note.id }}">
+                    <div class="order-note-meta">
+                        <span class="order-note-author">{{ note.created_by.get_full_name|default:note.created_by.username|default:"Unknown" }}</span>
+                        <span class="order-note-date">{{ note.created_at|date:"d M Y H:i" }}</span>
+                        <button type="button" class="order-note-delete" onclick="deleteOrderNote({{ note.id }})" title="Delete note">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                    <div class="order-note-text">{{ note.text|linebreaksbr }}</div>
+                </div>
+                {% empty %}
+                <p class="order-notes-empty" id="order-notes-empty">No notes yet.</p>
+                {% endfor %}
+            </div>
+            <form class="order-note-form" id="order-note-form" onsubmit="submitOrderNote(event)">
+                {% csrf_token %}
+                <textarea class="order-note-input" id="order-note-input" name="text" rows="3" placeholder="Add a note…"></textarea>
+                <button type="submit" class="btn btn-sm btn-add-icon order-note-submit">
+                    <i class="bi bi-plus-lg"></i> Add Note
+                </button>
+            </form>
+        </div>
+    </div><!-- /.tab-panel-notes -->
+
+    <script>
+    (function () {
+        var ORDER_NOTE_ADD_URL = '{% url "add_order_note" order.id %}';
+        var CSRF_TOKEN = '{{ csrf_token }}';
+
+        window.submitOrderNote = function (e) {
+            e.preventDefault();
+            var input = document.getElementById('order-note-input');
+            var text = input.value.trim();
+            if (!text) return;
+            fetch(ORDER_NOTE_ADD_URL, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'text=' + encodeURIComponent(text),
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) return;
+                var empty = document.getElementById('order-notes-empty');
+                if (empty) empty.remove();
+                var list = document.getElementById('order-notes-list');
+                var n = data.note;
+                var div = document.createElement('div');
+                div.className = 'order-note-item';
+                div.id = 'note-' + n.id;
+                div.innerHTML =
+                    '<div class="order-note-meta">' +
+                    '<span class="order-note-author">' + (n.created_by || '') + '</span>' +
+                    '<span class="order-note-date">' + n.created_at + '</span>' +
+                    '<button type="button" class="order-note-delete" onclick="deleteOrderNote(' + n.id + ')" title="Delete note"><i class="bi bi-trash"></i></button>' +
+                    '</div>' +
+                    '<div class="order-note-text">' + n.text.replace(/\n/g, '<br>') + '</div>';
+                list.insertBefore(div, list.firstChild);
+                input.value = '';
+                // Update tab count badge
+                var tabBtn = document.querySelector('[data-tab="notes"] .tab-count');
+                var count = document.querySelectorAll('.order-note-item').length;
+                if (tabBtn) { tabBtn.textContent = count; }
+                else {
+                    var btn = document.querySelector('[data-tab="notes"]');
+                    if (btn) { var s = document.createElement('span'); s.className = 'tab-count'; s.textContent = count; btn.appendChild(s); }
+                }
+            });
+        };
+
+        window.deleteOrderNote = function (noteId) {
+            if (!confirm('Delete this note?')) return;
+            fetch('/order-note/' + noteId + '/delete/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': CSRF_TOKEN },
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) return;
+                var el = document.getElementById('note-' + noteId);
+                if (el) el.remove();
+                var remaining = document.querySelectorAll('.order-note-item').length;
+                var tabBtn = document.querySelector('[data-tab="notes"] .tab-count');
+                if (remaining === 0) {
+                    if (tabBtn) tabBtn.remove();
+                    var list = document.getElementById('order-notes-list');
+                    var p = document.createElement('p');
+                    p.className = 'order-notes-empty'; p.id = 'order-notes-empty'; p.textContent = 'No notes yet.';
+                    list.appendChild(p);
+                } else if (tabBtn) { tabBtn.textContent = remaining; }
+            });
+        };
+    })();
+    </script>
+    {% endif %}
+
     </div><!-- /.sale-page-main -->
     <div class="sale-page-summary-col">
 
@@ -2042,11 +2130,21 @@
         <!-- Quick Actions Card -->
         <div class="card sale-sidebar-card">
             <div class="card-header">
-                <h3><i class="bi bi-lightning-charge"></i> Quick Actions</h3>
+                <h3>Quick Actions</h3>
             </div>
             <div class="card-body padded">
                 <div class="sale-quick-actions">
+                    {% if order %}
+                    <!-- Documents -->
+                    <span class="qa-section-header">Documents</span>
+                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-sm btn-primary sale-sidebar-btn" title="Download Summary Document PDF">
+                        <i class="bi bi-file-earmark-pdf"></i> Summary Document
+                    </a>
+                    {% endif %}
+
                     {% if sale.anthill_activity_id or sale.anthill_customer_id or sale.customer %}
+                    <!-- Anthill -->
+                    <span class="qa-section-header">Anthill</span>
                     <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
                         <i class="bi bi-box-arrow-up-right"></i> Anthill Sale
                     </a>
@@ -2056,13 +2154,17 @@
                     </a>
                     {% endif %}
                     {% if sale.customer %}
+                    <!-- Customer -->
+                    <span class="qa-section-header">Customer</span>
                     <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
                         <i class="bi bi-person"></i> Customer Profile
                     </a>
                     {% endif %}
-                    <div class="sale-quick-action-divider"></div>
                     {% endif %}
+
                     {% if order %}
+                    <!-- Purchase Orders -->
+                    <span class="qa-section-header">Purchase Orders</span>
                     {% if order.boards_po %}
                     <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="openModal('addAdditionalPOModal')" title="Create an additional boards PO for this order">
                         <i class="bi bi-plus-circle"></i> Add Additional Boards PO
@@ -2083,10 +2185,6 @@
                         <i class="bi bi-link-45deg"></i> Link Existing Boards PO
                     </button>
                     {% endif %}
-                    <div class="sale-quick-action-divider"></div>
-                    <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-sm btn-outline-secondary sale-sidebar-btn" title="Download Summary Document PDF">
-                        <i class="bi bi-file-earmark-pdf"></i> Summary Document
-                    </a>
                     {% else %}
                     <form method="POST" action="{% url 'sale_create_order' sale.pk %}" style="width:100%;">
                         {% csrf_token %}

@@ -34,13 +34,28 @@ function autoSetDueDate(invoiceDateVal) {
 }
 let modalPOSearchTimer = null;
 
+// Show/hide the "open PO" preview button next to the PO search input
+function updateModalPoOpenBtn() {
+    const input = document.getElementById('new-pinv-po-search');
+    const btn = document.getElementById('new-pinv-po-open');
+    if (!input || !btn) return;
+    const poId = input.dataset.poId || '';
+    if (poId) {
+        btn.href = `/purchase-order/${encodeURIComponent(poId)}/`;
+        btn.style.display = '';
+    } else {
+        btn.removeAttribute('href');
+        btn.style.display = 'none';
+    }
+}
+
 function modalSearchPO(q) {
     clearTimeout(modalPOSearchTimer);
     const dd = document.getElementById('new-pinv-po-dropdown');
     const input = document.getElementById('new-pinv-po-search');
     if (!q || q.trim().length < 2) {
         if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
-        if (!q) input.dataset.poId = '';
+        if (!q) { input.dataset.poId = ''; updateModalPoOpenBtn(); }
         return;
     }
     modalPOSearchTimer = setTimeout(() => {
@@ -79,6 +94,7 @@ function selectModalPO(id, label, poType) {
     input.dataset.poId = id;
     input.dataset.poType = poType || 'supplier';
     dd.style.display = 'none';
+    updateModalPoOpenBtn();
 }
 
 function clearModalPO() {
@@ -86,6 +102,7 @@ function clearModalPO() {
     if (input) { input.value = ''; input.dataset.poId = ''; input.dataset.poType = ''; }
     const dd = document.getElementById('new-pinv-po-dropdown');
     if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+    updateModalPoOpenBtn();
 }
 
 function setModalCurrency(code) {
@@ -418,6 +435,16 @@ function addDayRateLine() {
     } else {
         row.querySelector('.pinv-line-rate').focus();
     }
+}
+
+function addSurchargeLine() {
+    addModalLine();
+    const rows = document.querySelectorAll('.pinv-line-row');
+    const row = rows[rows.length - 1];
+    row.dataset.isSurcharge = '1';
+    row.querySelector('.pinv-line-desc').value = 'Surcharge';
+    row.querySelector('.pinv-line-qty').value = '1';
+    row.querySelector('.pinv-line-rate').focus();
 }
 
 function recalcLineTotal(row) {
@@ -843,6 +870,7 @@ function submitInlineOPO() {
             if (poInput) {
                 poInput.value = data.po.reference;
                 poInput.dataset.poId = data.po.id;
+                if (typeof updateModalPoOpenBtn === 'function') updateModalPoOpenBtn();
             }
             // Also fill supplier in invoice modal if empty
             const invSupplier = document.getElementById('new-pinv-supplier');
@@ -905,6 +933,7 @@ function openInlinePoFromLines() {
             const input = document.getElementById('new-pinv-po-search');
             input.value = data.po.display_number;
             input.dataset.poId = data.po.workguru_id;
+            if (typeof updateModalPoOpenBtn === 'function') updateModalPoOpenBtn();
         } else {
             alert(data.error || 'Failed to create PO');
         }

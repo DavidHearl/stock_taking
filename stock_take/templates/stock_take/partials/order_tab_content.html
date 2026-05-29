@@ -22,150 +22,11 @@
                 <!-- Card 1: Sale Info (merged with Anthill) -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-sale">
-                        <h3>Sale Info</h3>
-                        <div class="card-header-actions">
-                            <button type="button" class="btn btn-sm btn-outline-success edit-btn-spacing" id="edit-sale-btn" onclick="toggleSaleEdit()">
-                                <i class="bi bi-pencil"></i> Edit
-                            </button>
-                            <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-primary btn-sm btn-summary-doc" title="Download Summary Document PDF">
-                                <i class="bi bi-file-earmark-pdf"></i> Summary
-                            </a>
-                        </div>
+                        <h3>Sale Details</h3>
                     </div>
                     <div class="card-body padded">
-                        <div id="sale-display" class="info-display">
-                            <div class="field-row-sb">
-                                <span class="field-label">Sale Number</span>
-                                <span class="field-value-medium" id="sale-number-display">
-                                    {{ order.sale_number }}
-                                    {% for sale in anthill_sales %}
-                                        <a href="{% url 'sale_detail' sale.pk %}" class="external-link-btn-inline" title="View Sale">
-                                            <i class="bi bi-eye"></i>
-                                        </a>
-                                        <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ order.sale_number }}" target="_blank" class="external-link-btn-inline" title="Open in Anthill">
-                                            <i class="bi bi-box-arrow-up-right"></i>
-                                        </a>
-                                        <span class="customer-active-badge {% if sale.status == 'won' %}active{% elif sale.status == 'dead' %}danger{% else %}inactive{% endif %}">{{ sale.status|default:"-" }}</span>
-                                    {% endfor %}
-                                </span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">System Number (CAD)</span>
-                                <span class="field-value" id="customer-number-display">{{ order.customer_number }}</span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Designer</span>
-                                <span class="field-value" id="designer-display">{{ order.designer|default:"-" }}</span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Order Date</span>
-                                <span class="field-value {% if not order.order_date %}field-value-missing{% endif %}" id="order-date-display">{{ order.order_date|date:"d M Y"|default:"Not set" }}</span>
-                            </div>
-                            <div class="field-row-sb">
-                                <span class="field-label">Fit Date</span>
-                                <span class="field-value {% if not order.fit_date %}field-value-missing{% endif %}" id="fit-date-display">
-                                    {{ order.fit_date|date:"d M Y"|default:"Not set" }}
-                                    {% if not order.fit_date and anthill_sales %}
-                                        <button type="button" class="btn-pull-anthill" onclick="pullAnthillDates({{ order.id }})" title="Pull dates from Anthill">
-                                            <i class="bi bi-cloud-download"></i>
-                                        </button>
-                                    {% endif %}
-                                </span>
-                            </div>
-                            {% if anthill_sales %}
-                            {% for sale in anthill_sales %}
-                            {% if sale.range_name %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Range</span>
-                                <span class="field-value">{{ sale.range_name }}</span>
-                            </div>
-                            {% endif %}
-                            {% if sale.door_type %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Doors</span>
-                                <span class="field-value">{{ sale.door_type }}</span>
-                            </div>
-                            {% endif %}
-                            {% if sale.source %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Source</span>
-                                <span class="field-value">{{ sale.source }}</span>
-                            </div>
-                            {% endif %}
-                            {% if sale.discount %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Discount</span>
-                                <span class="field-value">£{{ sale.discount|floatformat:2 }}</span>
-                            </div>
-                            {% endif %}
-                            {% if sale.goods_due_in %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Goods Due</span>
-                                <span class="field-value">{{ sale.goods_due_in }}</span>
-                            </div>
-                            {% endif %}
-                            {% if not order.fit_date and sale.fit_from_date %}
-                            <div class="field-row-sb">
-                                <span class="field-label">Anthill Fit Date</span>
-                                <span class="field-value">{{ sale.fit_from_date }}</span>
-                            </div>
-                            {% endif %}
-                            {% endfor %}
-                            {% endif %}
-                        </div>
-                        <div id="sale-edit" class="info-edit">
-                            <div>
-                                <label class="form-label">Sale Number</label>
-                                <input type="text" class="form-input" id="sale-number-input" value="{{ order.sale_number }}">
-                            </div>
-                            <div>
-                                <label class="form-label">System Number (CAD)</label>
-                                <input type="text" class="form-input" id="customer-number-input" value="{{ order.customer_number }}">
-                            </div>
-                            <div>
-                                <label class="form-label">Designer</label>
-                                <div class="flex-row-gap">
-                                    <select class="form-input flex-1" id="designer-input">
-                                        <option value="">Select designer...</option>
-                                        {% for designer in designers %}
-                                            <option value="{{ designer.id }}" {% if order.designer and order.designer.id == designer.id %}selected{% endif %}>{{ designer.name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                    <button type="button" class="btn btn-sm btn-success btn-icon-add" onclick="toggleAddDesignerInline()" title="Add new designer">
-                                        <i class="bi bi-plus-lg"></i>
-                                    </button>
-                                </div>
-                                <div id="new-designer-inline" class="new-person-inline">
-                                    <input type="text" id="new-designer-name-inline" class="form-input flex-1" placeholder="New designer name">
-                                    <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesignerInline()" title="Save designer">
-                                        <i class="bi bi-check-lg"></i>
-                                    </button>
-                                    <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesignerInline()" title="Cancel">
-                                        <i class="bi bi-x-lg"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="form-label">Order Date</label>
-                                <div class="flex-row-gap">
-                                    <input type="date" class="form-input flex-1" id="order-date-input" value="{{ order.order_date|date:'Y-m-d' }}">
-                                    <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('order-date-input').value=''" title="Clear order date">
-                                        <i class="bi bi-x-lg"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="form-label">Fit Date</label>
-                                <div class="flex-row-gap">
-                                    <input type="date" class="form-input flex-1" id="fit-date-input" value="{{ order.fit_date|date:'Y-m-d' }}">
-                                    <button type="button" class="btn btn-sm btn-outline-danger btn-icon-add" onclick="document.getElementById('fit-date-input').value=''" title="Clear fit date">
-                                        <i class="bi bi-x-lg"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <button type="button" class="btn btn-outline-success btn-sm" onclick="saveSaleInfo({{ order.id }})">
-                                <i class="bi bi-check-lg"></i> Save Sale Info
-                            </button>
+                        <div class="info-display">
+                            {% include "stock_take/partials/sale_details_card_body.html" with sd_sale=anthill_sales.0 sd_show_pull_btn=anthill_sales sd_editable=True sd_order_editable=True %}
                         </div>
                     </div>
                 </div>
@@ -312,70 +173,7 @@
                     <h3>{{ bpo_data.po.po_number }} : Board Details{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.is_angled %} <span class="badge badge-info">ANGLED</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% if bpo_data.purchase_order %}{% if bpo_data.purchase_order.status == 'Received' %} <span class="badge badge-received">Received {{ bpo_data.purchase_order.received_date|format_date_str }}</span>{% elif bpo_data.purchase_order.expected_date %} <span class="po-date-hint">Expected: {{ bpo_data.purchase_order.expected_date|format_date_str }}</span>{% endif %}{% endif %}{% endif %}</h3>
                 </div>
                 <div class="header-actions">
-                    <!-- File status indicators -->
-                    <div class="file-status-group">
-                        <span class="file-status" title="PNX File">
-                            PNX
-                            {% if bpo_data.po.file %}
-                                <i class="bi bi-check-circle-fill text-success"></i>
-                                <a href="{{ bpo_data.po.file.url }}" download class="btn-icon" title="Download PNX">
-                                    <i class="bi bi-download"></i>
-                                </a>
-                            {% else %}
-                                <i class="bi bi-x-circle-fill text-danger"></i>
-                            {% endif %}
-                        </span>
-                        <span class="file-status" title="CSV File">
-                            CSV
-                            {% if bpo_data.po.csv_file %}
-                                <i class="bi bi-check-circle-fill text-success"></i>
-                                <a href="{{ bpo_data.po.csv_file.url }}" download class="btn-icon" title="Download CSV">
-                                    <i class="bi bi-download"></i>
-                                </a>
-                            {% else %}
-                                <i class="bi bi-x-circle-fill text-danger"></i>
-                            {% endif %}
-                        </span>
-                        <span class="file-status" title="DWG Drawing File">
-                            DWG
-                            {% if bpo_data.po.dwg_file %}
-                                <i class="bi bi-check-circle-fill text-success"></i>
-                                <a href="{{ bpo_data.po.dwg_file.url }}" download class="btn-icon" title="Download DWG">
-                                    <i class="bi bi-download"></i>
-                                </a>
-                            {% else %}
-                                <i class="bi bi-x-circle-fill text-danger"></i>
-                            {% endif %}
-                            <label class="btn-icon btn-upload-dwg" title="Upload DWG file">
-                                <i class="bi bi-upload"></i>
-                                <input type="file" accept=".dwg,.DWG" style="display:none" onchange="uploadDWG({{ bpo_data.po.id }}, this)">
-                            </label>
-                        </span>
-                    </div>
                     <div class="section-actions">
-                    {% if order.customer_number %}
-                        <button type="button" class="btn btn-sm btn-generate-cad" onclick="analyzePNXGeneration(event, {{ bpo_data.po.id }})">
-                            <i class="bi bi-stars"></i> Generate
-                        </button>
-                    {% endif %}
-                        {% if bpo_data.pnx_items and bpo_data.po.po_number %}
-                            {% if bpo_data.purchase_order %}
-                                <button type="button" class="btn btn-sm btn-update-icon" onclick="updateBoardsPO({{ bpo_data.po.id }})" title="Update Files & PO">
-                                    <i class="bi bi-arrow-repeat"></i>
-                                </button>
-                            {% else %}
-                                <a href="{% url 'create_boards_purchase_order' order.id %}?boards_po_id={{ bpo_data.po.id }}" class="btn btn-sm btn-create-po"
-                                   onclick="return confirm('Create a local Purchase Order for {{ bpo_data.po.po_number }} and attach the board files?');"
-                                   title="Create a local PO and attach PNX/CSV files">
-                                    <i class="bi bi-file-earmark-plus"></i> Create PO
-                                </a>
-                            {% endif %}
-                        {% endif %}
-                        {% if not bpo_data.is_primary %}
-                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeAdditionalBoardsPO({{ order.id }}, {{ bpo_data.po.id }})" title="Remove this additional PO from the order">
-                                <i class="bi bi-x-lg"></i> Remove
-                            </button>
-                        {% endif %}
                         {% if bpo_data.pnx_items %}
                             <button type="button" class="btn btn-danger btn-sm btn-delete-selected" data-boards-po-id="{{ bpo_data.po.id }}" style="display: none;">
                                 <i class="bi bi-trash"></i> Delete Selected
@@ -387,30 +185,88 @@
                         <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" data-is-angled="{{ bpo_data.po.is_angled|yesno:'true,false' }}" data-po-number="{{ bpo_data.po.po_number }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
                             <i class="bi bi-plus-lg"></i>
                         </button>
+                        <div class="kebab-menu" id="kebab-{{ bpo_data.po.id }}">
+                            <button type="button" class="kebab-trigger" onclick="this.closest('.kebab-menu').classList.toggle('open'); event.stopPropagation();" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                <!-- Edging diagram (hover to preview) -->
+                                <span class="kebab-item kebab-item-hint edging-hint-trigger">
+                                    <i class="bi bi-info-circle"></i> Edging Diagram
+                                    <span class="edging-hint-popup">
+                                        <span class="edging-hint-title">Edging Diagram</span>
+                                        <svg width="120" height="160" viewBox="0 0 120 160" xmlns="http://www.w3.org/2000/svg">
+                                            <rect x="32" y="22" width="56" height="116" rx="3" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"/>
+                                            <text x="14" y="84" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E1</text>
+                                            <text x="106" y="84" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E3</text>
+                                            <text x="60" y="15" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E4</text>
+                                            <text x="60" y="155" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E2</text>
+                                        </svg>
+                                    </span>
+                                </span>
+                                <div class="kebab-divider"></div>
+                                <!-- File chips: PNX / CSV / DWG -->
+                                {% if bpo_data.po.file %}
+                                <a href="{{ bpo_data.po.file.url }}" download class="kebab-item">
+                                    <i class="bi bi-download"></i> Download PNX
+                                </a>
+                                {% else %}
+                                <span class="kebab-item kebab-item-disabled">
+                                    <i class="bi bi-x-circle"></i> PNX (missing)
+                                </span>
+                                {% endif %}
+                                {% if bpo_data.po.csv_file %}
+                                <a href="{{ bpo_data.po.csv_file.url }}" download class="kebab-item">
+                                    <i class="bi bi-download"></i> Download CSV
+                                </a>
+                                {% else %}
+                                <span class="kebab-item kebab-item-disabled">
+                                    <i class="bi bi-x-circle"></i> CSV (missing)
+                                </span>
+                                {% endif %}
+                                {% if bpo_data.po.dwg_file %}
+                                <a href="{{ bpo_data.po.dwg_file.url }}" download class="kebab-item">
+                                    <i class="bi bi-download"></i> Download DWG
+                                </a>
+                                {% else %}
+                                <label class="kebab-item">
+                                    <i class="bi bi-upload"></i> Upload DWG
+                                    <input type="file" accept=".dwg,.DWG" style="display:none" onchange="uploadDWG({{ bpo_data.po.id }}, this)">
+                                </label>
+                                {% endif %}
+                                <div class="kebab-divider"></div>
+                                {% if order.customer_number %}
+                                <button type="button" class="kebab-item" onclick="this.closest('.kebab-menu').classList.remove('open'); analyzePNXGeneration(event, {{ bpo_data.po.id }})">
+                                    <i class="bi bi-stars"></i> Generate CAD
+                                </button>
+                                {% endif %}
+                                {% if bpo_data.pnx_items and bpo_data.po.po_number %}
+                                    {% if bpo_data.purchase_order %}
+                                    <button type="button" class="kebab-item" onclick="this.closest('.kebab-menu').classList.remove('open'); updateBoardsPO({{ bpo_data.po.id }})">
+                                        <i class="bi bi-arrow-repeat"></i> Update Files & PO
+                                    </button>
+                                    {% else %}
+                                    <a href="{% url 'create_boards_purchase_order' order.id %}?boards_po_id={{ bpo_data.po.id }}" class="kebab-item"
+                                       onclick="return confirm('Create a local Purchase Order for {{ bpo_data.po.po_number }} and attach the board files?');">
+                                        <i class="bi bi-file-earmark-plus"></i> Create PO
+                                    </a>
+                                    {% endif %}
+                                {% endif %}
+                                {% if not bpo_data.is_primary %}
+                                <button type="button" class="kebab-item kebab-item-danger" onclick="this.closest('.kebab-menu').classList.remove('open'); removeAdditionalBoardsPO({{ order.id }}, {{ bpo_data.po.id }})">
+                                    <i class="bi bi-x-lg"></i> Remove PO
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="card-body">
                 {% if bpo_data.pnx_items %}
-                    <div class="pnx-items-header">
-                        <p><strong>PNX Items for this Order ({{ bpo_data.pnx_items|length }} items):</strong>
-                            <span class="edging-hint-trigger">
-                                <i class="bi bi-info-circle"></i>
-                                <span class="edging-hint-popup">
-                                    <span class="edging-hint-title">Edging Diagram</span>
-                                    <svg width="120" height="160" viewBox="0 0 120 160" xmlns="http://www.w3.org/2000/svg">
-                                        <rect x="32" y="22" width="56" height="116" rx="3" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"/>
-                                        <text x="14" y="84" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E1</text>
-                                        <text x="106" y="84" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E3</text>
-                                        <text x="60" y="15" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E4</text>
-                                        <text x="60" y="155" text-anchor="middle" fill="var(--primary-color)" font-size="14" font-weight="600">E2</text>
-                                    </svg>
-                                </span>
-                            </span>
-                        </p>
-                    </div>
+                    <div class="boards-table-wrap">
                     <div class="table-container">
-                        <table class="table">
+                        <table class="table boards-table">
                             <thead>
                                 <tr>
                                     <th><input type="checkbox" class="select-all-pnx" data-boards-po-id="{{ bpo_data.po.id }}"></th>
@@ -430,10 +286,9 @@
                                     <th title="PRFID4">E4</th>
                                     <th title="PRFID2">E2</th>
                                     <th class="col-stock">Stock</th>
-                                    <th>Cost</th>
+                                    <th class="col-cost">Cost</th>
                                     {% if bpo_data.po.is_angled %}<th style="width:36px;"></th>{% endif %}
-                                    <th style="width:36px;"></th>
-                                    <th style="width:36px;"></th>
+                                    <th style="width:48px;"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -465,7 +320,12 @@
                                                data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.barcode }}">
                                     </td>
-                                    <td>
+                                    <td class="matname-cell">
+                                        {% if item.colour_image_url %}
+                                        <img src="{{ item.colour_image_url }}" class="matname-swatch" alt="" loading="lazy">
+                                        {% else %}
+                                        <span class="matname-swatch matname-swatch-empty"></span>
+                                        {% endif %}
                                         <input type="text" 
                                                class="quantity-input pnx-text-input" 
                                                value="{{ item.matname }}"
@@ -570,7 +430,7 @@
                                     <td class="stock-qty-cell {% if item.is_standard_board %}{% if item.stock_quantity == 0 %}stock-zero{% elif item.stock_quantity < 5 %}stock-low{% endif %}{% endif %}">
                                         {% if item.is_standard_board %}{{ item.stock_quantity }}{% else %}-{% endif %}
                                     </td>
-                                    <td>£{{ item.calculated_cost|floatformat:2 }}</td>
+                                    <td class="col-cost">£{{ item.calculated_cost|floatformat:2 }}</td>
                                     {% if bpo_data.po.is_angled %}
                                     <td style="text-align:center;">
                                         {% if item.left_height %}
@@ -581,28 +441,34 @@
                                         {% endif %}
                                     </td>
                                     {% endif %}
-                                    <td style="text-align:center;">
-                                        <button type="button" class="btn-board-copy" title="Duplicate row"
+                                    <td class="board-actions-cell">
+                                        <button type="button" class="btn-row-icon btn-board-copy" title="Duplicate row"
                                                 onclick="copyBoardRow({{ item.id }}, {{ bpo_data.po.id }})">
                                             <i class="bi bi-copy"></i>
-                                        </button>
-                                    </td>
-                                    <td style="text-align:center;">
-                                        <button type="button" class="btn-row-icon btn-board-edit" title="Edit row"
+                                        </button><button type="button" class="btn-row-icon btn-board-edit" title="Edit row"
                                                 onclick="toggleBoardRowEdit(this)">
                                             <i class="bi bi-pencil"></i>
                                         </button>
                                     </td>
                                 </tr>
                                 {% endfor %}
-                                <tr class="total-row">
-                                    <td colspan="{% if bpo_data.po.is_angled %}14{% else %}11{% endif %}"><strong>Total Cost:</strong></td>
-                                    <td><strong>£{{ bpo_data.total_cost|floatformat:2 }}</strong></td>
-                                    <td></td>
-                                    <td></td>
-                                </tr>
                             </tbody>
+                            <tfoot>
+                                <tr class="board-total-row" aria-hidden="true">
+                                    <td colspan="100" class="board-total-cell">
+                                        <div class="board-total-inner">
+                                            <span class="boards-total-badge boards-count-badge">
+                                                <span class="boards-total-label">Items</span>{{ bpo_data.pnx_items|length }}
+                                            </span>
+                                            <span class="boards-total-badge">
+                                                <span class="boards-total-label">Total</span>£{{ bpo_data.total_cost|floatformat:2 }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tfoot>
                         </table>
+                    </div>
                     </div>
                 {% else %}
                     <p class="text-muted empty-state-text">No board items yet. Use "Add Board" or "Generate PNX - CAD" to add items.</p>
@@ -664,8 +530,9 @@
                     
                     <!-- Existing Accessories -->
                     {% if non_glass_accessories %}
+                    <div class="boards-table-wrap">
                     <div class="table-container">
-                        <table class="table" id="accessories-table">
+                        <table class="table accessories-total-table" id="accessories-table">
                             <thead>
                                 <tr>
                                     <th style="width: 30px;"><input type="checkbox" id="accessory-select-all" title="Select all"></th>
@@ -707,7 +574,7 @@
                                             <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,1)" tabindex="-1">+</button>
                                         </div>
                                     </td>
-                                    <td>£{{ accessory.cost_price|floatformat:2 }}</td>
+                                    <td class="col-cost">£{{ accessory.cost_price|floatformat:2 }}</td>
                                     <td>
                                         {% if accessory.stock_item %}
                                             {% with remaining=accessory|calculate_remaining %}
@@ -746,13 +613,23 @@
                                     </td>
                                 </tr>
                                 {% endfor %}
-                                <tr class="table-total-row">
-                                    <td colspan="4" class="text-right">Total:</td>
-                                    <td>£{{ non_glass_accessories|sum_accessory_costs }}</td>
-                                    <td colspan="{% if has_os_door_accessories %}3{% else %}1{% endif %}"></td>
-                                </tr>
                             </tbody>
+                            <tfoot>
+                                <tr class="board-total-row" aria-hidden="true">
+                                    <td colspan="100" class="board-total-cell">
+                                        <div class="board-total-inner">
+                                            <span class="boards-total-badge boards-count-badge">
+                                                <span class="boards-total-label">Items</span>{{ non_glass_accessories|length }}
+                                            </span>
+                                            <span class="boards-total-badge">
+                                                <span class="boards-total-label">Total</span>£{{ non_glass_accessories|sum_accessory_costs }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tfoot>
                         </table>
+                    </div>
                     </div>
                     {% else %}
                     <p class="text-muted">No accessories added yet.</p>
@@ -775,6 +652,9 @@
                     </h3>
                 </div>
                 <div class="header-actions">
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-osd-selected-unlinked" title="Delete selected">
+                        <i class="bi bi-trash"></i> <span>0</span>
+                    </button>
                     <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
                         <i class="bi bi-plus-lg"></i>
                     </button>
@@ -783,13 +663,13 @@
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <div class="osd-kebab-menu">
-                            <a href="{% url 'os_door_options' %}" class="osd-kebab-item" target="_blank" rel="noopener"><i class="bi bi-collection"></i> Style &amp; Colour Library</a>
-                            <button type="button" class="osd-kebab-item" onclick="toggleApoPoSearch('primary-os-doors-po-search'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
-                                <i class="bi bi-link-45deg"></i> Link PO
-                            </button>
                             <button type="button" class="osd-kebab-item" onclick="createOSDoorsPO({{ order.id }}); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
                                 <i class="bi bi-file-earmark-plus"></i> Create PO
                             </button>
+                            <button type="button" class="osd-kebab-item" onclick="toggleApoPoSearch('primary-os-doors-po-search'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-link-45deg"></i> Link PO
+                            </button>
+                            <a href="{% url 'os_door_options' %}" class="osd-kebab-item" target="_blank" rel="noopener"><i class="bi bi-collection"></i> Style &amp; Colour Library</a>
                             {% if order.os_doors_required %}
                             <button type="button" class="osd-kebab-item danger" onclick="openModal('confirmRemoveOSDoorsModal'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
                                 <i class="bi bi-x-lg"></i> Remove OS Doors
@@ -811,7 +691,108 @@
                 </div>
             </div>
             <div class="card-body">
-                <p class="text-muted">No OS doors added yet. Link or create a PO to get started.</p>
+                {% if order.os_doors.all %}
+                <div class="alert alert-info" style="margin-bottom: 1rem;">
+                    <i class="bi bi-info-circle"></i>
+                    {{ order.os_doors.count }} door{{ order.os_doors.count|pluralize }} saved but not linked to a PO — create or link a PO above to organise them.
+                </div>
+                <div class="table-container">
+                    <table class="table" id="os-doors-table-unlinked">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="osd-select-all-unlinked" title="Select all"></th>
+                                <th>Door Style</th>
+                                <th style="white-space: nowrap;">Style Colour</th>
+                                <th>Height</th>
+                                <th>Width</th>
+                                <th>Qty</th>
+                                <th>Cost Price</th>
+                                <th>Total Cost</th>
+                                <th style="width: 52px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for os_door in order.os_doors.all %}
+                            {% with style_key=os_door.door_style|lower sc_key=os_door.style_colour|lower %}
+                            <tr data-os-door-id="{{ os_door.id }}">
+                                <td><input type="checkbox" class="checkbox-input osd-select" data-osd-id="{{ os_door.id }}" data-osd-table="unlinked"></td>
+                                <td>
+                                    <div class="osd-cell-with-swatch">
+                                        <span class="osd-display osd-display-door-style">{{ os_door.door_style }}</span>
+                                        {% with style_img=os_door_style_images|get_item:style_key %}{% if style_img %}<span class="osd-cam-wrap"><i class="bi bi-camera osd-cam-icon"></i><img class="osd-cam-preview" src="{{ style_img }}" alt=""></span>{% endif %}{% endwith %}
+                                    </div>
+                                    <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}" style="display:none;">
+                                </td>
+                                <td class="osd-sc-td">
+                                    <div class="osd-cell-with-swatch">
+                                        {% with sc_img=os_door_colour_images|get_item:sc_key %}{% if sc_img %}<img class="osd-colour-swatch" src="{{ sc_img }}" alt="">{% endif %}{% endwith %}
+                                        <span class="osd-display osd-display-style-colour">{{ os_door.style_colour }}</span>
+                                    </div>
+                                    <input type="text" class="osd-edit-input osd-input-style-colour" value="{{ os_door.style_colour }}" style="display:none;">
+                                </td>
+                                <td>
+                                    <span class="osd-display osd-display-height">{{ os_door.height|floatformat:0 }}</span>
+                                    <input type="number" class="osd-edit-input osd-input-height no-pnx-spinner" value="{{ os_door.height|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                </td>
+                                <td>
+                                    <span class="osd-display osd-display-width">{{ os_door.width|floatformat:0 }}</span>
+                                    <input type="number" class="osd-edit-input osd-input-width no-pnx-spinner" value="{{ os_door.width|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                </td>
+                                <td>
+                                    <div class="qty-stepper-input">
+                                        <button type="button" class="qty-step-btn" onclick="osDoorAdjustQty({{ os_door.id }}, -1)" tabindex="-1">&#8722;</button>
+                                        <input type="number" class="qty-step-value os-door-qty-input no-pnx-spinner" data-os-door-id="{{ os_door.id }}" value="{{ os_door.quantity }}" min="1" step="1" onchange="osDoorQtyChanged({{ os_door.id }})">
+                                        <button type="button" class="qty-step-btn" onclick="osDoorAdjustQty({{ os_door.id }}, 1)" tabindex="-1">+</button>
+                                    </div>
+                                </td>
+                                <td class="os-door-cost-cell">
+                                    <span class="osd-display os-door-cost-display">£{{ os_door.cost_price }}</span>
+                                    <input type="number" step="0.01" min="0" class="osd-edit-input os-door-cost-input-inline os-door-cost-input no-pnx-spinner" value="{{ os_door.cost_price }}" style="display:none;">
+                                </td>
+                                <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
+                                    £{{ os_door.cost_price|multiply:os_door.quantity }}
+                                </td>
+                                <td style="text-align: right;">
+                                    <div class="os-door-view-actions">
+                                        <button type="button" class="btn-row-icon" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button type="button" class="btn-row-icon" title="Delete" onclick="deleteOsDoor({{ os_door.id }})">
+                                            <i class="bi bi-trash" style="color: var(--danger-color);"></i>
+                                        </button>
+                                    </div>
+                                    <div class="os-door-edit-actions" style="display:none;">
+                                        <button type="button" class="btn-row-save" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                        <button type="button" class="btn-row-cancel" title="Cancel" onclick="cancelOsDoorEdit({{ os_door.id }})">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endwith %}
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr class="board-total-row" aria-hidden="true">
+                                <td colspan="100" class="board-total-cell">
+                                    <div class="board-total-inner">
+                                        <span class="boards-total-badge boards-count-badge">
+                                            <span class="boards-total-label">Items</span><span class="osdf-count">0</span>
+                                        </span>
+                                        <span class="boards-total-badge">
+                                            <span class="boards-total-label">Total</span><strong class="os-doors-table-total">£0.00</strong>
+                                        </span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No OS doors added yet. Create or link a PO above to get started.</p>
+                {% endif %}
             </div>
         </div>
         {% endif %}
@@ -833,6 +814,9 @@
                     </h3>
                 </div>
                 <div class="header-actions">
+                    <button type="button" class="btn btn-sm btn-danger hidden" id="delete-osd-selected-{{ apo.workguru_id }}" title="Delete selected">
+                        <i class="bi bi-trash"></i> <span>0</span>
+                    </button>
                     <button type="button" class="btn btn-sm btn-update-po" title="Sync to Purchase Order"
                             onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}', this)">
                         <i class="bi bi-arrow-repeat"></i> Update PO
@@ -885,8 +869,9 @@
                     <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
                         <thead>
                             <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="osd-select-all-{{ apo.workguru_id }}" title="Select all"></th>
                                 <th>Door Style</th>
-                                <th>Style Colour</th>
+                                <th style="white-space: nowrap;">Style Colour</th>
                                 <th>Height</th>
                                 <th>Width</th>
                                 <th>Qty</th>
@@ -900,6 +885,7 @@
                             {% if os_door.po_number == apo.display_number or apo.display_number == order.os_doors_po and not os_door.po_number %}
                             {% with style_key=os_door.door_style|lower sc_key=os_door.style_colour|lower %}
                             <tr data-os-door-id="{{ os_door.id }}">
+                                <td><input type="checkbox" class="checkbox-input osd-select" data-osd-id="{{ os_door.id }}" data-osd-table="{{ apo.workguru_id }}"></td>
                                 <td>
                                     <div class="osd-cell-with-swatch">
                                         <span class="osd-display osd-display-door-style">{{ os_door.door_style }}</span>
@@ -907,7 +893,7 @@
                                     </div>
                                     <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}" style="display:none;">
                                 </td>
-                                <td>
+                                <td class="osd-sc-td">
                                     <div class="osd-cell-with-swatch">
                                         {% with sc_img=os_door_colour_images|get_item:sc_key %}{% if sc_img %}<img class="osd-colour-swatch" src="{{ sc_img }}" alt="">{% endif %}{% endwith %}
                                         <span class="osd-display osd-display-style-colour">{{ os_door.style_colour }}</span>
@@ -937,9 +923,14 @@
                                     £{{ os_door.cost_price|multiply:os_door.quantity }}
                                 </td>
                                 <td style="text-align: right;">
-                                    <button type="button" class="btn-row-icon" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
+                                    <div class="os-door-view-actions">
+                                        <button type="button" class="btn-row-icon" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button type="button" class="btn-row-icon" title="Delete" onclick="deleteOsDoor({{ os_door.id }})">
+                                            <i class="bi bi-trash" style="color: var(--danger-color);"></i>
+                                        </button>
+                                    </div>
                                     <div class="os-door-edit-actions" style="display:none;">
                                         <button type="button" class="btn-row-save" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
                                             <i class="bi bi-check-lg"></i>
@@ -955,18 +946,15 @@
                             {% endfor %}
                         </tbody>
                         <tfoot>
-                            <tr class="os-doors-summary-row">
-                                <td colspan="8" style="padding: 0; border: none;">
-                                    <div class="os-doors-summary-footer">
-                                        <div class="osdf-meta">
-                                            <i class="bi bi-receipt"></i>
-                                            <span class="osdf-count">0 items</span>
-                                            <span class="osdf-po-name">{{ apo.display_number }}: OS Doors</span>
-                                        </div>
-                                        <div class="osdf-totals">
-                                            <span class="osdf-label">Total Cost</span>
-                                            <strong class="os-doors-table-total osdf-amount">£0.00</strong>
-                                        </div>
+                            <tr class="board-total-row" aria-hidden="true">
+                                <td colspan="100" class="board-total-cell">
+                                    <div class="board-total-inner">
+                                        <span class="boards-total-badge boards-count-badge">
+                                            <span class="boards-total-label">Items</span><span class="osdf-count">0</span>
+                                        </span>
+                                        <span class="boards-total-badge">
+                                            <span class="boards-total-label">Total</span><strong class="os-doors-table-total">£0.00</strong>
+                                        </span>
                                     </div>
                                 </td>
                             </tr>
@@ -2793,20 +2781,17 @@ function toggleCustomerEdit() {
     }
 }
 
-// Toggle Sale Edit Mode
+// Toggle Sale Edit Mode (driven by entity hero card edit button)
 function toggleSaleEdit() {
     const display = document.getElementById('sale-display');
     const edit = document.getElementById('sale-edit');
-    const btn = document.getElementById('edit-sale-btn');
-    
+    if (!display || !edit) return;
     if (display.style.display === 'none') {
         display.style.display = 'flex';
         edit.style.display = 'none';
-        btn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
     } else {
         display.style.display = 'none';
         edit.style.display = 'flex';
-        btn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel';
     }
 }
 
@@ -3830,7 +3815,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const footerCell = table.querySelector('tfoot .os-doors-table-total');
         if (footerCell) footerCell.textContent = '£' + sum.toFixed(2);
         const countEl = table.querySelector('.osdf-count');
-        if (countEl) countEl.textContent = count + ' item' + (count !== 1 ? 's' : '');
+        if (countEl) countEl.textContent = count;
     }
 
     // Initialise all table totals on load
@@ -4298,42 +4283,49 @@ async function submitParsedOSDoor() {
     let added = 0;
     let failed = 0;
 
+    const errors = [];
+
     for (let i = 0; i < items.length; i++) {
         const item = items[i];
         progressEl.textContent = 'Adding ' + (i + 1) + ' of ' + items.length + '...';
 
         const formData = new FormData();
-        formData.append('door_style',       item.doorStyle);
-        formData.append('style_colour',     item.styleColour);
-        formData.append('item_description', item.itemDescription);
+        formData.append('door_style',       item.doorStyle || '');
+        formData.append('style_colour',     item.styleColour || '');
+        formData.append('item_description', item.itemDescription || '');
         formData.append('height',           item.height || 0);
         formData.append('width',            item.width  || 0);
-        formData.append('colour',           item.colour);
-        formData.append('quantity',         item.quantity);
+        formData.append('colour',           item.colour || '');
+        formData.append('quantity',         item.quantity || 1);
         formData.append('cost_price',       item.costPrice || 0);
         if (_osdActivePo) formData.append('po_number', _osdActivePo);
 
         try {
             const resp = await fetch('{% url "order_details" order.id %}', {
                 method: 'POST',
-                headers: { 'X-CSRFToken': csrfToken },
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
                 body: formData,
-                redirect: 'follow'
             });
-            if (resp.ok || resp.redirected) {
+            const data = await resp.json();
+            if (data.success) {
                 added++;
             } else {
                 failed++;
+                errors.push('Door ' + (i + 1) + ': ' + (data.errors || 'Unknown error'));
             }
         } catch (err) {
             failed++;
+            errors.push('Door ' + (i + 1) + ': ' + err.message);
         }
     }
 
     if (failed > 0) {
-        showAlert('Added ' + added + ' door(s), ' + failed + ' failed. Reloading...', 'warning');
+        showAlert('Added ' + added + ' door(s), ' + failed + ' failed:\n' + errors.join('\n'), 'danger');
     }
-    setTimeout(function() { location.reload(); }, 800);
+    setTimeout(function() { location.reload(); }, failed > 0 ? 3000 : 400);
 }
 
 // Track which boards PO is currently being acted on
@@ -7080,9 +7072,9 @@ function startOsDoorEdit(osDoorId) {
     row.classList.add('os-door-editing');
     row.querySelectorAll('.osd-display').forEach(el => el.style.display = 'none');
     row.querySelectorAll('.osd-edit-input').forEach(el => { el.style.display = ''; });
-    const viewBtn = row.querySelector('.btn-row-icon');
+    const viewActions = row.querySelector('.os-door-view-actions');
     const editActions = row.querySelector('.os-door-edit-actions');
-    if (viewBtn) viewBtn.style.display = 'none';
+    if (viewActions) viewActions.style.display = 'none';
     if (editActions) editActions.style.display = 'flex';
     const firstInput = row.querySelector('.osd-edit-input');
     if (firstInput) { firstInput.focus(); firstInput.select(); }
@@ -7107,9 +7099,9 @@ function cancelOsDoorEdit(osDoorId) {
     });
     row.querySelectorAll('.osd-display').forEach(el => el.style.display = '');
     row.querySelectorAll('.osd-edit-input').forEach(el => el.style.display = 'none');
-    const viewBtn = row.querySelector('.btn-row-icon');
+    const viewActions = row.querySelector('.os-door-view-actions');
     const editActions = row.querySelector('.os-door-edit-actions');
-    if (viewBtn) viewBtn.style.display = '';
+    if (viewActions) viewActions.style.display = '';
     if (editActions) editActions.style.display = 'none';
 }
 
@@ -7153,9 +7145,9 @@ function saveOsDoorInlineEdit(osDoorId) {
             if (costDisplay) costDisplay.textContent = '£' + changes.cost_price.toFixed(2);
             row.querySelectorAll('.osd-display').forEach(el => el.style.display = '');
             row.querySelectorAll('.osd-edit-input').forEach(el => el.style.display = 'none');
-            const viewBtn = row.querySelector('.btn-row-icon');
+            const viewActions = row.querySelector('.os-door-view-actions');
             const editActions = row.querySelector('.os-door-edit-actions');
-            if (viewBtn) viewBtn.style.display = '';
+            if (viewActions) viewActions.style.display = '';
             if (editActions) editActions.style.display = 'none';
             recalcOsDoorTotal(row);
             showAlert('Saved', 'success');
@@ -7165,6 +7157,92 @@ function saveOsDoorInlineEdit(osDoorId) {
     })
     .catch(() => showAlert('Error saving changes', 'danger'));
 }
+
+function deleteOsDoor(osDoorId) {
+    if (!confirm('Delete this OS door? This cannot be undone.')) return;
+    fetch('/stock-take/delete-os-doors-batch/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ ids: [osDoorId] })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+            if (row) row.remove();
+            showAlert('Door deleted.', 'success');
+        } else {
+            showAlert('Error: ' + (result.error || ''), 'danger');
+        }
+    })
+    .catch(() => showAlert('Error deleting door', 'danger'));
+}
+
+// ─── OS Doors select / bulk delete ───────────────────────────────────────────
+function updateOSDActionButtons(tableKey) {
+    const checked = document.querySelectorAll(`.osd-select[data-osd-table="${tableKey}"]:checked`);
+    const count = checked.length;
+    const deleteBtn = document.getElementById(`delete-osd-selected-${tableKey}`);
+    const countSpan = deleteBtn ? deleteBtn.querySelector('span') : null;
+    if (countSpan) countSpan.textContent = count;
+    if (deleteBtn) {
+        if (count > 0) deleteBtn.classList.remove('hidden');
+        else deleteBtn.classList.add('hidden');
+    }
+    const all = document.querySelectorAll(`.osd-select[data-osd-table="${tableKey}"]`);
+    const selectAll = document.getElementById(`osd-select-all-${tableKey}`);
+    if (selectAll && all.length > 0) {
+        selectAll.checked = count === all.length;
+        selectAll.indeterminate = count > 0 && count < all.length;
+    }
+}
+document.addEventListener('change', function(e) {
+    if (e.target.matches('.osd-select')) {
+        updateOSDActionButtons(e.target.getAttribute('data-osd-table'));
+    }
+    if (e.target.id && e.target.id.startsWith('osd-select-all-')) {
+        const tableKey = e.target.id.replace('osd-select-all-', '');
+        document.querySelectorAll(`.osd-select[data-osd-table="${tableKey}"]`).forEach(cb => cb.checked = e.target.checked);
+        updateOSDActionButtons(tableKey);
+    }
+});
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('[id^="delete-osd-selected-"]');
+    if (!btn) return;
+    const tableKey = btn.id.replace('delete-osd-selected-', '');
+    const checked = document.querySelectorAll(`.osd-select[data-osd-table="${tableKey}"]:checked`);
+    const ids = Array.from(checked).map(cb => cb.getAttribute('data-osd-id'));
+    if (ids.length === 0) return;
+    showDeleteConfirm(`Delete ${ids.length} OS door(s)?`, () => {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Deleting...';
+        fetch('/stock-take/delete-os-doors-batch/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+            body: JSON.stringify({ ids: ids })
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (result.success) {
+                showAlert(`${result.deleted} door(s) deleted.`, 'success');
+                location.reload();
+            } else {
+                showAlert('Error: ' + (result.error || ''), 'danger');
+                btn.disabled = false;
+                btn.innerHTML = `<i class="bi bi-trash"></i> <span>${ids.length}</span>`;
+            }
+        })
+        .catch(() => {
+            showAlert('Error deleting doors', 'danger');
+            btn.disabled = false;
+            btn.innerHTML = `<i class="bi bi-trash"></i> <span>${ids.length}</span>`;
+        });
+    });
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Add Additional Boards PO to an order (via modal with DWG upload)
 let _addPOSearchTimer = null;
@@ -7809,6 +7887,15 @@ function openBoardEggerLightbox(url) {
 function closeBoardEggerLightbox() {
     document.getElementById('boardEggerLightbox').style.display = 'none';
 }
+
+// Close boards kebab menus when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.kebab-menu')) {
+        document.querySelectorAll('.kebab-menu.open').forEach(function(k) {
+            k.classList.remove('open');
+        });
+    }
+});
 </script>
 
 <!-- Claim Document Search Modal -->

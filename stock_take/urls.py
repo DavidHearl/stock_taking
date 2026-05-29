@@ -45,12 +45,15 @@ from .accounts_payable_views import (
     create_invoice_from_email,
     link_existing_invoice_to_email,
     parse_email_attachment,
+    scan_email_attachment_po,
     ignore_email,
+    delete_email,
     unprocess_email,
     mark_email_filed,
     download_mailbox_attachment,
     manage_exemptions,
     manage_email_filters,
+    manage_supplier_rules,
     bulk_email_action,
 )
 from .overhead_po_views import (
@@ -142,6 +145,7 @@ urlpatterns = [
     path('accounts-payable/sync/', sync_mailbox, name='sync_mailbox'),
     path('accounts-payable/exemptions/', manage_exemptions, name='manage_exemptions'),
     path('accounts-payable/email-filters/', manage_email_filters, name='manage_email_filters'),
+    path('accounts-payable/supplier-rules/', manage_supplier_rules, name='manage_supplier_rules'),
     path('accounts-payable/bulk/', bulk_email_action, name='bulk_email_action'),
     path('accounts-payable/<int:email_id>/create-invoice/', create_invoice_from_email, name='create_invoice_from_email'),
     path('accounts-payable/<int:email_id>/link-invoice/', link_existing_invoice_to_email, name='link_existing_invoice_to_email'),
@@ -150,6 +154,8 @@ urlpatterns = [
     path('accounts-payable/<int:email_id>/file/', mark_email_filed, name='mark_email_filed'),
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/', download_mailbox_attachment, name='download_mailbox_attachment'),
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
+    path('accounts-payable/<int:email_id>/scan-po/', scan_email_attachment_po, name='scan_email_attachment_po'),
+    path('accounts-payable/<int:email_id>/delete/', delete_email, name='delete_email'),
 
     # Overhead Purchase Orders
     path('overhead-purchase-orders/', overhead_po_list, name='overhead_po_list'),
@@ -443,6 +449,8 @@ urlpatterns = [
     path('order/<int:order_id>/add-substitution/', views.add_substitution, name='add_substitution'),
     path('order/<int:order_id>/add-skip-item/', views.add_skip_item, name='add_skip_item'),
     path('skip-item/delete/<int:skip_item_id>/', views.delete_skip_item, name='delete_skip_item'),
+    path('order/<int:order_id>/add-note/', views.add_order_note, name='add_order_note'),
+    path('order-note/<int:note_id>/delete/', views.delete_order_note, name='delete_order_note'),
     path('stock-take/search-stock-items/', views.search_stock_items, name='search_stock_items'),
     path('stock-take/swap-accessory/<int:accessory_id>/', views.swap_accessory, name='swap_accessory'),
     path('stock-take/update-accessory-quantities/', views.update_accessory_quantities, name='update_accessory_quantities'),
