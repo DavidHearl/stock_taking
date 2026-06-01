@@ -48,8 +48,8 @@
             <div class="entity-hero-col">
                 <span class="entity-hero-col-label">Phone</span>
                 <div class="entity-hero-col-value-row">
-                    <span class="entity-hero-col-value"><i class="bi bi-telephone"></i> {{ hero_phone }}</span>
-                    <button class="entity-hero-copy-btn" onclick="navigator.clipboard.writeText('{{ hero_phone }}')" title="Copy phone number"><i class="bi bi-copy"></i></button>
+                    <span class="entity-hero-col-value">{{ hero_phone }}</span>
+                    <button type="button" class="entity-hero-copy-btn" data-copy-text="{{ hero_phone }}" onclick="copyEntityHeroField(this)" title="Copy phone number" aria-label="Copy phone number"><i class="bi bi-copy"></i></button>
                 </div>
             </div>
             {% endif %}
@@ -57,15 +57,18 @@
             <div class="entity-hero-col">
                 <span class="entity-hero-col-label">Email</span>
                 <div class="entity-hero-col-value-row">
-                    <span class="entity-hero-col-value entity-hero-col-email"><i class="bi bi-envelope"></i> {{ hero_email }}</span>
-                    <button class="entity-hero-copy-btn" onclick="navigator.clipboard.writeText('{{ hero_email }}')" title="Copy email address"><i class="bi bi-copy"></i></button>
+                    <span class="entity-hero-col-value entity-hero-col-email">{{ hero_email }}</span>
+                    <button type="button" class="entity-hero-copy-btn" data-copy-text="{{ hero_email }}" onclick="copyEntityHeroField(this)" title="Copy email address" aria-label="Copy email address"><i class="bi bi-copy"></i></button>
                 </div>
             </div>
             {% endif %}
             {% if hero_address_1 or hero_city %}
             <div class="entity-hero-col">
                 <span class="entity-hero-col-label">Address</span>
-                <span class="entity-hero-col-value"><i class="bi bi-geo-alt"></i> {{ hero_address_1 }}{% if hero_address_2 %}, {{ hero_address_2 }}{% endif %}{% if hero_city %}, {{ hero_city }}{% endif %}{% if hero_postcode %}, {{ hero_postcode }}{% endif %}</span>
+                <div class="entity-hero-col-value-row">
+                    <span class="entity-hero-col-value entity-hero-col-address">{{ hero_address_1 }}{% if hero_address_2 %}, {{ hero_address_2 }}{% endif %}{% if hero_city %}, {{ hero_city }}{% endif %}{% if hero_postcode %}, {{ hero_postcode }}{% endif %}</span>
+                    <button type="button" class="entity-hero-copy-btn" data-copy-text="{{ hero_address_1 }}{% if hero_address_2 %}, {{ hero_address_2 }}{% endif %}{% if hero_city %}, {{ hero_city }}{% endif %}{% if hero_postcode %}, {{ hero_postcode }}{% endif %}" onclick="copyEntityHeroField(this)" title="Copy address" aria-label="Copy address"><i class="bi bi-copy"></i></button>
+                </div>
             </div>
             {% endif %}
         </div>
@@ -120,3 +123,30 @@
         {% endif %}
     </div>
 </div>
+<script>
+if (!window.copyEntityHeroField) {
+    window.copyEntityHeroField = function(btn) {
+        const text = btn.getAttribute('data-copy-text');
+        if (!text) return;
+        const icon = btn.querySelector('i');
+        const showCopied = function() {
+            if (!icon) return;
+            btn.classList.add('copied');
+            icon.className = 'bi bi-check-lg';
+            setTimeout(function() {
+                btn.classList.remove('copied');
+                icon.className = 'bi bi-copy';
+            }, 1500);
+        };
+        navigator.clipboard.writeText(text).then(showCopied).catch(function() {
+            const el = document.createElement('textarea');
+            el.value = text;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            showCopied();
+        });
+    };
+}
+</script>
