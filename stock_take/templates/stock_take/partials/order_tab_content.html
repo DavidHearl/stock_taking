@@ -186,7 +186,7 @@
                             <i class="bi bi-plus-lg"></i>
                         </button>
                         <div class="kebab-menu" id="kebab-{{ bpo_data.po.id }}">
-                            <button type="button" class="kebab-trigger" onclick="this.closest('.kebab-menu').classList.toggle('open'); event.stopPropagation();" title="More actions">
+                            <button type="button" class="kebab-trigger" onclick="toggleBoardKebab(this, event);" title="More actions">
                                 <i class="bi bi-three-dots-vertical"></i>
                             </button>
                             <div class="kebab-dropdown">
@@ -236,13 +236,13 @@
                                 {% endif %}
                                 <div class="kebab-divider"></div>
                                 {% if order.customer_number %}
-                                <button type="button" class="kebab-item" onclick="this.closest('.kebab-menu').classList.remove('open'); analyzePNXGeneration(event, {{ bpo_data.po.id }})">
+                                <button type="button" class="kebab-item" onclick="closeBoardKebab(this); analyzePNXGeneration(event, {{ bpo_data.po.id }})">
                                     <i class="bi bi-stars"></i> Generate CAD
                                 </button>
                                 {% endif %}
                                 {% if bpo_data.pnx_items and bpo_data.po.po_number %}
                                     {% if bpo_data.purchase_order %}
-                                    <button type="button" class="kebab-item" onclick="this.closest('.kebab-menu').classList.remove('open'); updateBoardsPO({{ bpo_data.po.id }})">
+                                    <button type="button" class="kebab-item" onclick="closeBoardKebab(this); updateBoardsPO({{ bpo_data.po.id }})">
                                         <i class="bi bi-arrow-repeat"></i> Update Files & PO
                                     </button>
                                     {% else %}
@@ -253,7 +253,7 @@
                                     {% endif %}
                                 {% endif %}
                                 {% if not bpo_data.is_primary %}
-                                <button type="button" class="kebab-item kebab-item-danger" onclick="this.closest('.kebab-menu').classList.remove('open'); removeAdditionalBoardsPO({{ order.id }}, {{ bpo_data.po.id }})">
+                                <button type="button" class="kebab-item kebab-item-danger" onclick="closeBoardKebab(this); removeAdditionalBoardsPO({{ order.id }}, {{ bpo_data.po.id }})">
                                     <i class="bi bi-x-lg"></i> Remove PO
                                 </button>
                                 {% endif %}
@@ -3133,6 +3133,37 @@ function _escHtml(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Close a board kebab menu and reset its fixed positioning
+function closeBoardKebab(el) {
+    const menu = el.closest('.kebab-menu');
+    if (!menu) return;
+    menu.classList.remove('open');
+    const d = menu.querySelector('.kebab-dropdown');
+    if (d) { d.style.position = ''; d.style.top = ''; d.style.right = ''; d.style.left = ''; }
+}
+
+// Toggle board kebab menu using position:fixed to escape card overflow:hidden
+function toggleBoardKebab(btn, event) {
+    event.stopPropagation();
+    const menu = btn.closest('.kebab-menu');
+    const dropdown = menu.querySelector('.kebab-dropdown');
+    const isOpen = menu.classList.contains('open');
+    // Close all other board kebab menus first
+    document.querySelectorAll('.kebab-menu.open').forEach(function(m) {
+        m.classList.remove('open');
+        const d = m.querySelector('.kebab-dropdown');
+        if (d) { d.style.position = ''; d.style.top = ''; d.style.right = ''; d.style.left = ''; }
+    });
+    if (!isOpen) {
+        const rect = btn.getBoundingClientRect();
+        dropdown.style.position = 'fixed';
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+        dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+        dropdown.style.left = 'auto';
+        menu.classList.add('open');
+    }
+}
+
 // Close results dropdown when clicking outside
 document.addEventListener('click', function(e) {
     const combo = document.querySelector('.boards-po-combo');
@@ -3145,6 +3176,14 @@ document.addEventListener('click', function(e) {
     const jobWrapper = document.getElementById('job-info-menu-wrapper');
     if (jobMenu && jobWrapper && !jobWrapper.contains(e.target)) {
         jobMenu.classList.remove('open');
+    }
+    // Close board kebab menus when clicking outside
+    if (!e.target.closest('.kebab-menu')) {
+        document.querySelectorAll('.kebab-menu.open').forEach(function(m) {
+            m.classList.remove('open');
+            const d = m.querySelector('.kebab-dropdown');
+            if (d) { d.style.position = ''; d.style.top = ''; d.style.right = ''; d.style.left = ''; }
+        });
     }
 });
 
