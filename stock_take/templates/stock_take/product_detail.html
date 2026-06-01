@@ -65,7 +65,7 @@
         <button class="tab-btn active" data-tab="overview">Overview</button>
         <button class="tab-btn" data-tab="price-history">Price History</button>
         <button class="tab-btn" data-tab="stock-history">Stock History</button>
-        <button class="tab-btn" data-tab="notes">Notes <span class="tab-count">(0)</span></button>
+        <button class="tab-btn" data-tab="notes">Notes <span class="tab-count">({{ product_notes|length }})</span></button>
         <button class="tab-btn" data-tab="last-modified">Last Modified</button>
         <button class="tab-btn" data-tab="purchase-orders">Purchase Orders <span class="tab-count">({{ po_lines|length }})</span></button>
         <button class="tab-btn" data-tab="projects">Projects <span class="tab-count">({{ order_accessories|length }})</span></button>
@@ -292,7 +292,19 @@
                 </button>
             </div>
             <div id="notesList">
-                <p class="text-muted">No notes added yet.</p>
+                {% if product_notes %}
+                {% for note in product_notes %}
+                <div class="product-note-card" id="note-{{ note.id }}">
+                    <div class="product-note-header">
+                        <span class="product-note-meta">{{ note.created_by.get_full_name|default:note.created_by.username|default:"Unknown" }} &middot; {{ note.created_at|date:"d M Y H:i" }}</span>
+                        <button class="product-note-delete" onclick="deleteNote({{ note.id }})" title="Delete note"><i class="bi bi-trash3"></i></button>
+                    </div>
+                    <div class="product-note-text">{{ note.text|linebreaksbr }}</div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="text-muted" id="notesEmpty">No notes added yet.</p>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -1353,9 +1365,71 @@ function saveNote() {
         alert('Please enter a note');
         return;
     }
-    
-    alert('Note functionality will be implemented soon');
-    closeAddNoteModal();
+    const btn = document.querySelector('#addNoteModal .btn-primary');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    fetch(`/product/${PRODUCT_ID}/add-note/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+        body: JSON.stringify({ text: noteText }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const note = data.note;
+            const empty = document.getElementById('notesEmpty');
+            if (empty) empty.remove();
+            const card = document.createElement('div');
+            card.className = 'product-note-card';
+            card.id = 'note-' + note.id;
+            card.innerHTML = `
+                <div class="product-note-header">
+                    <span class="product-note-meta">${note.created_by} &middot; ${note.created_at}</span>
+                    <button class="product-note-delete" onclick="deleteNote(${note.id})" title="Delete note"><i class="bi bi-trash3"></i></button>
+                </div>
+                <div class="product-note-text">${note.text.replace(/\n/g, '<br>')}</div>`;
+            document.getElementById('notesList').prepend(card);
+            // Update tab count
+            const countEl = document.querySelector('[data-tab="notes"] .tab-count');
+            if (countEl) {
+                const n = parseInt(countEl.textContent.replace(/[^\d]/g, ''), 10) || 0;
+                countEl.textContent = '(' + (n + 1) + ')';
+            }
+            closeAddNoteModal();
+        } else {
+            alert('Failed to save note: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => alert('Network error'))
+    .finally(() => { btn.disabled = false; btn.textContent = 'Save Note'; });
+}
+
+function deleteNote(noteId) {
+    if (!confirm('Delete this note?')) return;
+    fetch(`/product/${PRODUCT_ID}/delete-note/${noteId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const card = document.getElementById('note-' + noteId);
+            if (card) card.remove();
+            // Update tab count
+            const countEl = document.querySelector('[data-tab="notes"] .tab-count');
+            if (countEl) {
+                const n = parseInt(countEl.textContent.replace(/[^\d]/g, ''), 10) || 0;
+                countEl.textContent = '(' + Math.max(0, n - 1) + ')';
+            }
+            if (!document.querySelector('#notesList .product-note-card')) {
+                const p = document.createElement('p');
+                p.className = 'text-muted';
+                p.id = 'notesEmpty';
+                p.textContent = 'No notes added yet.';
+                document.getElementById('notesList').appendChild(p);
+            }
+        }
+    });
 }
 
 // ── Substitutions CRUD ─────────────────────────────────────────────────

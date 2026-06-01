@@ -614,6 +614,7 @@ function ignoreEmail(btn) {
     .then(data => {
         if (data.success) {
             const row = btn.closest('tr');
+            decrementActiveTabCount();
             row.style.opacity = '0';
             setTimeout(() => row.remove(), 300);
         } else {
@@ -634,6 +635,7 @@ function unignoreEmail(btn) {
     .then(data => {
         if (data.success) {
             const row = btn.closest('tr');
+            decrementActiveTabCount();
             row.style.opacity = '0';
             setTimeout(() => row.remove(), 300);
         } else {
@@ -651,6 +653,7 @@ function markEmailFiled(emailId) {
     .then(r => r.json())
     .then(data => {
         if (data.success && row) {
+            decrementActiveTabCount();
             row.style.opacity = '0';
             setTimeout(() => row.remove(), 300);
         }
@@ -675,8 +678,18 @@ function openLinkModal(btn) {
 function closeLinkModal(e) {
     if (e && e.target !== e.currentTarget) return;
     document.getElementById('link-invoice-modal').style.display = 'none';
+    document.getElementById('link-inv-results').style.display = 'none';
     linkEmailId = null;
     selectedInvoiceId = null;
+}
+
+function positionLinkInvResults() {
+    const input = document.getElementById('link-inv-search');
+    const results = document.getElementById('link-inv-results');
+    const rect = input.getBoundingClientRect();
+    results.style.top   = (rect.bottom + 2) + 'px';
+    results.style.left  = rect.left + 'px';
+    results.style.width = rect.width + 'px';
 }
 
 function searchForLinkInvoice(q) {
@@ -691,6 +704,7 @@ function searchForLinkInvoice(q) {
         .then(data => {
             if (!data.results || !data.results.length) {
                 results.innerHTML = '<div class="link-inv-result-empty">No invoices found</div>';
+                positionLinkInvResults();
                 results.style.display = 'block';
                 return;
             }
@@ -706,6 +720,7 @@ function searchForLinkInvoice(q) {
                         <span class="link-inv-result-total">£${parseFloat(inv.total).toFixed(2)}</span>
                     </div>
                 </div>`).join('');
+            positionLinkInvResults();
             results.style.display = 'block';
         })
         .catch(() => { results.style.display = 'none'; });

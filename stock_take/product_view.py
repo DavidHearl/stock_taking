@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, PriceHistory, ProductLink, log_activity
+from .models import StockItem, Category, StockTakeGroup, StockHistory, Accessory, PurchaseOrderProduct, Supplier, Substitution, PriceHistory, ProductLink, StockItemNote, log_activity
 import json
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -177,7 +177,10 @@ def product_detail(request, item_id):
     linked_products = ProductLink.objects.filter(
         product=product
     ).select_related('linked_product', 'linked_product__supplier')
-    
+
+    # Product notes
+    product_notes = list(StockItemNote.objects.filter(stock_item=product).select_related('created_by'))
+
     return render(request, 'stock_take/product_detail.html', {
         'product': product,
         'categories': json.dumps(categories),
@@ -195,6 +198,7 @@ def product_detail(request, item_id):
         'substitutions': substitutions,
         'price_history': price_history,
         'linked_products': linked_products,
+        'product_notes': product_notes,
     })
 
 
@@ -569,3 +573,36 @@ def product_delete_price_history(request, item_id, history_id):
     )
 
     return JsonResponse({'success': True, 'new_cost': str(reverted_cost)})
+
+
+@login_required
+@require_POST
+def product_add_note(request, item_id):
+    """Add a note to a product."""
+    product = get_object_or_404(StockItem, id=item_id)
+    try:
+        body = json.loads(request.body)
+        text = body.get('text', '').strip()
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
+    if not text:
+        return JsonResponse({'success': False, 'error': 'Note text is required'}, status=400)
+    note = StockItemNote.objects.create(stock_item=product, text=text, created_by=request.user)
+    return JsonResponse({
+        'success': True,
+        'note': {
+            'id': note.id,
+            'text': note.text,
+            'created_at': note.created_at.strftime('%d %b %Y %H:%M'),
+            'created_by': request.user.get_full_name() or request.user.username,
+        }
+    })
+
+
+@login_required
+@require_POST
+def product_delete_note(request, item_id, note_id):
+    """Delete a product note."""
+    note = get_object_or_404(StockItemNote, id=note_id, stock_item_id=item_id)
+    note.delete()
+    return JsonResponse({'success': True})

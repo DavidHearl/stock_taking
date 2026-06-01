@@ -1,7 +1,7 @@
 ﻿{% extends "base.html" %}
 {% load static %}
 
-{% block title %}Mobile Devices â€“ Atlas{% endblock %}
+{% block title %}Mobile Devices – Atlas{% endblock %}
 {% block page_title %}Mobile Devices{% endblock %}
 
 {% block nav_it_active %}active{% endblock %}
@@ -40,7 +40,7 @@
     </div>
     {% endif %}
 
-    <!-- â”€â”€ Tab navigation â”€â”€ -->
+    <!-- Tab navigation -->
     <div class="it-tabs">
         <button class="it-tab active" data-tab="devices">
             <i class="bi bi-phone"></i> Devices
@@ -52,8 +52,68 @@
         </button>
     </div>
 
-    <!-- â•â• Devices tab â•â• -->
+    <!-- ══ Devices tab ══ -->
     <div class="it-tab-panel" id="tabDevices">
+
+        {% if phones_active %}
+        <div class="mdv-section-label">
+            <i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i>
+            Active &mdash; {{ phones_active|length }} phone{{ phones_active|length|pluralize }} with SIM
+        </div>
+        <div class="mdv-grid">
+            {% for device in phones_active %}
+            <div class="mdv-card"
+                data-id="{{ device.id }}"
+                data-dead="false"
+                data-device-type="{{ device.device_type }}"
+                data-model="{{ device.model|escapejs }}"
+                data-chip="{{ device.chip|escapejs }}"
+                data-serial="{{ device.serial_number|escapejs }}"
+                data-condition="{{ device.condition }}"
+                data-status="{{ device.status }}"
+                data-purchase-date="{{ device.purchase_date|escapejs }}"
+                data-security="{{ device.security_updates_until|escapejs }}"
+                data-phone="{{ device.phone_number|escapejs }}"
+                data-sim-cost="{{ device.sim_cost|default:'' }}"
+                data-esim="false"
+                data-notes="{{ device.notes|escapejs }}"
+                data-user-id="{{ device.assigned_user_id|default:'' }}"
+                data-user-name="{{ device.assigned_user.get_full_name|default:''|escapejs }}">
+
+                <div class="mdv-card-top">
+                    <span class="mdv-device-chip device-{{ device.device_type }}">
+                        {% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i>{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i>{% elif device.device_type == 'google' %}<i class="bi bi-google"></i>{% else %}<i class="bi bi-phone"></i>{% endif %}
+                        {{ device.model|default:device.get_device_type_display }}
+                    </span>
+                    <button class="btn-icon edit-device-btn" title="Edit" data-id="{{ device.id }}">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </div>
+
+                <div class="mdv-card-body">
+                    <div class="mdv-user-avatar">
+                        {% if device.assigned_user %}{{ device.assigned_user.first_name|first|upper }}{{ device.assigned_user.last_name|first|upper }}{% else %}<i class="bi bi-person" style="font-size:1rem;"></i>{% endif %}
+                    </div>
+                    <div class="mdv-user-name">{{ device.assigned_user.get_full_name|default:"Unassigned" }}</div>
+                    <div class="mdv-phone-number">{{ device.phone_number }}</div>
+                </div>
+
+                <div class="mdv-card-footer">
+                    {% if device.sim_cost %}<span class="mdv-cost">&pound;{{ device.sim_cost }}/mo</span>{% endif %}
+                    {% if device.is_esim %}<span class="mdv-esim-badge"><i class="bi bi-sim"></i> eSIM</span>{% endif %}
+                    {% if device.notes %}<span class="mdv-notes-dot" title="{{ device.notes|escapejs }}"><i class="bi bi-sticky"></i></span>{% endif %}
+                </div>
+
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if phones_spare %}
+        <div class="mdv-section-label mdv-section-spare">
+            <i class="bi bi-inbox"></i>
+            Spare / No SIM &mdash; {{ phones_spare|length }} phone{{ phones_spare|length|pluralize }}
+        </div>
         <div class="it-table-wrapper">
             <table class="it-table">
                 <thead>
@@ -61,57 +121,14 @@
                         <th>Device</th>
                         <th>Model</th>
                         <th>Condition</th>
-                        <th>Chip</th>
-                        <th>Purchase Date</th>
-                        <th>Security Updates</th>
-                        <th>Serial Number</th>
                         <th>Status</th>
-                        <th>SIM</th>
+                        <th>Serial</th>
+                        <th>Purchase Date</th>
                         <th>Notes</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
-
-                    <!-- Active phones (have a SIM) -->
-                    <tr class="it-section-row"><td colspan="11">Active â€” {{ phones_active|length }} phone{{ phones_active|length|pluralize }} with SIM</td></tr>
-                    {% for device in phones_active %}
-                    <tr class="it-row"
-                        data-id="{{ device.id }}"
-                        data-dead="false"
-                        data-device-type="{{ device.device_type }}"
-                        data-model="{{ device.model|escapejs }}"
-                        data-chip="{{ device.chip|escapejs }}"
-                        data-serial="{{ device.serial_number|escapejs }}"
-                        data-condition="{{ device.condition }}"
-                        data-status="{{ device.status }}"
-                        data-purchase-date="{{ device.purchase_date|escapejs }}"
-                        data-security="{{ device.security_updates_until|escapejs }}"
-                        data-phone="{{ device.phone_number|escapejs }}"
-                        data-sim-cost="{{ device.sim_cost|default:'' }}"
-                        data-esim="false"
-                        data-notes="{{ device.notes|escapejs }}"
-                        data-user-id="{{ device.assigned_user_id|default:'' }}"
-                        data-user-name="{{ device.assigned_user.get_full_name|default:''|escapejs }}">
-                        <td><span class="device-badge device-{{ device.device_type }}">{% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i> iPhone{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i> Samsung{% elif device.device_type == 'google' %}<i class="bi bi-google"></i> Google{% else %}{{ device.device_type|default:"â€“" }}{% endif %}</span></td>
-                        <td>{{ device.model|default:"â€“" }}</td>
-                        <td>{% if device.condition %}<span class="condition-badge condition-{{ device.condition }}">{{ device.get_condition_display }}</span>{% else %}â€“{% endif %}</td>
-                        <td>{{ device.chip|default:"â€“" }}</td>
-                        <td>{{ device.purchase_date|default:"â€“" }}</td>
-                        <td>{% if device.security_updates_until == 'N/A' %}<span class="security-badge security-na">N/A</span>{% elif device.security_updates_until %}<span class="security-badge">{{ device.security_updates_until }}</span>{% else %}â€“{% endif %}</td>
-                        <td class="mono">{{ device.serial_number|default:"â€“" }}</td>
-                        <td><span class="status-badge status-{{ device.status }}">{{ device.get_status_display }}</span></td>
-                        <td class="mono">{{ device.phone_number|default:"â€“" }}</td>
-                        <td class="notes-cell">{{ device.notes|default:"" }}</td>
-                        <td class="actions-cell"><button class="btn-icon edit-device-btn" title="Edit" data-id="{{ device.id }}"><i class="bi bi-pencil"></i></button></td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="11" class="it-empty">No active phones.</td></tr>
-                    {% endfor %}
-
-                    <!-- Spare phones (no SIM) -->
-                    {% if phones_spare %}
-                    <tr class="it-section-row"><td colspan="11">Spare / No SIM â€” {{ phones_spare|length }} phone{{ phones_spare|length|pluralize }}</td></tr>
                     {% for device in phones_spare %}
                     <tr class="it-row it-row-spare"
                         data-id="{{ device.id }}"
@@ -130,66 +147,77 @@
                         data-notes="{{ device.notes|escapejs }}"
                         data-user-id="{{ device.assigned_user_id|default:'' }}"
                         data-user-name="{{ device.assigned_user.get_full_name|default:''|escapejs }}">
-                        <td><span class="device-badge device-{{ device.device_type }}">{% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i> iPhone{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i> Samsung{% elif device.device_type == 'google' %}<i class="bi bi-google"></i> Google{% else %}{{ device.device_type|default:"â€“" }}{% endif %}</span></td>
-                        <td>{{ device.model|default:"â€“" }}</td>
-                        <td>{% if device.condition %}<span class="condition-badge condition-{{ device.condition }}">{{ device.get_condition_display }}</span>{% else %}â€“{% endif %}</td>
-                        <td>{{ device.chip|default:"â€“" }}</td>
-                        <td>{{ device.purchase_date|default:"â€“" }}</td>
-                        <td>{% if device.security_updates_until == 'N/A' %}<span class="security-badge security-na">N/A</span>{% elif device.security_updates_until %}<span class="security-badge">{{ device.security_updates_until }}</span>{% else %}â€“{% endif %}</td>
-                        <td class="mono">{{ device.serial_number|default:"â€“" }}</td>
+                        <td><span class="device-badge device-{{ device.device_type }}">{% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i> iPhone{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i> Samsung{% elif device.device_type == 'google' %}<i class="bi bi-google"></i> Google{% else %}{{ device.device_type|default:"&mdash;" }}{% endif %}</span></td>
+                        <td>{{ device.model|default:"&mdash;" }}</td>
+                        <td>{% if device.condition %}<span class="condition-badge condition-{{ device.condition }}">{{ device.get_condition_display }}</span>{% else %}&mdash;{% endif %}</td>
                         <td><span class="status-badge status-{{ device.status }}">{{ device.get_status_display }}</span></td>
-                        <td style="color:var(--text-muted);">â€“</td>
+                        <td class="mono">{{ device.serial_number|default:"&mdash;" }}</td>
+                        <td>{{ device.purchase_date|default:"&mdash;" }}</td>
                         <td class="notes-cell">{{ device.notes|default:"" }}</td>
                         <td class="actions-cell"><button class="btn-icon edit-device-btn" title="Edit" data-id="{{ device.id }}"><i class="bi bi-pencil"></i></button></td>
                     </tr>
                     {% endfor %}
-                    {% endif %}
-
-                    <!-- Dead phones -->
-                    {% if phones_dead %}
-                    <tr class="it-section-row" id="deadSectionToggleRow" style="cursor:pointer;" onclick="toggleDeadSection()">
-                        <td colspan="11"><i class="bi bi-chevron-right" id="deadChevron"></i> Dead / Retired â€” {{ phones_dead|length }} phone{{ phones_dead|length|pluralize }}</td>
-                    </tr>
-                    {% for device in phones_dead %}
-                    <tr class="it-row it-row-dead dead-row"
-                        data-id="{{ device.id }}"
-                        data-dead="true"
-                        data-device-type="{{ device.device_type }}"
-                        data-model="{{ device.model|escapejs }}"
-                        data-chip="{{ device.chip|escapejs }}"
-                        data-serial="{{ device.serial_number|escapejs }}"
-                        data-condition="{{ device.condition }}"
-                        data-status="{{ device.status }}"
-                        data-purchase-date="{{ device.purchase_date|escapejs }}"
-                        data-security="{{ device.security_updates_until|escapejs }}"
-                        data-phone="{{ device.phone_number|escapejs }}"
-                        data-sim-cost="{{ device.sim_cost|default:'' }}"
-                        data-esim="false"
-                        data-notes="{{ device.notes|escapejs }}"
-                        data-user-id="{{ device.assigned_user_id|default:'' }}"
-                        data-user-name="{{ device.assigned_user.get_full_name|default:''|escapejs }}"
-                        style="display:none;">
-                        <td><span class="device-badge device-{{ device.device_type }}">{% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i> iPhone{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i> Samsung{% elif device.device_type == 'google' %}<i class="bi bi-google"></i> Google{% else %}{{ device.device_type|default:"â€“" }}{% endif %}</span></td>
-                        <td>{{ device.model|default:"â€“" }}</td>
-                        <td>{% if device.condition %}<span class="condition-badge condition-{{ device.condition }}">{{ device.get_condition_display }}</span>{% else %}â€“{% endif %}</td>
-                        <td>{{ device.chip|default:"â€“" }}</td>
-                        <td>{{ device.purchase_date|default:"â€“" }}</td>
-                        <td>{% if device.security_updates_until == 'N/A' %}<span class="security-badge security-na">N/A</span>{% elif device.security_updates_until %}<span class="security-badge">{{ device.security_updates_until }}</span>{% else %}â€“{% endif %}</td>
-                        <td class="mono">{{ device.serial_number|default:"â€“" }}</td>
-                        <td><span class="status-badge status-{{ device.status }}">{{ device.get_status_display }}</span></td>
-                        <td style="color:var(--text-muted);">{{ device.phone_number|default:"â€“" }}</td>
-                        <td class="notes-cell">{{ device.notes|default:"" }}</td>
-                        <td class="actions-cell"><button class="btn-icon edit-device-btn" title="Edit" data-id="{{ device.id }}"><i class="bi bi-pencil"></i></button></td>
-                    </tr>
-                    {% endfor %}
-                    {% endif %}
-
                 </tbody>
             </table>
         </div>
+        {% endif %}
+
+        {% if phones_dead %}
+        <div class="mdv-section-label mdv-section-dead" id="deadSectionToggle" onclick="toggleDeadSection()">
+            <i class="bi bi-chevron-right" id="deadChevron"></i>
+            Dead / Retired &mdash; {{ phones_dead|length }} phone{{ phones_dead|length|pluralize }}
+        </div>
+        <div id="deadSection" style="display:none;">
+            <div class="it-table-wrapper">
+                <table class="it-table">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Model</th>
+                            <th>Condition</th>
+                            <th>Status</th>
+                            <th>Serial</th>
+                            <th>Notes</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in phones_dead %}
+                        <tr class="it-row it-row-dead"
+                            data-id="{{ device.id }}"
+                            data-dead="true"
+                            data-device-type="{{ device.device_type }}"
+                            data-model="{{ device.model|escapejs }}"
+                            data-chip="{{ device.chip|escapejs }}"
+                            data-serial="{{ device.serial_number|escapejs }}"
+                            data-condition="{{ device.condition }}"
+                            data-status="{{ device.status }}"
+                            data-purchase-date="{{ device.purchase_date|escapejs }}"
+                            data-security="{{ device.security_updates_until|escapejs }}"
+                            data-phone="{{ device.phone_number|escapejs }}"
+                            data-sim-cost="{{ device.sim_cost|default:'' }}"
+                            data-esim="false"
+                            data-notes="{{ device.notes|escapejs }}"
+                            data-user-id="{{ device.assigned_user_id|default:'' }}"
+                            data-user-name="{{ device.assigned_user.get_full_name|default:''|escapejs }}">
+                            <td><span class="device-badge device-{{ device.device_type }}">{% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i> iPhone{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i> Samsung{% elif device.device_type == 'google' %}<i class="bi bi-google"></i> Google{% else %}{{ device.device_type|default:"&mdash;" }}{% endif %}</span></td>
+                            <td>{{ device.model|default:"&mdash;" }}</td>
+                            <td>{% if device.condition %}<span class="condition-badge condition-{{ device.condition }}">{{ device.get_condition_display }}</span>{% else %}&mdash;{% endif %}</td>
+                            <td><span class="status-badge status-{{ device.status }}">{{ device.get_status_display }}</span></td>
+                            <td class="mono">{{ device.serial_number|default:"&mdash;" }}</td>
+                            <td class="notes-cell">{{ device.notes|default:"" }}</td>
+                            <td class="actions-cell"><button class="btn-icon edit-device-btn" title="Edit" data-id="{{ device.id }}"><i class="bi bi-pencil"></i></button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 
-    <!-- â•â• SIMs tab â•â• -->
+    <!-- ══ SIMs tab ══ -->
     <div class="it-tab-panel" id="tabSims" style="display:none;">
         <div class="it-table-wrapper">
             <table class="it-table">
@@ -223,8 +251,8 @@
                         data-notes="{{ device.notes|escapejs }}"
                         data-user-id="{{ device.assigned_user_id|default:'' }}"
                         data-user-name="{{ device.assigned_user.get_full_name|default:''|escapejs }}">
-                        <td class="mono">{{ device.phone_number|default:"â€“" }}</td>
-                        <td>{{ device.assigned_user.get_full_name|default:"â€“" }}</td>
+                        <td class="mono">{{ device.phone_number|default:"&mdash;" }}</td>
+                        <td>{{ device.assigned_user.get_full_name|default:"&mdash;" }}</td>
                         <td>
                             {% if device.is_esim %}
                             <span class="device-badge">eSIM</span>
@@ -232,8 +260,8 @@
                             <span class="device-badge device-{{ device.device_type }}">{% if device.device_type == 'iphone' %}<i class="bi bi-apple"></i>{% elif device.device_type == 'samsung' %}<i class="bi bi-android2"></i>{% elif device.device_type == 'google' %}<i class="bi bi-google"></i>{% endif %} {{ device.model|default:device.get_device_type_display }}</span>
                             {% endif %}
                         </td>
-                        <td>{% if device.sim_cost %}<span class="sim-cost">Â£{{ device.sim_cost }}</span>{% else %}â€“{% endif %}</td>
-                        <td class="center">{% if device.is_esim %}<i class="bi bi-check-lg text-success"></i>{% else %}â€“{% endif %}</td>
+                        <td>{% if device.sim_cost %}<span class="sim-cost">&pound;{{ device.sim_cost }}</span>{% else %}&mdash;{% endif %}</td>
+                        <td class="center">{% if device.is_esim %}<i class="bi bi-check-lg" style="color:var(--success-color);"></i>{% else %}&mdash;{% endif %}</td>
                         <td class="notes-cell">{{ device.notes|default:"" }}</td>
                         <td class="actions-cell">
                             <button class="btn-icon edit-device-btn" title="Edit" data-id="{{ device.id }}"><i class="bi bi-pencil"></i></button>
@@ -241,7 +269,7 @@
                             <button class="btn-icon move-sim-btn" title="Move SIM to another phone"
                                 data-id="{{ device.id }}"
                                 data-number="{{ device.phone_number|escapejs }}"
-                                data-cost="{% if device.sim_cost %}Â£{{ device.sim_cost }}{% endif %}"
+                                data-cost="{% if device.sim_cost %}&pound;{{ device.sim_cost }}{% endif %}"
                                 data-user="{{ device.assigned_user.get_full_name|default:''|escapejs }}">
                                 <i class="bi bi-arrow-left-right"></i>
                             </button>
@@ -253,7 +281,7 @@
                     {% endfor %}
                     <tr class="it-totals-row">
                         <td colspan="3" class="totals-label">Monthly Total</td>
-                        <td class="sim-cost total">Â£{{ active_sim_total }}</td>
+                        <td class="sim-cost total">&pound;{{ active_sim_total }}</td>
                         <td colspan="3"></td>
                     </tr>
                 </tbody>
@@ -263,39 +291,36 @@
 
 </div>
 
-<!-- â”€â”€ Move SIM Modal â”€â”€ -->
-<div class="modal" id="moveSIMModal" style="display:none; align-items:center; justify-content:center;">
-    <div class="modal-overlay" onclick="document.getElementById('moveSIMModal').style.display='none'"></div>
-    <div class="modal-dialog" style="width:480px;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="bi bi-arrow-left-right"></i> Move SIM</h3>
-                <button class="modal-close" onclick="document.getElementById('moveSIMModal').style.display='none'">âœ•</button>
-            </div>
-            <div class="modal-body">
-                <p id="moveSIMInfo" style="margin-bottom:16px; font-size:0.85rem; color:var(--text-secondary);"></p>
-                <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:6px;">Move to phone</label>
-                <select id="moveSIMTargetSelect" class="form-control">
-                    <option value="">â€” Select spare / dead phone â€”</option>
-                    {% for device in spare_devices %}
-                    <option value="{{ device.id }}">{{ device.get_device_type_display }} {{ device.model }} {% if device.serial_number %}({{ device.serial_number }}){% endif %}</option>
-                    {% endfor %}
-                    {% for device in dead_devices %}
-                    {% if not device.phone_number %}
-                    <option value="{{ device.id }}">[Dead] {{ device.get_device_type_display }} {{ device.model }} {% if device.serial_number %}({{ device.serial_number }}){% endif %}</option>
-                    {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="document.getElementById('moveSIMModal').style.display='none'">Cancel</button>
-                <button class="btn btn-primary" id="moveSIMConfirmBtn">Transfer SIM</button>
-            </div>
+<!-- Move SIM Modal -->
+<div class="modal-overlay" id="moveSIMModal">
+    <div class="modal-dialog" style="max-width:480px;">
+        <div class="modal-header">
+            <h3><i class="bi bi-arrow-left-right"></i> Move SIM</h3>
+            <button class="modal-close" id="closeMoveSIMModal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="moveSIMInfo" style="margin-bottom:16px; font-size:0.85rem; color:var(--text-secondary);"></p>
+            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:6px;">Move to phone</label>
+            <select id="moveSIMTargetSelect" class="form-control">
+                <option value="">&mdash; Select spare / dead phone &mdash;</option>
+                {% for device in spare_devices %}
+                <option value="{{ device.id }}">{{ device.get_device_type_display }} {{ device.model }} {% if device.serial_number %}({{ device.serial_number }}){% endif %}</option>
+                {% endfor %}
+                {% for device in dead_devices %}
+                {% if not device.phone_number %}
+                <option value="{{ device.id }}">[Dead] {{ device.get_device_type_display }} {{ device.model }} {% if device.serial_number %}({{ device.serial_number }}){% endif %}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-cancel" id="cancelMoveSIMModal">Cancel</button>
+            <button class="btn btn-primary" id="moveSIMConfirmBtn">Transfer SIM</button>
         </div>
     </div>
 </div>
 
-<!-- â”€â”€ Edit / Add Device Modal â”€â”€ -->
+<!-- Edit / Add Device Modal -->
 <div class="modal-overlay" id="deviceModal">
     <div class="modal-dialog modal-lg">
         <div class="modal-header">
@@ -306,7 +331,6 @@
             {% csrf_token %}
             <div class="modal-body device-form-body">
 
-                <!-- â”€â”€ Section: Phone Template (add mode only) â”€â”€ -->
                 <div class="device-form-section" id="templateSection">
                     <div class="device-form-section-header">
                         <i class="bi bi-clipboard-data"></i> Phone Template
@@ -315,13 +339,12 @@
                         <div class="form-group form-group-grow">
                             <label>Select a template to auto-fill hardware specs</label>
                             <select id="f_template" class="form-control">
-                                <option value="">â€“ No template (fill manually) â€“</option>
+                                <option value="">&mdash; No template (fill manually) &mdash;</option>
                             </select>
                         </div>
                     </div>
                 </div>
 
-                <!-- â”€â”€ Section: Hardware â”€â”€ -->
                 <div class="device-form-section">
                     <div class="device-form-section-header">
                         <i class="bi bi-cpu"></i> Hardware
@@ -330,7 +353,7 @@
                         <div class="form-group">
                             <label>Type</label>
                             <select name="device_type" id="f_device_type" class="form-control">
-                                <option value="">â€“ Select â€“</option>
+                                <option value="">&mdash; Select &mdash;</option>
                                 <option value="iphone">iPhone</option>
                                 <option value="samsung">Samsung</option>
                                 <option value="google">Google</option>
@@ -339,7 +362,7 @@
                         </div>
                         <div class="form-group form-group-grow">
                             <label>Model</label>
-                            <input type="text" name="model" id="f_model" class="form-control" placeholder="15 Pro, S23+â€¦">
+                            <input type="text" name="model" id="f_model" class="form-control" placeholder="15 Pro, S23+&hellip;">
                         </div>
                         <div class="form-group">
                             <label>Chip</label>
@@ -357,7 +380,6 @@
                     </div>
                 </div>
 
-                <!-- â”€â”€ Section: Device â”€â”€ -->
                 <div class="device-form-section">
                     <div class="device-form-section-header">
                         <i class="bi bi-upc-scan"></i> Device
@@ -370,7 +392,7 @@
                         <div class="form-group">
                             <label>Condition</label>
                             <select name="condition" id="f_condition" class="form-control">
-                                <option value="">â€“ Select â€“</option>
+                                <option value="">&mdash; Select &mdash;</option>
                                 <option value="excellent">Excellent</option>
                                 <option value="good">Good</option>
                                 <option value="ok">Ok</option>
@@ -408,7 +430,6 @@
                     </div>
                 </div>
 
-                <!-- â”€â”€ Section: SIM & Assignment â”€â”€ -->
                 <div class="device-form-section">
                     <div class="device-form-section-header">
                         <i class="bi bi-sim"></i> SIM &amp; Assignment
@@ -419,13 +440,13 @@
                             <input type="text" name="phone_number" id="f_phone_number" class="form-control" placeholder="07xxx xxx xxx">
                         </div>
                         <div class="form-group">
-                            <label>Monthly SIM Cost (Â£)</label>
+                            <label>Monthly SIM Cost (&pound;)</label>
                             <input type="text" name="sim_cost" id="f_sim_cost" class="form-control" placeholder="16.50">
                         </div>
                         <div class="form-group form-group-grow">
                             <label>Assigned To</label>
                             <div class="user-picker" id="userPickerContainer">
-                                <input type="text" id="f_user_search" class="form-control" placeholder="Search usersâ€¦" autocomplete="off">
+                                <input type="text" id="f_user_search" class="form-control" placeholder="Search users&hellip;" autocomplete="off">
                                 <div class="user-picker-dropdown" id="userPickerDropdown"></div>
                             </div>
                             <input type="hidden" name="assigned_user_id" id="f_assigned_user_id">
@@ -455,7 +476,7 @@
     </div>
 </div>
 
-<!-- â”€â”€ Add Template Modal â”€â”€ -->
+<!-- Add Template Modal -->
 <div class="modal-overlay" id="addTemplateModal">
     <div class="modal-dialog" style="max-width:520px;">
         <div class="modal-header">
@@ -472,7 +493,7 @@
                     <div class="device-form-row">
                         <div class="form-group form-group-grow">
                             <label>Template Name</label>
-                            <input type="text" id="tpl_name" class="form-control" placeholder="iPhone 15 Pro, Samsung S24+â€¦" required>
+                            <input type="text" id="tpl_name" class="form-control" placeholder="iPhone 15 Pro, Samsung S24+&hellip;" required>
                         </div>
                         <div class="form-group">
                             <label>Type</label>
@@ -487,7 +508,7 @@
                     <div class="device-form-row" style="margin-top:10px;">
                         <div class="form-group form-group-grow">
                             <label>Model</label>
-                            <input type="text" id="tpl_model" class="form-control" placeholder="15 Pro, S24+â€¦">
+                            <input type="text" id="tpl_model" class="form-control" placeholder="15 Pro, S24+&hellip;">
                         </div>
                         <div class="form-group form-group-grow">
                             <label>Chip</label>
@@ -502,7 +523,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-cancel" id="cancelAddTemplateModal">Cancel</button>
-                <button type="submit" class="btn btn-success" id="saveTemplateBtn">
+                <button type="submit" class="btn btn-success">
                     <i class="bi bi-check-lg"></i> Save Template
                 </button>
             </div>
@@ -510,7 +531,7 @@
     </div>
 </div>
 
-<!-- â”€â”€ Confirm Delete Modal â”€â”€ -->
+<!-- Confirm Delete Modal -->
 <div class="modal-overlay" id="confirmDeleteModal">
     <div class="modal-dialog" style="max-width:420px;">
         <div class="modal-header">
@@ -523,7 +544,7 @@
             </p>
         </div>
         <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" id="cancelConfirmDeleteModal">Cancel</button>
+            <button type="button" class="btn btn-cancel" id="cancelConfirmDeleteModal">Cancel</button>
             <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
                 <i class="bi bi-trash"></i> Delete Permanently
             </button>
@@ -531,4 +552,269 @@
     </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+
+    const ATLAS_USERS = [
+        {% for user in atlas_users %}{ id: {{ user.pk }}, name: "{{ user.get_full_name|escapejs }}" }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    function getCsrf() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    function openModal(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.add('active');
+    }
+
+    function closeModal(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.remove('active');
+    }
+
+    document.querySelectorAll('.modal-overlay').forEach(function (overlay) {
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) closeModal(overlay.id);
+        });
+    });
+
+    // Tab switching
+    document.querySelectorAll('.it-tab').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('.it-tab').forEach(function (b) { b.classList.remove('active'); });
+            this.classList.add('active');
+            var tab = this.dataset.tab;
+            document.getElementById('tabDevices').style.display = tab === 'devices' ? '' : 'none';
+            document.getElementById('tabSims').style.display    = tab === 'sims'    ? '' : 'none';
+        });
+    });
+
+    // Dead section toggle
+    window.toggleDeadSection = function () {
+        var section = document.getElementById('deadSection');
+        var chevron = document.getElementById('deadChevron');
+        if (!section) return;
+        var isHidden = section.style.display === 'none';
+        section.style.display = isHidden ? '' : 'none';
+        if (chevron) chevron.className = isHidden ? 'bi bi-chevron-down' : 'bi bi-chevron-right';
+    };
+
+    // Populate / reset the device form from a data map
+    function resetDeviceForm(d) {
+        var get = function (key, def) { return d ? (d[key] || def || '') : (def || ''); };
+        document.getElementById('f_device_type').value           = get('deviceType');
+        document.getElementById('f_model').value                 = get('model');
+        document.getElementById('f_chip').value                  = get('chip');
+        document.getElementById('f_serial_number').value         = get('serial');
+        document.getElementById('f_condition').value             = get('condition');
+        document.getElementById('f_status').value                = get('status', 'active');
+        document.getElementById('f_purchase_date').value         = get('purchaseDate');
+        document.getElementById('f_phone_number').value          = get('phone');
+        document.getElementById('f_sim_cost').value              = get('simCost');
+        document.getElementById('f_notes').value                 = get('notes');
+        document.getElementById('f_is_dead').checked             = get('dead') === 'true';
+        document.getElementById('f_is_esim').checked             = get('esim') === 'true';
+        var sec  = get('security');
+        var isNA = sec === 'N/A';
+        document.getElementById('f_security_na').checked             = isNA;
+        document.getElementById('f_security_updates_until').value    = sec;
+        document.getElementById('f_security_updates_until').disabled = isNA;
+        document.getElementById('f_assigned_user_id').value = get('userId');
+        document.getElementById('f_user_search').value      = get('userName');
+    }
+
+    // Add Device
+    document.getElementById('addDeviceBtn').addEventListener('click', function () {
+        resetDeviceForm(null);
+        document.getElementById('modalTitle').innerHTML          = '<i class="bi bi-phone"></i> Add Device';
+        document.getElementById('submitBtn').innerHTML           = '<i class="bi bi-check-lg"></i> Save Device';
+        document.getElementById('deleteDeviceBtn').style.display = 'none';
+        document.getElementById('formMethod').value             = 'create';
+        document.getElementById('formDeviceId').value           = '';
+        document.getElementById('templateSection').style.display = '';
+        document.getElementById('deviceForm').action            = '{% url "mobile_device_create" %}';
+        openModal('deviceModal');
+        loadTemplates();
+    });
+
+    // Edit Device (cards and table rows)
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.edit-device-btn');
+        if (!btn) return;
+        var row = btn.closest('[data-id]');
+        if (!row) return;
+        var d = row.dataset;
+        resetDeviceForm(d);
+        document.getElementById('modalTitle').innerHTML          = '<i class="bi bi-pencil"></i> Edit Device';
+        document.getElementById('submitBtn').innerHTML           = '<i class="bi bi-check-lg"></i> Save Changes';
+        document.getElementById('deleteDeviceBtn').style.display = '';
+        document.getElementById('deleteDeviceBtn').dataset.id    = d.id;
+        document.getElementById('formMethod').value             = 'edit';
+        document.getElementById('formDeviceId').value           = d.id;
+        document.getElementById('templateSection').style.display = 'none';
+        openModal('deviceModal');
+    });
+
+    document.getElementById('closeModal').addEventListener('click',  function () { closeModal('deviceModal'); });
+    document.getElementById('cancelModal').addEventListener('click', function () { closeModal('deviceModal'); });
+
+    // Form submit: AJAX for edit, normal POST for create
+    document.getElementById('deviceForm').addEventListener('submit', function (e) {
+        if (document.getElementById('formMethod').value === 'edit') {
+            e.preventDefault();
+            var deviceId = document.getElementById('formDeviceId').value;
+            fetch('/it/mobile/' + deviceId + '/save/', { method: 'POST', body: new FormData(this) })
+                .then(function (r) { return r.json(); })
+                .then(function (data) { if (data.success) location.reload(); });
+        }
+    });
+
+    // Delete
+    document.getElementById('deleteDeviceBtn').addEventListener('click', function () {
+        document.getElementById('confirmDeleteBtn').dataset.id = this.dataset.id;
+        openModal('confirmDeleteModal');
+    });
+    document.getElementById('closeConfirmDeleteModal').addEventListener('click',  function () { closeModal('confirmDeleteModal'); });
+    document.getElementById('cancelConfirmDeleteModal').addEventListener('click', function () { closeModal('confirmDeleteModal'); });
+    document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
+        var form  = document.createElement('form');
+        form.method = 'post';
+        form.action = '/it/mobile/' + this.dataset.id + '/delete/';
+        var csrf  = document.createElement('input');
+        csrf.type = 'hidden'; csrf.name = 'csrfmiddlewaretoken'; csrf.value = getCsrf();
+        form.appendChild(csrf);
+        document.body.appendChild(form);
+        form.submit();
+    });
+
+    // Move SIM
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.move-sim-btn');
+        if (!btn) return;
+        document.getElementById('moveSIMInfo').textContent =
+            'Moving ' + btn.dataset.number +
+            (btn.dataset.cost ? ' (' + btn.dataset.cost + '/mo)' : '') +
+            (btn.dataset.user ? ' — currently assigned to ' + btn.dataset.user : '');
+        document.getElementById('moveSIMTargetSelect').value    = '';
+        document.getElementById('moveSIMConfirmBtn').dataset.id = btn.dataset.id;
+        openModal('moveSIMModal');
+    });
+    document.getElementById('closeMoveSIMModal').addEventListener('click',  function () { closeModal('moveSIMModal'); });
+    document.getElementById('cancelMoveSIMModal').addEventListener('click', function () { closeModal('moveSIMModal'); });
+    document.getElementById('moveSIMConfirmBtn').addEventListener('click', function () {
+        var targetId = document.getElementById('moveSIMTargetSelect').value;
+        if (!targetId) { alert('Please select a target device.'); return; }
+        var fd = new FormData();
+        fd.append('csrfmiddlewaretoken', getCsrf());
+        fd.append('target_device_id', targetId);
+        fetch('/it/mobile/' + this.dataset.id + '/transfer-sim/', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) { if (data.success) location.reload(); });
+    });
+
+    // Security N/A toggle
+    document.getElementById('f_security_na').addEventListener('change', function () {
+        var input = document.getElementById('f_security_updates_until');
+        input.value    = this.checked ? 'N/A' : '';
+        input.disabled = this.checked;
+        if (!this.checked) input.focus();
+    });
+
+    // User picker
+    var userSearch   = document.getElementById('f_user_search');
+    var userDropdown = document.getElementById('userPickerDropdown');
+    var userIdInput  = document.getElementById('f_assigned_user_id');
+
+    function renderUsers(q) {
+        var matches = ATLAS_USERS.filter(function (u) {
+            return u.name.toLowerCase().includes(q.toLowerCase());
+        });
+        userDropdown.innerHTML = '';
+        var none = document.createElement('div');
+        none.className = 'user-picker-option';
+        none.textContent = '— No assignment —';
+        none.addEventListener('click', function () {
+            userIdInput.value = ''; userSearch.value = ''; userDropdown.classList.remove('open');
+        });
+        userDropdown.appendChild(none);
+        matches.forEach(function (u) {
+            var opt = document.createElement('div');
+            opt.className = 'user-picker-option';
+            opt.textContent = u.name;
+            opt.addEventListener('click', function () {
+                userIdInput.value = u.id; userSearch.value = u.name; userDropdown.classList.remove('open');
+            });
+            userDropdown.appendChild(opt);
+        });
+        userDropdown.classList.add('open');
+    }
+
+    userSearch.addEventListener('focus', function () { renderUsers(this.value); });
+    userSearch.addEventListener('input', function () { renderUsers(this.value); });
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('#userPickerContainer')) userDropdown.classList.remove('open');
+    });
+
+    // Templates
+    var templates = [];
+    function loadTemplates() {
+        if (templates.length) { populateTemplateSelect(); return; }
+        fetch('{% url "mobile_phone_templates" %}')
+            .then(function (r) { return r.json(); })
+            .then(function (data) { templates = data.templates; populateTemplateSelect(); });
+    }
+    function populateTemplateSelect() {
+        var sel = document.getElementById('f_template');
+        sel.innerHTML = '<option value="">&mdash; No template (fill manually) &mdash;</option>';
+        templates.forEach(function (t) {
+            var opt = document.createElement('option');
+            opt.value = t.id; opt.textContent = t.name;
+            opt.dataset.deviceType = t.device_type; opt.dataset.model = t.model;
+            opt.dataset.chip = t.chip; opt.dataset.security = t.security_updates_until;
+            sel.appendChild(opt);
+        });
+    }
+    document.getElementById('f_template').addEventListener('change', function () {
+        var opt = this.options[this.selectedIndex];
+        if (!opt.value) return;
+        document.getElementById('f_device_type').value = opt.dataset.deviceType || '';
+        document.getElementById('f_model').value       = opt.dataset.model      || '';
+        document.getElementById('f_chip').value        = opt.dataset.chip       || '';
+        var sec = opt.dataset.security || '', isNA = sec === 'N/A';
+        document.getElementById('f_security_na').checked             = isNA;
+        document.getElementById('f_security_updates_until').value    = sec;
+        document.getElementById('f_security_updates_until').disabled = isNA;
+    });
+
+    // Add Template modal
+    document.getElementById('addTemplateBtn').addEventListener('click', function () {
+        ['tpl_name','tpl_model','tpl_chip','tpl_security'].forEach(function (id) {
+            document.getElementById(id).value = '';
+        });
+        openModal('addTemplateModal');
+    });
+    document.getElementById('closeAddTemplateModal').addEventListener('click',  function () { closeModal('addTemplateModal'); });
+    document.getElementById('cancelAddTemplateModal').addEventListener('click', function () { closeModal('addTemplateModal'); });
+    document.getElementById('addTemplateForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var fd = new FormData();
+        fd.append('csrfmiddlewaretoken',    getCsrf());
+        fd.append('name',                  document.getElementById('tpl_name').value);
+        fd.append('device_type',           document.getElementById('tpl_device_type').value);
+        fd.append('model',                 document.getElementById('tpl_model').value);
+        fd.append('chip',                  document.getElementById('tpl_chip').value);
+        fd.append('security_updates_until', document.getElementById('tpl_security').value);
+        fetch('{% url "mobile_phone_template_create" %}', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) { if (data.success) { templates = []; closeModal('addTemplateModal'); } });
+    });
+
+}());
+</script>
 {% endblock %}

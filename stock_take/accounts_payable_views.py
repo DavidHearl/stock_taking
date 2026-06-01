@@ -215,10 +215,19 @@ def accounts_payable_inbox(request):
     unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False).count()
     processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True).count()
     ignored = MailboxEmail.objects.filter(is_ignored=True).count()
-    total_count = MailboxEmail.objects.exclude(tab='statements').count()
-    rjl_count = MailboxEmail.objects.filter(tab='rjl', is_ignored=False).count()
-    group_count = MailboxEmail.objects.filter(tab='group', is_ignored=False).count()
-    statements_count = MailboxEmail.objects.filter(tab='statements', is_ignored=False).count()
+    # Tab badge counts — respect the current status filter so badges match the visible rows
+    if status_filter == 'ignored':
+        _count_base = MailboxEmail.objects.filter(is_ignored=True)
+    elif status_filter == 'processed':
+        _count_base = MailboxEmail.objects.filter(is_processed=True, is_ignored=False)
+    elif status_filter == 'all':
+        _count_base = MailboxEmail.objects.filter(is_ignored=False)
+    else:  # unprocessed (default)
+        _count_base = MailboxEmail.objects.filter(is_processed=False, is_ignored=False)
+    total_count = _count_base.exclude(tab='statements').count()
+    rjl_count = _count_base.filter(tab='rjl').count()
+    group_count = _count_base.filter(tab='group').count()
+    statements_count = _count_base.filter(tab='statements').count()
 
     last_synced = MailboxEmail.objects.aggregate(
         last=db_models.Max('synced_at')

@@ -738,6 +738,21 @@ class PNXItem(models.Model):
         return area_sqm * self.cnt * price_per_sqm
 
 
+class StockItemNote(models.Model):
+    stock_item = models.ForeignKey('StockItem', on_delete=models.CASCADE, related_name='notes')
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_item_notes'
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Note on {self.stock_item.sku} at {self.created_at:%d %b %Y %H:%M}'
+
+
 class OrderNote(models.Model):
     order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='notes')
     text = models.TextField()
