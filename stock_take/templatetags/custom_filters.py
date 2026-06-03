@@ -39,6 +39,28 @@ def get_item(dictionary, key):
     return None
 
 @register.filter
+def price_2_4(value):
+    """Format a number with a minimum of 2 and a maximum of 4 decimal places.
+    Trailing zeros beyond 2 places are stripped (e.g. 5 -> '5.00',
+    5.5 -> '5.50', 5.1234 -> '5.1234', 5.12340 -> '5.1234')."""
+    if value is None or value == '':
+        return ''
+    try:
+        num = float(value)
+    except (ValueError, TypeError):
+        return value
+    s = f'{num:.4f}'.rstrip('0')
+    integer, _, decimals = s.partition('.')
+    decimals = (decimals + '00')[:max(2, len(decimals))]
+    return f'{integer}.{decimals}'
+
+@register.filter
+def currency_symbol(code):
+    """Return the symbol for a currency code (GBP -> £, EUR -> €, USD -> $)."""
+    symbols = {'GBP': '£', 'EUR': '€', 'USD': '$'}
+    return symbols.get((code or 'GBP').upper(), (code or 'GBP'))
+
+@register.filter
 def calculate_remaining(accessory):
     """Waterfall stock allocation: available stock (on-hand + incoming) is
     allocated to orders with the earliest fit_date first.  Only orders that

@@ -265,6 +265,7 @@ def sync_purchase_orders_stream(request):
 @login_required
 def purchase_orders_list(request):
     """Display list of all purchase orders from local database"""
+    from decimal import Decimal
     status_filter = request.GET.get('status', 'all')
     search_query = request.GET.get('q', '').strip()
     excluded_suppliers = request.GET.getlist('exclude_supplier')
@@ -355,6 +356,40 @@ def purchase_orders_list(request):
         .filter(supplier_name__icontains='Carnehill', status='Approved')
         .order_by('-display_number')
     )
+
+    # All approved POs for the Report modal (value + expected date)
+    approved_report_qs = PurchaseOrder.objects.filter(status='Approved')
+    approved_report_total = approved_report_qs.aggregate(t=Sum('total'))['t'] or 0
+
+    def _expected_sort_key(po):
+        """Parse expected_date (stored as a string in various formats).
+        POs with no parseable date sort first, then oldest date first."""
+        raw = (po.expected_date or '').strip()
+        if not raw:
+            return (0, datetime.min)
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
+            try:
+                return (1, datetime.strptime(raw[:19], fmt))
+            except (ValueError, TypeError):
+                continue
+        return (0, datetime.min)
+
+    approved_report_pos = sorted(approved_report_qs, key=_expected_sort_key)
+
+    # Per-currency totals for the report modal (GBP first, then EUR, then others)
+    _ccy_order = {'GBP': 0, 'EUR': 1, 'USD': 2}
+    _ccy_symbols = {'GBP': '£', 'EUR': '€', 'USD': '$'}
+    _ccy_totals = {}
+    for _po in approved_report_pos:
+        _code = _po.currency or 'GBP'
+        _ccy_totals[_code] = _ccy_totals.get(_code, Decimal('0')) + (_po.total or Decimal('0'))
+    approved_report_currency_totals = [
+        {'symbol': _ccy_symbols.get(code.upper(), code), 'amount': amount}
+        for code, amount in sorted(
+            _ccy_totals.items(),
+            key=lambda kv: (_ccy_order.get(kv[0].upper(), 99), kv[0])
+        )
+    ]
 
     # Batch-lookup linked orders (project_id -> Order.workguru_id)
     # Batch-lookup linked orders using multiple strategies
@@ -478,6 +513,9 @@ def purchase_orders_list(request):
         'partial_count': status_counts.get('Partially Received', 0),
         'cancelled_count': status_counts.get('Cancelled', 0),
         'carnehill_pos': carnehill_pos,
+        'approved_report_pos': approved_report_pos,
+        'approved_report_total': approved_report_total,
+        'approved_report_currency_totals': approved_report_currency_totals,
     }
     
     return render(request, 'stock_take/purchase_orders_list.html', context)
@@ -4598,6 +4636,255 @@ def carnehill_summary(request):
 
     response = HttpResponse(buffer, content_type='application/pdf')
     response['Content-Disposition'] = f'inline; filename="carnehill_summary_{_dt.now().strftime("%Y%m%d")}.pdf"'
+    return response
+
+
+@login_required
+def approved_pos_report_pdf(request):
+    """Generate a PDF report of all Approved POs with their value and expected date."""
+    from decimal import Decimal
+    from .po_pdf_generator import (
+        _get_styles, _format_date, BRAND_DARK, BRAND_ACCENT, HEADER_BG,
+        ROW_ALT, BORDER_COLOR
+    )
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+    )
+    from reportlab.lib.styles import ParagraphStyle
+    from datetime import datetime as _dt
+    import io, os
+
+    pos = (
+        PurchaseOrder.objects
+        .filter(status='Approved')
+    )
+
+    def _expected_sort_key(po):
+        """POs with no parseable expected date sort first, then oldest first."""
+        raw = (po.expected_date or '').strip()
+        if not raw:
+            return (0, datetime.min)
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
+            try:
+                return (1, datetime.strptime(raw[:19], fmt))
+            except (ValueError, TypeError):
+                continue
+        return (0, datetime.min)
+
+    pos = sorted(pos, key=_expected_sort_key)
+
+    _CURRENCY_SYMBOLS = {'GBP': '£', 'EUR': '€', 'USD': '$'}
+
+    def _value_cell(currency, amount, style):
+        """Build a space-between value cell: symbol on the left, amount on the right."""
+        symbol = _CURRENCY_SYMBOLS.get((currency or 'GBP').upper(), (currency or 'GBP'))
+        inner = Table(
+            [[Paragraph(symbol, style), Paragraph(f'{amount:,.2f}', styles['CellTextRight'])]],
+            colWidths=[col_widths[3] * 0.30, col_widths[3] * 0.70],
+        )
+        inner.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ]))
+        return inner
+
+    buffer = io.BytesIO()
+    styles = _get_styles()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title='Approved Purchase Orders',
+    )
+
+    elements = []
+    page_width = A4[0] - 30 * mm
+
+    # ─── LOGO ──────────────────────────────────────────────
+    logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+        logo.hAlign = 'CENTER'
+        elements.append(logo)
+        elements.append(Spacer(1, 6 * mm))
+
+    # ─── TITLE ─────────────────────────────────────────────
+    title_style = ParagraphStyle('ReportTitle', parent=styles['POTitle'], fontSize=14, leading=18)
+    elements.append(Paragraph('<b>Approved Purchase Orders</b>', title_style))
+    elements.append(Paragraph(
+        f'Generated {_dt.now().strftime("%d/%m/%Y")}  ·  {len(pos)} purchase order{"s" if len(pos) != 1 else ""}',
+        styles['AddressText']
+    ))
+    elements.append(Spacer(1, 8 * mm))
+
+    # ─── TABLE ─────────────────────────────────────────────
+    col_widths = [
+        page_width * 0.16,   # PO
+        page_width * 0.42,   # Supplier
+        page_width * 0.22,   # Expected Date
+        page_width * 0.20,   # Value
+    ]
+    table_data = [[
+        Paragraph('<b>PO</b>', styles['CellText']),
+        Paragraph('<b>Supplier</b>', styles['CellText']),
+        Paragraph('<b>Expected Date</b>', styles['CellText']),
+        Paragraph('<b>Value</b>', styles['CellTextRight']),
+    ]]
+
+    grand_total = Decimal('0')
+    currency_totals = {}  # currency code -> Decimal
+    for po in pos:
+        po_total = po.total or Decimal('0')
+        grand_total += po_total
+        currency = po.currency or 'GBP'
+        currency_totals[currency] = currency_totals.get(currency, Decimal('0')) + po_total
+        expected = _format_date(po.expected_date) if po.expected_date else '—'
+        table_data.append([
+            Paragraph(str(po.display_number or po.number or '—'), styles['CellText']),
+            Paragraph(str(po.supplier_name or '—'), styles['CellText']),
+            Paragraph(expected, styles['CellText']),
+            _value_cell(currency, po_total, styles['CellText']),
+        ])
+
+    last_col = len(col_widths) - 1
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    table_style = [
+        ('LINEBELOW', (0, 0), (-1, 0), 0.6, BRAND_DARK),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEBELOW', (0, 1), (-1, -1), 0.2, BORDER_COLOR),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('ALIGN', (last_col, 0), (last_col, -1), 'RIGHT'),
+    ]
+    for i in range(1, len(table_data)):
+        if i % 2 == 0:
+            table_style.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+    table.setStyle(TableStyle(table_style))
+    elements.append(table)
+
+    # ─── GRAND TOTALS (per currency) ──────────────────────────
+    elements.append(Spacer(1, 4 * mm))
+    # Show one total row per currency (GBP first, then EUR, then any others)
+    _currency_order = {'GBP': 0, 'EUR': 1, 'USD': 2}
+    sorted_currencies = sorted(
+        currency_totals.items(),
+        key=lambda kv: (_currency_order.get(kv[0].upper(), 99), kv[0])
+    )
+    total_rows = []
+    for code, amount in sorted_currencies:
+        total_rows.append([
+            Paragraph('<b>Total</b>', styles['GrandTotalLabel']),
+            _value_cell(code, amount, styles['GrandTotalLabel']),
+        ])
+    total_tbl = Table(total_rows, colWidths=[page_width - col_widths[3], col_widths[3]])
+    total_tbl.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LINEABOVE', (0, 0), (-1, 0), 1, BRAND_DARK),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (1, 0), (1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(total_tbl)
+
+    # ─── PAGE 2: AGGREGATED ITEMS ─────────────────────────────
+    # Sum the quantity of every line item across all approved POs.
+    # Lines that share the same SKU (or name when no SKU) are combined.
+    agg = {}  # key -> {'sku', 'name', 'qty'}
+    for po in pos:
+        for line in po.products.all():
+            sku = (line.sku or '').strip()
+            name = (line.name or line.description or '').strip()
+            key = sku.upper() if sku else f'NAME::{name.upper()}'
+            qty = line.order_quantity or line.quantity or Decimal('0')
+            if key not in agg:
+                agg[key] = {'sku': sku, 'name': name, 'qty': Decimal('0')}
+            agg[key]['qty'] += qty
+            # Prefer a non-empty name if the first occurrence lacked one
+            if not agg[key]['name'] and name:
+                agg[key]['name'] = name
+
+    agg_rows = sorted(agg.values(), key=lambda r: (r['sku'] or '', r['name'].upper()))
+
+    if agg_rows:
+        elements.append(PageBreak())
+
+        if os.path.exists(logo_path):
+            logo2 = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+            logo2.hAlign = 'CENTER'
+            elements.append(logo2)
+            elements.append(Spacer(1, 6 * mm))
+
+        elements.append(Paragraph('<b>Combined Item Totals</b>', title_style))
+        elements.append(Paragraph(
+            f'Generated {_dt.now().strftime("%d/%m/%Y")}  ·  {len(agg_rows)} unique item{"s" if len(agg_rows) != 1 else ""}',
+            styles['AddressText']
+        ))
+        elements.append(Spacer(1, 8 * mm))
+
+        sku_style = ParagraphStyle(
+            'ItemSku', parent=styles['CellText'], fontSize=7, leading=9, splitLongWords=False
+        )
+        item_col_widths = [
+            page_width * 0.30,   # SKU
+            page_width * 0.52,   # Description
+            page_width * 0.18,   # Qty
+        ]
+        item_data = [[
+            Paragraph('<b>SKU</b>', styles['CellText']),
+            Paragraph('<b>Description</b>', styles['CellText']),
+            Paragraph('<b>Total Qty</b>', styles['CellTextRight']),
+        ]]
+        for r in agg_rows:
+            qty = r['qty']
+            qty_str = f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}'
+            item_data.append([
+                Paragraph(str(r['sku'] or '—'), sku_style),
+                Paragraph(str(r['name'] or '—'), styles['CellText']),
+                Paragraph(qty_str, styles['CellTextRight']),
+            ])
+
+        item_table = Table(item_data, colWidths=item_col_widths, repeatRows=1)
+        item_style = [
+            ('LINEBELOW', (0, 0), (-1, 0), 0.6, BRAND_DARK),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LINEBELOW', (0, 1), (-1, -1), 0.2, BORDER_COLOR),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+        ]
+        for i in range(1, len(item_data)):
+            if i % 2 == 0:
+                item_style.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+        item_table.setStyle(TableStyle(item_style))
+        elements.append(item_table)
+
+    # Build
+    doc.build(elements)
+    buffer.seek(0)
+
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="approved_pos_report_{_dt.now().strftime("%Y%m%d")}.pdf"'
     return response
 
 

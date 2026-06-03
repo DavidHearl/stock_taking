@@ -271,9 +271,30 @@ def ordering(request):
             if o.sale_number not in sale_boards_po_map:
                 sale_boards_po_map[o.sale_number] = o.boards_po
 
-    # Split the already-evaluated list in Python — avoids 2 extra DB queries
-    pfp_orders = [o for o in orders_list if o.order_date is None and o.fit_date is None]
-    regular_orders = [o for o in orders_list if o.order_date is not None or o.fit_date is not None]
+    # Split the already-evaluated list in Python — avoids 2 extra DB queries.
+    # Keep display unique by sale_number so the same sale cannot show in both
+    # the PFP block and the dated block.
+    pfp_candidates = [o for o in orders_list if o.order_date is None and o.fit_date is None]
+    pfp_sale_numbers = {o.sale_number for o in pfp_candidates if o.sale_number}
+    regular_candidates = [
+        o for o in orders_list
+        if (o.order_date is not None or o.fit_date is not None)
+        and (not o.sale_number or o.sale_number not in pfp_sale_numbers)
+    ]
+
+    def _dedupe_display_orders(order_rows):
+        seen_sale_numbers = set()
+        deduped = []
+        for row in order_rows:
+            if row.sale_number:
+                if row.sale_number in seen_sale_numbers:
+                    continue
+                seen_sale_numbers.add(row.sale_number)
+            deduped.append(row)
+        return deduped
+
+    pfp_orders = _dedupe_display_orders(pfp_candidates)
+    regular_orders = _dedupe_display_orders(regular_candidates)
 
     return render(request, 'stock_take/ordering.html', {
         'orders': orders_list,
@@ -5268,7 +5289,10 @@ def add_accessories_to_po(request):
             # so only include the order reference for Stock POs.
             desc_parts = []
             if acc.cut_width and acc.cut_height:
-                desc_parts.append(f'{acc.cut_width:.0f} x {acc.cut_height:.0f}mm')
+                desc_parts.append(f'{acc.cut_width:.0f}mm x {acc.cut_height:.0f}mm')
+                # CTS glass is always supplied with polished edges
+                if acc.is_cut_to_size and (acc.sku or '').upper().startswith('GLS'):
+                    desc_parts.append('Polished Edges')
             if po.project_name == 'Stock' and acc.order:
                 desc_parts.append(f'For order {acc.order.sale_number}')
             description = ' | '.join(desc_parts)
