@@ -44,7 +44,7 @@ class OrderForm(forms.ModelForm):
             'os_doors_required': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
             'all_items_ordered': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
             'anthill_id': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 273121'}),
-            'total_value_inc_vat': forms.NumberInput(attrs={'class': 'form-input', 'placeholder': 'e.g., 5000.00', 'step': '0.01'}),
+            'total_value_inc_vat': forms.TextInput(attrs={'class': 'form-input no-pnx-spinner', 'placeholder': 'e.g., 5000.00', 'inputmode': 'decimal'}),
         }
         labels = {
             'customer_number': 'CAD Number',

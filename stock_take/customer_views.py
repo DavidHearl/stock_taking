@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
-from django.db.models import Count, Max, Sum, Q, Exists, OuterRef
+from django.db.models import Count, Max, Sum, Q, Exists, OuterRef, F
 from django.db import ProgrammingError, DatabaseError, transaction
 from django.contrib import messages
 from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead, SaleCoverSheet, SaleCoverSheetHistory, ClaimDocument, Designer
@@ -679,7 +679,7 @@ def sales_list(request):
         category='3'
     ).exclude(
         status__iexact='cancelled'
-    ).order_by('-activity_date')
+    ).order_by(F('fit_date').asc(nulls_last=True), '-activity_date')
 
     if location_filter and not search_query:
         sales_base = sales_base.filter(location__iexact=location_filter)
@@ -707,16 +707,31 @@ def sales_list(request):
             search_q &= extra
 
     # Status-based filters
+    from .models import Remedial
     complete_statuses = ['complete', 'completed', 'won']
+    complete_re = r'^(' + '|'.join(complete_statuses) + ')$'
+
+    # Orders that have at least one open (not completed) remedial — these sales
+    # belong in the "Remedial" bracket rather than the plain "Open" bracket.
+    open_remedial_order_ids = set(
+        Remedial.objects.filter(is_completed=False)
+        .exclude(original_order__isnull=True)
+        .values_list('original_order_id', flat=True)
+    )
 
     def status_bracket(qs, bracket):
-        if bracket == 'open':
-            return qs.exclude(status__iregex=r'^(' + '|'.join(complete_statuses) + ')$')
-        elif bracket == 'complete':
-            return qs.filter(status__iregex=r'^(' + '|'.join(complete_statuses) + ')$')
+        if bracket == 'complete':
+            return qs.filter(status__iregex=complete_re)
+        # Open and Remedial are both "not complete"
+        non_complete = qs.exclude(status__iregex=complete_re)
+        if bracket == 'remedial':
+            return non_complete.filter(order_id__in=open_remedial_order_ids)
+        elif bracket == 'open':
+            return non_complete.exclude(order_id__in=open_remedial_order_ids)
         return qs
 
     count_open = status_bracket(sales_base, 'open').count()
+    count_remedial = status_bracket(sales_base, 'remedial').count()
     count_complete = status_bracket(sales_base, 'complete').count()
 
     sales = status_bracket(sales_base, status_filter)
@@ -725,13 +740,100 @@ def sales_list(request):
         sales = sales.filter(search_q)
 
     page_number = request.GET.get('page', 1)
-    paginator = Paginator(sales, 100)
-    page_obj = paginator.get_page(page_number)
 
-    # Build a fallback map: anthill_activity_id -> Order (via Order.sale_number match)
-    page_activity_ids = [s.anthill_activity_id for s in page_obj]
-    matched_orders = Order.objects.filter(sale_number__in=page_activity_ids).only('id', 'sale_number')
-    order_map = {o.sale_number: o for o in matched_orders}
+    # ---- Ordering status per sale (Required / Short / Ordered / Validated) ----
+    from .models import OrderValidationRequest
+    from .ordering_status import get_short_sale_numbers
+
+    def _attach_ordering_status(sale_list):
+        """Resolve each sale's linked order and set .ordering_status. Returns the
+        anthill_activity_id -> Order fallback map used by the template."""
+        activity_ids = [s.anthill_activity_id for s in sale_list]
+        omap = {
+            o.sale_number: o
+            for o in Order.objects.filter(sale_number__in=activity_ids).only('id', 'sale_number')
+        }
+
+        sale_order_ids = {}
+        for s in sale_list:
+            linked = s.order or omap.get(s.anthill_activity_id)
+            if linked:
+                sale_order_ids[s.pk] = linked.id
+
+        status_orders = {}
+        if sale_order_ids:
+            status_orders = {
+                o.id: o for o in Order.objects.filter(id__in=set(sale_order_ids.values()))
+                .select_related('boards_po')
+                .prefetch_related('additional_boards_pos', 'accessories')
+            }
+
+        validated_order_ids = set(
+            OrderValidationRequest.objects.filter(is_dismissed=True)
+            .values_list('order_id', flat=True)
+        )
+        short_sale_numbers = get_short_sale_numbers()
+
+        for s in sale_list:
+            order = status_orders.get(sale_order_ids.get(s.pk))
+            if not order:
+                s.ordering_status = None
+            elif order.id in validated_order_ids:
+                s.ordering_status = 'validated'
+            elif order.all_materials_ordered:
+                s.ordering_status = 'ordered'
+            elif order.sale_number in short_sale_numbers:
+                s.ordering_status = 'short'
+            else:
+                s.ordering_status = 'required'
+        return omap
+
+    # PFP sales (no fit date) are collapsed into a single group shown only on page 1.
+    pfp_sales = list(sales.filter(fit_date__isnull=True))
+
+    # Sort keys: group by ordering status (Required -> Short -> Ordered/Validated -> none).
+    # Required is ordered by nearest upcoming fit date first; every other bracket is
+    # ordered by fit date descending (furthest-away date first).
+    from datetime import date as _date
+    _today = _date.today()
+    _status_rank = {'required': 0, 'short': 1, 'ordered': 2, 'validated': 2}
+
+    def _fit_key(s):
+        if s.fit_date >= _today:
+            return (0, (s.fit_date - _today).days)
+        return (1, (_today - s.fit_date).days)
+
+    def _sort_key(s):
+        rank = _status_rank.get(s.ordering_status, 3)
+        if s.ordering_status == 'required':
+            # Nearest upcoming fit date first within the Required group.
+            return (rank, 0, _fit_key(s))
+        # All other groups: furthest-away fit date first (descending).
+        return (rank, 1, (-s.fit_date.toordinal(),))
+
+    if status_filter == 'complete':
+        # The "complete" bracket is huge and status grouping is irrelevant there, so
+        # just order by most-recent fit date and compute status for the visible page.
+        dated_qs = sales.filter(fit_date__isnull=False).order_by(F('fit_date').desc(nulls_last=True))
+        paginator = Paginator(dated_qs, 100)
+        page_obj = paginator.get_page(page_number)
+        dated_sales = list(page_obj)
+        order_map = _attach_ordering_status(
+            dated_sales + (pfp_sales if page_obj.number == 1 else [])
+        )
+    else:
+        # Actionable brackets: materialise all dated sales, resolve status, then sort
+        # by status group + fit date so the ordering is consistent across pages.
+        dated_all = list(sales.filter(fit_date__isnull=False))
+        order_map = _attach_ordering_status(dated_all + pfp_sales)
+        dated_all.sort(key=_sort_key)
+        paginator = Paginator(dated_all, 100)
+        page_obj = paginator.get_page(page_number)
+        dated_sales = list(page_obj)
+
+    # PFP collapsed group only appears on the first page.
+    if page_obj.number != 1:
+        pfp_sales = []
 
     # Designer report — only for David Hearl
     is_david_hearl = request.user.email.lower() == 'david.hearl@sliderobes.com'
@@ -747,18 +849,76 @@ def sales_list(request):
             .order_by('location')
         )
 
+    # ---- Ordering toolbar context (validator bell, Orders-to-Place, Add Order) ----
+    from django.urls import reverse as _reverse
+    from .forms import OrderForm
+    from .models import UserSiteRole, AnthillOrderToPlace
+
+    order_form = OrderForm(initial={'order_type': 'sale'})
+
+    # Validator bell + modal
+    is_validator = UserSiteRole.objects.filter(user=request.user, role_name='validator').exists()
+    validation_requests = list(
+        OrderValidationRequest.objects.filter(recipient=request.user, is_dismissed=False)
+        .select_related('order', 'order__boards_po')
+    )
+    validation_pending_count = sum(
+        1 for vr in validation_requests
+        if not (
+            (vr.boards_checked or vr.order.boards_not_required) and
+            (vr.accessories_checked or vr.order.accessories_not_required) and
+            (vr.os_doors_checked or not vr.order.os_doors_required) and
+            vr.glass_checked
+        )
+    )
+
+    # Detail-link map for orders shown in the validator modal
+    order_href_map = {}
+    if validation_requests:
+        vr_order_numbers = [vr.order.sale_number for vr in validation_requests if vr.order.sale_number]
+        vr_sale_pk_map = dict(
+            AnthillSale.objects.filter(anthill_activity_id__in=vr_order_numbers)
+            .values_list('anthill_activity_id', 'pk')
+        )
+        for vr in validation_requests:
+            sale_pk = vr_sale_pk_map.get(vr.order.sale_number)
+            if sale_pk:
+                order_href_map[vr.order.id] = _reverse('sale_detail', kwargs={'pk': sale_pk}) + '?tab=order'
+            else:
+                order_href_map[vr.order.id] = _reverse('order_details', kwargs={'order_id': vr.order.id})
+
+    # Anthill "Orders to Place" count + sale-number map for the modal
+    anthill_orders_to_place_count = AnthillOrderToPlace.objects.filter(resolved=False).count()
+    all_existing_sale_numbers = dict(
+        Order.objects.exclude(sale_number__isnull=True).exclude(sale_number='')
+        .values_list('sale_number', 'id')
+    )
+    from .views import _build_anthill_sale_pk_map
+    anthill_sale_pk_map = _build_anthill_sale_pk_map()
+
     context = {
         'sales': page_obj,
         'page_obj': page_obj,
+        'dated_sales': dated_sales,
+        'pfp_sales': pfp_sales,
         'filtered_count': paginator.count,
         'search_query': search_query,
         'status_filter': status_filter,
         'location_filter': location_filter,
         'count_open': count_open,
+        'count_remedial': count_remedial,
         'count_complete': count_complete,
         'order_map': order_map,
         'is_david_hearl': is_david_hearl,
         'available_locations': available_locations,
+        'form': order_form,
+        'is_validator': is_validator,
+        'validation_requests': validation_requests,
+        'validation_pending_count': validation_pending_count,
+        'order_href_map': order_href_map,
+        'anthill_orders_to_place_count': anthill_orders_to_place_count,
+        'all_existing_sale_numbers': all_existing_sale_numbers,
+        'anthill_sale_pk_map': anthill_sale_pk_map,
     }
 
     return render(request, 'stock_take/sales_list.html', context)
@@ -1274,6 +1434,35 @@ def sale_claim_document_upload(request, pk):
     return redirect('sale_detail', pk=pk)
 
 
+@login_required
+def sale_claim_document_attach(request, pk):
+    """Attach one or more existing Claim Service documents to this job by re-homing
+    them under the sale's canonical group key, so they appear in the Job Info docs."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+
+    raw_ids = request.POST.get('doc_ids') or request.POST.get('doc_id') or ''
+    doc_ids = [i.strip() for i in str(raw_ids).split(',') if i.strip().isdigit()]
+    if not doc_ids:
+        return JsonResponse({'success': False, 'error': 'No documents selected.'}, status=400)
+
+    group_key = _sale_claim_group_key(sale)
+    docs = ClaimDocument.objects.filter(id__in=doc_ids)
+    attached = 0
+    for doc in docs:
+        if doc.group_key != group_key:
+            doc.group_key = group_key
+            doc.save(update_fields=['group_key'])
+        attached += 1
+
+    if not attached:
+        return JsonResponse({'success': False, 'error': 'No matching documents found.'}, status=404)
+
+    return JsonResponse({'success': True, 'attached': attached})
+
+
 def _build_sale_context(sale, request_user):
     """Compute context dict for a single AnthillSale. Used by both
     sale_detail (standalone) and order_details (sale tab)."""
@@ -1402,7 +1591,149 @@ def sale_create_order(request, pk):
             context['missing_order_fields'] = set(form.errors.keys()) | {'designer'}
             return render(request, 'stock_take/sale_detail.html', context)
 
+
+@login_required
+def sale_save_order_fields(request, pk):
+    """Save order-level fields (CAD/system number, designer) edited from the Sale tab.
+
+    When the sale already has an Order, the provided fields are updated directly.
+    When it has none, an Order is created and linked — but only when there's enough
+    information to build a valid Order (a 6-digit sale number plus a valid CAD number).
+    Otherwise a helpful error is returned describing what's still required.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+
+    try:
+        import json
+        data = json.loads(request.body or '{}')
+
+        order = sale.order
+        if order is not None:
+            if 'customer_number' in data:
+                order.customer_number = (data.get('customer_number') or '').strip()
+            if 'designer_id' in data:
+                designer_id = data.get('designer_id')
+                order.designer = Designer.objects.get(id=designer_id) if designer_id else None
+            order.save()
+            return JsonResponse({'success': True})
+
+        # No order yet — try to build one from the sale data plus the submitted edits.
+        from .forms import OrderForm
+        initial = _order_initial_from_sale(sale)
+        form_data = {k: ('' if v is None else v) for k, v in initial.items()}
+        if data.get('customer_number'):
+            form_data['customer_number'] = data['customer_number'].strip()
+        if data.get('designer_id'):
+            form_data['designer'] = data['designer_id']
+        # Total value may be edited in the Financial Summary and sent here directly,
+        # so order creation doesn't depend on the parallel sale-save committing first.
+        total_value = data.get('total_value_inc_vat')
+        if total_value not in (None, ''):
+            cleaned = str(total_value).replace('£', '').replace(',', '').strip()
+            if cleaned:
+                form_data['total_value_inc_vat'] = cleaned
+
+        form = OrderForm(form_data)
+        if not form.is_valid():
+            parts = []
+            for field, errs in form.errors.items():
+                label = form.fields[field].label or field.replace('_', ' ').title()
+                parts.append(f"{label}: {' '.join(errs)}")
+            return JsonResponse({
+                'success': False,
+                'error': 'Not enough information to create an order yet — ' + ' | '.join(parts),
+            })
+
+        order = form.save()
+        sale.order = order
+        sale.save(update_fields=['order'])
+        return JsonResponse({'success': True, 'order_created': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def sale_set_anthill_id(request, pk):
+    """Save a missing Anthill customer/sale ID on a sale and return the built URL.
+
+    Used by the Anthill icon column on the sales list: clicking a greyed-out icon
+    pops a small modal asking for the number, which is saved here so the link
+    becomes permanent.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+    field = (request.POST.get('field') or '').strip()
+    number = (request.POST.get('number') or '').strip()
+
+    if not number:
+        return JsonResponse({'success': False, 'error': 'Please enter a number.'}, status=400)
+
+    if field == 'customer':
+        sale.anthill_customer_id = number
+        sale.save(update_fields=['anthill_customer_id'])
+        url = f'https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={number}'
+    elif field == 'sale':
+        if AnthillSale.objects.exclude(pk=sale.pk).filter(anthill_activity_id=number).exists():
+            return JsonResponse({'success': False, 'error': 'That sale ID is already in use.'}, status=400)
+        sale.anthill_activity_id = number
+        sale.save(update_fields=['anthill_activity_id'])
+        url = f'https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={number}'
+    else:
+        return JsonResponse({'success': False, 'error': 'Invalid field.'}, status=400)
+
+    return JsonResponse({'success': True, 'url': url})
+
     return redirect(_reverse('sale_detail', kwargs={'pk': pk}) + '?tab=order')
+
+
+def _order_initial_from_sale(sale):
+    """Derive OrderForm initial data from an AnthillSale. Shared by the create-order
+    form and the auto-create-on-save flow for order-level fields edited on the Sale tab."""
+    customer = sale.customer
+    raw_cnum = (
+        (customer.code if customer else None)
+        or sale.anthill_customer_id
+        or ''
+    ).strip()
+    if len(raw_cnum) == 5 and raw_cnum.isdigit():
+        raw_cnum = '0' + raw_cnum
+    customer_number = raw_cnum if (len(raw_cnum) == 6 and raw_cnum.startswith('0')) else ''
+
+    first_name = (customer.first_name if customer else '') or ''
+    last_name = (customer.last_name if customer else '') or ''
+    if not first_name and not last_name and sale.customer_name:
+        parts = sale.customer_name.strip().split(' ', 1)
+        first_name = parts[0]
+        last_name = parts[1] if len(parts) > 1 else ''
+
+    # Auto-assign the designer from the contract number initials (e.g. BFS-NR-424804 -> NR -> Neil Robb)
+    designer_id = ''
+    inferred_designer_name = _infer_designer_name_from_contract(sale)
+    if inferred_designer_name:
+        matched_designer = Designer.objects.filter(name=inferred_designer_name).first()
+        if matched_designer:
+            designer_id = matched_designer.pk
+
+    return {
+        'customer': customer.pk if customer else '',
+        'first_name': first_name,
+        'last_name': last_name,
+        'sale_number': sale.anthill_activity_id or '',
+        'customer_number': customer_number,
+        'order_date': sale.activity_date.date() if sale.activity_date else None,
+        'fit_date': sale.fit_date,
+        'address': (customer.address_1 or customer.address if customer else '') or '',
+        'postcode': (customer.postcode if customer else '') or '',
+        'anthill_id': (customer.anthill_customer_id if customer else '') or sale.anthill_customer_id or '',
+        'total_value_inc_vat': sale.sale_value or '',
+        'order_type': 'sale',
+        'designer': designer_id,
+    }
 
 
 @login_required
@@ -1423,40 +1754,56 @@ def sale_detail(request, pk):
         for key, val in order_ctx.items():
             if key not in context:
                 context[key] = val
+
+        # Build remedial "action required" suggestions from the original order's
+        # items so the open/edit-remedial form can hint what likely needs ordering.
+        # Each suggestion is a dict: {'label', 'sku', 'detail'} — sku/detail optional.
+        def _dedupe_suggestions(rows, cap=20):
+            out = []
+            seen = set()
+            for row in rows:
+                label = (row.get('label') or '').strip()
+                if not label:
+                    continue
+                key = (label, row.get('sku') or '')
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({
+                    'label': label,
+                    'sku': (row.get('sku') or '').strip(),
+                    'detail': (row.get('detail') or '').strip(),
+                })
+                if len(out) >= cap:
+                    break
+            return out
+
+        context['rem_suggest_boards'] = _dedupe_suggestions(
+            {'label': m} for m in context.get('order_materials', [])
+        )
+        context['rem_suggest_glass'] = _dedupe_suggestions(
+            {'label': g.name, 'sku': g.sku} for g in context.get('glass_items', [])
+        )
+        _rem_accs = list(context.get('non_glass_accessories', [])) + list(context.get('raumplus_accessories', []))
+        context['rem_suggest_accessories'] = _dedupe_suggestions(
+            {
+                'label': a.name,
+                'sku': a.sku,
+                'detail': (f"Stock {a.available_quantity:.0f}" if a.stock_item else ''),
+            }
+            for a in _rem_accs
+        )
+        context['rem_suggest_osdoors'] = _dedupe_suggestions(
+            {
+                'label': ' '.join(p for p in [(d.door_style or '').strip(), (d.style_colour or d.colour or '').strip()] if p),
+                'detail': (f"{d.width:.0f}×{d.height:.0f}" if d.width and d.height else ''),
+            }
+            for d in sale.order.os_doors.all()
+        )
     else:
         # No order yet — supply a pre-filled OrderForm so the order tab can render a create form
         from .forms import OrderForm
-        customer = sale.customer
-        raw_cnum = (
-            (customer.code if customer else None)
-            or sale.anthill_customer_id
-            or ''
-        ).strip()
-        if len(raw_cnum) == 5 and raw_cnum.isdigit():
-            raw_cnum = '0' + raw_cnum
-        customer_number = raw_cnum if (len(raw_cnum) == 6 and raw_cnum.startswith('0')) else ''
-
-        first_name = (customer.first_name if customer else '') or ''
-        last_name = (customer.last_name if customer else '') or ''
-        if not first_name and not last_name and sale.customer_name:
-            parts = sale.customer_name.strip().split(' ', 1)
-            first_name = parts[0]
-            last_name = parts[1] if len(parts) > 1 else ''
-
-        initial_data = {
-            'customer': customer.pk if customer else '',
-            'first_name': first_name,
-            'last_name': last_name,
-            'sale_number': sale.anthill_activity_id or '',
-            'customer_number': customer_number,
-            'order_date': sale.activity_date.date() if sale.activity_date else None,
-            'fit_date': sale.fit_date,
-            'address': (customer.address_1 or customer.address if customer else '') or '',
-            'postcode': (customer.postcode if customer else '') or '',
-            'anthill_id': (customer.anthill_customer_id if customer else '') or sale.anthill_customer_id or '',
-            'total_value_inc_vat': sale.sale_value or '',
-            'order_type': 'sale',
-        }
+        initial_data = _order_initial_from_sale(sale)
         context['create_order_form'] = context.get('create_order_form') or OrderForm(initial=initial_data)
 
         # Fields the user must fill in: always show designer; show any field where we have no data

@@ -27,6 +27,41 @@ from django.utils import timezone
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+
+def _build_anthill_sale_pk_map():
+    """Map sale_number -> AnthillSale.pk for the unresolved 'orders to place'.
+
+    Lets the Anthill modal's "View Sale" action deep-link to the sale detail
+    page for every row, whether or not an Order has been created yet.
+    """
+    from .models import AnthillOrderToPlace, AnthillSale
+    sale_numbers = set()
+    contracts = (
+        AnthillOrderToPlace.objects.filter(resolved=False)
+        .values_list('contract_number', flat=True)
+    )
+    for contract in contracts:
+        if not contract:
+            continue
+        contract = contract.strip()
+        if contract.isdigit():
+            sale_numbers.add(contract)
+        else:
+            digits = re.findall(r'\d+', contract)
+            if digits:
+                sale_numbers.add(digits[-1])
+
+    pk_map = {}
+    for sale_number, pk in (
+        AnthillSale.objects.filter(anthill_activity_id__in=sale_numbers)
+        .order_by('-activity_date', '-pk')
+        .values_list('anthill_activity_id', 'pk')
+    ):
+        if sale_number not in pk_map:
+            pk_map[sale_number] = pk
+    return pk_map
+
+
 @login_required
 def ordering(request):
     # Handle price per square meter update
@@ -215,6 +250,7 @@ def ordering(request):
         Order.objects.exclude(sale_number__isnull=True).exclude(sale_number='')
         .values_list('sale_number', 'id')
     )
+    anthill_sale_pk_map = _build_anthill_sale_pk_map()
 
     # Build set of order IDs that have a pending validation request for this user
     from .models import OrderValidationRequest, UserSiteRole
@@ -318,6 +354,7 @@ def ordering(request):
         'remedials_map': remedials_map,
         'anthill_orders_to_place_count': anthill_orders_to_place_count,
         'all_existing_sale_numbers': all_existing_sale_numbers,
+        'anthill_sale_pk_map': anthill_sale_pk_map,
         'is_validator': is_validator,
         'validation_order_ids': validation_order_ids,
         'validated_order_ids': validated_order_ids,
@@ -9353,9 +9390,16 @@ def upload_accessories_csv(request):
                     missing = False
                     substituted = False
                 except StockItem.DoesNotExist:
-                    # Check for substitution
+                    # Check for substitution. Duplicate substitutions can exist for the
+                    # same missing SKU, so prefer one with a replacement defined and fall
+                    # back to the most recent rather than raising MultipleObjectsReturned.
                     try:
-                        substitution = Substitution.objects.get(missing_sku=sku)
+                        substitution = (
+                            Substitution.objects.filter(missing_sku=sku).exclude(replacement_sku='').order_by('-created_at').first()
+                            or Substitution.objects.filter(missing_sku=sku).order_by('-created_at').first()
+                        )
+                        if substitution is None:
+                            raise Substitution.DoesNotExist
                         replacement_sku = substitution.replacement_sku
                         if replacement_sku and replacement_sku.strip():
                             # Apply substitution immediately
@@ -10981,6 +11025,14 @@ def create_remedial(request, order_pk):
     order_boards_required = request.POST.get('order_boards_required') == 'on'
     order_accessories_required = request.POST.get('order_accessories_required') == 'on'
     order_glass_required = request.POST.get('order_glass_required') == 'on'
+    order_boards_items = request.POST.get('order_boards_items', '').strip()
+    order_boards_po_ref = request.POST.get('order_boards_po_ref', '').strip()
+    order_accessories_items = request.POST.get('order_accessories_items', '').strip()
+    order_accessories_po_ref = request.POST.get('order_accessories_po_ref', '').strip()
+    order_glass_items = request.POST.get('order_glass_items', '').strip()
+    order_glass_po_ref = request.POST.get('order_glass_po_ref', '').strip()
+    os_doors_items = request.POST.get('os_doors_items', '').strip()
+    os_doors_po = request.POST.get('os_doors_po', '').strip()
     next_url = request.POST.get('next', '').strip() or None
 
     if not reason:
@@ -11006,6 +11058,14 @@ def create_remedial(request, order_pk):
         order_boards_required=order_boards_required,
         order_accessories_required=order_accessories_required,
         order_glass_required=order_glass_required,
+        order_boards_items=order_boards_items,
+        order_boards_po_ref=order_boards_po_ref,
+        order_accessories_items=order_accessories_items,
+        order_accessories_po_ref=order_accessories_po_ref,
+        order_glass_items=order_glass_items,
+        order_glass_po_ref=order_glass_po_ref,
+        os_doors_items=os_doors_items,
+        os_doors_po=os_doors_po,
         first_name=order.first_name,
         last_name=order.last_name,
         customer_number=order.customer_number,
@@ -11013,6 +11073,67 @@ def create_remedial(request, order_pk):
         postcode=order.postcode,
     )
     return redirect(next_url) if next_url else redirect('remedial_detail', pk=remedial.pk)
+
+@login_required
+def update_remedial(request, pk):
+    """Edit an existing remedial order."""
+    from django.shortcuts import get_object_or_404
+    from django.contrib import messages
+    remedial = get_object_or_404(Remedial, pk=pk)
+
+    if request.method != 'POST':
+        return redirect('remedial_detail', pk=remedial.pk)
+
+    next_url = request.POST.get('next', '').strip() or None
+    reason = request.POST.get('reason', '').strip()
+
+    if not reason:
+        messages.error(request, 'Reason is required.')
+        return redirect(next_url) if next_url else redirect('remedial_detail', pk=remedial.pk)
+
+    remedial.reason = reason
+    remedial.notes = request.POST.get('notes', '').strip()
+    remedial.scheduled_date = request.POST.get('scheduled_date') or None
+    remedial.os_doors_required = request.POST.get('os_doors_required') == 'on'
+    remedial.order_boards_required = request.POST.get('order_boards_required') == 'on'
+    remedial.order_accessories_required = request.POST.get('order_accessories_required') == 'on'
+    remedial.order_glass_required = request.POST.get('order_glass_required') == 'on'
+    remedial.order_boards_items = request.POST.get('order_boards_items', '').strip()
+    remedial.order_boards_po_ref = request.POST.get('order_boards_po_ref', '').strip()
+    remedial.order_accessories_items = request.POST.get('order_accessories_items', '').strip()
+    remedial.order_accessories_po_ref = request.POST.get('order_accessories_po_ref', '').strip()
+    remedial.order_glass_items = request.POST.get('order_glass_items', '').strip()
+    remedial.order_glass_po_ref = request.POST.get('order_glass_po_ref', '').strip()
+    remedial.os_doors_items = request.POST.get('os_doors_items', '').strip()
+    remedial.os_doors_po = request.POST.get('os_doors_po', '').strip()
+
+    is_completed = request.POST.get('is_completed') == 'on'
+    remedial.is_completed = is_completed
+    if is_completed and not remedial.completed_date:
+        from django.utils import timezone as _tz
+        remedial.completed_date = _tz.now().date()
+    elif not is_completed:
+        remedial.completed_date = None
+
+    remedial.save()
+    messages.success(request, f'Remedial {remedial.remedial_number} updated.')
+    return redirect(next_url) if next_url else redirect('remedial_detail', pk=remedial.pk)
+
+@login_required
+def delete_remedial(request, pk):
+    """Delete a remedial order (e.g. one created by accident)."""
+    from django.shortcuts import get_object_or_404
+    from django.contrib import messages
+    remedial = get_object_or_404(Remedial, pk=pk)
+
+    if request.method != 'POST':
+        return redirect('remedial_detail', pk=remedial.pk)
+
+    next_url = request.POST.get('next', '').strip() or None
+    number = remedial.remedial_number
+    remedial.delete()
+    messages.success(request, f'Remedial {number} deleted.')
+    return redirect(next_url) if next_url else redirect('remedials')
 
 @login_required
 def remedial_report(request):
@@ -13130,9 +13251,16 @@ def generate_and_upload_accessories_csv(request, order_id):
             try:
                 stock_item = StockItem.objects.get(sku=sku)
             except StockItem.DoesNotExist:
-                # Check for substitution
+                # Check for substitution. Duplicate substitutions can exist for the
+                # same missing SKU, so prefer one with a replacement defined and fall
+                # back to the most recent rather than raising MultipleObjectsReturned.
                 try:
-                    substitution = Substitution.objects.get(missing_sku=sku)
+                    substitution = (
+                        Substitution.objects.filter(missing_sku=sku).exclude(replacement_sku='').order_by('-created_at').first()
+                        or Substitution.objects.filter(missing_sku=sku).order_by('-created_at').first()
+                    )
+                    if substitution is None:
+                        raise Substitution.DoesNotExist
                     replacement_sku = substitution.replacement_sku
                     if replacement_sku and replacement_sku.strip():
                         # Apply substitution - use the REPLACEMENT SKU

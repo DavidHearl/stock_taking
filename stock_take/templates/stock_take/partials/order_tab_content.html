@@ -113,6 +113,12 @@
                                 </div>
 
                                 <!-- Claim Service Docs -->
+                                <div class="job-doc-list-header">
+                                    <span class="job-doc-list-title">Claim Service Documents</span>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchAndAttachAll(this)" title="Search the Claim Service and choose which documents to attach to this job">
+                                        <i class="bi bi-search"></i> Find &amp; review
+                                    </button>
+                                </div>
                                 <div class="job-doc-list">
                                     {% for item in important_documents %}
                                     <div class="job-doc-item">
@@ -124,26 +130,21 @@
                                             {% endif %}
                                             <div>
                                                 <div class="job-doc-item-name">{{ item.doc_type }}</div>
-                                                {% if item.doc %}
-                                                <div class="job-doc-item-date">{{ item.doc.uploaded_at|date:'d M Y' }}</div>
-                                                {% else %}
-                                                <div class="job-doc-item-date">Not uploaded</div>
-                                                {% endif %}
                                             </div>
                                         </div>
                                         <div class="job-doc-item-right">
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.doc_type }}">
+                                            <button type="button" class="claim-icon-btn" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.doc_type }}">
                                                 <i class="bi bi-search"></i>
                                             </button>
                                             {% if item.doc %}
-                                            <a href="{{ item.doc.file.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                                            <a href="{{ item.doc.file.url }}" target="_blank" class="claim-icon-btn" title="View {{ item.doc_type }}">
                                                 <i class="bi bi-eye"></i>
                                             </a>
                                             {% endif %}
                                             <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="job-doc-upload-form">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
-                                                <label class="btn btn-sm {% if item.doc %}btn-outline-secondary{% else %}btn-outline-primary{% endif %}" title="Upload {{ item.doc_type }}">
+                                                <label class="claim-icon-btn{% if not item.doc %} claim-icon-btn-primary{% endif %}" title="Upload {{ item.doc_type }}">
                                                     <i class="bi bi-upload"></i>
                                                     <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" class="job-doc-file-hidden" onchange="this.closest('form').submit()">
                                                 </label>
@@ -642,7 +643,7 @@
 
         {# ── No-PO placeholder: shown only when no PO has been linked yet ── #}
         {% if not all_os_doors_pos_list %}
-        <div class="card">
+        <div class="card osd-card">
             <div class="card-header">
                 <div class="boards-header-left">
                     <h3>OS Doors
@@ -668,6 +669,9 @@
                             </button>
                             <button type="button" class="osd-kebab-item" onclick="toggleApoPoSearch('primary-os-doors-po-search'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
                                 <i class="bi bi-link-45deg"></i> Link PO
+                            </button>
+                            <button type="button" class="osd-kebab-item" onclick="copyOSDoorsOrderReference({{ order.id }}, '{{ order.first_name|escapejs }} {{ order.last_name|escapejs }}', '{{ order.sale_number|escapejs }}'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-clipboard"></i> Order Reference
                             </button>
                             <a href="{% url 'os_door_options' %}" class="osd-kebab-item" target="_blank" rel="noopener"><i class="bi bi-collection"></i> Style &amp; Colour Library</a>
                             {% if order.os_doors_required %}
@@ -796,7 +800,7 @@
 
         {# ── Unified loop: one identical card per linked PO ── #}
         {% for apo in all_os_doors_pos_list %}
-        <div class="card{% if not forloop.first %} mt-3{% endif %}">
+        <div class="card osd-card{% if not forloop.first %} mt-3{% endif %}">
             <div class="card-header">
                 <div class="boards-header-left">
                     <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" title="View Purchase Order">
@@ -826,6 +830,9 @@
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <div class="osd-kebab-menu">
+                            <button type="button" class="osd-kebab-item" onclick="copyOrderReferenceText('{{ apo.display_number|escapejs }}', '{{ order.first_name|escapejs }} {{ order.last_name|escapejs }}', '{{ order.sale_number|escapejs }}'); document.querySelectorAll('.osd-kebab-menu.open').forEach(m=>m.classList.remove('open'))">
+                                <i class="bi bi-clipboard"></i> Order Reference
+                            </button>
                             <a href="{% url 'os_door_options' %}" class="osd-kebab-item" target="_blank" rel="noopener"><i class="bi bi-collection"></i> Style &amp; Colour Library</a>
                             {% if apo.display_number == order.os_doors_po %}
                             <button type="button" class="osd-kebab-item" onclick="if(confirm('Clear the OS Doors ordered mark? This will not delete the PO.')) document.getElementById('clear-os-doors-form').submit()">
@@ -2253,10 +2260,12 @@
                 <button type="button" class="modal-close" onclick="closeModal('addItemModal')">✕</button>
             </div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="add-item-search">Search for Item</label>
-                    <input type="text" class="form-input" id="add-item-search" 
-                           placeholder="Search by SKU or Name..." onkeyup="searchItemsToAdd()">
+                <div class="add-item-search-bar">
+                    <div class="search-input-wrapper">
+                        <i class="bi bi-search"></i>
+                        <input type="text" id="add-item-search"
+                               placeholder="Search by SKU or Name..." onkeyup="searchItemsToAdd()">
+                    </div>
                 </div>
                 <div id="add-item-results" class="search-results-container">
                     <p class="text-muted">Type to search for items...</p>
@@ -3090,13 +3099,17 @@ function toggleJobInfoMenu(e) {
 
 // Search Claim Service for a given doc type
 const CLAIM_GROUP_KEY = '{{ claim_group_key|escapejs }}';
+const CLAIM_IMPORTANT_DOC_TYPES = [{% for item in important_documents %}'{{ item.doc_type|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+const CLAIM_ATTACH_URL = '{% url "sale_claim_document_attach" sale.pk %}';
 
 function searchClaimDocs(docType) {
     const modal = document.getElementById('claimSearchModal');
     const docTypeLabel = document.getElementById('claimSearchDocType');
     const resultsEl = document.getElementById('claimSearchResults');
+    const footerEl = document.getElementById('claimSearchFooter');
     if (!modal) return;
 
+    if (footerEl) footerEl.innerHTML = '';
     if (docTypeLabel) docTypeLabel.textContent = docType;
     resultsEl.innerHTML = '<div class="claim-search-loading"><i class="bi bi-arrow-repeat claim-search-spin"></i> Searching...</div>';
     modal.showModal();
@@ -3115,12 +3128,11 @@ function searchClaimDocs(docType) {
                 html += '<div class="claim-search-item">'
                       + '<div class="claim-search-item-left">'
                       + '<i class="bi bi-file-earmark-pdf claim-search-icon"></i>'
-                      + '<div>'
-                      + '<div class="claim-search-item-name">' + _escHtml(doc.filename) + '</div>'
-                      + '<div class="claim-search-item-meta">' + _escHtml(doc.group_key) + ' &middot; ' + _escHtml(doc.uploaded_at) + '</div>'
-                      + '</div></div>'
+                      + '<span class="claim-search-item-name">' + _escHtml(doc.filename) + '</span>'
+                      + '</div>'
                       + '<div class="claim-search-item-right">'
-                      + '<a href="' + _escHtml(doc.download_url) + '" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> View</a>'
+                      + '<a href="' + _escHtml(doc.download_url) + '" target="_blank" class="claim-icon-btn" title="View"><i class="bi bi-eye"></i></a>'
+                      + '<button type="button" class="claim-icon-btn claim-icon-btn-primary" onclick="attachClaimDoc(' + doc.id + ', this)" title="Attach"><i class="bi bi-paperclip"></i></button>'
                       + '</div></div>';
             }
             html += '</div>';
@@ -3128,6 +3140,130 @@ function searchClaimDocs(docType) {
         })
         .catch(() => {
             resultsEl.innerHTML = '<div class="claim-search-empty"><i class="bi bi-exclamation-circle"></i><p>Failed to load results.</p></div>';
+        });
+}
+
+// Attach a single claim document to this job, then refresh
+function attachClaimDoc(docId, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat claim-search-spin"></i> Attaching...';
+    }
+    const body = new URLSearchParams({ doc_ids: String(docId) });
+    fetch(CLAIM_ATTACH_URL, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+        body: body,
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach'; }
+                alert(data.error || 'Could not attach document.');
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach'; }
+            alert('Could not attach document.');
+        });
+}
+
+// Search the Claim Service for every important doc type and present the matches
+// for the user to review and choose before attaching. No auto-attaching.
+async function searchAndAttachAll(btn) {
+    const modal = document.getElementById('claimSearchModal');
+    const docTypeLabel = document.getElementById('claimSearchDocType');
+    const resultsEl = document.getElementById('claimSearchResults');
+    const footerEl = document.getElementById('claimSearchFooter');
+    if (!modal) return;
+
+    if (docTypeLabel) docTypeLabel.textContent = 'Find documents';
+    if (footerEl) footerEl.innerHTML = '';
+    resultsEl.innerHTML = '<div class="claim-search-loading"><i class="bi bi-arrow-repeat claim-search-spin"></i> Searching...</div>';
+    modal.showModal();
+
+    try {
+        const groups = [];
+        for (const docType of CLAIM_IMPORTANT_DOC_TYPES) {
+            const params = new URLSearchParams({ doc_type: docType });
+            if (CLAIM_GROUP_KEY) params.set('group_key', CLAIM_GROUP_KEY);
+            const data = await fetch('/claims/api/search/?' + params.toString()).then(r => r.json());
+            groups.push({ docType: docType, documents: (data.documents || []) });
+        }
+
+        const totalDocs = groups.reduce((n, g) => n + g.documents.length, 0);
+        if (!totalDocs) {
+            resultsEl.innerHTML = '<div class="claim-search-empty"><i class="bi bi-file-earmark-x"></i><p>No matching documents found in the Claim Service.</p></div>';
+            return;
+        }
+
+        let html = '<div class="claim-attach-review">';
+        for (const g of groups) {
+            html += '<div class="claim-attach-group">';
+            html += '<div class="claim-attach-group-head">' + _escHtml(g.docType)
+                  + (g.documents.length > 1 ? '<span class="claim-attach-multi"><i class="bi bi-exclamation-triangle"></i> ' + g.documents.length + ' matches — newest selected</span>' : '')
+                  + '</div>';
+            if (!g.documents.length) {
+                html += '<div class="claim-attach-none">No match found</div>';
+            } else {
+                // Pre-select the most recent match (results are newest-first) for every type;
+                // when several exist the warning prompts the user to confirm or pick another.
+                for (let i = 0; i < g.documents.length; i++) {
+                    const doc = g.documents[i];
+                    html += '<label class="claim-attach-row">'
+                          + '<input type="checkbox" class="claim-attach-check" value="' + doc.id + '"' + (i === 0 ? ' checked' : '') + '>'
+                          + '<i class="bi bi-file-earmark-pdf claim-search-icon"></i>'
+                          + '<span class="claim-search-item-name">' + _escHtml(doc.filename) + '</span>'
+                          + '<a href="' + _escHtml(doc.download_url) + '" target="_blank" class="claim-icon-btn claim-attach-view" title="View"><i class="bi bi-eye"></i></a>'
+                          + '</label>';
+                }
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+        resultsEl.innerHTML = html;
+
+        if (footerEl) {
+            footerEl.innerHTML = '<button type="button" class="btn btn-outline-secondary" onclick="document.getElementById(\'claimSearchModal\').close()">Cancel</button>'
+                               + '<button type="button" class="btn btn-primary" onclick="attachSelectedClaimDocs(this)"><i class="bi bi-paperclip"></i> Attach selected</button>';
+        }
+    } catch (e) {
+        resultsEl.innerHTML = '<div class="claim-search-empty"><i class="bi bi-exclamation-circle"></i><p>Failed to load results.</p></div>';
+    }
+}
+
+// Attach whichever documents the user ticked in the review list
+function attachSelectedClaimDocs(btn) {
+    const checks = document.querySelectorAll('#claimSearchResults .claim-attach-check:checked');
+    const ids = Array.from(checks).map(c => c.value);
+    if (!ids.length) {
+        alert('Select at least one document to attach.');
+        return;
+    }
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat claim-search-spin"></i> Attaching...';
+    }
+    const body = new URLSearchParams({ doc_ids: ids.join(',') });
+    fetch(CLAIM_ATTACH_URL, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+        body: body,
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach selected'; }
+                alert(data.error || 'Could not attach documents.');
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-paperclip"></i> Attach selected'; }
+            alert('Could not attach documents.');
         });
 }
 
@@ -6822,7 +6958,52 @@ function createOSDoorsPO(orderId) {
     });
 }
 
-// ─── OS Doors PO search-based combo ──────────────────────────────────────
+// Copy "PONNNN - Name (sale number)" to the clipboard for an existing PO.
+function copyOrderReferenceText(poNumber, customerName, saleNumber) {
+    const reference = `${poNumber} - ${customerName.trim()} (${saleNumber})`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(reference)
+            .then(() => showAlert(`Copied: ${reference}`, 'success'))
+            .catch(() => showAlert(`Reference: ${reference}`, 'info'));
+    } else {
+        showAlert(`Reference: ${reference}`, 'info');
+    }
+}
+
+// Force-create the OS Doors PO, then copy "PONNNN - Name (sale number)" to the clipboard.
+function copyOSDoorsOrderReference(orderId, customerName, saleNumber) {
+    fetch(`/order/${orderId}/create-os-doors-purchase-order/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (!result.success) {
+            showAlert('Error: ' + (result.error || 'Unknown'), 'danger');
+            return;
+        }
+        const reference = `${result.po_number} - ${customerName.trim()} (${saleNumber})`;
+        const finish = () => setTimeout(() => location.reload(), 1200);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(reference)
+                .then(() => { showAlert(`Copied: ${reference}`, 'success'); finish(); })
+                .catch(() => { showAlert(`PO created. Reference: ${reference}`, 'success'); finish(); });
+        } else {
+            showAlert(`PO created. Reference: ${reference}`, 'success');
+            finish();
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Error creating OS Doors PO: ' + error.message, 'danger');
+    });
+}
+
 let _osDoorsPOSearchTimer = null;
 
 function searchOSDoorsPO(query) {
@@ -7945,6 +8126,7 @@ document.addEventListener('click', function(e) {
     <div class="manual-modal-body">
         <div id="claimSearchResults"></div>
     </div>
+    <div class="manual-modal-footer claim-search-footer" id="claimSearchFooter"></div>
 </dialog>
 
 <!-- Delete Order Confirmation Modal -->

@@ -1294,6 +1294,7 @@
 
             // ── Edit / Save / Cancel ─────────────────────────────────────────
             const SALE_SAVE_URL = "{% url 'sale_save' sale.pk %}";
+            const SALE_ORDER_FIELDS_URL = "{% url 'sale_save_order_fields' sale.pk %}";
             const ORDER_ID = {% if order %}{{ order.id }}{% else %}null{% endif %};
             const INVOICE_DETAIL_URL = "{% url 'invoices_list' %}";
 
@@ -1301,19 +1302,37 @@
                 return document.querySelector('.detail-tab-panel.active') || document;
             }
 
+            // Roots that participate in page edit mode: the active tab panel plus the
+            // persistent summary column (which holds the Financial Summary).
+            function _editScopes() {
+                const scopes = [];
+                const panel = document.querySelector('.detail-tab-panel.active');
+                if (panel) scopes.push(panel);
+                const summary = document.querySelector('.sale-page-summary-col');
+                if (summary) scopes.push(summary);
+                if (scopes.length === 0) scopes.push(document);
+                return scopes;
+            }
+
+            function _queryEdit(selector) {
+                const out = [];
+                _editScopes().forEach(scope => {
+                    scope.querySelectorAll(selector).forEach(el => out.push(el));
+                });
+                return out;
+            }
+
             function toggleEditMode() {
-                const panel = _activePanel();
-                panel.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
-                panel.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
+                _queryEdit('.view-val').forEach(el => el.style.display = 'none');
+                _queryEdit('.edit-val').forEach(el => el.style.display = 'block');
                 document.getElementById('btn-edit').style.display = 'none';
                 document.getElementById('btn-save').style.display = 'inline-flex';
                 document.getElementById('btn-cancel').style.display = 'inline-flex';
             }
 
             function cancelEdit() {
-                const panel = _activePanel();
-                panel.querySelectorAll('.view-val').forEach(el => el.style.display = '');
-                panel.querySelectorAll('.edit-val').forEach(el => {
+                _queryEdit('.view-val').forEach(el => el.style.display = '');
+                _queryEdit('.edit-val').forEach(el => {
                     el.style.display = 'none';
                     if (el.tagName === 'SELECT') {
                         el.querySelectorAll('option').forEach(o => { o.selected = o.defaultSelected; });
@@ -1327,9 +1346,8 @@
             }
 
             function saveSale() {
-                const panel = _activePanel();
                 const saleData = {};
-                panel.querySelectorAll('.edit-val[data-field]').forEach(input => {
+                _queryEdit('.edit-val[data-field]').forEach(input => {
                     if (!input.dataset.model) {
                         saleData[input.getAttribute('data-field')] = input.value;
                     }
@@ -1349,12 +1367,35 @@
 
                 if (ORDER_ID) {
                     const orderData = {};
-                    panel.querySelectorAll('.edit-val[data-model="order"][data-field]').forEach(input => {
+                    _queryEdit('.edit-val[data-model="order"][data-field]').forEach(input => {
                         orderData[input.getAttribute('data-field')] = input.value;
                     });
                     if (Object.keys(orderData).length > 0) {
                         saves.push(
                             fetch(`/order/${ORDER_ID}/update-sale/`, {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                                body: JSON.stringify(orderData),
+                            })
+                        );
+                    }
+                } else {
+                    // No order linked yet — order-level fields (CAD number, designer) are
+                    // saved via a sale-scoped endpoint that auto-creates the order once
+                    // there's enough information to build one. Include the edited sale
+                    // fields (e.g. total value) directly in the payload so creation does
+                    // not depend on the parallel sale-save committing first.
+                    const orderData = {};
+                    _queryEdit('.edit-val[data-model="order"][data-field]').forEach(input => {
+                        orderData[input.getAttribute('data-field')] = input.value;
+                    });
+                    if (saleData.sale_value !== undefined) {
+                        orderData.total_value_inc_vat = saleData.sale_value;
+                    }
+                    const hasValues = Object.entries(orderData).some(([k, v]) => v && String(v).trim());
+                    if (hasValues) {
+                        saves.push(
+                            fetch(SALE_ORDER_FIELDS_URL, {
                                 method: 'POST',
                                 headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
                                 body: JSON.stringify(orderData),
@@ -1605,7 +1646,7 @@
         <!-- Create order form -->
         <div class="card" style="max-width:480px;margin:24px auto;">
             <div class="card-header card-header-sale">
-                <h3><i class="bi bi-plus-circle"></i> Create Order for this Sale</h3>
+                <h3>Create Order for this Sale</h3>
             </div>
             <div class="card-body padded">
                 {% if create_order_form.errors %}
@@ -1619,12 +1660,12 @@
                 {% endif %}
                 <form method="POST" action="{% url 'sale_create_order' sale.pk %}">
                     {% csrf_token %}
-                    <div class="info-display">
+                    <div class="info-display create-order-fields">
                     {% for field in create_order_form %}
                         {% if field.name in missing_order_fields %}
-                        <div class="field-row-sb" style="padding:6px 0;">
+                        <div class="field-row-sb">
                             <div class="field-label">{{ field.label }}</div>
-                            <div style="flex:1;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                            <div class="create-order-input-wrap">
                                 {{ field }}
                                 {% if field.errors %}<div class="text-danger small">{{ field.errors|join:", " }}</div>{% endif %}
                             </div>
@@ -1696,6 +1737,11 @@
     <div id="tab-panel-remedials" class="detail-tab-panel {% if active_tab == 'remedials' %}active{% endif %}">
         <div style="margin-top:16px;">
         {% if remedials %}
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createRemedialModal')">
+                    <i class="bi bi-plus-circle"></i> Open Remedial
+                </button>
+            </div>
             {% for rem in remedials %}
             <div class="card order-info-card" style="margin-bottom:12px;">
                 <div class="card-header card-header-sale">
@@ -1704,6 +1750,34 @@
                         <span class="customer-active-badge {% if rem.is_completed %}active{% elif rem.is_overdue %}danger{% else %}inactive{% endif %}">
                             {% if rem.is_completed %}Completed{% elif rem.is_overdue %}Overdue{% else %}Open{% endif %}
                         </span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                title="Edit remedial"
+                                onclick="openEditRemedial(this)"
+                                data-pk="{{ rem.pk }}"
+                                data-reason="{{ rem.reason|escape }}"
+                                data-notes="{{ rem.notes|escape }}"
+                                data-scheduled="{{ rem.scheduled_date|date:'Y-m-d' }}"
+                                data-completed="{{ rem.is_completed|yesno:'1,0' }}"
+                                data-boards="{{ rem.order_boards_required|yesno:'1,0' }}"
+                                data-accessories="{{ rem.order_accessories_required|yesno:'1,0' }}"
+                                data-glass="{{ rem.order_glass_required|yesno:'1,0' }}"
+                                data-osdoors="{{ rem.os_doors_required|yesno:'1,0' }}"
+                                data-boards-items="{{ rem.order_boards_items|escape }}"
+                                data-boards-po="{{ rem.order_boards_po_ref|escape }}"
+                                data-accessories-items="{{ rem.order_accessories_items|escape }}"
+                                data-accessories-po="{{ rem.order_accessories_po_ref|escape }}"
+                                data-glass-items="{{ rem.order_glass_items|escape }}"
+                                data-glass-po="{{ rem.order_glass_po_ref|escape }}"
+                                data-osdoors-items="{{ rem.os_doors_items|escape }}"
+                                data-osdoors-po="{{ rem.os_doors_po|escape }}"
+                                data-number="{{ rem.remedial_number }}">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                title="Delete remedial"
+                                onclick="openDeleteRemedial('{{ rem.pk }}', '{{ rem.remedial_number|escapejs }}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </div>
                 </div>
                 <div class="card-body padded">
@@ -1787,6 +1861,16 @@
                     </div>
                     {% if boards_po_list %}
                     <table class="table po-sub-table">
+                        <thead>
+                            <tr>
+                                <th class="po-col-badge"></th>
+                                <th>PO Number</th>
+                                <th>Supplier</th>
+                                <th>Status</th>
+                                <th class="po-col-num">Total</th>
+                                <th class="po-col-actions">Actions</th>
+                            </tr>
+                        </thead>
                         <tbody>
                         {% for bpd in boards_po_list %}
                         <tr>
@@ -1828,53 +1912,6 @@
                     </div>
                 </div>
 
-                <!-- OS DOORS section -->
-                <div class="po-type-section">
-                    <div class="po-type-section-header">
-                        <span class="po-type-section-title">OS Doors</span>
-                        <div style="display:flex;gap:6px;">
-                            {% if os_doors_purchase_order %}
-                            <button class="btn btn-sm btn-outline-secondary" onclick="togglePoLinkSearch('os-doors-po-search-row')"><i class="bi bi-link-45deg"></i> Change</button>
-                            {% else %}
-                            <button class="btn btn-sm btn-outline-primary" onclick="togglePoLinkSearch('os-doors-po-search-row')"><i class="bi bi-link-45deg"></i> Link PO</button>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% if os_doors_purchase_order or additional_os_doors_pos_list %}
-                    <table class="table po-sub-table">
-                        <tbody>
-                        {% if os_doors_purchase_order %}
-                        <tr>
-                            <td><a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}">{{ os_doors_purchase_order.display_number }}</a></td>
-                            <td style="color:var(--text-secondary);">{{ os_doors_purchase_order.supplier_name|default:"-" }}</td>
-                            <td><span class="customer-active-badge {% if os_doors_purchase_order.status == 'Approved' or os_doors_purchase_order.status == 'Received' %}active{% elif os_doors_purchase_order.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ os_doors_purchase_order.status|default:"-" }}</span></td>
-                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if os_doors_purchase_order.total %}£{{ os_doors_purchase_order.total|floatformat:2 }}{% else %}—{% endif %}</td>
-                            <td style="text-align:right;"><a href="{% url 'purchase_order_detail' os_doors_purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a></td>
-                        </tr>
-                        {% endif %}
-                        {% for apo in additional_os_doors_pos_list %}
-                        <tr>
-                            <td><a href="{% url 'purchase_order_detail' apo.workguru_id %}">{{ apo.display_number }}</a></td>
-                            <td style="color:var(--text-secondary);">{{ apo.supplier_name|default:"-" }}</td>
-                            <td><span class="customer-active-badge {% if apo.status == 'Approved' or apo.status == 'Received' %}active{% elif apo.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ apo.status|default:"-" }}</span></td>
-                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if apo.total %}£{{ apo.total|floatformat:2 }}{% else %}—{% endif %}</td>
-                            <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end;">
-                                <a href="{% url 'purchase_order_detail' apo.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a>
-                                <button type="button" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;" onclick="removeAdditionalOSDoorsPO({{ order.id }}, {{ apo.workguru_id }})" title="Remove from order"><i class="bi bi-x-lg"></i></button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                    {% else %}
-                    <div class="po-empty-section">No OS Doors POs linked</div>
-                    {% endif %}
-                    <div id="os-doors-po-search-row" class="po-search-panel" style="display:none;">
-                        <input type="text" class="form-input" id="os-doors-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('os-doors', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('os-doors', this.value)" style="width:100%;">
-                        <div id="os-doors-po-inline-results" class="boards-po-results" style="display:none;"></div>
-                    </div>
-                </div>
-
                 <!-- PROJECT POs section -->
                 {% with has_project_pos=False %}
                 {% for item in sale_purchase_orders %}{% if item.type == 'Project' %}{% with has_project_pos=True %}{% endwith %}{% endif %}{% endfor %}
@@ -1884,6 +1921,16 @@
                     </div>
                     {% with showed_any=False %}
                     <table class="table po-sub-table" id="project-pos-table" style="display:none;">
+                        <thead>
+                            <tr>
+                                <th class="po-col-badge"></th>
+                                <th>PO Number</th>
+                                <th>Supplier</th>
+                                <th>Status</th>
+                                <th class="po-col-num">Total</th>
+                                <th class="po-col-actions">Actions</th>
+                            </tr>
+                        </thead>
                         <tbody>
                         {% for item in sale_purchase_orders %}
                         {% if item.type == 'Project' %}
@@ -2095,7 +2142,10 @@
             <div class="fin-summary-body">
                 <div class="fin-row fin-row-primary">
                     <span class="fin-label">Total Value (Inc VAT)</span>
-                    <span class="fin-value fin-value-large"><span class="fin-currency">£</span><span class="fin-amount">{{ sale.sale_value|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                    <div class="fin-value-wrap">
+                        <span class="fin-value fin-value-large view-val"><span class="fin-currency">£</span><span class="fin-amount">{{ sale.sale_value|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                        <input type="text" inputmode="decimal" class="fin-edit-input edit-val" data-field="sale_value" value="{{ sale.sale_value|default:'0.00' }}" style="display:none;">
+                    </div>
                 </div>
                 {% if discount %}
                 <div class="fin-row">
@@ -2739,27 +2789,7 @@ function toggleInvoiceDetail(invoiceId) {
                         <label class="form-label" for="rem-scheduled">Scheduled Date</label>
                         <input type="date" id="rem-scheduled" name="scheduled_date" class="form-control" style="max-width:200px;">
                     </div>
-                    <div style="border-top:1px solid var(--border-color);margin-top:8px;padding-top:16px;">
-                        <p style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary);margin-bottom:10px;font-weight:600;">Action Required</p>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="rem-boards" name="order_boards_required">
-                                <label class="form-check-label" for="rem-boards">Order Boards</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="rem-accessories" name="order_accessories_required">
-                                <label class="form-check-label" for="rem-accessories">Order Accessories</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="rem-glass" name="order_glass_required">
-                                <label class="form-check-label" for="rem-glass">Order Glass</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="rem-os-doors" name="os_doors_required">
-                                <label class="form-check-label" for="rem-os-doors">Order OS Doors</label>
-                            </div>
-                        </div>
-                    </div>
+                    {% include 'stock_take/partials/remedial_actions_section.html' with prefix='rem' %}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('createRemedialModal')">Cancel</button>
@@ -2769,6 +2799,227 @@ function toggleInvoiceDetail(invoiceId) {
         </div>
     </div>
 </div>
+
+<!-- Modal: Edit Remedial -->
+<div class="modal" id="editRemedialModal">
+    <div class="modal-overlay" onclick="closeModal('editRemedialModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Remedial <span id="edit-rem-number" style="color:var(--text-secondary);font-weight:500;"></span></h3>
+                <button type="button" class="modal-close" onclick="closeModal('editRemedialModal')">&#x2715;</button>
+            </div>
+            <form method="post" id="editRemedialForm">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
+                <div class="modal-body">
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" for="edit-rem-reason">Reason <span style="color:var(--danger-color)">*</span></label>
+                        <textarea id="edit-rem-reason" name="reason" class="form-control" rows="4" required></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" for="edit-rem-notes">Notes</label>
+                        <textarea id="edit-rem-notes" name="notes" class="form-control" rows="3"></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label" for="edit-rem-scheduled">Scheduled Date</label>
+                        <input type="date" id="edit-rem-scheduled" name="scheduled_date" class="form-control" style="max-width:200px;">
+                    </div>
+                    <div class="form-check" style="margin-bottom:8px;">
+                        <input class="form-check-input" type="checkbox" id="edit-rem-completed" name="is_completed">
+                        <label class="form-check-label" for="edit-rem-completed">Mark as completed</label>
+                    </div>
+                    {% include 'stock_take/partials/remedial_actions_section.html' with prefix='erem' %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('editRemedialModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Delete Remedial -->
+<div class="modal" id="deleteRemedialModal">
+    <div class="modal-overlay" onclick="closeModal('deleteRemedialModal')"></div>
+    <div class="modal-dialog" style="max-width:440px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Delete Remedial</h3>
+                <button type="button" class="modal-close" onclick="closeModal('deleteRemedialModal')">&#x2715;</button>
+            </div>
+            <form method="post" id="deleteRemedialForm">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
+                <div class="modal-body">
+                    <p style="margin:0;">Are you sure you want to delete remedial <strong id="delete-rem-number"></strong>? This cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('deleteRemedialModal')">Cancel</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleRemAction(prefix, key) {
+    const cb = document.getElementById(`${prefix}-${key}-cb`);
+    setRemActionState(prefix, key, !cb.checked);
+}
+
+function setRemActionState(prefix, key, active) {
+    const cb = document.getElementById(`${prefix}-${key}-cb`);
+    const toggle = document.getElementById(`${prefix}-${key}-toggle`);
+    const card = document.getElementById(`${prefix}-${key}-card`);
+    if (!cb || !toggle || !card) return;
+    cb.checked = active;
+    toggle.classList.toggle('active', active);
+    toggle.setAttribute('aria-pressed', active ? 'true' : 'false');
+    card.hidden = !active;
+}
+
+// ── Item-list management ───────────────────────────────────────────────
+// Items are rendered as rows (qty stepper + label) and serialised into a
+// hidden textarea as one line per item: "{qty} x {label}".
+function remItemsContainer(base) { return document.getElementById(`${base}-items-list`); }
+
+function syncRemItems(base) {
+    const list = remItemsContainer(base);
+    const ta = document.getElementById(`${base}-items`);
+    if (!list || !ta) return;
+    const lines = [];
+    list.querySelectorAll('.rem-item').forEach(row => {
+        const qty = row.querySelector('.rem-item-qty').value || '1';
+        const label = row.dataset.label || '';
+        if (label) lines.push(`${qty} x ${label}`);
+    });
+    ta.value = lines.join('\n');
+    refreshRemChips(base);
+}
+
+function refreshRemChips(base) {
+    const card = document.getElementById(`${base}-card`);
+    if (!card) return;
+    const list = remItemsContainer(base);
+    const labels = new Set();
+    list.querySelectorAll('.rem-item').forEach(r => labels.add((r.dataset.label || '').toLowerCase()));
+    card.querySelectorAll('.rem-chip').forEach(chip => {
+        chip.classList.toggle('selected', labels.has((chip.dataset.label || '').toLowerCase()));
+    });
+}
+
+function makeRemItemRow(base, label, sku, qty) {
+    const row = document.createElement('div');
+    row.className = 'rem-item';
+    row.dataset.label = label;
+    row.innerHTML = `
+        <div class="qty-stepper-input rem-item-stepper">
+            <button type="button" class="qty-step-btn" tabindex="-1" onclick="remStepQty(this,-1)"><i class="bi bi-dash-lg"></i></button>
+            <input type="number" class="qty-step-value rem-item-qty" min="1" step="1" value="${qty || 1}">
+            <button type="button" class="qty-step-btn" tabindex="-1" onclick="remStepQty(this,1)"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div class="rem-item-label">
+            <span class="rem-item-name"></span>
+            ${sku ? `<span class="rem-item-sku"></span>` : ''}
+        </div>
+        <button type="button" class="rem-item-remove" title="Remove" onclick="removeRemItem(this,'${base}')"><i class="bi bi-trash"></i></button>`;
+    row.querySelector('.rem-item-name').textContent = label;
+    if (sku) row.querySelector('.rem-item-sku').textContent = sku;
+    row.querySelector('.rem-item-qty').addEventListener('change', () => syncRemItems(base));
+    row.querySelector('.rem-item-qty').addEventListener('input', () => syncRemItems(base));
+    return row;
+}
+
+function addRemItem(base, label, sku, qty) {
+    label = (label || '').trim();
+    if (!label) return;
+    const list = remItemsContainer(base);
+    // If the same label already exists, bump its qty instead of duplicating.
+    const existing = Array.from(list.querySelectorAll('.rem-item'))
+        .find(r => (r.dataset.label || '').toLowerCase() === label.toLowerCase());
+    if (existing) {
+        const q = existing.querySelector('.rem-item-qty');
+        q.value = (parseInt(q.value || '1', 10) || 1) + (qty ? (parseInt(qty, 10) || 1) - 1 : 1);
+        syncRemItems(base);
+        return;
+    }
+    list.appendChild(makeRemItemRow(base, label, sku || '', qty || 1));
+    syncRemItems(base);
+}
+
+function addRemItemFromInput(base) {
+    const input = document.getElementById(`${base}-add-input`);
+    if (!input) return;
+    const val = input.value.trim();
+    if (!val) return;
+    addRemItem(base, val, '', 1);
+    input.value = '';
+    input.focus();
+}
+
+function removeRemItem(btn, base) {
+    btn.closest('.rem-item').remove();
+    syncRemItems(base);
+}
+
+function remStepQty(btn, dir) {
+    const input = btn.parentElement.querySelector('.rem-item-qty');
+    const next = Math.max(1, (parseInt(input.value || '1', 10) || 1) + dir);
+    input.value = next;
+    input.dispatchEvent(new Event('change'));
+}
+
+function loadRemItems(base, raw) {
+    const list = remItemsContainer(base);
+    if (!list) return;
+    list.innerHTML = '';
+    (raw || '').split('\n').map(s => s.trim()).filter(Boolean).forEach(line => {
+        // Parse "{qty} x {label}" — fall back to qty 1 if no prefix.
+        const m = line.match(/^(\d+)\s*[x×]\s*(.+)$/i);
+        if (m) {
+            list.appendChild(makeRemItemRow(base, m[2].trim(), '', m[1]));
+        } else {
+            list.appendChild(makeRemItemRow(base, line, '', 1));
+        }
+    });
+    syncRemItems(base);
+}
+
+function openEditRemedial(btn) {
+    const d = btn.dataset;
+    const form = document.getElementById('editRemedialForm');
+    form.action = `/remedial/${d.pk}/update/`;
+    document.getElementById('edit-rem-number').textContent = d.number || '';
+    document.getElementById('edit-rem-reason').value = d.reason || '';
+    document.getElementById('edit-rem-notes').value = d.notes || '';
+    document.getElementById('edit-rem-scheduled').value = d.scheduled || '';
+    document.getElementById('edit-rem-completed').checked = d.completed === '1';
+
+    const actions = [
+        { key: 'boards',      on: d.boards === '1',      items: d.boardsItems,      po: d.boardsPo },
+        { key: 'glass',       on: d.glass === '1',       items: d.glassItems,       po: d.glassPo },
+        { key: 'accessories', on: d.accessories === '1', items: d.accessoriesItems, po: d.accessoriesPo },
+        { key: 'osdoors',     on: d.osdoors === '1',     items: d.osdoorsItems,     po: d.osdoorsPo },
+    ];
+    actions.forEach(a => {
+        setRemActionState('erem', a.key, a.on);
+        loadRemItems(`erem-${a.key}`, a.items || '');
+        const poEl = document.getElementById(`erem-${a.key}-po`);
+        if (poEl) poEl.value = a.po || '';
+    });
+    openModal('editRemedialModal');
+}
+
+function openDeleteRemedial(pk, number) {
+    document.getElementById('deleteRemedialForm').action = `/remedial/${pk}/delete/`;
+    document.getElementById('delete-rem-number').textContent = number;
+    openModal('deleteRemedialModal');
+}
+</script>
 {% endif %}
 
 {% endblock %}
+

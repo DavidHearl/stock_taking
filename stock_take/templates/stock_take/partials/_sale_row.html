@@ -1,0 +1,79 @@
+{% load custom_filters %}
+<td>
+    {% if sale.order %}
+    <a href="{% url 'order_details' sale.order.id %}?tab=sale" class="customer-name-link">
+        {{ sale.contract_number|default:sale.anthill_activity_id }}
+    </a>
+    {% else %}
+    {% with linked_order_sale=order_map|get_item:sale.anthill_activity_id %}
+    {% if linked_order_sale %}
+    <a href="{% url 'order_details' linked_order_sale.id %}?tab=sale" class="customer-name-link">
+        {{ sale.contract_number|default:sale.anthill_activity_id }}
+    </a>
+    {% else %}
+    <a href="{% url 'sale_detail' sale.pk %}" class="customer-name-link">
+        {{ sale.contract_number|default:sale.anthill_activity_id }}
+    </a>
+    {% endif %}
+    {% endwith %}
+    {% endif %}
+</td>
+<td>
+    {% if sale.customer %}
+    <a href="{% url 'customer_detail' sale.customer.pk %}" class="customer-name-link">
+        {{ sale.customer.name|default:sale.customer_name }}
+    </a>
+    {% else %}
+    {{ sale.customer_name|default:"-" }}
+    {% endif %}
+</td>
+<td>{{ sale.assigned_to_name|default:"-" }}</td>
+<td>
+    {% if sale.sale_value %}
+    £{{ sale.sale_value|floatformat:0 }}
+    {% else %}-{% endif %}
+</td>
+<td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
+<td>{{ sale.fit_date|date:"d/m/Y"|default:"-" }}</td>
+<td>{{ sale.location|default:"-" }}</td>
+<td>
+    {% if sale.ordering_status == 'required' %}
+    <span class="order-status-badge order-status-required">Required</span>
+    {% elif sale.ordering_status == 'short' %}
+    <span class="order-status-badge order-status-short">Short</span>
+    {% elif sale.ordering_status == 'ordered' %}
+    <span class="order-status-badge order-status-ordered">Ordered</span>
+    {% elif sale.ordering_status == 'validated' %}
+    <span class="order-status-badge order-status-validated"><i class="bi bi-check-lg"></i> Validated</span>
+    {% else %}
+    <span class="text-muted">-</span>
+    {% endif %}
+</td>
+<td onclick="event.stopPropagation();">
+    {% with cust_id=sale.anthill_customer_id|default:sale.customer.anthill_customer_id %}
+    {% if cust_id %}
+    <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ cust_id }}"
+       target="_blank" class="anthill-icon-link" title="Open Anthill Customer">
+        <i class="bi bi-person-fill"></i>
+    </a>
+    {% else %}
+    <button type="button" class="anthill-icon-link anthill-icon-missing"
+            title="No Anthill customer ID — click to add"
+            onclick="openAnthillIdModal({{ sale.pk }}, 'customer')">
+        <i class="bi bi-person-fill"></i>
+    </button>
+    {% endif %}
+    {% endwith %}
+    {% if sale.anthill_activity_id %}
+    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}"
+       target="_blank" class="anthill-icon-link" title="Open Anthill Sale">
+        <i class="bi bi-cash-stack"></i>
+    </a>
+    {% else %}
+    <button type="button" class="anthill-icon-link anthill-icon-missing"
+            title="No Anthill sale ID — click to add"
+            onclick="openAnthillIdModal({{ sale.pk }}, 'sale')">
+        <i class="bi bi-cash-stack"></i>
+    </button>
+    {% endif %}
+</td>

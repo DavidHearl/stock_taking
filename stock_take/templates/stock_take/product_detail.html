@@ -52,11 +52,19 @@
                     <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <div class="product-more-dropdown" id="product-more-dropdown">
+                    <button class="product-more-item" onclick="createPurchaseOrder()">
+                        <i class="bi bi-cart-plus"></i> Create PO
+                    </button>
                     <button class="product-more-item danger" onclick="deleteProduct()">
                         <i class="bi bi-trash"></i> Delete Product
                     </button>
                 </div>
             </div>
+            <form method="POST" action="{% url 'purchase_order_create' %}" id="create-po-form" style="display:none;">
+                {% csrf_token %}
+                <input type="hidden" name="po_type" value="supplier">
+                <input type="hidden" name="product_id" value="{{ product.id }}">
+            </form>
         </div>
     </div>
 
@@ -96,13 +104,13 @@
                 <td class="info-label">SKU</td>
                 <td class="info-value" data-field="sku" data-value="{{ product.sku }}">{{ product.sku }}</td>
                 <td class="info-label">Cost Price</td>
-                <td class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:3 }}</td>
+                {% if product.price_per_sqm %}<td class="info-value"><span style="opacity:.5;">Priced per m²</span></td>{% else %}<td class="info-value" data-field="cost" data-value="{{ product.cost }}">£{{ product.cost|floatformat:3 }}</td>{% endif %}
             </tr>
             <tr>
                 <td class="info-label">Name</td>
                 <td class="info-value" data-field="name" data-value="{{ product.name }}">{{ product.name }}</td>
                 <td class="info-label">Pack Cost Price</td>
-                <td class="info-value" data-field="pack_cost_price" data-value="{{ product.pack_cost_price|default:'' }}">{% if product.pack_cost_price is not None %}£{{ product.pack_cost_price|floatformat:3 }}{% else %}-{% endif %}</td>
+                {% if product.price_per_sqm %}<td class="info-value"><span style="opacity:.5;">Priced per m²</span></td>{% else %}<td class="info-value" data-field="pack_cost_price" data-value="{{ product.pack_cost_price|default:'' }}">{% if product.pack_cost_price is not None %}£{{ product.pack_cost_price|floatformat:3 }}{% else %}-{% endif %}</td>{% endif %}
             </tr>
             <tr>
                 <td class="info-label">Order Source</td>
@@ -114,7 +122,7 @@
                 <td class="info-label">Description</td>
                 <td class="info-value" data-field="description" data-value="{{ product.description }}">{{ product.description|default:"-" }}</td>
                 <td class="info-label">Sell Price</td>
-                <td class="info-value">£{{ product.sell_price|floatformat:2 }}</td>
+                {% if product.price_per_sqm %}<td class="info-value"><span style="opacity:.5;">Priced per m²</span></td>{% else %}<td class="info-value">£{{ product.sell_price|floatformat:2 }}</td>{% endif %}
             </tr>
             <tr>
                 <td class="info-label" style="vertical-align: top; padding-top: 10px;">Specifications</td>
@@ -130,7 +138,7 @@
                 <td class="info-label">Category</td>
                 <td class="info-value" data-field="category_id" data-value="{{ product.category.id }}">{{ product.category.name|default:"Not Set" }}</td>
                 <td class="info-label">Total Value</td>
-                <td class="info-value">£{{ product.total_value|floatformat:2 }}</td>
+                {% if product.price_per_sqm %}<td class="info-value"><span style="opacity:.5;">Priced per m²</span></td>{% else %}<td class="info-value">£{{ product.total_value|floatformat:2 }}</td>{% endif %}
             </tr>
             <tr>
                 <td class="info-label">Tracking Type</td>
@@ -384,10 +392,10 @@
 
     <!-- Purchase Orders Tab -->
     <div class="tab-content" id="purchase-orders" style="display: none;">
-        <div class="info-group">
+        <div class="info-group info-group--flush">
             <h3>Purchase Orders</h3>
             {% if po_lines %}
-            <div class="po-table-container" style="margin-top: 16px;">
+            <div class="po-table-container">
                 <table class="linked-table">
                     <thead>
                         <tr>
@@ -430,7 +438,7 @@
                 </table>
             </div>
             {% else %}
-            <p class="text-muted">This product has not appeared in any purchase orders.</p>
+            <p class="text-muted" style="padding: 16px;">This product has not appeared in any purchase orders.</p>
             {% endif %}
         </div>
     </div>
@@ -1804,6 +1812,10 @@ document.addEventListener('click', function(e) {
 function deleteProduct() {
     document.getElementById('product-more-dropdown').classList.remove('open');
     document.getElementById('delete-product-modal').style.display = 'flex';
+}
+function createPurchaseOrder() {
+    document.getElementById('product-more-dropdown').classList.remove('open');
+    document.getElementById('create-po-form').submit();
 }
 function closeDeleteModal() {
     document.getElementById('delete-product-modal').style.display = 'none';

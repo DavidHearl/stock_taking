@@ -1,0 +1,564 @@
+<script>
+// ============================================================================
+// Ordering actions (validator bell, "Orders to Place", add-order modal)
+// Self-contained copy used by the sales list page.
+// ============================================================================
+
+// Modal functions
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.add('active');
+    }
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+// Close any active modal on ESC
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
+    }
+});
+
+// ── Validator check functions ───────────────────────────────────
+function toggleVChip(el, vrId, field) {
+    const wasDone = el.classList.contains('vchip-done');
+    const newVal = !wasDone;
+    // Optimistic UI update
+    el.classList.toggle('vchip-done', newVal);
+    el.classList.toggle('vchip-todo', !newVal);
+    const statusEl = document.getElementById('validatorSaveStatus');
+    if (statusEl) statusEl.textContent = 'Saving';
+    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    fetch(`/validation-request/${vrId}/save/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: newVal }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            if (statusEl) { statusEl.textContent = 'Saved'; setTimeout(() => { statusEl.textContent = ''; }, 1500); }
+            if (data.auto_dismissed) { removeValidatorRow(vrId); }
+        } else {
+            // Revert
+            el.classList.toggle('vchip-done', wasDone);
+            el.classList.toggle('vchip-todo', !wasDone);
+            if (statusEl) statusEl.textContent = 'Save failed';
+        }
+    })
+    .catch(() => {
+        el.classList.toggle('vchip-done', wasDone);
+        el.classList.toggle('vchip-todo', !wasDone);
+        if (statusEl) statusEl.textContent = 'Save failed';
+    });
+}
+
+function dismissValidationRow(vrId) {
+    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    fetch(`/validation-request/${vrId}/dismiss/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken },
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) removeValidatorRow(vrId); });
+}
+
+function removeValidatorRow(vrId) {
+    const row = document.getElementById(`vrow-${vrId}`);
+    if (row) row.remove();
+    // If card list is now empty, show the "all clear" message
+    const list = document.querySelector('.vcard-list');
+    if (list && list.querySelectorAll('.vcard').length === 0) {
+        list.closest('.modal-body').innerHTML =
+            '<div style="padding:32px;text-align:center;color:var(--text-secondary);">' +
+            '<i class="bi bi-check2-circle" style="font-size:2rem;color:#10b981;"></i>' +
+            '<p style="margin:8px 0 0;font-size:0.9rem;">All orders have been checked — nothing pending.</p>' +
+            '</div>';
+    }
+}
+
+// ── Add-order: customer search / designer / sale-selector ───────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    let customerSearchTimeout;
+    const customerSearchInput = document.getElementById('customer-search');
+    const customerResults = document.getElementById('customer-results');
+
+    if (customerSearchInput) {
+        customerSearchInput.addEventListener('input', function() {
+            clearTimeout(customerSearchTimeout);
+            const query = this.value.trim();
+
+            if (query.length < 3) {
+                customerResults.classList.remove('show');
+                return;
+            }
+
+            customerSearchTimeout = setTimeout(() => {
+                fetch(`/search-customers/?q=${encodeURIComponent(query)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.customers && data.customers.length > 0) {
+                            customerResults.innerHTML = data.customers.map(customer => {
+                                const name = customer.name || `${customer.first_name} ${customer.last_name}`.trim();
+                                const escapedName = name.replace(/'/g, "\\'");
+                                const details = [customer.address, customer.city, customer.postcode].filter(Boolean).join(', ') || 'No address';
+                                return `
+                                <div class="search-result-item" onclick="selectCustomer(${customer.customer_id}, '${escapedName}', '${(customer.anthill_customer_id || '').replace(/'/g, "\\'")}', '${(customer.address || '').replace(/'/g, "\\'")}', '${customer.postcode || ''}')">
+                                    <div class="search-result-name">${name}</div>
+                                    <div class="search-result-details">${details}${customer.phone ? ' · ' + customer.phone : ''}</div>
+                                </div>`;
+                            }).join('');
+                            customerResults.classList.add('show');
+                        } else {
+                            customerResults.innerHTML = '<div class="search-result-item">No customers found</div>';
+                            customerResults.classList.add('show');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error searching customers:', error);
+                        customerResults.classList.remove('show');
+                    });
+            }, 1000);
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.field-value')) {
+                customerResults.classList.remove('show');
+            }
+        });
+    }
+
+    // When selecting from dropdown, hide the new designer input
+    const designerSelect = document.getElementById('id_designer');
+    if (designerSelect) {
+        designerSelect.addEventListener('change', function() {
+            if (this.value) {
+                document.getElementById('new-designer-row').style.display = 'none';
+                document.getElementById('new-designer-name').value = '';
+            }
+        });
+    }
+
+    // Order Type color change based on selection
+    const orderTypeSelect = document.getElementById('id_order_type');
+    if (orderTypeSelect) {
+        function updateOrderTypeColor() {
+            const value = orderTypeSelect.value;
+            if (value === 'sale') {
+                orderTypeSelect.style.background = '#10b981';
+                orderTypeSelect.style.borderColor = '#10b981';
+            } else if (value === 'remedial') {
+                orderTypeSelect.style.background = '#f59e0b';
+                orderTypeSelect.style.borderColor = '#f59e0b';
+            } else if (value === 'warranty') {
+                orderTypeSelect.style.background = '#ef4444';
+                orderTypeSelect.style.borderColor = '#ef4444';
+            }
+        }
+        updateOrderTypeColor();
+        orderTypeSelect.addEventListener('change', updateOrderTypeColor);
+    }
+
+    // Wire sale-selector to populate sale_number and total_value_inc_vat
+    const saleSelector = document.getElementById('sale-selector');
+    if (saleSelector) {
+        saleSelector.addEventListener('change', function() {
+            const rawSaleNumber = this.value;
+            const saleValue = this.options[this.selectedIndex]?.dataset?.value || '';
+            if (rawSaleNumber) {
+                const saleNumber = rawSaleNumber.replace(/[^0-9]/g, '').substring(0, 6);
+                document.getElementById('id_sale_number').value = saleNumber;
+            }
+            if (saleValue) {
+                const valField = document.getElementById('id_total_value_inc_vat');
+                if (valField) valField.value = parseFloat(saleValue).toFixed(2);
+            }
+        });
+    }
+});
+
+function selectCustomer(customerId, name, anthillId, address, postcode) {
+    document.getElementById('id_customer').value = customerId;
+    const parts = name.split(' ');
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ') || '';
+    document.getElementById('id_first_name').value = firstName;
+    document.getElementById('id_last_name').value = lastName;
+    document.getElementById('id_anthill_id').value = anthillId;
+    document.getElementById('id_address').value = address;
+    document.getElementById('id_postcode').value = postcode;
+    document.getElementById('customer-results').classList.remove('show');
+    document.getElementById('customer-search').value = name;
+    fetchCustomerSales(customerId);
+}
+
+function fetchCustomerSales(customerId) {
+    const selectorRow = document.getElementById('sale-selector-row');
+    const selector = document.getElementById('sale-selector');
+    if (!selectorRow || !selector) return;
+
+    selector.innerHTML = '<option value="">Loading sales...</option>';
+    selectorRow.style.display = 'flex';
+
+    fetch(`/get-customer-sales/?customer_id=${encodeURIComponent(customerId)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.sales && data.sales.length > 0) {
+                selector.innerHTML = '<option value="">-- Select a sale --</option>' +
+                    data.sales.map(sale => {
+                        const name = sale.contract_number || sale.anthill_activity_id;
+                        const label = [
+                            name,
+                            sale.sale_value ? '£' + parseFloat(sale.sale_value).toLocaleString('en-GB', {minimumFractionDigits: 0}) : '',
+                            sale.activity_date ? sale.activity_date : ''
+                        ].filter(Boolean).join('  ·  ');
+                        return `<option value="${sale.anthill_activity_id}" data-value="${sale.sale_value || ''}">${label}</option>`;
+                    }).join('');
+            } else {
+                selector.innerHTML = '<option value="">No sales found for this customer</option>';
+            }
+        })
+        .catch(() => {
+            selector.innerHTML = '<option value="">Could not load sales</option>';
+        });
+}
+
+// Designer management functions
+function toggleAddDesigner() {
+    const row = document.getElementById('new-designer-row');
+    if (row.style.display === 'none') {
+        row.style.display = 'flex';
+        document.getElementById('new-designer-name').focus();
+    } else {
+        row.style.display = 'none';
+        document.getElementById('new-designer-name').value = '';
+    }
+}
+
+function cancelAddDesigner() {
+    document.getElementById('new-designer-row').style.display = 'none';
+    document.getElementById('new-designer-name').value = '';
+}
+
+function saveNewDesigner() {
+    const designerName = document.getElementById('new-designer-name').value.trim();
+
+    if (!designerName) {
+        alert('Please enter a designer name');
+        return;
+    }
+
+    fetch('/add-designer/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ name: designerName })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const designerSelect = document.getElementById('id_designer');
+            const option = new Option(data.designer.name, data.designer.id, true, true);
+            designerSelect.add(option);
+            document.getElementById('new-designer-row').style.display = 'none';
+            document.getElementById('new-designer-name').value = '';
+        } else {
+            alert('Error: ' + (data.error || 'Failed to add designer'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error adding designer');
+    });
+}
+
+function toggleNoDate(fieldName, btn) {
+    const input = document.getElementById('id_' + fieldName);
+    const isActive = btn.classList.toggle('active');
+
+    if (isActive) {
+        input.value = '';
+        input.classList.add('no-date-set');
+        btn.innerHTML = '<i class="bi bi-calendar-plus"></i> Set date';
+    } else {
+        input.classList.remove('no-date-set');
+        btn.innerHTML = '<i class="bi bi-x-circle"></i> No date';
+        input.focus();
+    }
+}
+
+// ── Anthill "Orders to Place" modal ────────────────────────────────────────
+const ANTHILL_URL = 'https://sliderobes.anthillcrm.com/n/screens/0/CAEaEgmodXB0DE3fQBGxXocD9CIgKw?f=ChUKChIITG9jYXRpb24aBy8xLzMvMS8&rf=CjwKFgoEU2FsZRIOV29ya2Zsb3dBY3Rpb24aIlBsYWNlIE9yZGVyIG9yIEFsbG9jYXRlIGZyb20gU3RvY2sKHQoOCgRTYWxlEgZTdGF0dXMQARoJQ2FuY2VsbGVk';
+
+function setSyncStatus(state, text) {
+    const el = document.getElementById('anthillSyncStatus');
+    if (!el) return;
+    if (state === 'syncing') {
+        el.innerHTML = '<div style="width:13px;height:13px;border:2px solid var(--border-color);border-top-color:var(--primary-color);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;"></div><span style="color:var(--text-secondary);">Syncing</span>';
+    } else if (state === 'done') {
+        el.innerHTML = `<i class="bi bi-check-circle-fill" style="color:#28a745;font-size:.9rem;"></i><span style="color:var(--text-secondary);">${escHtml(text || 'Synced')}</span>`;
+    } else if (state === 'error') {
+        el.innerHTML = `<i class="bi bi-exclamation-circle-fill" style="color:#dc3545;font-size:.9rem;"></i><span style="color:#dc3545;" title="${escHtml(text || '')}">Sync failed</span>`;
+    } else {
+        el.innerHTML = '';
+    }
+}
+
+function openAnthillOrdersModal() {
+    openModal('anthillOrdersModal');
+    window._existingOrderSaleNumbers = window._allExistingSaleNumbers;
+    document.getElementById('anthillParseError').style.display = 'none';
+    document.getElementById('anthillOrdersTbody').innerHTML = '';
+    document.getElementById('anthillOrdersCount').textContent = '—';
+    const diff = document.getElementById('anthillDiffSummary');
+    if (diff) { diff.innerHTML = ''; diff.style.display = 'none'; }
+    setSyncStatus('syncing');
+    loadAnthillFromDb();
+}
+
+function loadAnthillFromDb() {
+    fetch('{% url "get_anthill_orders_from_db" %}', {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.orders && data.orders.length > 0) {
+            renderAnthillOrders(data.orders, data);
+        }
+        runBackgroundSync();
+    })
+    .catch(() => runBackgroundSync());
+}
+
+function runBackgroundSync() {
+    setSyncStatus('syncing');
+    const errorEl = document.getElementById('anthillParseError');
+    fetch('{% url "scrape_anthill_orders_to_place" %}', {
+        method: 'GET',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.orders) {
+            renderAnthillOrders(data.orders, data);
+            const now = new Date();
+            setSyncStatus('done', 'Synced at ' + now.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}));
+            const btn = document.getElementById('anthillOrdersBtn');
+            if (btn && data.count != null) {
+                btn.innerHTML = `<i class="bi bi-arrow-repeat"></i> <strong>${data.count}</strong>`;
+            }
+        } else {
+            setSyncStatus('error', data.error || 'Unknown error');
+            let errHtml = `<strong>${escHtml(data.error || 'Sync failed')}</strong>`;
+            if (data.diag) {
+                errHtml += `<br><br><a href="${ANTHILL_URL}" target="_blank" class="btn btn-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> Open Anthill in New Tab</a>`;
+            }
+            errorEl.innerHTML = errHtml;
+            errorEl.className = 'alert alert-danger';
+            errorEl.style.display = 'block';
+        }
+    })
+    .catch(err => setSyncStatus('error', err.toString()));
+}
+
+function renderAnthillOrders(orders, meta) {
+    const resultsEl = document.getElementById('anthillOrdersResults');
+    const tbody = document.getElementById('anthillOrdersTbody');
+    tbody.innerHTML = '';
+
+    document.getElementById('anthillOrdersCount').textContent = orders.length;
+
+    const parseFitDate = (str) => {
+        if (!str) return null;
+        const parts = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        if (parts) return new Date(parts[3], parts[2] - 1, parts[1]);
+        const d = new Date(str);
+        if (!isNaN(d)) return d;
+        return null;
+    };
+    orders = orders.slice().sort((a, b) => {
+        const da = parseFitDate(a.fitDate || a.fit_date);
+        const db = parseFitDate(b.fitDate || b.fit_date);
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return da - db;
+    });
+
+    orders.forEach((o, i) => {
+        const change = o.change;
+        let rowClass = '';
+        if (change === 'new')          rowClass = 'row-new';
+        else if (change === 'changed') rowClass = 'row-changed';
+        const contractNum = String(o.contract || o.contract_number || '').trim();
+        const saleNum = extractSaleNumber(contractNum);
+        const salePk = window._anthillSalePkMap && window._anthillSalePkMap[saleNum];
+        const actionBtn = salePk
+            ? `<a href="/sale/${salePk}/" target="_blank" class="btn btn-sm btn-primary"><i class="bi bi-eye"></i> View Sale</a>`
+            : '<span class="text-muted">—</span>';
+        const url = o.orderUrl || o.order_url || '';
+        const linksHtml = url
+            ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success anthill-link-btn" title="View in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>`
+            : '<span class="text-muted">—</span>';
+        tbody.insertAdjacentHTML('beforeend', `
+            <tr class="${rowClass}" data-acc-sale="${escHtml(saleNum)}">
+                <td class="col-customer">${escHtml(o.customer)}</td>
+                <td>${escHtml(o.contract || o.contract_number || '')}</td>
+                <td>${escHtml(o.dateSold || o.date_sold || '')}</td>
+                <td>${escHtml(o.site)}</td>
+                <td>${escHtml(o.assignedTo || o.assigned_to || '')}</td>
+                <td class="col-value">${escHtml(o.totalValue || o.total_value || '')}</td>
+                <td>${escHtml(o.fitDate || o.fit_date || '')}</td>
+                <td class="col-links">${linksHtml}</td>
+                <td class="col-action">${actionBtn}</td>
+            </tr>`);
+    });
+    resultsEl.style.display = 'block';
+
+    const matchingSaleNums = orders
+        .map(o => extractSaleNumber(String(o.contract || o.contract_number || '')))
+        .filter(sn => sn && window._existingOrderSaleNumbers && window._existingOrderSaleNumbers.has(sn));
+    if (matchingSaleNums.length > 0) {
+        fetch(`/ordering/load-indicators/?sale_numbers=${matchingSaleNums.join(',')}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) return;
+                Object.entries(data.indicators).forEach(([sn, ind]) => {
+                    const rows = document.querySelectorAll(`[data-acc-sale="${sn}"]`);
+                    if (!rows.length) return;
+                    let bg = '';
+                    if (ind.has_short) {
+                        bg = 'rgba(220,53,69,.10)';
+                    } else if (ind.has_accessories && !ind.accessories_not_required) {
+                        if (ind.all_items_ordered || !ind.has_unordered_accessories) {
+                            bg = 'rgba(16,185,129,.10)';
+                        } else {
+                            bg = 'rgba(240,173,78,.10)';
+                        }
+                    }
+                    if (bg) {
+                        rows.forEach(r => {
+                            r.querySelectorAll('td').forEach(td => td.style.backgroundColor = bg);
+                        });
+                    }
+                });
+            })
+            .catch(err => console.error('Error loading modal accessories:', err));
+    }
+}
+
+function createOrderFromAnthill(btn) {
+    const data = JSON.parse(btn.dataset.order);
+    closeModal('anthillOrdersModal');
+
+    const saleInput = document.querySelector('#add-order-form [name="sale_number"]');
+    if (saleInput) saleInput.value = data.saleNum;
+
+    const nameParts = (data.customer || '').split(/\s+/);
+    const firstNameInput = document.querySelector('#add-order-form [name="first_name"]');
+    const lastNameInput = document.querySelector('#add-order-form [name="last_name"]');
+    if (firstNameInput && nameParts.length > 0) firstNameInput.value = nameParts[0];
+    if (lastNameInput && nameParts.length > 1) lastNameInput.value = nameParts.slice(1).join(' ');
+
+    const addressInput = document.querySelector('#add-order-form [name="address"]');
+    if (addressInput && data.address) {
+        const pcMatch = data.address.match(/,\s*([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$/i);
+        if (pcMatch) {
+            addressInput.value = data.address.slice(0, pcMatch.index).trim();
+            const postcodeInput = document.querySelector('#add-order-form [name="postcode"]');
+            if (postcodeInput) postcodeInput.value = pcMatch[1].trim();
+        } else {
+            addressInput.value = data.address;
+        }
+    }
+
+    const fitDateInput = document.querySelector('#add-order-form [name="fit_date"]');
+    if (fitDateInput && data.fitDate) {
+        const fd = parseDateForInput(data.fitDate);
+        if (fd) fitDateInput.value = fd;
+    }
+
+    const orderDateInput = document.querySelector('#add-order-form [name="order_date"]');
+    if (orderDateInput && data.dateSold) {
+        const od = parseDateForInput(data.dateSold);
+        if (od) orderDateInput.value = od;
+    }
+
+    const valueInput = document.querySelector('#add-order-form [name="total_value_inc_vat"]');
+    if (valueInput && data.totalValue) {
+        const numVal = parseFloat(data.totalValue.replace(/[^\d.\-]/g, ''));
+        if (!isNaN(numVal)) {
+            valueInput.value = (numVal * 1.2).toFixed(2);
+        }
+    }
+
+    const designerSelect = document.querySelector('#add-order-form [name="designer"]');
+    if (designerSelect && data.assignedTo) {
+        const assignedLower = data.assignedTo.toLowerCase();
+        for (const opt of designerSelect.options) {
+            if (opt.text.toLowerCase() === assignedLower) {
+                designerSelect.value = opt.value;
+                break;
+            }
+        }
+    }
+
+    openModal('addOrderModal');
+}
+
+// Extract just the numeric sale number from a contract string like 'BFS-NR-418230'
+function extractSaleNumber(str) {
+    if (!str) return '';
+    if (/^\d+$/.test(str.trim())) return str.trim();
+    const m = str.match(/(\d+)(?!.*\d)/);
+    return m ? m[1] : str.trim();
+}
+
+// Parse various date formats into YYYY-MM-DD for <input type="date">
+function parseDateForInput(str) {
+    if (!str) return null;
+    const parts = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (parts) {
+        const d = parts[1].padStart(2, '0');
+        const m = parts[2].padStart(2, '0');
+        return `${parts[3]}-${m}-${d}`;
+    }
+    const d2 = new Date(str);
+    if (!isNaN(d2)) {
+        return d2.toISOString().split('T')[0];
+    }
+    return null;
+}
+
+function escHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+</script>
+
+{{ all_existing_sale_numbers|json_script:"existing-sale-numbers" }}
+{{ anthill_sale_pk_map|json_script:"anthill-sale-pk-map" }}
+<script>
+// All sale numbers from the database — server-rendered, covers all tabs/order types
+// Maps sale_number -> order_id
+window._allExistingSaleMap = JSON.parse(document.getElementById('existing-sale-numbers').textContent);
+window._allExistingSaleNumbers = new Set(
+    Object.keys(window._allExistingSaleMap).map(n => String(n).trim())
+);
+// Maps sale_number -> AnthillSale.pk for the "orders to place" modal
+window._anthillSalePkMap = JSON.parse(document.getElementById('anthill-sale-pk-map').textContent);
+</script>

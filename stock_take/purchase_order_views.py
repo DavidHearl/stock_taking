@@ -526,7 +526,39 @@ def purchase_order_detail(request, po_id):
     """Display detailed view of a single purchase order from local database"""
     purchase_order = get_object_or_404(PurchaseOrder, workguru_id=po_id)
     products = purchase_order.products.all()
-    
+
+    # ── Recalculate cut-to-size glass lines from current price per m² ──────────
+    # CTS glass is priced as (width_m × height_m × price_per_sqm). The dimensions
+    # are stored in the line description (e.g. "511mm x 2022mm | Polished Edges").
+    # Recompute on load so a later change to the stock item's price_per_sqm is
+    # reflected without re-adding the line.
+    import re as _re_cts
+    from decimal import Decimal as _Dec_cts
+    _cts_changed = False
+    for _p in products:
+        if not (_p.stock_item and _p.stock_item.price_per_sqm):
+            continue
+        _m = _re_cts.search(
+            r'(\d+(?:\.\d+)?)\s*mm\s*x\s*(\d+(?:\.\d+)?)\s*mm',
+            _p.description or '', _re_cts.IGNORECASE)
+        if not _m:
+            continue
+        _width_m = _Dec_cts(_m.group(1)) / _Dec_cts('1000')
+        _height_m = _Dec_cts(_m.group(2)) / _Dec_cts('1000')
+        _unit = (_width_m * _height_m * _p.stock_item.price_per_sqm).quantize(_Dec_cts('0.00001'))
+        _line_total = (_unit * _p.order_quantity).quantize(_Dec_cts('0.01'))
+        if _p.order_price != _unit or _p.line_total != _line_total:
+            _p.order_price = _unit
+            _p.line_total = _line_total
+            _p.save(update_fields=['order_price', 'line_total'])
+            _cts_changed = True
+    if _cts_changed:
+        _new_total = purchase_order.products.aggregate(total=Sum('line_total'))['total'] or 0
+        if purchase_order.total != _new_total:
+            purchase_order.total = _new_total
+            purchase_order.save(update_fields=['total'])
+        products = purchase_order.products.all()
+
     # All suppliers for the dropdown
     all_suppliers = list(
         Supplier.objects.order_by('name')
@@ -670,6 +702,30 @@ def purchase_order_detail(request, po_id):
         supplier_obj = Supplier.objects.filter(name__iexact=purchase_order.supplier_name).first()
         if supplier_obj:
             supplier_contacts = list(supplier_obj.contacts.all())
+
+    # ── Derive expected date from approved date + supplier lead time ───────────
+    # If the PO is approved but has no expected date, calculate it as
+    # approved_date + supplier lead time (weekends pushed to Monday) and persist it.
+    if not purchase_order.expected_date and purchase_order.approved_date:
+        approved_dt = None
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y',
+                    '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
+            try:
+                approved_dt = datetime.strptime(purchase_order.approved_date, fmt)
+                break
+            except ValueError:
+                continue
+        if approved_dt:
+            lead_days = (supplier_obj.estimate_lead_time
+                         if supplier_obj and supplier_obj.estimate_lead_time else 10)
+            exp_dt = approved_dt + timedelta(days=lead_days)
+            # Push weekends to Monday
+            if exp_dt.weekday() == 5:
+                exp_dt += timedelta(days=2)
+            elif exp_dt.weekday() == 6:
+                exp_dt += timedelta(days=1)
+            purchase_order.expected_date = exp_dt.strftime('%Y-%m-%d')
+            purchase_order.save(update_fields=['expected_date'])
 
     # Determine original customer info (for stock/customer toggle)
     # If project is currently "Stock", try to find the original customer from the PO description
@@ -1529,9 +1585,24 @@ def purchase_order_create(request):
     fitter_id = request.POST.get('fitter_id', '').strip()
     description = request.POST.get('description', '').strip()
     order_ids = request.POST.getlist('order_ids')
+    product_id = request.POST.get('product_id', '').strip()
 
     supplier = None
     fitter = None
+    stock_item = None
+
+    # If launched from a product page, derive the supplier from the product
+    if product_id:
+        try:
+            stock_item = StockItem.objects.get(id=int(product_id))
+        except (StockItem.DoesNotExist, ValueError):
+            messages.error(request, 'Product not found.')
+            return redirect('purchase_orders_list')
+        if not stock_item.supplier:
+            messages.error(request, f'{stock_item.sku} has no supplier set — add a supplier before creating a PO.')
+            return redirect('product_detail', item_id=stock_item.id)
+        po_type = 'supplier'
+        supplier = stock_item.supplier
 
     if po_type == 'fitter':
         if not fitter_id:
@@ -1542,7 +1613,7 @@ def purchase_order_create(request):
         except (Fitter.DoesNotExist, ValueError):
             messages.error(request, 'Fitter not found.')
             return redirect('purchase_orders_list')
-    else:
+    elif supplier is None:
         if not supplier_id:
             messages.error(request, 'Please select a supplier.')
             return redirect('purchase_orders_list')
@@ -1592,6 +1663,25 @@ def purchase_order_create(request):
                 )
             except (Order.DoesNotExist, ValueError):
                 pass  # Order link failed but PO still created
+
+    # If launched from a product page, add that product as the first line item
+    if stock_item is not None:
+        unit_cost = float(stock_item.cost or 0)
+        pack_size = int(stock_item.pack_size or 1)
+        PurchaseOrderProduct.objects.create(
+            purchase_order=po,
+            sku=stock_item.sku,
+            supplier_code=stock_item.supplier_code or stock_item.supplier_sku or '',
+            name=stock_item.name,
+            description=stock_item.description or '',
+            order_price=unit_cost,
+            order_quantity=pack_size,
+            line_total=round(unit_cost * pack_size, 2),
+            sort_order=1,
+            stock_item_id=stock_item.id,
+        )
+        po.total = po.products.aggregate(total=Sum('line_total'))['total'] or 0
+        po.save(update_fields=['total'])
 
     entity_name = fitter.name if fitter else supplier.name
     log_activity(

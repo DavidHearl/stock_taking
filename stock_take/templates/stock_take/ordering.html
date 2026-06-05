@@ -48,9 +48,6 @@
             <i class="bi bi-arrow-repeat"></i>
             {% if anthill_orders_to_place_count %}<strong>{{ anthill_orders_to_place_count }}</strong>{% endif %}
         </button>
-        <button type="button" class="btn btn-add-order" onclick="openModal('addOrderModal')" title="Add Order">
-            <i class="bi bi-plus-lg"></i>
-        </button>
     </div>
 </div>
 
@@ -404,288 +401,9 @@
     </table>
 </div>
 
-<!-- Modal: Anthill "Orders to Place" -->
-<div class="modal" id="anthillOrdersModal">
-    <div class="modal-overlay" onclick="closeModal('anthillOrdersModal')"></div>
-    <div class="modal-dialog" style="max-width:1100px;width:95%;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="bi bi-clipboard-data"></i> Orders to Place (Anthill)</h3>
-                <div class="modal-header-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('anthillOrdersModal')">Close</button>
-                </div>
-            </div>
-            <div class="modal-body" style="padding:0;">
-                <!-- Error display -->
-                <div id="anthillParseError" class="alert alert-danger" style="display:none;margin:1rem;"></div>
-                
-                <!-- Results section -->
-                <div id="anthillOrdersResults">
-                    <div style="padding:.55rem 1rem;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
-                        <span style="font-size:.85rem;color:var(--text-secondary);">
-                            <strong id="anthillOrdersCount">&#x2014;</strong> orders awaiting placement
-                        </span>
-                        <span id="anthillDiffSummary" style="display:none;font-size:.78rem;gap:.4rem;"></span>
-                        <span style="display:flex;align-items:center;gap:10px;font-size:.72rem;font-weight:600;letter-spacing:.03em;margin-left:1rem;">
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(16,185,129,.35);"></span> Ordered</span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(240,173,78,.35);"></span> Added</span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(220,53,69,.35);"></span> Short</span>
-                        </span>
-                        <span id="anthillSyncStatus" style="margin-left:auto;font-size:.75rem;display:flex;align-items:center;gap:5px;"></span>
-                    </div>
-                    <div style="overflow-x:auto;max-height:50vh;overflow-y:auto;">
-                        <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
-                            <thead>
-                                <tr style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
-                                    <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Customer</th>
-                                    <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Contract No.</th>
-                                    <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Date Sold</th>
-                                    <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Site</th>
-                                    <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Assigned To</th>
-                                    <th style="padding:8px;text-align:right;border-bottom:2px solid var(--border-color);white-space:nowrap;">Value (ex VAT)</th>
-                                    <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border-color);white-space:nowrap;">Fit Date</th>
-                                    <th style="padding:8px;text-align:center;border-bottom:2px solid var(--border-color);white-space:nowrap;">Links</th>
-                                    <th style="padding:8px;text-align:center;border-bottom:2px solid var(--border-color);white-space:nowrap;">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="anthillOrdersTbody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+{% include 'stock_take/partials/_orders_to_place_modal.html' %}
 
-<!-- Validator Check Modal -->
-<div class="modal" id="validatorCheckModal">
-    <div class="modal-overlay" onclick="closeModal('validatorCheckModal')"></div>
-    <div class="modal-dialog" style="width:860px; max-width:96vw;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="bi bi-clipboard2-check"></i> Validate Orders
-                    {% if validation_requests %}<span style="font-size:0.78rem;font-weight:400;color:var(--text-secondary);margin-left:8px;">{{ validation_requests|length }} pending</span>{% endif %}
-                </h3>
-                <button type="button" class="modal-close" onclick="closeModal('validatorCheckModal')">✕</button>
-            </div>
-            <div class="modal-body" style="padding:0;">
-                {% if validation_requests %}
-                <div class="vcard-list">
-                    {% for vr in validation_requests %}
-                    <div class="vcard" id="vrow-{{ vr.id }}">
-                        <div class="vcard-head">
-                            <div>
-                                <span class="vcard-name">{{ vr.order.first_name }} {{ vr.order.last_name }}</span>
-                                <span class="vcard-sale">· {{ vr.order.sale_number }}</span>
-                                {% if vr.order.order_type != 'sale' %}<span class="vcard-type">{{ vr.order.get_order_type_display }}</span>{% endif %}
-                            </div>
-                            {% if vr.order.fit_date %}<span class="vcard-fitdate">Fit: {{ vr.order.fit_date|date:"d M Y" }}</span>{% endif %}
-                        </div>
-                        <div class="vcard-meta-row">
-                            {% if vr.order.boards_po %}<span class="vcard-metabadge">PO: {{ vr.order.boards_po.po_number }}</span>{% endif %}
-                        </div>
-                        <div class="vcard-body">
-                            <div class="vcard-chips">
-                                {# Boards #}
-                                {% if vr.order.boards_not_required %}
-                                    <span class="vchip vchip-na"><i class="bi bi-grid-3x3-gap"></i> Boards</span>
-                                {% else %}
-                                    <span class="vchip {% if vr.boards_checked %}vchip-done{% else %}vchip-todo{% endif %}"
-                                          id="vchip-boards-{{ vr.id }}"
-                                          onclick="toggleVChip(this, {{ vr.id }}, 'boards_checked')">
-                                        <i class="bi bi-grid-3x3-gap"></i> Boards
-                                    </span>
-                                {% endif %}
-                                {# Accessories #}
-                                {% if vr.order.accessories_not_required %}
-                                    <span class="vchip vchip-na"><i class="bi bi-box-seam"></i> Acc</span>
-                                {% else %}
-                                    <span class="vchip {% if vr.accessories_checked %}vchip-done{% else %}vchip-todo{% endif %}"
-                                          id="vchip-acc-{{ vr.id }}"
-                                          onclick="toggleVChip(this, {{ vr.id }}, 'accessories_checked')">
-                                        <i class="bi bi-box-seam"></i> Acc
-                                    </span>
-                                {% endif %}
-                                {# OS Doors #}
-                                {% if vr.order.os_doors_required %}
-                                    <span class="vchip {% if vr.os_doors_checked %}vchip-done{% else %}vchip-todo{% endif %}"
-                                          id="vchip-osd-{{ vr.id }}"
-                                          onclick="toggleVChip(this, {{ vr.id }}, 'os_doors_checked')">
-                                        <i class="bi bi-door-open"></i> OS Doors
-                                    </span>
-                                {% else %}
-                                    <span class="vchip vchip-na"><i class="bi bi-door-open"></i> OS Doors</span>
-                                {% endif %}
-                                {# Glass #}
-                                {% if vr.order.glass_not_required %}
-                                    <span class="vchip vchip-na"><i class="bi bi-gem"></i> Glass</span>
-                                {% else %}
-                                    <span class="vchip {% if vr.glass_checked %}vchip-done{% else %}vchip-todo{% endif %}"
-                                          id="vchip-glass-{{ vr.id }}"
-                                          onclick="toggleVChip(this, {{ vr.id }}, 'glass_checked')">
-                                        <i class="bi bi-gem"></i> Glass
-                                    </span>
-                                {% endif %}
-                                {# Raumplus #}
-                                {% if vr.order.raumplus_required %}
-                                    <span class="vchip {% if vr.raumplus_checked %}vchip-done{% else %}vchip-todo{% endif %}"
-                                          id="vchip-raumplus-{{ vr.id }}"
-                                          onclick="toggleVChip(this, {{ vr.id }}, 'raumplus_checked')">
-                                        <i class="bi bi-grid-fill"></i> Raumplus
-                                    </span>
-                                {% else %}
-                                    <span class="vchip vchip-na"><i class="bi bi-grid-fill"></i> Raumplus</span>
-                                {% endif %}
-                            </div>
-                            <div class="vcard-actions">
-                                <a href="{{ order_href_map|get_item:vr.order.id }}" class="btn-vcard-view" target="_blank" title="Open order">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </a>
-                                <button type="button" class="btn-vcard-done" onclick="dismissValidationRow({{ vr.id }})">
-                                    Done <i class="bi bi-check2"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div style="padding:32px;text-align:center;color:var(--text-secondary);">
-                    <i class="bi bi-check2-circle" style="font-size:2rem;color:#10b981;"></i>
-                    <p style="margin:8px 0 0;font-size:0.9rem;">All orders have been checked — nothing pending.</p>
-                </div>
-                {% endif %}
-            </div>
-            <div class="modal-footer" style="justify-content:space-between;align-items:center;">
-                <span id="validatorSaveStatus" style="font-size:0.8rem;color:var(--text-secondary);"></span>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <a href="{% url 'validation_history' %}" class="btn btn-sm btn-outline-secondary" style="font-size:0.8rem;"><i class="bi bi-clock-history"></i> View History</a>
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('validatorCheckModal')">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal for Creating New Boards PO -->
-<!-- Modal for Adding New Order -->
-<div class="modal" id="addOrderModal">
-    <div class="modal-overlay" onclick="closeModal('addOrderModal')"></div>
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <form method="POST" id="add-order-form">
-                {% csrf_token %}
-                {{ form.customer }}
-                {{ form.address.as_hidden }}
-                {{ form.postcode.as_hidden }}
-                <div class="modal-header">
-                    <h3>Add New Order</h3>
-                </div>
-                <div class="modal-body">
-                    <!-- Customer Info Section -->
-                    <div class="add-order-section customer-section">
-                        <h4 class="section-title customer-title">
-                            <i class="bi bi-person"></i> Customer
-                        </h4>
-                        <div class="modal-field-row">
-                            <label>Search Existing</label>
-                            <div class="field-value" style="position: relative;">
-                                <input type="text" id="customer-search" class="form-input" placeholder="Name, email, phone..." autocomplete="off">
-                                <div id="customer-results" class="search-results"></div>
-                            </div>
-                        </div>
-                        <div class="divider-text">OR ADD NEW CUSTOMER</div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.first_name.id_for_label }}">First Name</label>
-                            <div class="field-value">{{ form.first_name }}</div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.last_name.id_for_label }}">Last Name</label>
-                            <div class="field-value">{{ form.last_name }}</div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.anthill_id.id_for_label }}">Anthill ID</label>
-                            <div class="field-value">{{ form.anthill_id }}</div>
-                        </div>
-                    </div>
-
-                    <!-- Sale Info Section -->
-                    <div class="add-order-section sale-section">
-                        <div class="section-header-with-select">
-                            <h4 class="section-title sale-title">
-                                <i class="bi bi-receipt"></i> Sale Information
-                            </h4>
-                            <div class="order-type-wrapper">
-                                {{ form.order_type }}
-                            </div>
-                        </div>
-                        <div class="modal-field-row" id="sale-selector-row" style="display: none;">
-                            <label>Select Sale</label>
-                            <div class="field-value">
-                                <select id="sale-selector" class="form-input">
-                                    <option value="">-- Select a sale --</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.sale_number.id_for_label }}">Sale Number</label>
-                            <div class="field-value">{{ form.sale_number }}</div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.customer_number.id_for_label }}">Customer No. (CAD)</label>
-                            <div class="field-value">{{ form.customer_number }}</div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.order_date.id_for_label }}">Order Date</label>
-                            <div class="field-value date-input-wrapper">
-                                {{ form.order_date }}
-                                <button type="button" class="btn btn-sm btn-no-date" onclick="toggleNoDate('order_date', this)" title="No date yet">
-                                    <i class="bi bi-x-circle"></i> No date
-                                </button>
-                            </div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.fit_date.id_for_label }}">Fit Date</label>
-                            <div class="field-value date-input-wrapper">
-                                {{ form.fit_date }}
-                                <button type="button" class="btn btn-sm btn-no-date" onclick="toggleNoDate('fit_date', this)" title="No date yet">
-                                    <i class="bi bi-x-circle"></i> No date
-                                </button>
-                            </div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.designer.id_for_label }}">Designer</label>
-                            <div class="field-value designer-input-wrapper">
-                                {{ form.designer }}
-                                <button type="button" class="btn btn-sm btn-success add-designer-btn" onclick="toggleAddDesigner()" title="Add new designer">
-                                    <i class="bi bi-plus-lg"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="modal-field-row">
-                            <label for="{{ form.total_value_inc_vat.id_for_label }}">Sale Value (Inc VAT)</label>
-                            <div class="field-value">{{ form.total_value_inc_vat }}</div>
-                        </div>
-                        <!-- New Designer Row -->
-                        <div id="new-designer-row" class="new-designer-input" style="display: none;">
-                            <input type="text" id="new-designer-name" class="form-input" placeholder="New designer name">
-                            <button type="button" class="btn btn-sm btn-success" onclick="saveNewDesigner()" title="Save designer">
-                                <i class="bi bi-check-lg"></i>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelAddDesigner()" title="Cancel">
-                                <i class="bi bi-x-lg"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary btn-pill" onclick="closeModal('addOrderModal')">Cancel</button>
-                    <button type="submit" class="btn btn-success btn-pill">Add Order</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+{% include 'stock_take/partials/_validator_modal.html' %}
 
 <script>
     function toggleOrderingStockDetail(btn) {
@@ -2036,60 +1754,33 @@
 
         orders.forEach((o, i) => {
             const change = o.change;
-            let rowBg;
-            if (change === 'new')          rowBg = 'background:rgba(40,167,69,.07);';
-            else if (change === 'changed') rowBg = 'background:rgba(255,193,7,.08);';
-            else                           rowBg = i % 2 === 0 ? '' : 'background:var(--bg-secondary);';
-            const changePip = change === 'new'
-                ? '<span title="New" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#28a745;margin-right:5px;flex-shrink:0;"></span>'
-                : change === 'changed'
-                ? '<span title="Changed" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ffc107;margin-right:5px;flex-shrink:0;"></span>'
-                : '';
+            let rowClass = '';
+            if (change === 'new')          rowClass = 'row-new';
+            else if (change === 'changed') rowClass = 'row-changed';
             const contractNum = String(o.contract || o.contract_number || '').trim();
             // Extract just the numeric portion (e.g. 'BFS-NR-418230' -> '418230')
             const saleNum = extractSaleNumber(contractNum);
-            const orderExists = saleNum && window._existingOrderSaleNumbers && window._existingOrderSaleNumbers.has(saleNum);
-            // Store the full order data for the create button so we can populate the form
-            const orderDataAttr = escHtml(JSON.stringify({
-                customer: o.customer || '',
-                contract: contractNum,
-                saleNum: saleNum,
-                dateSold: o.dateSold || o.date_sold || '',
-                address: o.address || '',
-                site: o.site || '',
-                assignedTo: o.assignedTo || o.assigned_to || '',
-                totalValue: o.totalValue || o.total_value || '',
-                fitDate: o.fitDate || o.fit_date || '',
-                orderUrl: o.orderUrl || o.order_url || ''
-            }));
-            const actionBtn = orderExists
-                ? (() => { const oid = window._allExistingSaleMap[saleNum]; return oid ? `<a href="/order/${oid}/" target="_blank" class="btn btn-sm btn-primary"><i class="bi bi-eye"></i> View Order</a>` : ''; })()
-                : `<button type="button" class="btn btn-sm btn-success" data-order="${orderDataAttr}" onclick="createOrderFromAnthill(this)"><i class="bi bi-plus-lg"></i> Create Order</button>`;
+            const salePk = window._anthillSalePkMap && window._anthillSalePkMap[saleNum];
+            const actionBtn = salePk
+                ? `<a href="/sale/${salePk}/" target="_blank" class="btn btn-sm btn-primary"><i class="bi bi-eye"></i> View Sale</a>`
+                : '<span class="text-muted">—</span>';
             const url = o.orderUrl || o.order_url || '';
-            const customerCell = url
-                ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);font-weight:600;display:flex;align-items:center;">${changePip}${escHtml(o.customer)}</a>`
-                : `<span style="font-weight:600;display:flex;align-items:center;">${changePip}${escHtml(o.customer)}</span>`;
             // Build links cell: Anthill link
             const linksHtml = url
-                ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success" style="padding:2px 8px;font-size:.75rem;" title="View in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>`
+                ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success anthill-link-btn" title="View in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>`
                 : '<span class="text-muted">—</span>';
             tbody.insertAdjacentHTML('beforeend', `
-                <tr style="${rowBg}" data-acc-sale="${escHtml(saleNum)}">
-                    <td style="padding:7px 10px 2px;"><span style="font-weight:600;display:flex;align-items:center;">${changePip}${escHtml(o.customer)}</span></td>
-                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.contract || o.contract_number || '')}</td>
-                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.dateSold || o.date_sold || '')}</td>
-                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.site)}</td>
-                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.assignedTo || o.assigned_to || '')}</td>
-                    <td style="padding:7px 10px 2px;text-align:right;white-space:nowrap;">${escHtml(o.totalValue || o.total_value || '')}</td>
-                    <td style="padding:7px 10px 2px;white-space:nowrap;">${escHtml(o.fitDate || o.fit_date || '')}</td>
-                    <td style="padding:7px 10px 2px;text-align:center;white-space:nowrap;">${linksHtml}</td>
-                    <td style="padding:7px 10px 2px;text-align:center;">${actionBtn}</td>
-                </tr>
-                <tr style="${rowBg}border-bottom:1px solid var(--border-color);" data-acc-sale="${escHtml(saleNum)}">
-                    <td colspan="9" style="padding:2px 10px 7px;color:var(--text-secondary);font-size:.78rem;">
-                        ${escHtml(o.address)}
-                    </td>
-                </tr>`);
+                <tr class="${rowClass}" data-acc-sale="${escHtml(saleNum)}">
+                    <td class="col-customer">${escHtml(o.customer)}</td>
+                    <td>${escHtml(o.contract || o.contract_number || '')}</td>
+                    <td>${escHtml(o.dateSold || o.date_sold || '')}</td>
+                    <td>${escHtml(o.site)}</td>
+                    <td>${escHtml(o.assignedTo || o.assigned_to || '')}</td>
+                    <td class="col-value">${escHtml(o.totalValue || o.total_value || '')}</td>
+                    <td>${escHtml(o.fitDate || o.fit_date || '')}</td>
+                    <td class="col-links">${linksHtml}</td>
+                    <td class="col-action">${actionBtn}</td>
+                </tr>`);                                            
         });
         resultsEl.style.display = 'block';
 
@@ -2252,6 +1943,7 @@
 
 {% block extra_js %}
 {{ all_existing_sale_numbers|json_script:"existing-sale-numbers" }}
+{{ anthill_sale_pk_map|json_script:"anthill-sale-pk-map" }}
 <script>
 // All sale numbers from the database — server-rendered, covers all tabs/order types
 // Maps sale_number -> order_id
@@ -2259,5 +1951,7 @@ window._allExistingSaleMap = JSON.parse(document.getElementById('existing-sale-n
 window._allExistingSaleNumbers = new Set(
     Object.keys(window._allExistingSaleMap).map(n => String(n).trim())
 );
+// Maps sale_number -> AnthillSale.pk for the "orders to place" modal
+window._anthillSalePkMap = JSON.parse(document.getElementById('anthill-sale-pk-map').textContent);
 </script>
 {% endblock %}

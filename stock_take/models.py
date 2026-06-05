@@ -1473,7 +1473,16 @@ class Remedial(models.Model):
     order_boards_required = models.BooleanField(default=False, help_text='Boards need to be ordered for this remedial')
     order_accessories_required = models.BooleanField(default=False, help_text='Accessories need to be ordered for this remedial')
     order_glass_required = models.BooleanField(default=False, help_text='Glass needs to be ordered for this remedial')
-    
+
+    # Per-action details: items to order + PO reference recorded against the remedial
+    order_boards_items = models.TextField(blank=True, default='', help_text='Boards to order for this remedial')
+    order_boards_po_ref = models.CharField(max_length=100, blank=True, default='', help_text='PO number/reference for the boards order')
+    order_accessories_items = models.TextField(blank=True, default='', help_text='Accessories to order for this remedial')
+    order_accessories_po_ref = models.CharField(max_length=100, blank=True, default='', help_text='PO number/reference for the accessories order')
+    order_glass_items = models.TextField(blank=True, default='', help_text='Glass to order for this remedial')
+    order_glass_po_ref = models.CharField(max_length=100, blank=True, default='', help_text='PO number/reference for the glass order')
+    os_doors_items = models.TextField(blank=True, default='', help_text='OS Doors to order for this remedial')
+
     # Status
     is_completed = models.BooleanField(default=False)
     all_items_ordered = models.BooleanField(default=False)

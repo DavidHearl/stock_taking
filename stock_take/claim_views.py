@@ -243,7 +243,16 @@ def claim_search_api(request):
 
     qs = ClaimDocument.objects.filter(file__icontains=f'_{doc_type}.')
     if group_key:
-        qs = qs.filter(group_key=group_key)
+        # The group_key generated from sale data (e.g. "424804_MarieJoseMcKeown_023071")
+        # rarely matches the group_key stored on uploaded documents
+        # (e.g. "BFS-NR-S424804_Marie-JoseMcKeown_023071"), because the upload naming
+        # convention differs. Match on the job/sale number token — the one reliable
+        # identifier that appears in both — so the right documents are still found.
+        job_token = group_key.split('_', 1)[0].strip()
+        if job_token:
+            qs = qs.filter(Q(group_key=group_key) | Q(file__icontains=job_token))
+        else:
+            qs = qs.filter(group_key=group_key)
     documents = qs.order_by('-uploaded_at')[:100]
 
     results = []

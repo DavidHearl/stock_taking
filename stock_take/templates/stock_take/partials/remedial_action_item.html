@@ -1,0 +1,65 @@
+{% comment %}
+A single "order card" for one remedial action (boards / glass / accessories / OS doors).
+Hidden until its toggle is switched on. Mirrors the order-tab card styling.
+Params:
+  prefix        - unique DOM id prefix for this modal ('rem' create, 'erem' edit)
+  key           - short key for this action ('boards','glass','accessories','osdoors')
+  field         - checkbox field name (e.g. 'order_glass_required')
+  items_field   - textarea field name (e.g. 'order_glass_items')
+  po_field      - PO reference field name (e.g. 'order_glass_po_ref')
+  label         - card title (e.g. 'Order Glass')
+  icon          - bootstrap icon class
+  suggestions   - list of {label, sku, detail}
+  suggest_label - heading for the suggestions block
+{% endcomment %}
+<div class="rem-card" id="{{ prefix }}-{{ key }}-card" hidden>
+    <input type="checkbox" class="rem-action-cb" id="{{ prefix }}-{{ key }}-cb" name="{{ field }}" hidden>
+    <div class="rem-card-header">
+        <h4><i class="bi {{ icon }}"></i> {{ label }}</h4>
+        <button type="button" class="rem-card-remove" title="Remove this action"
+                onclick="setRemActionState('{{ prefix }}', '{{ key }}', false)">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+    <div class="rem-card-body">
+        {% if suggestions %}
+        <div class="rem-suggest">
+            <div class="rem-suggest-label"><i class="bi bi-lightbulb"></i> {{ suggest_label }} &mdash; click to add</div>
+            <div class="rem-suggest-chips">
+                {% for s in suggestions %}
+                <button type="button" class="rem-chip"
+                        data-label="{{ s.label }}"{% if s.sku %} data-sku="{{ s.sku }}"{% endif %}
+                        onclick="addRemItem('{{ prefix }}-{{ key }}', this.dataset.label, this.dataset.sku || '')">
+                    <span class="rem-chip-name">{{ s.label }}</span>
+                    {% if s.sku %}<span class="rem-chip-sku">{{ s.sku }}</span>{% endif %}
+                    {% if s.detail %}<span class="rem-chip-detail">{{ s.detail }}</span>{% endif %}
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="rem-suggest-empty">No matching items on the original order &mdash; add items manually below.</div>
+        {% endif %}
+
+        <div class="rem-items" id="{{ prefix }}-{{ key }}-items-list"></div>
+
+        <div class="rem-add-row">
+            <input type="text" class="form-control rem-add-input" id="{{ prefix }}-{{ key }}-add-input"
+                   placeholder="Add another item to order&hellip;"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addRemItemFromInput('{{ prefix }}-{{ key }}');}">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="addRemItemFromInput('{{ prefix }}-{{ key }}')">
+                <i class="bi bi-plus-lg"></i> Add
+            </button>
+        </div>
+
+        <textarea id="{{ prefix }}-{{ key }}-items" name="{{ items_field }}" hidden></textarea>
+
+        <div class="rem-po-row">
+            <label class="form-label" for="{{ prefix }}-{{ key }}-po">PO Number / Reference</label>
+            <input type="text" class="form-control" id="{{ prefix }}-{{ key }}-po" name="{{ po_field }}"
+                   placeholder="e.g. PO-12345">
+        </div>
+    </div>
+</div>
+
