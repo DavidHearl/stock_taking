@@ -4895,9 +4895,22 @@ def approved_pos_report_pdf(request):
 
     # ─── PAGE 2: AGGREGATED ITEMS ─────────────────────────────
     # Sum the quantity of every line item across all approved POs.
-    # Lines that share the same SKU (or name when no SKU) are combined.
+    # Regular POs: lines sharing the same SKU are combined.
+    # OS Doors POs: each unique (sku, name) combo is kept separate — doors
+    #   differ by dimension/colour even when they share a style code.
+
+    # Pre-compute which PO display_numbers belong to OS Doors orders.
+    _os_doors_po_numbers = (
+        set(Order.objects.exclude(os_doors_po='').values_list('os_doors_po', flat=True)) |
+        set(OSDoor.objects.exclude(po_number='').exclude(po_number__isnull=True)
+            .values_list('po_number', flat=True))
+    )
+
     agg = {}  # key -> {'sku', 'name', 'qty'}
     for po in pos:
+        is_osd_po = bool(po.display_number and po.display_number in _os_doors_po_numbers)
+        if is_osd_po:
+            continue  # OS Doors have their own dedicated section on page 3
         for line in po.products.all():
             sku = (line.sku or '').strip()
             name = (line.name or line.description or '').strip()
@@ -4968,6 +4981,312 @@ def approved_pos_report_pdf(request):
                 item_style.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
         item_table.setStyle(TableStyle(item_style))
         elements.append(item_table)
+
+    # ─── PAGE 3: OS DOORS DUE IN ──────────────────────────────
+    # A per-PO breakdown of every approved OS Doors purchase order,
+    # with each door line (style, dimensions, colour, qty, price, total).
+    os_doors_approved_pos = [
+        po for po in pos
+        if po.display_number and po.display_number in _os_doors_po_numbers
+    ]
+
+    # Shared styles for per-PO section headers (used in OS Doors + Carnehill pages)
+    _sec_title_style = ParagraphStyle(
+        'SecPoHeader', parent=styles['CellText'],
+        fontSize=8.5, leading=11, fontName='Helvetica-Bold',
+    )
+    _meta_style = ParagraphStyle(
+        'SecPoMeta', parent=styles['AddressText'], fontSize=7.5, leading=10,
+    )
+
+    if os_doors_approved_pos:
+        elements.append(PageBreak())
+
+        if os.path.exists(logo_path):
+            logo3 = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+            logo3.hAlign = 'CENTER'
+            elements.append(logo3)
+            elements.append(Spacer(1, 6 * mm))
+
+        total_door_lines = sum(po.products.count() for po in os_doors_approved_pos)
+        elements.append(Paragraph('<b>OS Doors Due In</b>', title_style))
+        elements.append(Paragraph(
+            f'Generated {_dt.now().strftime("%d/%m/%Y")}  ·  '
+            f'{len(os_doors_approved_pos)} purchase order{"s" if len(os_doors_approved_pos) != 1 else ""}  ·  '
+            f'{total_door_lines} door line{"s" if total_door_lines != 1 else ""}',
+            styles['AddressText']
+        ))
+        elements.append(Spacer(1, 8 * mm))
+
+        osd_col_widths = [
+            page_width * 0.54,  # Description
+            page_width * 0.08,  # Qty
+            page_width * 0.19,  # Unit Price
+            page_width * 0.19,  # Total
+        ]
+
+        for po in os_doors_approved_pos:
+            # Resolve the linked order
+            linked_order = Order.objects.filter(os_doors_po=po.display_number).first()
+            if not linked_order:
+                first_door = OSDoor.objects.filter(
+                    po_number=po.display_number
+                ).select_related('customer').first()
+                if first_door:
+                    linked_order = first_door.customer
+
+            sale_label = ''
+            if linked_order:
+                cname = linked_order.customer_name or ''
+                sale_label = f'{linked_order.sale_number}  {cname}'.strip()
+
+            expected = _format_date(po.expected_date) if po.expected_date else 'No date set'
+            supplier = po.supplier_name or '—'
+
+            header_text = (
+                f'{po.display_number or po.number or "—"}  ·  '
+                f'{supplier}'
+                + (f'  ·  {sale_label}' if sale_label else '')
+            )
+            meta_text = f'Expected: {expected}'
+
+            elements.append(Paragraph(header_text, _sec_title_style))
+            elements.append(Paragraph(meta_text, _meta_style))
+            elements.append(Spacer(1, 2 * mm))
+
+            door_lines = list(po.products.all().order_by('sort_order', 'id'))
+            if door_lines:
+                currency = (po.currency or 'GBP').upper()
+                symbol = _CURRENCY_SYMBOLS.get(currency, currency)
+
+                osd_data = [[
+                    Paragraph('<b>Description</b>', styles['CellText']),
+                    Paragraph('<b>Qty</b>', styles['CellTextRight']),
+                    Paragraph(f'<b>Unit ({symbol})</b>', styles['CellTextRight']),
+                    Paragraph(f'<b>Total ({symbol})</b>', styles['CellTextRight']),
+                ]]
+                po_subtotal = Decimal('0')
+                for line in door_lines:
+                    qty = line.order_quantity or line.quantity or Decimal('0')
+                    unit_price = line.order_price or Decimal('0')
+                    line_total = line.line_total if line.line_total else (qty * unit_price)
+                    po_subtotal += line_total
+                    qty_str = f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}'
+                    desc = (line.name or line.description or '—').strip()
+                    osd_data.append([
+                        Paragraph(desc, styles['CellText']),
+                        Paragraph(qty_str, styles['CellTextRight']),
+                        Paragraph(f'{unit_price:,.2f}', styles['CellTextRight']),
+                        Paragraph(f'{line_total:,.2f}', styles['CellTextRight']),
+                    ])
+                # Subtotal row (spans first three cols)
+                osd_data.append([
+                    Paragraph('<b>Subtotal</b>', styles['CellTextRight']),
+                    Paragraph('', styles['CellTextRight']),
+                    Paragraph('', styles['CellTextRight']),
+                    Paragraph(f'<b>{po_subtotal:,.2f}</b>', styles['CellTextRight']),
+                ])
+
+                osd_table = Table(osd_data, colWidths=osd_col_widths, repeatRows=1)
+                osd_style_cmds = [
+                    ('LINEBELOW', (0, 0), (-1, 0), 0.6, BRAND_DARK),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LINEBELOW', (0, 1), (-1, -2), 0.2, BORDER_COLOR),
+                    ('LINEABOVE', (0, -1), (-1, -1), 0.6, BRAND_DARK),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                    ('SPAN', (0, -1), (2, -1)),
+                ]
+                for i in range(1, len(osd_data) - 1):
+                    if i % 2 == 0:
+                        osd_style_cmds.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+                osd_table.setStyle(TableStyle(osd_style_cmds))
+                elements.append(osd_table)
+            else:
+                elements.append(Paragraph('No line items found for this PO.', styles['AddressText']))
+
+            elements.append(Spacer(1, 6 * mm))
+
+    # ─── PAGE 4: CARNEHILL DUE IN ─────────────────────────────
+    carnehill_approved_pos = [
+        po for po in pos
+        if 'carnehill' in (po.supplier_name or '').lower()
+        and po.display_number not in _os_doors_po_numbers
+    ]
+
+    if carnehill_approved_pos:
+        elements.append(PageBreak())
+
+        if os.path.exists(logo_path):
+            logo4 = Image(logo_path, width=50 * mm, height=14 * mm, kind='proportional')
+            logo4.hAlign = 'CENTER'
+            elements.append(logo4)
+            elements.append(Spacer(1, 6 * mm))
+
+        def _ch_line_count(po):
+            bpo = BoardsPO.objects.filter(po_number=po.display_number).first()
+            return bpo.pnx_items.count() if bpo else po.products.count()
+
+        total_carnehill_lines = sum(_ch_line_count(po) for po in carnehill_approved_pos)
+        elements.append(Paragraph('<b>Carnehill Due In</b>', title_style))
+        elements.append(Paragraph(
+            f'Generated {_dt.now().strftime("%d/%m/%Y")}  ·  '
+            f'{len(carnehill_approved_pos)} purchase order{"s" if len(carnehill_approved_pos) != 1 else ""}  ·  '
+            f'{total_carnehill_lines} line{"s" if total_carnehill_lines != 1 else ""}',
+            styles['AddressText']
+        ))
+        elements.append(Spacer(1, 8 * mm))
+
+        ch_col_widths = [
+            page_width * 0.54,  # Description
+            page_width * 0.08,  # Qty
+            page_width * 0.19,  # Unit Price
+            page_width * 0.19,  # Total
+        ]
+
+        for po in carnehill_approved_pos:
+            expected = _format_date(po.expected_date) if po.expected_date else 'No date set'
+
+            # Resolve sale reference: try project fields on the PO first,
+            # then fall back to the linked BoardsPO orders.
+            sale_label = ''
+            if po.project_number:
+                sale_label = f'{po.project_number}  {po.project_name or ""}'.strip()
+            if not sale_label:
+                boards_po_obj = BoardsPO.objects.filter(po_number=po.display_number).first()
+                if boards_po_obj:
+                    linked_orders = list(boards_po_obj.orders.all()[:3])
+                    if linked_orders:
+                        sale_label = ', '.join(
+                            f'{o.sale_number} {o.customer_name}'.strip()
+                            for o in linked_orders
+                        )
+
+            header_text = (
+                f'{po.display_number or po.number or "—"}  ·  '
+                f'{po.supplier_name or "—"}'
+                + (f'  ·  {sale_label}' if sale_label else '')
+            )
+            meta_text = f'Expected: {expected}'
+
+            elements.append(Paragraph(header_text, _sec_title_style))
+            elements.append(Paragraph(meta_text, _meta_style))
+            elements.append(Spacer(1, 2 * mm))
+
+            currency = (po.currency or 'GBP').upper()
+            symbol = _CURRENCY_SYMBOLS.get(currency, currency)
+
+            ch_data = [[
+                Paragraph('<b>Description</b>', styles['CellText']),
+                Paragraph('<b>Qty</b>', styles['CellTextRight']),
+                Paragraph(f'<b>Unit ({symbol})</b>', styles['CellTextRight']),
+                Paragraph(f'<b>Total ({symbol})</b>', styles['CellTextRight']),
+            ]]
+            po_subtotal = Decimal('0')
+
+            # ── Boards PO: group PNX items by material + dimensions ──────────
+            boards_po_obj = BoardsPO.objects.filter(po_number=po.display_number).first()
+            if boards_po_obj:
+                from collections import defaultdict
+                pnx_items = list(boards_po_obj.pnx_items.all())
+                for item in pnx_items:
+                    item.calculated_cost = item.get_cost()
+
+                is_angled = boards_po_obj.is_angled
+                groups = defaultdict(lambda: {
+                    'matname': '', 'cleng': 0, 'cwidth': 0,
+                    'left_height': None, 'right_height': None, 'top_edge': 0,
+                    'total_qty': Decimal('0'), 'total_cost': Decimal('0'),
+                })
+                for item in pnx_items:
+                    if is_angled and item.left_height is not None:
+                        key = (item.matname, float(item.left_height or 0),
+                               float(item.right_height or 0), float(item.cwidth),
+                               float(item.top_edge or 0))
+                    else:
+                        key = (item.matname, float(item.cleng), float(item.cwidth))
+                    grp = groups[key]
+                    grp['matname'] = item.matname
+                    grp['cleng'] = float(item.cleng)
+                    grp['cwidth'] = float(item.cwidth)
+                    grp['left_height'] = float(item.left_height) if item.left_height is not None else None
+                    grp['right_height'] = float(item.right_height) if item.right_height is not None else None
+                    grp['top_edge'] = float(item.top_edge or 0)
+                    grp['total_qty'] += item.cnt
+                    grp['total_cost'] += item.calculated_cost
+
+                for key in sorted(groups):
+                    grp = groups[key]
+                    qty = grp['total_qty']
+                    cost = grp['total_cost']
+                    unit_price = (cost / qty) if qty else Decimal('0')
+                    if grp['left_height'] is not None:
+                        dims = f"L:{grp['left_height']:.0f} R:{grp['right_height']:.0f} W:{grp['cwidth']:.0f}"
+                        if grp['top_edge'] > 0:
+                            dims += f" TE:{grp['top_edge']:.0f}"
+                        desc = f"{grp['matname']} — {dims}mm"
+                    else:
+                        desc = f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm"
+                    qty_str = f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}'
+                    po_subtotal += cost
+                    ch_data.append([
+                        Paragraph(desc, styles['CellText']),
+                        Paragraph(qty_str, styles['CellTextRight']),
+                        Paragraph(f'{unit_price:,.2f}', styles['CellTextRight']),
+                        Paragraph(f'{cost:,.2f}', styles['CellTextRight']),
+                    ])
+            else:
+                # ── Non-boards Carnehill PO: use standard product lines ───────
+                for line in po.products.all().order_by('sort_order', 'id'):
+                    qty = line.order_quantity or line.quantity or Decimal('0')
+                    unit_price = line.order_price or Decimal('0')
+                    line_total = line.line_total if line.line_total else (qty * unit_price)
+                    po_subtotal += line_total
+                    qty_str = f'{qty:,.0f}' if qty == int(qty) else f'{qty:,.2f}'
+                    desc = (line.name or line.description or '—').strip()
+                    ch_data.append([
+                        Paragraph(desc, styles['CellText']),
+                        Paragraph(qty_str, styles['CellTextRight']),
+                        Paragraph(f'{unit_price:,.2f}', styles['CellTextRight']),
+                        Paragraph(f'{line_total:,.2f}', styles['CellTextRight']),
+                    ])
+
+            if len(ch_data) > 1:
+                ch_data.append([
+                    Paragraph('<b>Subtotal</b>', styles['CellTextRight']),
+                    Paragraph('', styles['CellTextRight']),
+                    Paragraph('', styles['CellTextRight']),
+                    Paragraph(f'<b>{po_subtotal:,.2f}</b>', styles['CellTextRight']),
+                ])
+                ch_table = Table(ch_data, colWidths=ch_col_widths, repeatRows=1)
+                ch_style_cmds = [
+                    ('LINEBELOW', (0, 0), (-1, 0), 0.6, BRAND_DARK),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LINEBELOW', (0, 1), (-1, -2), 0.2, BORDER_COLOR),
+                    ('LINEABOVE', (0, -1), (-1, -1), 0.6, BRAND_DARK),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                    ('SPAN', (0, -1), (2, -1)),
+                ]
+                for i in range(1, len(ch_data) - 1):
+                    if i % 2 == 0:
+                        ch_style_cmds.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+                ch_table.setStyle(TableStyle(ch_style_cmds))
+                elements.append(ch_table)
+            else:
+                elements.append(Paragraph('No line items found for this PO.', styles['AddressText']))
+
+            elements.append(Spacer(1, 6 * mm))
 
     # Build
     doc.build(elements)

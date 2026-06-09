@@ -33,7 +33,6 @@
     £{{ sale.sale_value|floatformat:0 }}
     {% else %}-{% endif %}
 </td>
-<td>{{ sale.activity_date|date:"d/m/Y"|default:"-" }}</td>
 <td>{{ sale.fit_date|date:"d/m/Y"|default:"-" }}</td>
 <td>{{ sale.location|default:"-" }}</td>
 <td>
@@ -49,31 +48,35 @@
     <span class="text-muted">-</span>
     {% endif %}
 </td>
-<td onclick="event.stopPropagation();">
-    {% with cust_id=sale.anthill_customer_id|default:sale.customer.anthill_customer_id %}
-    {% if cust_id %}
-    <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ cust_id }}"
-       target="_blank" class="anthill-icon-link" title="Open Anthill Customer">
-        <i class="bi bi-person-fill"></i>
-    </a>
-    {% else %}
-    <button type="button" class="anthill-icon-link anthill-icon-missing"
-            title="No Anthill customer ID — click to add"
-            onclick="openAnthillIdModal({{ sale.pk }}, 'customer')">
-        <i class="bi bi-person-fill"></i>
-    </button>
-    {% endif %}
-    {% endwith %}
-    {% if sale.anthill_activity_id %}
-    <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}"
-       target="_blank" class="anthill-icon-link" title="Open Anthill Sale">
-        <i class="bi bi-cash-stack"></i>
-    </a>
-    {% else %}
-    <button type="button" class="anthill-icon-link anthill-icon-missing"
-            title="No Anthill sale ID — click to add"
-            onclick="openAnthillIdModal({{ sale.pk }}, 'sale')">
-        <i class="bi bi-cash-stack"></i>
-    </button>
-    {% endif %}
+<td class="row-actions-cell" onclick="event.stopPropagation();">
+    <div class="kebab-menu">
+        <button type="button" class="kebab-trigger" onclick="toggleKebab(this, event)" title="Actions">
+            <i class="bi bi-three-dots-vertical"></i>
+        </button>
+        <div class="kebab-dropdown">
+            {% firstof sale.anthill_customer_id sale.customer.anthill_customer_id as cust_id %}
+            {% if cust_id %}
+            <a href="https://sliderobes.anthillcrm.com/system/Customers/ViewCustomer.aspx?CustomerID={{ cust_id }}"
+               target="_blank" class="kebab-item">
+                <i class="bi bi-person-fill"></i> Open Anthill Customer
+            </a>
+            {% else %}
+            <button type="button" class="kebab-item muted"
+                    onclick="openAnthillIdModal({{ sale.pk }}, 'customer')">
+                <i class="bi bi-person-fill"></i> Add Anthill Customer ID
+            </button>
+            {% endif %}
+            {% if sale.anthill_activity_id %}
+            <a href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ sale.anthill_activity_id }}"
+               target="_blank" class="kebab-item">
+                <i class="bi bi-cash-stack"></i> Open Anthill Sale
+            </a>
+            {% else %}
+            <button type="button" class="kebab-item muted"
+                    onclick="openAnthillIdModal({{ sale.pk }}, 'sale')">
+                <i class="bi bi-cash-stack"></i> Add Anthill Sale ID
+            </button>
+            {% endif %}
+        </div>
+    </div>
 </td>

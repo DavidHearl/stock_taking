@@ -800,6 +800,677 @@ def dashboard(request):
     return render(request, 'stock_take/dashboard.html', context)
 
 
+def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=None):
+    """Persist Xero invoice/payment data onto a single AnthillSale.
+
+    Mirrors the linking logic used by the outstanding-balance Xero check
+    endpoints (payment cap, fallback de-duplication, cleanup). Returns a
+    ``(created, updated, skipped)`` tuple.
+    """
+    if seen_fallback_base_pids is None:
+        seen_fallback_base_pids = set()
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    # Payment cap: never credit more than the sale is worth.
+    sale_value = (sale.sale_value or Decimal('0')) - (sale.discount or Decimal('0'))
+    running_total = (
+        AnthillPayment.objects.filter(sale=sale).aggregate(total=Sum('amount'))['total']
+    ) or Decimal('0')
+
+    for inv in invoice_data:
+        if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
+            continue
+
+        for p in inv['payments']:
+            if p.get('status', '').upper() == 'CANCELLED':
+                continue
+            pid = p.get('payment_id') or ''
+            base_pid = p.get('base_payment_id') or ''
+            is_fallback = p.get('is_fallback', False)
+            p_amount = p['amount'] or Decimal('0')
+
+            # Prevent double-counting fallback (un-allocated) payments across sales
+            if is_fallback and base_pid and base_pid in seen_fallback_base_pids:
+                continue
+            if is_fallback and base_pid:
+                already_on_other = AnthillPayment.objects.filter(
+                    anthill_payment_id__startswith=base_pid,
+                ).exclude(sale=sale).exists()
+                if already_on_other:
+                    continue
+
+            already_exists = False
+            if pid:
+                already_exists = AnthillPayment.objects.filter(
+                    sale=sale, anthill_payment_id=pid).exists()
+            else:
+                already_exists = AnthillPayment.objects.filter(
+                    sale=sale, xero_invoice_id=inv['invoice_id'],
+                    date=p['date']).exists()
+
+            if not already_exists and sale_value > 0:
+                if running_total + p_amount > sale_value + Decimal('0.50'):
+                    skipped += 1
+                    continue
+
+            defaults = {
+                'source': 'xero',
+                'xero_invoice_id': inv['invoice_id'],
+                'xero_invoice_number': inv['invoice_number'],
+                'invoice_total': inv['total'],
+                'invoice_amount_due': inv['amount_due'],
+                'invoice_status': inv['status'],
+                'payment_type': p['reference'] or 'Payment',
+                'date': p['date'],
+                'amount': p_amount,
+                'status': p['status'],
+                'location': '',
+                'user_name': '',
+            }
+            if pid:
+                _obj, was_created = AnthillPayment.objects.update_or_create(
+                    sale=sale, anthill_payment_id=pid, defaults=defaults)
+            else:
+                _obj, was_created = AnthillPayment.objects.update_or_create(
+                    sale=sale, xero_invoice_id=inv['invoice_id'], date=p['date'], defaults=defaults)
+
+            if was_created:
+                created += 1
+                running_total += p_amount
+            else:
+                updated += 1
+
+            if is_fallback and base_pid:
+                seen_fallback_base_pids.add(base_pid)
+
+        # Invoice-level summary row for invoices with no individual payments
+        if not inv['payments']:
+            inv_amount = inv['amount_paid'] or Decimal('0')
+            already_exists = AnthillPayment.objects.filter(
+                sale=sale, xero_invoice_id=inv['invoice_id'], date=None).exists()
+            if not already_exists and sale_value > 0:
+                if running_total + inv_amount > sale_value + Decimal('0.50'):
+                    skipped += 1
+                    continue
+
+            defaults = {
+                'source': 'xero',
+                'xero_invoice_id': inv['invoice_id'],
+                'xero_invoice_number': inv['invoice_number'],
+                'invoice_total': inv['total'],
+                'invoice_amount_due': inv['amount_due'],
+                'invoice_status': inv['status'],
+                'payment_type': 'Invoice Payment',
+                'date': None,
+                'amount': inv_amount,
+                'status': inv['status'],
+                'location': '',
+                'user_name': '',
+            }
+            _obj, was_created = AnthillPayment.objects.update_or_create(
+                sale=sale, xero_invoice_id=inv['invoice_id'], date=None, defaults=defaults)
+            if was_created:
+                created += 1
+                running_total += inv_amount
+            else:
+                updated += 1
+
+    _cleanup_old_format_payment_ids(sale)
+    _deduplicate_manual_payments(sale)
+    return created, updated, skipped
+
+
+def _sync_xero_payments_for_sales(sales):
+    """Link Xero payments for the given AnthillSale objects.
+
+    Used by the weekly report to keep payment data correct. Silently no-ops if
+    Xero is not connected, and tolerates per-sale Xero/API errors so the report
+    always renders. Returns the total number of payments created.
+    """
+    from .services import xero_api
+
+    try:
+        access_token, _ = xero_api.get_valid_access_token()
+    except Exception:
+        access_token = None
+    if not access_token:
+        return 0
+
+    seen_fallback_base_pids = set()
+    created_total = 0
+    for sale in sales:
+        if not sale.contract_number:
+            continue
+        try:
+            invoice_data = xero_api.get_sale_payments_from_xero(
+                contract_number=sale.contract_number,
+                contact_name=sale.customer_name or None,
+            )
+        except Exception:
+            continue
+        if not invoice_data:
+            continue
+        try:
+            created, _updated, _skipped = _write_xero_payments_for_sale(
+                sale, invoice_data, seen_fallback_base_pids)
+            created_total += created
+        except Exception:
+            continue
+    return created_total
+
+
+@login_required
+def dashboard_weekly_summary(request):
+    """JSON endpoint — comprehensive three-week operational summary for B2C fitting company."""
+    from .models import Remedial, BoardsPO as _BoardsPO
+
+    profile = getattr(request.user, 'profile', None)
+    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    today = datetime.now().date()
+
+    # ── Week boundaries ──────────────────────────────────────────────────────
+    this_week_start = today - timedelta(days=today.weekday())
+    this_week_end   = this_week_start + timedelta(days=6)
+    last_week_start = this_week_start - timedelta(days=7)
+    last_week_end   = last_week_start + timedelta(days=6)
+    next_week_start = this_week_start + timedelta(days=7)
+    next_week_end   = next_week_start + timedelta(days=6)
+
+    # Per-sale total of linked (non-ignored) payments — reused throughout.
+    payments_subquery = Subquery(
+        AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
+        .values('sale').annotate(total=Sum('amount')).values('total'),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+
+    # ── Xero sync ─────────────────────────────────────────────────────────────
+    # Before computing payment figures, pull the latest payments from Xero for
+    # every job fitting in the 3-week window and link any that aren't recorded
+    # yet, so the report's payment data is accurate. No-ops if Xero is offline.
+    xero_sync_qs = (AnthillSale.objects
+                    .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end, sale_value__gt=0)
+                    .exclude(status__in=['cancelled', 'dead'])
+                    .annotate(total_paid=Coalesce(
+                        payments_subquery, Value(Decimal('0')),
+                        output_field=DecimalField(max_digits=14, decimal_places=2))))
+    if contract_prefix:
+        xero_sync_qs = xero_sync_qs.filter(contract_number__istartswith=contract_prefix)
+    sales_to_sync = [
+        s for s in xero_sync_qs
+        if s.contract_number and (
+            ((s.sale_value or Decimal('0')) - 2 * (s.discount or Decimal('0')) - (s.total_paid or Decimal('0')))
+            >= Decimal('1')
+        )
+    ]
+    payments_linked = _sync_xero_payments_for_sales(sales_to_sync)
+
+    def _week_sales(start, end):
+        qs = (AnthillSale.objects
+              .filter(fit_date__gte=start, fit_date__lte=end, sale_value__gt=0)
+              .exclude(status__in=['cancelled', 'dead'])
+              .annotate(total_paid=Coalesce(
+                  payments_subquery, Value(Decimal('0')),
+                  output_field=DecimalField(max_digits=14, decimal_places=2))))
+        if contract_prefix:
+            qs = qs.filter(contract_number__istartswith=contract_prefix)
+        total = Decimal('0')
+        collected = Decimal('0')
+        outstanding = Decimal('0')
+        count = 0
+        for row in qs.values('sale_value', 'discount', 'total_paid'):
+            count += 1
+            sv = row['sale_value'] or Decimal('0')
+            net = max(sv - 2 * (row['discount'] or Decimal('0')), Decimal('0'))
+            paid = min(row['total_paid'] or Decimal('0'), net)
+            total += sv
+            collected += paid
+            outstanding += (net - paid)
+        return {
+            'total': float(total),
+            'count': count,
+            'collected': float(collected),
+            'outstanding': float(outstanding),
+        }
+
+    last_week_sales = _week_sales(last_week_start, last_week_end)
+    this_week_sales = _week_sales(this_week_start, this_week_end)
+    next_week_sales = _week_sales(next_week_start, next_week_end)
+
+    # Helper: map order ids -> comma-joined fitter display names (handles multi-fitter jobs)
+    from .models import FitAppointment as _FitAppointment
+    _fitter_name_map = dict(_FitAppointment.FITTER_CHOICES)
+
+    def _fitters_for_orders(order_ids):
+        result = {}
+        if not order_ids:
+            return result
+        for appt in (_FitAppointment.objects
+                     .filter(order_id__in=order_ids)
+                     .values('order_id', 'fitter')):
+            name = _fitter_name_map.get(appt['fitter'], appt['fitter'])
+            names = result.setdefault(appt['order_id'], [])
+            if name and name not in names:
+                names.append(name)
+        return {oid: ', '.join(v) for oid, v in result.items()}
+
+    # Per-day breakdown for this week
+    day_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    day_sales = {
+        i: {
+            'label': day_labels[i],
+            'date': (this_week_start + timedelta(days=i)).strftime('%d %b'),
+            'total': 0.0,
+            'count': 0,
+            'jobs': [],
+        }
+        for i in range(7)
+    }
+    # Per-day breakdown for this week — sourced from Orders (the scheduled fits)
+    # so the chart matches the Materials Readiness table below it.
+    this_week_order_qs = (Order.objects
+                          .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end)
+                          .order_by('fit_date'))
+    for o in this_week_order_qs.values('fit_date', 'total_value_inc_vat',
+                                       'sale_number', 'first_name', 'last_name'):
+        idx = o['fit_date'].weekday()
+        val = float(o['total_value_inc_vat'] or 0)
+        day_sales[idx]['total'] += val
+        day_sales[idx]['count'] += 1
+        day_sales[idx]['jobs'].append({
+            'customer': (f"{o['first_name'] or ''} {o['last_name'] or ''}").strip() or '-',
+            'contract': o['sale_number'] or '-',
+            'value': val,
+        })
+
+    # Per-day breakdown for last week
+    last_day_sales = {
+        i: {
+            'label': day_labels[i],
+            'date': (last_week_start + timedelta(days=i)).strftime('%d %b'),
+            'total': 0.0,
+            'count': 0,
+        }
+        for i in range(7)
+    }
+    last_week_day_qs = (Order.objects
+                        .filter(fit_date__gte=last_week_start, fit_date__lte=last_week_end)
+                        .order_by('fit_date'))
+    for o in last_week_day_qs.values('fit_date', 'total_value_inc_vat'):
+        idx = o['fit_date'].weekday()
+        last_day_sales[idx]['total'] += float(o['total_value_inc_vat'] or 0)
+        last_day_sales[idx]['count'] += 1
+
+    # ── Stock ─────────────────────────────────────────────────────────────────
+    stock_items_qs = StockItem.objects.filter(tracking_type__in=['stock', 'non-stock'], quantity__gt=0)
+    total_stock_value = sum(item.cost * item.quantity for item in stock_items_qs) or Decimal('0')
+    seven_days_ago = today - timedelta(days=7)
+    recent_hist = (StockHistory.objects
+                   .filter(created_at__date__gte=seven_days_ago,
+                           stock_item__tracking_type__in=['stock', 'non-stock'])
+                   .exclude(change_type__in=['sale', 'purchase'])
+                   .select_related('stock_item'))
+    stock_7d_delta = sum(h.change_amount * h.stock_item.cost for h in recent_hist) or Decimal('0')
+    shortage_count = (StockItem.objects
+                      .filter(tracking_type__in=['stock', 'non-stock'], par_level__gt=0)
+                      .filter(quantity__lt=F('par_level'))
+                      .count())
+
+    # ── Outstanding payments ──────────────────────────────────────────────────
+    outstanding_qs = (AnthillSale.objects
+                      .filter(sale_value__gt=0)
+                      .exclude(status='cancelled')
+                      .annotate(total_paid=Coalesce(
+                          payments_subquery, Value(Decimal('0')),
+                          output_field=DecimalField(max_digits=14, decimal_places=2))))
+    if contract_prefix:
+        outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
+    total_outstanding = Decimal('0')
+    outstanding_count = 0
+    top_debtors_all = []
+    for row in outstanding_qs.values('order_id', 'customer_name', 'contract_number', 'fit_date',
+                                     'sale_value', 'discount', 'total_paid'):
+        owed = max(
+            (row['sale_value'] or Decimal('0'))
+            - 2 * (row['discount'] or Decimal('0'))
+            - (row['total_paid'] or Decimal('0')),
+            Decimal('0'),
+        )
+        if owed >= Decimal('10'):
+            total_outstanding += owed
+            outstanding_count += 1
+            top_debtors_all.append({
+                'order_id':    row['order_id'],
+                'customer':    row['customer_name'] or '-',
+                'contract':    row['contract_number'] or '-',
+                'fit_date':    row['fit_date'].strftime('%d %b %Y') if row['fit_date'] else 'TBC',
+                'sale_value':  float(row['sale_value'] or 0),
+                'outstanding': float(owed),
+            })
+    top_debtors = sorted(top_debtors_all, key=lambda x: x['outstanding'], reverse=True)[:10]
+    # Attach fitter names for just the top-10 debtor jobs
+    _debtor_fitters = _fitters_for_orders([d['order_id'] for d in top_debtors if d['order_id']])
+    for d in top_debtors:
+        d['fitter'] = _debtor_fitters.get(d['order_id'], '-') or '-'
+
+    # Collections due this week (jobs fitting this week with a remaining balance)
+    this_week_collect_qs = (AnthillSale.objects
+                            .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
+                            .exclude(status__in=['cancelled', 'dead'])
+                            .annotate(total_paid=Coalesce(
+                                payments_subquery, Value(Decimal('0')),
+                                output_field=DecimalField(max_digits=14, decimal_places=2))))
+    if contract_prefix:
+        this_week_collect_qs = this_week_collect_qs.filter(contract_number__istartswith=contract_prefix)
+    this_week_outstanding = Decimal('0')
+    this_week_collections = []
+    for s in this_week_collect_qs.values('customer_name', 'contract_number', 'fit_date',
+                                         'sale_value', 'discount', 'total_paid'):
+        owed = max(
+            (s['sale_value'] or Decimal('0'))
+            - 2 * (s['discount'] or Decimal('0'))
+            - (s['total_paid'] or Decimal('0')),
+            Decimal('0'),
+        )
+        if owed >= Decimal('1'):
+            this_week_outstanding += owed
+            this_week_collections.append({
+                'customer':   s['customer_name'] or '-',
+                'contract':   s['contract_number'] or '-',
+                'fit_date':   s['fit_date'].strftime('%a %d %b') if s['fit_date'] else '',
+                'sale_value': float(s['sale_value'] or 0),
+                'outstanding': float(owed),
+            })
+
+    # ── Purchase orders ───────────────────────────────────────────────────────
+    pending_qs = PurchaseOrder.objects.filter(status__in=['Approved', 'Ordered', 'Sent'])
+    pending_po_total = pending_qs.aggregate(total=Sum('total'))['total'] or Decimal('0')
+    pending_po_count = pending_qs.count()
+    four_weeks_ago = today - timedelta(weeks=4)
+    recent_po_spend = (PurchaseOrder.objects
+                       .filter(issue_date__gte=four_weeks_ago)
+                       .aggregate(total=Sum('total'))['total'] or Decimal('0'))
+    po_status_breakdown = [
+        {'status': r['status'], 'count': r['count'], 'total': float(r['total'] or 0)}
+        for r in (PurchaseOrder.objects
+                  .filter(status__in=['Approved', 'Ordered', 'Sent'])
+                  .values('status')
+                  .annotate(count=Count('id'), total=Sum('total'))
+                  .order_by('status'))
+    ]
+    # Received POs: only those received in the last 7 days (received_date is a
+    # free-text string in mixed formats, so parse it in Python).
+    def _parse_po_date(raw):
+        if not raw:
+            return None
+        s = str(raw)[:19]
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%Y-%m-%dT%H:%M:%S'):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    recv_week_start = today - timedelta(days=7)
+    recv_count = 0
+    recv_total = Decimal('0')
+    for po in PurchaseOrder.objects.filter(status='Received').values('received_date', 'total'):
+        rd = _parse_po_date(po['received_date'])
+        if rd and recv_week_start <= rd <= today:
+            recv_count += 1
+            recv_total += (po['total'] or Decimal('0'))
+    po_status_breakdown.append({'status': 'Received', 'count': recv_count, 'total': float(recv_total)})
+
+    # ── Shared per-order lookups (fitter, remedial flag, money due) ───────────
+    window_order_ids = set(
+        AnthillSale.objects
+        .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end, order__isnull=False)
+        .values_list('order_id', flat=True)
+    )
+    window_order_ids |= set(
+        Order.objects
+        .filter(fit_date__gte=this_week_start, fit_date__lte=next_week_end)
+        .values_list('id', flat=True)
+    )
+
+    fitter_by_order = _fitters_for_orders(window_order_ids)
+
+    remedial_order_ids = set()
+    if window_order_ids:
+        remedial_order_ids = set(
+            Remedial.objects
+            .filter(original_order_id__in=window_order_ids)
+            .values_list('original_order_id', flat=True)
+        )
+
+    # Outstanding balance per linked order (for the "money due" columns)
+    money_qs = (AnthillSale.objects
+                .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end,
+                        sale_value__gt=0, order__isnull=False)
+                .exclude(status__in=['cancelled', 'dead'])
+                .annotate(total_paid=Coalesce(
+                    payments_subquery, Value(Decimal('0')),
+                    output_field=DecimalField(max_digits=14, decimal_places=2))))
+    if contract_prefix:
+        money_qs = money_qs.filter(contract_number__istartswith=contract_prefix)
+    outstanding_by_order = {}
+    for r in money_qs.values('order_id', 'sale_value', 'discount', 'total_paid'):
+        net = max((r['sale_value'] or Decimal('0')) - 2 * (r['discount'] or Decimal('0')), Decimal('0'))
+        owed = max(net - (r['total_paid'] or Decimal('0')), Decimal('0'))
+        outstanding_by_order[r['order_id']] = float(owed)
+
+    # ── Materials readiness (this week + next week fits) ─────────────────────
+    fitting_orders = (Order.objects
+                      .filter(fit_date__gte=this_week_start, fit_date__lte=next_week_end, job_finished=False)
+                      .select_related('boards_po')
+                      .order_by('fit_date'))
+    materials_rows = []
+    for order in fitting_orders:
+        # Boards
+        boards_status = 'not_required' if order.boards_not_required else 'no_po'
+        if not order.boards_not_required:
+            bpo = order.boards_po
+            if bpo:
+                linked_po = PurchaseOrder.objects.filter(display_number=bpo.po_number).first()
+                if linked_po:
+                    if linked_po.status in ('Received', 'Invoiced', 'Closed'):
+                        boards_status = 'received'
+                    elif linked_po.status in ('Approved', 'Ordered', 'Sent'):
+                        boards_status = 'ordered'
+                    else:
+                        boards_status = 'pending'
+                else:
+                    boards_status = 'no_po'
+        # OS Doors
+        os_doors_status = 'not_required'
+        if order.os_doors_po:
+            os_po = PurchaseOrder.objects.filter(display_number=order.os_doors_po).first()
+            if os_po:
+                if os_po.status in ('Received', 'Invoiced', 'Closed'):
+                    os_doors_status = 'received'
+                elif os_po.status in ('Approved', 'Ordered', 'Sent'):
+                    os_doors_status = 'ordered'
+                else:
+                    os_doors_status = 'pending'
+            else:
+                os_doors_status = 'no_po'
+        ready = order.all_items_ordered or (
+            boards_status in ('not_required', 'received')
+            and os_doors_status in ('not_required', 'received')
+        )
+        materials_rows.append({
+            'order_id':        order.id,
+            'sale_number':     order.sale_number or '-',
+            'customer':        order.customer_name or '-',
+            'fit_date':        order.fit_date.strftime('%a %d %b') if order.fit_date else '',
+            'fit_week':        'this' if order.fit_date and order.fit_date <= this_week_end else 'next',
+            'boards_status':   boards_status,
+            'os_doors_status': os_doors_status,
+            'all_items_ordered': order.all_items_ordered,
+            'ready':           ready,
+            'value':           float(order.total_value_inc_vat or 0),
+            'fitter':          fitter_by_order.get(order.id, '-') or '-',
+            'money_due':       outstanding_by_order.get(order.id),
+        })
+    materials_not_ready = sum(1 for r in materials_rows if not r['ready'])
+
+    # ── Remedials ─────────────────────────────────────────────────────────────
+    open_remedials      = Remedial.objects.filter(is_completed=False).count()
+    scheduled_remedials = Remedial.objects.filter(
+        is_completed=False,
+        scheduled_date__gte=this_week_start,
+        scheduled_date__lte=next_week_end,
+    ).count()
+
+    # Detailed list of open remedials (with status)
+    remedials_list = []
+    open_remedials_qs = (Remedial.objects
+                         .filter(is_completed=False)
+                         .order_by('scheduled_date', '-created_date'))
+    for rem in open_remedials_qs:
+        if rem.scheduled_date and rem.scheduled_date < today:
+            status_key, status_label = 'overdue', 'Overdue'
+        elif not rem.all_items_ordered:
+            status_key, status_label = 'awaiting', 'Awaiting Materials'
+        elif rem.scheduled_date:
+            status_key, status_label = 'scheduled', 'Scheduled'
+        else:
+            status_key, status_label = 'unscheduled', 'Unscheduled'
+        remedials_list.append({
+            'number':       rem.remedial_number,
+            'customer':     f'{rem.first_name} {rem.last_name}'.strip() or '-',
+            'reason':       (rem.reason or '').strip()[:80] or '-',
+            'scheduled':    rem.scheduled_date.strftime('%a %d %b') if rem.scheduled_date else 'Not scheduled',
+            'days_open':    rem.days_since_created,
+            'items_ordered': rem.all_items_ordered,
+            'status_key':   status_key,
+            'status_label': status_label,
+        })
+
+    # ── Payment status (jobs fitting last/this/next week) ─────────────────────
+    payment_status_rows = []
+    paid_in_full = 0
+    part_paid = 0
+    unpaid = 0
+    pay_window_qs = (AnthillSale.objects
+                     .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end, sale_value__gt=0)
+                     .exclude(status__in=['cancelled', 'dead'])
+                     .annotate(total_paid=Coalesce(
+                         payments_subquery, Value(Decimal('0')),
+                         output_field=DecimalField(max_digits=14, decimal_places=2)))
+                     .order_by('fit_date'))
+    if contract_prefix:
+        pay_window_qs = pay_window_qs.filter(contract_number__istartswith=contract_prefix)
+    for s in pay_window_qs.values('order_id', 'customer_name', 'contract_number', 'fit_date',
+                                  'sale_value', 'discount', 'total_paid'):
+        net = max((s['sale_value'] or Decimal('0')) - 2 * (s['discount'] or Decimal('0')), Decimal('0'))
+        paid = s['total_paid'] or Decimal('0')
+        owed = max(net - paid, Decimal('0'))
+        if owed < Decimal('10'):
+            pkey, plabel = 'paid', 'Paid in Full'
+            paid_in_full += 1
+        elif paid >= Decimal('10'):
+            pkey, plabel = 'part', 'Part Paid'
+            part_paid += 1
+        else:
+            pkey, plabel = 'unpaid', 'Unpaid'
+            unpaid += 1
+        if s['fit_date'] and s['fit_date'] < this_week_start:
+            pweek = 'last'
+        elif s['fit_date'] and s['fit_date'] <= this_week_end:
+            pweek = 'this'
+        else:
+            pweek = 'next'
+        payment_status_rows.append({
+            'customer':    s['customer_name'] or '-',
+            'contract':    s['contract_number'] or '-',
+            'fit_date':    s['fit_date'].strftime('%a %d %b') if s['fit_date'] else '',
+            'week':        pweek,
+            'sale_value':  float(net),
+            'paid':        float(paid),
+            'outstanding': float(owed),
+            'pay_key':     pkey,
+            'pay_label':   plabel,
+            'fitter':      fitter_by_order.get(s['order_id'], '-') or '-',
+            'remedial':    s['order_id'] in remedial_order_ids,
+        })
+
+    # ── Auto-generated insights ────────────────────────────────────────────────
+    insights = []
+    lw = last_week_sales['total']
+    tw = this_week_sales['total']
+    delta_pct = ((tw - lw) / lw * 100) if lw else 0
+    if delta_pct >= 15:
+        insights.append({'type': 'positive', 'icon': 'bi-graph-up-arrow',
+                         'text': f'Revenue up {delta_pct:.0f}% vs last week — strong performance.'})
+    elif delta_pct <= -15:
+        insights.append({'type': 'danger', 'icon': 'bi-graph-down-arrow',
+                         'text': f'Revenue down {abs(delta_pct):.0f}% vs last week. Review fitting schedule.'})
+    if materials_not_ready > 0:
+        insights.append({'type': 'danger', 'icon': 'bi-exclamation-triangle',
+                         'text': f'{materials_not_ready} job(s) fitting this/next week have materials not confirmed — chase suppliers immediately.'})
+    if shortage_count > 0:
+        insights.append({'type': 'warning', 'icon': 'bi-box-seam',
+                         'text': f'{shortage_count} stock item(s) below par level. Raise purchase orders to replenish.'})
+    if len(this_week_collections) > 0:
+        insights.append({'type': 'info', 'icon': 'bi-cash-coin',
+                         'text': f'£{float(this_week_outstanding):,.0f} balance outstanding across {len(this_week_collections)} job(s) fitting this week — ensure collection on installation day.'})
+    if next_week_sales['count'] == 0:
+        insights.append({'type': 'warning', 'icon': 'bi-calendar-x',
+                         'text': 'No fits currently scheduled for next week. Pipeline may need attention.'})
+    elif next_week_sales['count'] <= 2:
+        insights.append({'type': 'info', 'icon': 'bi-calendar-week',
+                         'text': f'Only {next_week_sales["count"]} fit(s) scheduled next week — capacity available for new bookings.'})
+    if float(total_outstanding) > 50000:
+        insights.append({'type': 'danger', 'icon': 'bi-wallet2',
+                         'text': f'Total outstanding balance is £{float(total_outstanding):,.0f}. Consider a proactive collections review.'})
+    if pending_po_count > 20:
+        insights.append({'type': 'warning', 'icon': 'bi-receipt',
+                         'text': f'{pending_po_count} purchase orders currently open/pending. Review for any overdue deliveries.'})
+    if open_remedials > 5:
+        insights.append({'type': 'warning', 'icon': 'bi-tools',
+                         'text': f'{open_remedials} open remedials outstanding. Schedule outstanding work to protect customer satisfaction.'})
+    if not insights:
+        insights.append({'type': 'positive', 'icon': 'bi-check-circle',
+                         'text': 'All systems healthy — no urgent actions required.'})
+
+    return JsonResponse({
+        'success': True,
+        'generated_at': today.strftime('%A %d %B %Y'),
+        'payments_linked': payments_linked,
+        'last_week':    {'start': last_week_start.strftime('%d %b'), 'end': last_week_end.strftime('%d %b %Y')},
+        'this_week':    {'start': this_week_start.strftime('%d %b'), 'end': this_week_end.strftime('%d %b %Y')},
+        'next_week':    {'start': next_week_start.strftime('%d %b'), 'end': next_week_end.strftime('%d %b %Y')},
+        'last_week_sales':  last_week_sales,
+        'this_week_sales':  this_week_sales,
+        'next_week_sales':  next_week_sales,
+        'day_sales':        [day_sales[i] for i in range(7)],
+        'last_day_sales':   [last_day_sales[i] for i in range(7)],
+        'stock_value':      float(total_stock_value),
+        'stock_delta':      float(stock_7d_delta),
+        'shortage_count':   shortage_count,
+        'total_outstanding':       float(total_outstanding),
+        'outstanding_count':       outstanding_count,
+        'this_week_outstanding':   float(this_week_outstanding),
+        'this_week_collections':   this_week_collections,
+        'pending_po_total':     float(pending_po_total),
+        'pending_po_count':     pending_po_count,
+        'recent_po_spend':      float(recent_po_spend),
+        'po_status_breakdown':  po_status_breakdown,
+        'materials_rows':       materials_rows,
+        'materials_not_ready':  materials_not_ready,
+        'open_remedials':       open_remedials,
+        'scheduled_remedials':  scheduled_remedials,
+        'remedials_list':       remedials_list,
+        'payment_status_rows':  payment_status_rows,
+        'payment_summary':      {'paid': paid_in_full, 'part': part_paid, 'unpaid': unpaid},
+        'top_debtors':          top_debtors,
+        'insights':             insights,
+    })
+
+
 @login_required
 def dashboard_save_layout(request):
     """Save the user's dashboard widget layout."""

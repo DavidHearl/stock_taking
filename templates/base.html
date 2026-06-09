@@ -70,9 +70,6 @@
                     {% if role_perms.orders.can_view or is_role_admin %}
                     <a href="{% url 'active_projects' %}" class="nav-link {% block nav_active_projects_active %}{% endblock %}" title="Active"><span class="nav-text">Active</span></a>
                     {% endif %}
-                    {% if role_perms.orders.can_view or is_role_admin %}
-                    <a href="{% url 'ordering' %}" class="nav-link" title="Orders"><span class="nav-text">Orders</span></a>
-                    {% endif %}
                     {% if role_perms.customers.can_view or is_role_admin %}
                     <a href="{% url 'sales_list' %}" class="nav-link {% block nav_sales_active %}{% endblock %}" title="Sales"><span class="nav-text">Sales</span></a>
                     {% endif %}
@@ -800,6 +797,57 @@
             // Auto-dismiss after 4 seconds
             setTimeout(() => dismissToast(toast), 4000 + i * 500);
         });
+    });
+    </script>
+
+    <script>
+    // ── Global kebab (3-dot) menu controller ────────────────
+    // Single site-wide controller for every .kebab-menu. The dropdown is
+    // position:fixed so it escapes any clipping/scrolling container; it is
+    // positioned against its trigger each time it opens.
+    function closeAllKebabs() {
+        document.querySelectorAll('.kebab-menu.open, .kebab-dropdown.open').forEach(function(el) {
+            el.classList.remove('open');
+        });
+    }
+    function positionKebabDropdown(trigger, dropdown) {
+        const rect = trigger.getBoundingClientRect();
+        const w = dropdown.offsetWidth;
+        const h = dropdown.offsetHeight;
+        let left = rect.right - w;
+        if (left + w > window.innerWidth - 8) left = window.innerWidth - 8 - w;
+        if (left < 8) left = 8;
+        let top = rect.bottom + 4;
+        if (top + h > window.innerHeight - 8) top = rect.top - h - 4;
+        if (top < 8) top = 8;
+        dropdown.style.top = top + 'px';
+        dropdown.style.left = left + 'px';
+    }
+    function toggleKebab(trigger, e) {
+        if (e) e.stopPropagation();
+        const menu = trigger.closest('.kebab-menu');
+        const dropdown = menu ? menu.querySelector('.kebab-dropdown') : trigger.nextElementSibling;
+        if (!dropdown) return;
+        const wasOpen = dropdown.classList.contains('open');
+        closeAllKebabs();
+        if (wasOpen) return;
+        if (menu) menu.classList.add('open');
+        dropdown.classList.add('open');
+        positionKebabDropdown(trigger, dropdown);
+    }
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.kebab-trigger')) return; // toggleKebab handles it
+        const item = e.target.closest('.kebab-item');
+        if (item && !item.closest('[data-keep-open]')) {
+            closeAllKebabs(); // action item clicked — close after its handler runs
+            return;
+        }
+        if (!e.target.closest('.kebab-dropdown')) closeAllKebabs();
+    });
+    window.addEventListener('scroll', closeAllKebabs, true);
+    window.addEventListener('resize', closeAllKebabs);
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeAllKebabs();
     });
     </script>
 </body>

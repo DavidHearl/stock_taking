@@ -32,101 +32,6 @@
     <div class="sale-page-layout">
     <div class="sale-page-main">
 
-    <!-- ===== WORKFLOW STAGE (persistent, shown when order exists) ===== -->
-    {% if order %}
-    <div class="card workflow-compact">
-        <div class="workflow-compact-row">
-            <div class="workflow-compact-info">
-                {% if workflow_progress.current_stage %}
-                <span class="wf-badge wf-phase">{{ workflow_progress.current_stage.get_phase_display }}</span>
-                <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
-                {% if workflow_progress.current_stage.expected_days %}
-                <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
-                {% endif %}
-                {% else %}
-                <span class="wf-badge wf-none">No stage set</span>
-                {% endif %}
-            </div>
-            <div class="workflow-compact-nav">
-                <button class="wf-nav-btn wf-workflow" onclick="openWorkflowModal()" title="Full Workflow">
-                    <i class="bi bi-diagram-3"></i> Workflow
-                </button>
-                <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
-                    <i class="bi bi-chevron-left"></i> Previous
-                </button>
-                <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
-                    Next <i class="bi bi-chevron-right"></i>
-                </button>
-                <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
-                    <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
-                </button>
-            </div>
-        </div>
-        <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
-            {% if workflow_progress.current_stage %}
-            {% if workflow_progress.current_stage.description %}
-            <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
-            {% endif %}
-            {% if workflow_progress.current_stage.tasks.all %}
-            <div class="wf-tasks">
-                {% for task in workflow_progress.current_stage.tasks.all %}
-                {% with completion=task_completions|get_item:task.id %}
-                <div class="wf-task-item">
-                    {% if task.task_type == 'decision_matrix' %}
-                        <span class="wf-task-label">{{ task.description }}</span>
-                        <div class="wf-decision-btns">
-                            <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}"
-                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
-                            <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
-                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
-                            <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
-                                    onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
-                        </div>
-                    {% elif task.task_type == 'radio' %}
-                        <span class="wf-task-label">{{ task.description }}</span>
-                        <div class="wf-radio-group">
-                            {% if task.options %}{% for option in task.options|split_options %}
-                            <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
-                                   {% if completion.selected_option == option %}checked{% endif %}
-                                   onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/> {{ option }}</label>
-                            {% endfor %}{% endif %}
-                        </div>
-                    {% elif task.task_type == 'dropdown' %}
-                        <label class="wf-task-label">{{ task.description }}
-                            <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
-                                <option value="">Select...</option>
-                                {% if task.options %}{% for option in task.options|split_options %}
-                                <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
-                                {% endfor %}{% endif %}
-                            </select>
-                        </label>
-                    {% elif task.task_type == 'attachment' %}
-                        <label class="wf-check">
-                            <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                   onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                            {{ task.description }} <i class="bi bi-paperclip" style="opacity:0.5;"></i>
-                            {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
-                        </label>
-                        <input type="file" id="attachment_{{ task.id }}" class="attachment-input"
-                               onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
-                    {% else %}
-                        <label class="wf-check">
-                            <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                   onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                            {{ task.description }}
-                            {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
-                        </label>
-                    {% endif %}
-                </div>
-                {% endwith %}
-                {% endfor %}
-            </div>
-            {% endif %}
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
     <!-- ===== TAB BAR ===== -->
     <div class="detail-tab-bar">
         <button class="detail-tab {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' and active_tab != 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
@@ -167,37 +72,130 @@
                     </div>
                 </div>
 
-                <!-- Card 3: Product Info -->
+                <!-- Card 2: Job Info -->
                 <div class="card order-info-card">
                     <div class="card-header card-header-job">
-                        <h3>Product Info</h3>
+                        <h3>Job Info</h3>
+                        {% if order %}
+                        <div class="kebab-menu" id="job-info-menu-wrapper-sale">
+                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Job status options">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown" id="job-info-dropdown-sale" data-keep-open>
+                                <div class="kebab-label">Job Status</div>
+                                <label class="kebab-item kebab-item-toggle" for="boardsNotRequired-sale">
+                                    <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
+                                    <input class="job-checkbox" type="checkbox" id="boardsNotRequired-sale"
+                                           {% if order.boards_not_required %}checked{% endif %}
+                                           onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
+                                </label>
+                                <label class="kebab-item kebab-item-toggle" for="accessoriesNotRequired-sale">
+                                    <span><i class="bi bi-slash-circle icon-warning"></i> Accessories Not Required</span>
+                                    <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired-sale"
+                                           {% if order.accessories_not_required %}checked{% endif %}
+                                           onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
+                                </label>
+                                <label class="kebab-item kebab-item-toggle" for="allItemsOrdered-sale">
+                                    <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
+                                    <input class="job-checkbox" type="checkbox" id="allItemsOrdered-sale"
+                                           {% if order.all_items_ordered %}checked{% endif %}
+                                           onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
+                                </label>
+                                <label class="kebab-item kebab-item-toggle" for="jobFinished-sale">
+                                    <span><i class="bi bi-check2-circle"></i> Job Finished</span>
+                                    <input class="job-checkbox" type="checkbox" id="jobFinished-sale"
+                                           {% if order.job_finished %}checked{% endif %}
+                                           onchange="onJobFinishedChange(this, {{ order.id }})">
+                                </label>
+                                {% if order.accessories.exists %}
+                                <label class="kebab-item kebab-item-toggle" for="materialsAllocated-sale">
+                                    <span><i class="bi bi-box-arrow-in-down"></i> Materials Allocated</span>
+                                    <input class="job-checkbox" type="checkbox" id="materialsAllocated-sale"
+                                           {% if all_allocated %}checked{% endif %}
+                                           onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
+                                </label>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                     <div class="card-body padded">
-                        <div class="info-display">
-                            <div class="field-row-sb">
-                                <div class="field-label">Range</div>
-                                <div class="field-value view-val">{{ sale.range_name|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="range_name" value="{{ sale.range_name|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Door Type</div>
-                                <div class="field-value view-val">{{ sale.door_type|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="door_type" value="{{ sale.door_type|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Products Included</div>
-                                <div class="field-value view-val">{{ sale.products_included|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="products_included" value="{{ sale.products_included|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Fit From Date</div>
-                                <div class="field-value view-val">{{ sale.fit_from_date|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="fit_from_date" value="{{ sale.fit_from_date|default:'' }}" style="display:none;">
-                            </div>
-                            <div class="field-row-sb">
-                                <div class="field-label">Goods Due In</div>
-                                <div class="field-value view-val">{{ sale.goods_due_in|default:"-" }}</div>
-                                <input class="customer-edit-input edit-val" data-field="goods_due_in" value="{{ sale.goods_due_in|default:'' }}" style="display:none;">
+                        <div class="job-info-column">
+                            <div class="job-info-docs">
+
+                                <!-- Coversheet -->
+                                <div class="job-doc-coversheet">
+                                    <div class="job-doc-coversheet-left">
+                                        <div class="job-doc-coversheet-header">
+                                            <div class="job-doc-coversheet-icon">
+                                                <i class="bi bi-file-earmark-text"></i>
+                                            </div>
+                                            <div class="job-doc-coversheet-title">
+                                                <span>Coversheet</span>
+                                                {% if coversheet.is_final %}
+                                                <span class="job-doc-badge job-doc-badge-final">Final</span>
+                                                {% else %}
+                                                <span class="job-doc-badge job-doc-badge-draft">Draft</span>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <div class="job-doc-coversheet-meta">
+                                            {% if coversheet.prepared_by %}<span><i class="bi bi-person"></i> {{ coversheet.prepared_by }}</span>{% endif %}
+                                            <span><i class="bi bi-clock"></i> {{ coversheet.updated_at|date:'d M Y' }}</span>
+                                        </div>
+                                    </div>
+                                    <div class="job-doc-coversheet-actions">
+                                        <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-file-earmark-pdf"></i> PDF
+                                        </a>
+                                        <button type="button" class="btn btn-sm btn-outline-success" onclick="openCoversheetModal()">
+                                            <i class="bi bi-pencil-square"></i> Edit
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Claim Service Docs -->
+                                <div class="job-doc-list-header">
+                                    <span class="job-doc-list-title">Claim Service Documents</span>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchAndAttachAll(this)" title="Search the Claim Service and choose which documents to attach to this job">
+                                        <i class="bi bi-search"></i> Find &amp; review
+                                    </button>
+                                </div>
+                                <div class="job-doc-list">
+                                    {% for item in important_documents %}
+                                    <div class="job-doc-item">
+                                        <div class="job-doc-item-left">
+                                            {% if item.doc %}
+                                            <i class="bi bi-file-earmark-check job-doc-item-icon job-doc-item-icon-ok"></i>
+                                            {% else %}
+                                            <i class="bi bi-file-earmark job-doc-item-icon job-doc-item-icon-empty"></i>
+                                            {% endif %}
+                                            <div>
+                                                <div class="job-doc-item-name">{{ item.doc_type }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="job-doc-item-right">
+                                            <button type="button" class="claim-icon-btn" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.doc_type }}">
+                                                <i class="bi bi-search"></i>
+                                            </button>
+                                            {% if item.doc %}
+                                            <a href="{{ item.doc.file.url }}" target="_blank" class="claim-icon-btn" title="View {{ item.doc_type }}">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                            {% endif %}
+                                            <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="job-doc-upload-form">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
+                                                <label class="claim-icon-btn{% if not item.doc %} claim-icon-btn-primary{% endif %}" title="Upload {{ item.doc_type }}">
+                                                    <i class="bi bi-upload"></i>
+                                                    <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" class="job-doc-file-hidden" onchange="this.closest('form').submit()">
+                                                </label>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+
                             </div>
                         </div>
                     </div>
@@ -538,13 +536,13 @@
                         <table class="manual-entry-table">
                             <thead>
                                 <tr>
-                                    <th style="width:18%;">Type</th>
-                                    <th style="width:20%;">Date</th>
-                                    <th style="width:14%;">Location</th>
-                                    <th style="width:16%;">User</th>
-                                    <th style="width:13%;">Amount (£)</th>
-                                    <th style="width:14%;">Status</th>
-                                    <th style="width:5%;"></th>
+                                    <th>Type</th>
+                                    <th>Date</th>
+                                    <th>Location</th>
+                                    <th>User</th>
+                                    <th>Amount (£)</th>
+                                    <th>Status</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody id="manualEntryBody"></tbody>
@@ -1515,9 +1513,9 @@
                                 <tr>
                                     <th>Item</th>
                                     <th>Description</th>
-                                    <th style="text-align:right;">Rate</th>
-                                    <th style="text-align:right;">Qty</th>
-                                    <th style="text-align:right;">Total</th>
+                                    <th>Rate</th>
+                                    <th>Qty</th>
+                                    <th>Total</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1644,7 +1642,7 @@
         {% include 'stock_take/partials/order_tab_content.html' %}
         {% else %}
         <!-- Create order form -->
-        <div class="card" style="max-width:480px;margin:24px auto;">
+        <div class="card sd-create-order-card">
             <div class="card-header card-header-sale">
                 <h3>Create Order for this Sale</h3>
             </div>
@@ -1675,7 +1673,7 @@
                         {% endif %}
                     {% endfor %}
                     </div>
-                    <div style="text-align:right;margin-top:12px;">
+                    <div class="sd-create-order-actions">
                         <button type="submit" class="btn btn-success">
                             <i class="bi bi-plus-circle"></i> Create Order
                         </button>
@@ -1688,7 +1686,7 @@
 
     <!-- ===== ENQUIRY TAB PANEL ===== -->
     <div id="tab-panel-enquiry" class="detail-tab-panel {% if active_tab == 'enquiry' %}active{% endif %}">
-        <div class="card order-info-card" style="margin-top:16px;">
+        <div class="card order-info-card">
             <div class="card-header card-header-sale"><h3>Enquiry Details</h3></div>
             <div class="card-body padded">
                 <div class="info-display">
@@ -1735,15 +1733,15 @@
 
     <!-- ===== REMEDIALS TAB PANEL ===== -->
     <div id="tab-panel-remedials" class="detail-tab-panel {% if active_tab == 'remedials' %}active{% endif %}">
-        <div style="margin-top:16px;">
+        <div class="sd-tab-content-wrap">
         {% if remedials %}
-            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+            <div class="sd-tab-header-actions">
                 <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createRemedialModal')">
                     <i class="bi bi-plus-circle"></i> Open Remedial
                 </button>
             </div>
             {% for rem in remedials %}
-            <div class="card order-info-card" style="margin-bottom:12px;">
+            <div class="card order-info-card">
                 <div class="card-header card-header-sale">
                     <h3>{{ rem.remedial_number }}</h3>
                     <div class="header-actions">
@@ -1813,7 +1811,7 @@
                             <span class="field-value">{{ rem.os_doors_required|yesno:"Yes,No" }}</span>
                         </div>
                         {% if rem.accessories.all %}
-                        <div class="field-row-sb" style="align-items:flex-start;">
+                        <div class="field-row-sb field-row-top">
                             <span class="field-label">Accessories</span>
                             <span class="field-value">{{ rem.accessories.count }} item{{ rem.accessories.count|pluralize }}</span>
                         </div>
@@ -1824,9 +1822,9 @@
             {% endfor %}
         {% else %}
             <div class="card order-info-card">
-                <div class="card-body padded" style="color:var(--text-secondary);font-size:0.875rem;padding:24px;text-align:center;">
+                <div class="card-body sd-empty-card-body">
                     {% if order %}
-                        <p style="margin-bottom:16px;">No remedials on record for this job.</p>
+                        <p>No remedials on record for this job.</p>
                         <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createRemedialModal')">
                             <i class="bi bi-plus-circle"></i> Open Remedial
                         </button>
@@ -1839,18 +1837,18 @@
 
     <!-- ===== PURCHASE ORDERS TAB PANEL ===== -->
     <div id="tab-panel-purchase_orders" class="detail-tab-panel {% if active_tab == 'purchase_orders' %}active{% endif %}">
-        <div style="margin-top:16px;">
+        <div class="sd-tab-content-wrap">
 
         {% if order %}
         <div class="card order-info-card">
             <div class="card-header card-header-sale"><h3>Linked Purchase Orders</h3></div>
-            <div class="card-body" style="padding:0;">
+            <div class="card-body card-body-flush">
 
                 <!-- BOARDS section -->
                 <div class="po-type-section">
                     <div class="po-type-section-header">
                         <span class="po-type-section-title">Boards</span>
-                        <div style="display:flex;gap:6px;">
+                        <div class="sd-po-header-actions">
                             {% if order.boards_po %}
                             <button class="btn btn-sm btn-outline-secondary" onclick="togglePoLinkSearch('primary-po-search-row')"><i class="bi bi-link-45deg"></i> Change Primary</button>
                             {% else %}
@@ -1874,26 +1872,25 @@
                         <tbody>
                         {% for bpd in boards_po_list %}
                         <tr>
-                            <td style="width:28px;"><span class="po-role-badge {% if bpd.is_primary %}primary{% else %}additional{% endif %}">{% if bpd.is_primary %}P{% else %}A{% endif %}</span></td>
+                            <td class="po-col-badge"><span class="po-role-badge {% if bpd.is_primary %}primary{% else %}additional{% endif %}">{% if bpd.is_primary %}P{% else %}A{% endif %}</span></td>
                             <td>
                                 {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}">{{ bpd.po.po_number }}</a>{% else %}{{ bpd.po.po_number }}{% endif %}
                             </td>
-                            <td style="color:var(--text-secondary);">{{ bpd.purchase_order.supplier_name|default:"-" }}</td>
+                            <td class="po-col-supplier">{{ bpd.purchase_order.supplier_name|default:"-" }}</td>
                             <td>
                                 {% if bpd.purchase_order %}
                                 <span class="customer-active-badge {% if bpd.purchase_order.status == 'Approved' or bpd.purchase_order.status == 'Received' %}active{% elif bpd.purchase_order.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ bpd.purchase_order.status }}</span>
-                                {% else %}<span style="color:var(--text-muted);font-size:0.8rem;">—</span>{% endif %}
+                                {% else %}<span class="po-no-link-text">—</span>{% endif %}
                             </td>
-                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if bpd.purchase_order and bpd.purchase_order.total %}£{{ bpd.purchase_order.total|floatformat:2 }}{% else %}—{% endif %}</td>
-                            <td style="text-align:right;white-space:nowrap;">
-                                <button class="btn btn-sm {% if bpd.po.from_stock %}btn-success{% else %}btn-outline-secondary{% endif %}"
-                                        style="padding:2px 8px;font-size:0.72rem;"
+                            <td class="po-col-num">{% if bpd.purchase_order and bpd.purchase_order.total %}£{{ bpd.purchase_order.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td class="po-col-actions">
+                                <button class="btn btn-sm {% if bpd.po.from_stock %}btn-success{% else %}btn-outline-secondary{% endif %} po-stock-btn"
                                         title="{% if bpd.po.from_stock %}From stock — click to unmark{% else %}Mark as used from stock{% endif %}"
                                         onclick="toggleBoardsPoFromStock({{ bpd.po.id }}, this)">
                                     <i class="bi bi-{% if bpd.po.from_stock %}box-fill{% else %}box{% endif %}"></i>
                                     {% if bpd.po.from_stock %}Stock{% endif %}
                                 </button>
-                                {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a>{% endif %}
+                                {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}" class="btn btn-sm btn-view-po"><i class="bi bi-eye"></i></a>{% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -1903,11 +1900,11 @@
                     <div class="po-empty-section">No Boards POs linked</div>
                     {% endif %}
                     <div id="primary-po-search-row" class="po-search-panel" style="display:none;">
-                        <input type="text" class="form-input" id="primary-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('primary', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('primary', this.value)" style="width:100%;">
+                        <input type="text" class="form-input" id="primary-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('primary', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('primary', this.value)">
                         <div id="primary-po-inline-results" class="boards-po-results" style="display:none;"></div>
                     </div>
                     <div id="additional-po-search-row" class="po-search-panel" style="display:none;">
-                        <input type="text" class="form-input" id="additional-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('additional', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('additional', this.value)" style="width:100%;">
+                        <input type="text" class="form-input" id="additional-po-search-input" placeholder="Search by PO number or supplier…" autocomplete="off" oninput="searchPoLinkInline('additional', this.value)" onfocus="if(this.value.length>=2) searchPoLinkInline('additional', this.value)">
                         <div id="additional-po-inline-results" class="boards-po-results" style="display:none;"></div>
                     </div>
                 </div>
@@ -1935,12 +1932,12 @@
                         {% for item in sale_purchase_orders %}
                         {% if item.type == 'Project' %}
                         <tr>
-                            <td style="width:28px;"><span class="po-role-badge additional">P</span></td>
+                            <td class="po-col-badge"><span class="po-role-badge additional">P</span></td>
                             <td><a href="{% url 'purchase_order_detail' item.po.workguru_id %}">{{ item.po.display_number|default:item.po.number }}</a></td>
-                            <td style="color:var(--text-secondary);">{{ item.po.supplier_name|default:"-" }}</td>
+                            <td class="po-col-supplier">{{ item.po.supplier_name|default:"-" }}</td>
                             <td><span class="customer-active-badge {% if item.po.status == 'Approved' or item.po.status == 'Received' %}active{% elif item.po.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ item.po.status|default:"-" }}</span></td>
-                            <td style="text-align:right;font-variant-numeric:tabular-nums;">{% if item.po.total %}£{{ item.po.total|floatformat:2 }}{% else %}—{% endif %}</td>
-                            <td style="text-align:right;"><a href="{% url 'purchase_order_detail' item.po.workguru_id %}" class="btn btn-sm btn-view-po" style="padding:2px 8px;"><i class="bi bi-eye"></i></a></td>
+                            <td class="po-col-num">{% if item.po.total %}£{{ item.po.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td class="po-col-actions"><a href="{% url 'purchase_order_detail' item.po.workguru_id %}" class="btn btn-sm btn-view-po"><i class="bi bi-eye"></i></a></td>
                         </tr>
                         {% endif %}
                         {% endfor %}
@@ -1955,7 +1952,7 @@
         </div>
         {% else %}
         <div class="card order-info-card">
-            <div class="card-body padded" style="color:var(--text-secondary);font-size:0.875rem;padding:24px;text-align:center;">
+            <div class="card-body sd-empty-card-body">
                 No order linked &mdash; purchase orders are tracked against orders.
             </div>
         </div>
@@ -2128,9 +2125,9 @@
                 <div class="manual-modal-title"><span>Cost Breakdown</span></div>
                 <button class="manual-modal-close" onclick="document.getElementById('financialChartModal').close()"><i class="bi bi-x-lg"></i></button>
             </div>
-            <div class="manual-modal-body" style="padding:24px; width:380px; max-width:90vw;">
-                <canvas id="financialChartCanvas" style="max-width:100%;"></canvas>
-                <div id="financialChartLegend" style="margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:13px;"></div>
+            <div class="manual-modal-body">
+                <canvas id="financialChartCanvas"></canvas>
+                <div id="financialChartLegend"></div>
             </div>
         </dialog>
         {% else %}
@@ -2173,6 +2170,101 @@
                     <span class="fin-label">Manufacturing</span>
                     <span class="fin-value fin-muted">&mdash;</span>
                 </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ===== WORKFLOW STAGE ===== -->
+        {% if order %}
+        <div class="card workflow-compact">
+            <div class="workflow-compact-row">
+                <div class="workflow-compact-info">
+                    {% if workflow_progress.current_stage %}
+                    <span class="wf-badge wf-phase">{{ workflow_progress.current_stage.get_phase_display }}</span>
+                    <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
+                    {% if workflow_progress.current_stage.expected_days %}
+                    <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="wf-badge wf-none">No stage set</span>
+                    {% endif %}
+                </div>
+                <div class="workflow-compact-nav">
+                    <button class="wf-nav-btn wf-workflow" onclick="openWorkflowModal()" title="Full Workflow">
+                        <i class="bi bi-diagram-3"></i> Workflow
+                    </button>
+                    <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
+                        <i class="bi bi-chevron-left"></i> Previous
+                    </button>
+                    <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
+                        Next <i class="bi bi-chevron-right"></i>
+                    </button>
+                    <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
+                        <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
+                {% if workflow_progress.current_stage %}
+                {% if workflow_progress.current_stage.description %}
+                <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
+                {% endif %}
+                {% if workflow_progress.current_stage.tasks.all %}
+                <div class="wf-tasks">
+                    {% for task in workflow_progress.current_stage.tasks.all %}
+                    {% with completion=task_completions|get_item:task.id %}
+                    <div class="wf-task-item">
+                        {% if task.task_type == 'decision_matrix' %}
+                            <span class="wf-task-label">{{ task.description }}</span>
+                            <div class="wf-decision-btns">
+                                <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}"
+                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
+                                <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
+                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
+                                <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
+                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
+                            </div>
+                        {% elif task.task_type == 'radio' %}
+                            <span class="wf-task-label">{{ task.description }}</span>
+                            <div class="wf-radio-group">
+                                {% if task.options %}{% for option in task.options|split_options %}
+                                <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
+                                       {% if completion.selected_option == option %}checked{% endif %}
+                                       onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/> {{ option }}</label>
+                                {% endfor %}{% endif %}
+                            </div>
+                        {% elif task.task_type == 'dropdown' %}
+                            <label class="wf-task-label">{{ task.description }}
+                                <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
+                                    <option value="">Select...</option>
+                                    {% if task.options %}{% for option in task.options|split_options %}
+                                    <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
+                                    {% endfor %}{% endif %}
+                                </select>
+                            </label>
+                        {% elif task.task_type == 'attachment' %}
+                            <label class="wf-check">
+                                <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                       onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
+                                {{ task.description }} <i class="bi bi-paperclip wf-attach-icon"></i>
+                                {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
+                            </label>
+                            <input type="file" id="attachment_{{ task.id }}" class="attachment-input"
+                                   onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
+                        {% else %}
+                            <label class="wf-check">
+                                <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                       onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
+                                {{ task.description }}
+                                {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
+                            </label>
+                        {% endif %}
+                    </div>
+                    {% endwith %}
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% endif %}
             </div>
         </div>
         {% endif %}
@@ -2236,9 +2328,9 @@
                     </button>
                     {% endif %}
                     {% else %}
-                    <form method="POST" action="{% url 'sale_create_order' sale.pk %}" style="width:100%;">
+                    <form method="POST" action="{% url 'sale_create_order' sale.pk %}" class="sd-create-order-form">
                         {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-success sale-sidebar-btn" style="width:100%;">
+                        <button type="submit" class="btn btn-sm btn-outline-success sale-sidebar-btn sd-create-order-btn">
                             <i class="bi bi-plus-circle"></i> Create Order
                         </button>
                     </form>
@@ -2740,7 +2832,7 @@ function toggleInvoiceDetail(invoiceId) {
             <div class="modal-body">
                 <div class="form-group">
                     <label for="link-boards-po-search">Search Purchase Orders</label>
-                    <div style="position:relative;">
+                    <div class="sd-po-search-wrap">
                         <input type="text" id="link-boards-po-search" class="form-input"
                                placeholder="Type a PO number or supplier name..."
                                autocomplete="off"
@@ -2775,19 +2867,19 @@ function toggleInvoiceDetail(invoiceId) {
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
                 <div class="modal-body">
-                    <div class="form-group" style="margin-bottom:16px;">
-                        <label class="form-label" for="rem-reason">Reason <span style="color:var(--danger-color)">*</span></label>
+                    <div class="form-group">
+                        <label class="form-label" for="rem-reason">Reason <span class="required-star">*</span></label>
                         <textarea id="rem-reason" name="reason" class="form-control" rows="4"
                                   placeholder="Describe the issue requiring remedial work" required></textarea>
                     </div>
-                    <div class="form-group" style="margin-bottom:16px;">
+                    <div class="form-group">
                         <label class="form-label" for="rem-notes">Notes</label>
                         <textarea id="rem-notes" name="notes" class="form-control" rows="3"
                                   placeholder="Any additional notes (optional)"></textarea>
                     </div>
-                    <div class="form-group" style="margin-bottom:16px;">
+                    <div class="form-group">
                         <label class="form-label" for="rem-scheduled">Scheduled Date</label>
-                        <input type="date" id="rem-scheduled" name="scheduled_date" class="form-control" style="max-width:200px;">
+                        <input type="date" id="rem-scheduled" name="scheduled_date" class="form-control sd-date-input">
                     </div>
                     {% include 'stock_take/partials/remedial_actions_section.html' with prefix='rem' %}
                 </div>
@@ -2806,26 +2898,26 @@ function toggleInvoiceDetail(invoiceId) {
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Edit Remedial <span id="edit-rem-number" style="color:var(--text-secondary);font-weight:500;"></span></h3>
+                <h3>Edit Remedial <span id="edit-rem-number"></span></h3>
                 <button type="button" class="modal-close" onclick="closeModal('editRemedialModal')">&#x2715;</button>
             </div>
             <form method="post" id="editRemedialForm">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
                 <div class="modal-body">
-                    <div class="form-group" style="margin-bottom:16px;">
-                        <label class="form-label" for="edit-rem-reason">Reason <span style="color:var(--danger-color)">*</span></label>
+                    <div class="form-group">
+                        <label class="form-label" for="edit-rem-reason">Reason <span class="required-star">*</span></label>
                         <textarea id="edit-rem-reason" name="reason" class="form-control" rows="4" required></textarea>
                     </div>
-                    <div class="form-group" style="margin-bottom:16px;">
+                    <div class="form-group">
                         <label class="form-label" for="edit-rem-notes">Notes</label>
                         <textarea id="edit-rem-notes" name="notes" class="form-control" rows="3"></textarea>
                     </div>
-                    <div class="form-group" style="margin-bottom:16px;">
+                    <div class="form-group">
                         <label class="form-label" for="edit-rem-scheduled">Scheduled Date</label>
-                        <input type="date" id="edit-rem-scheduled" name="scheduled_date" class="form-control" style="max-width:200px;">
+                        <input type="date" id="edit-rem-scheduled" name="scheduled_date" class="form-control sd-date-input">
                     </div>
-                    <div class="form-check" style="margin-bottom:8px;">
+                    <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="edit-rem-completed" name="is_completed">
                         <label class="form-check-label" for="edit-rem-completed">Mark as completed</label>
                     </div>
@@ -2843,7 +2935,7 @@ function toggleInvoiceDetail(invoiceId) {
 <!-- Modal: Delete Remedial -->
 <div class="modal" id="deleteRemedialModal">
     <div class="modal-overlay" onclick="closeModal('deleteRemedialModal')"></div>
-    <div class="modal-dialog" style="max-width:440px;">
+    <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Delete Remedial</h3>
@@ -2853,7 +2945,7 @@ function toggleInvoiceDetail(invoiceId) {
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
                 <div class="modal-body">
-                    <p style="margin:0;">Are you sure you want to delete remedial <strong id="delete-rem-number"></strong>? This cannot be undone.</p>
+                    <p class="mb-0">Are you sure you want to delete remedial <strong id="delete-rem-number"></strong>? This cannot be undone.</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('deleteRemedialModal')">Cancel</button>

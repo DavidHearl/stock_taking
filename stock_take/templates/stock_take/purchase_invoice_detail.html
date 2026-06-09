@@ -51,39 +51,39 @@
                 <i class="bi bi-trash"></i> Delete
             </button>
             <!-- 3-dots menu -->
-            <div class="pinv-kebab-wrapper" id="kebab-wrapper">
-                <button class="pinv-btn-sm pinv-kebab-btn" id="kebab-btn" onclick="toggleKebab(event)" title="More options">
+            <div class="kebab-menu" id="kebab-wrapper">
+                <button class="kebab-trigger" id="kebab-btn" onclick="toggleKebab(this, event)" title="More options">
                     <i class="bi bi-three-dots-vertical"></i>
                 </button>
-                <div class="pinv-kebab-menu" id="kebab-menu" style="display:none;">
+                <div class="kebab-dropdown" id="kebab-menu">
                     {% if invoice.xero_id %}
-                    <button class="pinv-kebab-item" onclick="confirmRemoveXeroLink()">
+                    <button class="kebab-item" onclick="confirmRemoveXeroLink()">
                         <i class="bi bi-cloud-slash"></i> Remove Xero link
                     </button>
                     {% else %}
-                    <span class="pinv-kebab-item disabled"><i class="bi bi-cloud-slash"></i> Remove Xero link</span>
+                    <span class="kebab-item disabled"><i class="bi bi-cloud-slash"></i> Remove Xero link</span>
                     {% endif %}
-                    <button class="pinv-kebab-item" onclick="openManualLinkModal()">
+                    <button class="kebab-item" onclick="openManualLinkModal()">
                         <i class="bi bi-link-45deg"></i> Manually link Xero ID
                     </button>
-                    <div class="pinv-kebab-divider"></div>
-                    <button class="pinv-kebab-item" onclick="generateTimesheets()" title="Create/update timesheet entries for each allocated line">
+                    <div class="kebab-divider"></div>
+                    <button class="kebab-item" onclick="generateTimesheets()" title="Create/update timesheet entries for each allocated line">
                         <i class="bi bi-clock-history"></i> Generate Timesheets
                     </button>
-                    <div class="pinv-kebab-divider"></div>
-                    <span class="pinv-kebab-label">Overhead PO</span>
-                    <button class="pinv-kebab-item" onclick="openCreateOpoModal()">
+                    <div class="kebab-divider"></div>
+                    <span class="kebab-label">Overhead PO</span>
+                    <button class="kebab-item" onclick="openCreateOpoModal()">
                         <i class="bi bi-plus-circle"></i> Create OPO from invoice
                     </button>
-                    <button class="pinv-kebab-item" onclick="openLinkOpoModal()">
+                    <button class="kebab-item" onclick="openLinkOpoModal()">
                         <i class="bi bi-link-45deg"></i> Link existing OPO
                     </button>
-                    <div class="pinv-kebab-divider"></div>
-                    <span class="pinv-kebab-label">Purchase Order</span>
-                    <button class="pinv-kebab-item" onclick="openCreatePoModal()">
+                    <div class="kebab-divider"></div>
+                    <span class="kebab-label">Purchase Order</span>
+                    <button class="kebab-item" onclick="openCreatePoModal()">
                         <i class="bi bi-plus-circle"></i> Create PO from invoice
                     </button>
-                    <button class="pinv-kebab-item" onclick="closeKebabScrollTo('linked-pos-section')">
+                    <button class="kebab-item" onclick="closeKebabScrollTo('linked-pos-section')">
                         <i class="bi bi-link-45deg"></i> Link existing PO
                     </button>
                 </div>
@@ -1694,26 +1694,17 @@ document.addEventListener('click', function(e) {
 });
 
 // ── Push to Xero ──────────────────────────────────────────────
-// ── 3-dots kebab menu ──────────────────────────────────────────
-function toggleKebab(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('kebab-menu');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-}
-document.addEventListener('click', () => {
-    const m = document.getElementById('kebab-menu');
-    if (m) m.style.display = 'none';
-});
+// ── 3-dots kebab menu (toggle/close handled globally in base.html) ──
 
 function openManualLinkModal() {
-    document.getElementById('kebab-menu').style.display = 'none';
+    closeAllKebabs();
     document.getElementById('manual-xero-input').value = '';
     document.getElementById('manual-link-error').style.display = 'none';
     document.getElementById('manual-link-modal').style.display = 'flex';
 }
 
 function generateTimesheets() {
-    document.getElementById('kebab-menu').style.display = 'none';
+    closeAllKebabs();
     document.getElementById('gen-ts-modal').style.display = 'flex';
 }
 
@@ -1762,9 +1753,9 @@ function doManualLink() {
                 pushBtn.outerHTML = `<a class="pinv-btn-sm" id="xero-link-btn" href="${data.xero_url}" target="_blank" title="View in Xero (ID: ${escHtml(data.xero_id)})"><i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> In Xero <i class="bi bi-box-arrow-up-right" style="font-size:0.75rem;"></i></a>`;
             }
             // Enable the Remove link kebab item
-            const disabledItem = document.querySelector('#kebab-menu .pinv-kebab-item.disabled');
+            const disabledItem = document.querySelector('#kebab-menu .kebab-item.disabled');
             if (disabledItem) {
-                disabledItem.outerHTML = `<button class="pinv-kebab-item" onclick="confirmRemoveXeroLink()"><i class="bi bi-cloud-slash"></i> Remove Xero link</button>`;
+                disabledItem.outerHTML = `<button class="kebab-item" onclick="confirmRemoveXeroLink()"><i class="bi bi-cloud-slash"></i> Remove Xero link</button>`;
             }
         } else {
             errEl.textContent = data.error || 'Failed to save link.';
@@ -1775,7 +1766,7 @@ function doManualLink() {
 }
 
 function confirmRemoveXeroLink() {
-    document.getElementById('kebab-menu').style.display = 'none';
+    closeAllKebabs();
     document.getElementById('remove-xero-modal').style.display = 'flex';
 }
 
@@ -1794,8 +1785,8 @@ function doRemoveXeroLink() {
                 link.outerHTML = `<button class="pinv-btn-sm" id="xero-push-btn" onclick="pushToXero()" title="Push to Xero as draft bill"><i class="bi bi-cloud-upload"></i> Push to Xero</button>`;
             }
             // Hide the kebab item since there's no link to remove now
-            const item = document.querySelector('#kebab-menu .pinv-kebab-item');
-            if (item) item.outerHTML = `<span class="pinv-kebab-item disabled"><i class="bi bi-cloud-slash"></i> Remove Xero link</span>`;
+            const item = document.querySelector('#kebab-menu .kebab-item');
+            if (item) item.outerHTML = `<span class="kebab-item disabled"><i class="bi bi-cloud-slash"></i> Remove Xero link</span>`;
         }
     })
     .catch(err => alert('Error removing link: ' + err.message));
@@ -1884,7 +1875,7 @@ function _showAttachFailModal(xeroId, xeroUrl, pushBtn) {
 
 // ── Helpers ────────────────────────────────────────────────────
 function closeKebab() {
-    document.getElementById('kebab-menu').style.display = 'none';
+    closeAllKebabs();
 }
 function closeKebabScrollTo(sectionId) {
     closeKebab();

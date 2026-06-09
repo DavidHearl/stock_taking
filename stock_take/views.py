@@ -6760,14 +6760,28 @@ def _build_order_context(order, request):
             w = int(item.cwidth)
             if w in STANDARD_WIDTHS:
                 item.is_standard_board = True
-                sku_prefix = f"{item.matname}{w}"
-                stock_item = StockItem.objects.filter(sku=sku_prefix).first()
-                item.stock_quantity = stock_item.quantity if stock_item else 0
+                item.sku_prefix = f"{item.matname}{w}"
                 item.sort_key = (0, WIDTH_ORDER.get(w, 999))
             else:
                 item.is_standard_board = False
-                item.stock_quantity = None
+                item.sku_prefix = None
                 item.sort_key = (1, w)
+
+        # Batch-lookup stock quantities for all standard-board SKUs in one query
+        # instead of one query per item.
+        standard_prefixes = {item.sku_prefix for item in items if item.is_standard_board}
+        stock_qty_map = {}
+        if standard_prefixes:
+            stock_qty_map = {
+                si['sku']: si['quantity']
+                for si in StockItem.objects.filter(sku__in=standard_prefixes).values('sku', 'quantity')
+            }
+
+        for item in items:
+            if item.is_standard_board:
+                item.stock_quantity = stock_qty_map.get(item.sku_prefix, 0)
+            else:
+                item.stock_quantity = None
             code = item_codes.get(item)
             item.colour_image_url = colour_image_map.get(code) if code else None
         items.sort(key=lambda x: x.sort_key)
@@ -6799,8 +6813,9 @@ def _build_order_context(order, request):
         order_pnx_items.extend(items)
         pnx_total_cost += cost
 
-    # Fetch all accessories once; all downstream filtering is done in Python
-    all_accessories = list(order.accessories.all())
+    # Fetch all accessories once; all downstream filtering is done in Python.
+    # select_related('stock_item') avoids a per-accessory query in available_quantity.
+    all_accessories = list(order.accessories.select_related('stock_item').all())
 
     # Process skip items using the already-fetched list — avoids per-sku DB queries
     skip_skus = (
@@ -6839,6 +6854,32 @@ def _build_order_context(order, request):
             order.processed_csv_created_at = timezone.now()
             order.save()
 
+    # Batch-precompute allocated/incoming quantities for all accessory SKUs in two
+    # queries instead of one aggregate per accessory (used in the sort key below and
+    # in the template). Values are cached on each instance and read by the model
+    # properties. exclude(order=order) is constant since every accessory shares `order`.
+    acc_skus = {a.sku for a in all_accessories}
+    alloc_by_sku = {}
+    inc_by_sku = {}
+    if acc_skus:
+        alloc_by_sku = {
+            r['sku']: (r['total'] or 0)
+            for r in Accessory.objects.filter(
+                sku__in=acc_skus, order__job_finished=False, is_allocated=False
+            ).exclude(order=order).values('sku').annotate(total=Sum('quantity'))
+        }
+        inc_by_sku = {
+            r['sku']: (r['total'] or 0)
+            for r in PurchaseOrderProduct.objects.filter(
+                sku__in=acc_skus, purchase_order__status='Approved'
+            ).values('sku').annotate(
+                total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1))
+            )
+        }
+    for a in all_accessories:
+        a._allocated_quantity_cache = alloc_by_sku.get(a.sku, 0)
+        a._incoming_quantity_cache = inc_by_sku.get(a.sku, 0)
+
     # Filter accessories in Python — replaces 4+ separate DB queries
     _acc_sort_key = lambda x: ((x.available_quantity - x.allocated_quantity) >= 0, x.id)
     has_os_door_accessories = any(a.is_os_door for a in all_accessories)
@@ -6854,11 +6895,6 @@ def _build_order_context(order, request):
         key=_acc_sort_key,
     )
 
-    materials_cost = order.calculate_materials_cost(price_per_sqm)
-    if order.materials_cost != materials_cost:
-        order.materials_cost = materials_cost
-        order.save(update_fields=['materials_cost'])
-
     # Reuse already-fetched PNX items for boards cost — avoids re-querying per BPO
     boards_cost = sum(
         item.calculated_cost for item in order_pnx_items
@@ -6868,13 +6904,23 @@ def _build_order_context(order, request):
     accessories_cost = sum(a.cost_price * a.quantity for a in all_accessories)
     os_doors_cost = sum(d.cost_price * d.quantity for d in all_os_doors)
 
+    # materials_cost is exactly boards + accessories + os_doors (same as
+    # Order.calculate_materials_cost) but computed from already-fetched data,
+    # avoiding the redundant re-query that method would perform.
+    materials_cost = boards_cost + accessories_cost + os_doors_cost
+    if order.materials_cost != materials_cost:
+        order.materials_cost = materials_cost
+        order.save(update_fields=['materials_cost'])
+
     installation_timesheets = order.timesheets.filter(timesheet_type='installation').select_related('fitter', 'purchase_order', 'purchase_invoice_line__invoice')
     manufacturing_timesheets = order.timesheets.filter(timesheet_type='manufacturing').select_related('factory_worker')
     # Evaluate expenses once so petrol/materials/other cost sums don't each hit the DB
     expenses = list(order.expenses.all().select_related('fitter'))
 
-    calculated_installation_cost = order.calculate_installation_cost()
-    calculated_manufacturing_cost = order.calculate_manufacturing_cost()
+    # Compute installation/manufacturing costs from the already-fetched timesheets and
+    # expenses instead of re-querying via the model methods.
+    calculated_installation_cost = sum(ts.total_cost for ts in installation_timesheets) + sum(exp.amount for exp in expenses)
+    calculated_manufacturing_cost = sum(ts.total_cost for ts in manufacturing_timesheets)
     installation_fitter_cost = sum(ts.total_cost for ts in installation_timesheets if ts.fitter)
     purchase_invoice_ts_cost = sum(ts.total_cost for ts in installation_timesheets if ts.purchase_invoice_line_id)
     petrol_cost = sum(exp.amount for exp in expenses if exp.expense_type == 'petrol')
@@ -13704,6 +13750,11 @@ def timesheets_json(request):
     ts_type   = request.GET.get('type', 'all').strip()
     search    = request.GET.get('q', '').strip()
 
+    # Rate and total cost are only exposed to admins and directors
+    _profile = getattr(request.user, 'profile', None)
+    _role = _profile.role if _profile else None
+    can_view_rates = request.user.is_superuser or (_role and _role.name in ('admin', 'director'))
+
     qs = Timesheet.objects.select_related(
         'order', 'fitter', 'factory_worker', 'purchase_order', 'purchase_invoice_line'
     ).order_by('-date', '-created_at')
@@ -13737,8 +13788,8 @@ def timesheets_json(request):
             'fitter_id':       ts.fitter_id,
             'factory_worker_id': ts.factory_worker_id,
             'hours':           str(ts.hours) if ts.hours else '',
-            'hourly_rate':     str(ts.hourly_rate) if ts.hourly_rate else '',
-            'total_cost':      str(ts.total_cost),
+            'hourly_rate':     (str(ts.hourly_rate) if ts.hourly_rate else '') if can_view_rates else '',
+            'total_cost':      str(ts.total_cost) if can_view_rates else '',
             'description':     ts.description or '',
             'display_description': ts.display_description or '',
             'order_id':        ts.order_id,

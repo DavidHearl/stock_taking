@@ -405,6 +405,23 @@
         <!-- Workflow Role Widgets (rendered by JS) -->
         <div id="workflowWidgetSlot"></div>
 
+        <!-- Weekly Summary Report Widget -->
+        <div class="widget" data-widget-id="weekly_summary" data-default-w="4" data-default-h="3">
+            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
+            <div class="dashboard-card weekly-summary-card">
+                <div class="card-label"><i class="bi bi-clipboard2-data" style="color:var(--success-color);"></i> Weekly Operations Report</div>
+                <div class="card-value" style="font-size:1rem;font-weight:600;background:linear-gradient(90deg,#29e8eb,#3cf987);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+                    Last · This · Next Week
+                </div>
+                <div class="card-subtext">Sales · Stock · POs · Materials · Insights</div>
+                <div class="card-action">
+                    <button class="card-action-btn" onclick="openWeeklySummary()">
+                        <i class="bi bi-file-earmark-bar-graph"></i> View Full Report
+                    </button>
+                </div>
+            </div>
+        </div>
+
     </div><!-- /widget-grid -->
 </div>
 
@@ -505,7 +522,8 @@
         weighted_avg_chart: 'Avg Sale Value Per Fit',
         pending_pos: 'Pending POs',
         shortages: 'Item Shortages',
-        incoming: 'Incoming Materials'
+        incoming: 'Incoming Materials',
+        weekly_summary: 'Weekly Operations Report'
     };
     const widgetIcons = {
         outstanding: 'bi-cash-stack',
@@ -521,7 +539,8 @@
         weighted_avg_chart: 'bi-graph-up',
         pending_pos: 'bi-receipt',
         shortages: 'bi-exclamation-triangle',
-        incoming: 'bi-truck'
+        incoming: 'bi-truck',
+        weekly_summary: 'bi-clipboard2-data'
     };
 
     // Apply saved layout or defaults
@@ -608,7 +627,7 @@
         });
     }
 
-    // ── Open widget configuration modal ──
+    // -- Open widget configuration modal --
     window.openWidgetConfig = function(w) {
         if (!grid.classList.contains('widget-edit-mode')) return;
         activeWidget = w;
@@ -798,7 +817,7 @@
         });
     };
 
-    // ── Widget Overview Dialog ──
+    // -- Widget Overview Dialog --
     window.openWidgetOverview = function() {
         const tbody = document.getElementById('womTableBody');
         tbody.innerHTML = '';
@@ -926,7 +945,7 @@
         document.getElementById('widgetOverviewModal').showModal();
     };
 
-    // ── Pointer-based drag with explicit grid placement ──
+    // -- Pointer-based drag with explicit grid placement --
     let dragState = null;
 
     function getGridCell(clientX, clientY) {
@@ -1660,7 +1679,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ── Weighted Average Sale Value Per Fit Chart ─────────────────────────
+    // -- Weighted Average Sale Value Per Fit Chart -------------------------
     // 5-week centred moving average — naturally fills zero-fit gaps by borrowing
     // from adjacent weeks, producing a smooth curve with no holes.
     const WA_WINDOW = 5;
@@ -1797,7 +1816,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ── Chart Type Switcher ──────────────────────────────────────────────
+    // -- Chart Type Switcher ----------------------------------------------
     // Apply saved chart types from layout
     const savedLayout = window._dashboardSavedLayout;
     if (savedLayout && Array.isArray(savedLayout)) {
@@ -2078,7 +2097,7 @@ function loadOutstandingReport() {
 
             html += '</tbody></table>';
 
-            // ── Overpaid customers section ──
+            // -- Overpaid customers section --
             if (data.overpaid_rows && data.overpaid_rows.length > 0) {
                 const totalOverpaid = data.overpaid_rows.reduce((s, r) => s + r.total_overpaid, 0);
                 html += `<div style="margin-top:18px;padding:12px 16px;background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.3);border-radius:8px;">`;
@@ -2296,16 +2315,16 @@ function checkXeroPayments() {
                     appendLog(`[${msg.index}/${msg.total}] Checking ${msg.customer} (${msg.contract})...`, 'info');
                 } else if (msg.type === 'result') {
                     if (msg.status === 'found') {
-                        appendLog(`[${msg.index}/${msg.total}] ✓ ${msg.customer}: ${msg.message}`, 'found');
+                        appendLog(`[${msg.index}/${msg.total}] ? ${msg.customer}: ${msg.message}`, 'found');
                         hadUpdates = true;
                     } else if (msg.status === 'error') {
-                        appendLog(`[${msg.index}/${msg.total}] ✗ ${msg.customer}: ${msg.message}`, 'error');
+                        appendLog(`[${msg.index}/${msg.total}] ? ${msg.customer}: ${msg.message}`, 'error');
                     } else {
                         appendLog(`[${msg.index}/${msg.total}] — ${msg.customer}: ${msg.message}`, 'skip');
                     }
                 } else if (msg.type === 'done') {
                     const s = msg.stats;
-                    appendLog('─'.repeat(50), 'info');
+                    appendLog('-'.repeat(50), 'info');
                     appendLog(`Done. ${s.total} checked | ${s.invoices_found} invoices found | ${s.payments_created} created | ${s.payments_updated} updated | ${s.no_invoice} no invoice | ${s.errors} errors`, 'info');
                     resetBtn();
                 }
@@ -2613,7 +2632,7 @@ function openStockReport(tab) {
             document.getElementById('stockReportMeta').innerHTML =
                 '&nbsp;&mdash;&nbsp;' + dateLabel + ' &nbsp;|&nbsp; ' + data.stock_count.toLocaleString() + ' items &nbsp;|&nbsp; ' + fmt(data.total_value);
 
-            // ── Changes tab ──────────────────────────────────────
+            // -- Changes tab --------------------------------------
             let changesHtml = '';
             if (data.recent_changes.length) {
                 changesHtml += '<table class="dash-report-table"><thead><tr>' +
@@ -2640,7 +2659,7 @@ function openStockReport(tab) {
             }
             document.getElementById('stockChangesBody').innerHTML = changesHtml;
 
-            // ── Stock Report tab ─────────────────────────────────
+            // -- Stock Report tab ---------------------------------
             const grandQty = data.current_stock.reduce((s, i) => s + i.quantity, 0);
             let reportHtml = '<table class="dash-report-table"><thead><tr>' +
                 '<th>SKU</th><th>Material</th><th>Category</th><th>Location</th>' +
@@ -3008,7 +3027,7 @@ function openIncomingModal() {
 </script>
 
 <script>
-/* ── Widget Preview Lists (populated from existing JSON data) ── */
+/* -- Widget Preview Lists (populated from existing JSON data) -- */
 (function() {
     function buildPreviewRows(container, items, rowBuilder) {
         if (!container || !items || items.length === 0) return;
@@ -3196,7 +3215,7 @@ function openDashStageOrders(stageId) {
         .then(function(data) {
             loading.style.display = 'none';
             title.textContent = data.stage_name;
-            meta.textContent = data.phase + ' · ' + data.stage_role + ' · ' + data.count + ' customer' + (data.count !== 1 ? 's' : '');
+            meta.textContent = data.phase + ' — ' + data.stage_role + ' — ' + data.count + ' customer' + (data.count !== 1 ? 's' : '');
             
             if (data.orders.length === 0) {
                 empty.style.display = 'block';
@@ -3243,5 +3262,647 @@ function openDashStageOrders(stageId) {
         <p id="dashStageOrdersEmpty" style="display:none;text-align:center;color:var(--text-secondary);padding:24px;">No customers at this stage.</p>
     </div>
 </dialog>
+
+<!-- ===== WEEKLY SUMMARY REPORT MODAL ===== -->
+<dialog id="weeklySummaryModal" class="dash-report-modal wr-modal">
+    <!-- Branded header -->
+    <div class="wr-header">
+        <div class="wr-header-brand">
+            <span class="wr-logo-mark">S</span>
+            <div>
+                <div class="wr-brand-name">Sliderobes</div>
+                <div class="wr-brand-sub">Weekly Operations Report</div>
+            </div>
+        </div>
+        <div class="wr-header-meta" id="wrHeaderMeta">Loading&hellip;</div>
+        <div class="wr-header-actions">
+            <button class="wr-print-btn" onclick="printWeeklyReport()" title="Print / Save as PDF">
+                <i class="bi bi-printer"></i> Print / PDF
+            </button>
+            <button class="dash-report-close" onclick="document.getElementById('weeklySummaryModal').close()">&times;</button>
+        </div>
+    </div>
+
+    <div class="wr-body" id="wrBody">
+        <div class="wr-loading" id="wrLoading">
+            <i class="bi bi-arrow-repeat wr-spinner"></i>
+            <span>Generating report&hellip;</span>
+        </div>
+        <div id="wrContent" style="display:none;">
+
+            <!-- Report title block (for print + on-screen context) -->
+            <div class="wr-report-title">
+                <h1 class="wr-report-h1">Weekly Operations Report</h1>
+                <div class="wr-report-period" id="wrReportPeriod"></div>
+            </div>
+
+            <!-- Executive Summary -->
+            <section class="wr-section">
+                <div class="wr-section-header">
+                    <span class="wr-section-icon" style="--c:#3cf987"><i class="bi bi-speedometer2"></i></span>
+                    <h2 class="wr-section-title">Executive Summary</h2>
+                </div>
+                <div class="wr-kpi-grid" id="wrKpiGrid"></div>
+            </section>
+
+            <!-- LAST WEEK -->
+            <section class="wr-section wr-chapter wr-chapter-last">
+                <div class="wr-chapter-head">
+                    <div class="wr-chapter-left">
+                        <div class="wr-chapter-label">Last Week</div>
+                        <div class="wr-chapter-sub">Retrospective</div>
+                        <div class="wr-chapter-range" id="wrLastChapterRange"></div>
+                    </div>
+                    <div class="wr-chapter-stats" id="wrLastChapterStats"></div>
+                </div>
+                <div class="wr-chapter-body">
+                    <div class="wr-day-grid" id="wrLastDayGrid"></div>
+
+                    <div class="wr-sub-title" style="margin-top:18px;">Completed Jobs &amp; Payment</div>
+                    <div id="wrLastJobsEmpty" style="display:none;" class="wr-empty-state">
+                        <i class="bi bi-calendar-x"></i> No fits recorded last week.
+                    </div>
+                    <table class="dash-report-table" id="wrLastJobsTable" style="display:none;">
+                        <thead>
+                            <tr>
+                                <th>Customer</th><th>Contract</th><th>Fit Date</th>
+                                <th>Fitter</th>
+                                <th class="text-right">Sale Value</th>
+                                <th class="text-right">Money Due</th>
+                                <th class="text-center">Remedial</th>
+                                <th class="text-center">Payment</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wrLastJobsBody"></tbody>
+                        <tfoot id="wrLastJobsFoot"></tfoot>
+                    </table>
+                </div>
+            </section>
+
+            <!-- THIS WEEK -->
+            <section class="wr-section wr-chapter wr-chapter-this">
+                <div class="wr-chapter-head">
+                    <div class="wr-chapter-left">
+                        <div class="wr-chapter-label">This Week</div>
+                        <div class="wr-chapter-sub">Live Status</div>
+                        <div class="wr-chapter-range" id="wrThisChapterRange"></div>
+                    </div>
+                    <div class="wr-chapter-stats" id="wrThisChapterStats"></div>
+                </div>
+                <div class="wr-chapter-body">
+                    <div class="wr-day-grid" id="wrThisDayGrid"></div>
+
+                    <div class="wr-sub-title" style="margin-top:18px;">Materials Readiness</div>
+                    <div id="wrThisMaterialsEmpty" style="display:none;" class="wr-empty-state">
+                        <i class="bi bi-calendar-x"></i> No jobs scheduled this week.
+                    </div>
+                    <table class="dash-report-table" id="wrThisMaterialsTable" style="display:none;">
+                        <thead>
+                            <tr>
+                                <th>Customer</th><th>Fit Date</th>
+                                <th>Fitter</th>
+                                <th class="text-center">Boards</th>
+                                <th class="text-center">OS Doors</th>
+                                <th class="text-center">Status</th>
+                                <th class="text-right">Value</th>
+                                <th class="text-right">Money Due</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wrThisMaterialsBody"></tbody>
+                        <tfoot id="wrThisMaterialsFoot"></tfoot>
+                    </table>
+                </div>
+            </section>
+
+            <!-- NEXT WEEK -->
+            <section class="wr-section wr-chapter wr-chapter-next">
+                <div class="wr-chapter-head">
+                    <div class="wr-chapter-left">
+                        <div class="wr-chapter-label">Next Week</div>
+                        <div class="wr-chapter-sub">Forward Look</div>
+                        <div class="wr-chapter-range" id="wrNextChapterRange"></div>
+                    </div>
+                    <div class="wr-chapter-stats" id="wrNextChapterStats"></div>
+                </div>
+                <div class="wr-chapter-body">
+                    <div class="wr-sub-title">Materials Readiness</div>
+                    <div id="wrNextMaterialsEmpty" style="display:none;" class="wr-empty-state">
+                        <i class="bi bi-calendar-x"></i> No jobs scheduled next week yet.
+                    </div>
+                    <table class="dash-report-table" id="wrNextMaterialsTable" style="display:none;">
+                        <thead>
+                            <tr>
+                                <th>Customer</th><th>Fit Date</th>
+                                <th>Fitter</th>
+                                <th class="text-center">Boards</th>
+                                <th class="text-center">OS Doors</th>
+                                <th class="text-center">Status</th>
+                                <th class="text-right">Value</th>
+                                <th class="text-right">Money Due</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wrNextMaterialsBody"></tbody>
+                        <tfoot id="wrNextMaterialsFoot"></tfoot>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Payment Status -->
+            <section class="wr-section">
+                <div class="wr-section-header">
+                    <span class="wr-section-icon" style="--c:#ef4444"><i class="bi bi-cash-coin"></i></span>
+                    <h2 class="wr-section-title">Debtors Report</h2>
+                    <span class="wr-section-badge" id="wrPaymentBadge"></span>
+                </div>
+                <div class="wr-pay-summary" id="wrPaymentSummary"></div>
+                <div id="wrPaymentEmpty" style="display:none;" class="wr-empty-state">
+                    <i class="bi bi-cash"></i> No fits in the reporting window.
+                </div>
+                <table class="dash-report-table" id="wrPaymentTable" style="display:none;">
+                    <thead>
+                        <tr>
+                            <th>Customer</th><th>Contract</th><th>Fit Date</th>
+                            <th>Fitter</th>
+                            <th class="text-right">Sale Value</th>
+                            <th class="text-right">Paid</th>
+                            <th class="text-right">Money Due</th>
+                            <th class="text-center">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="wrPaymentBody"></tbody>
+                    <tfoot id="wrPaymentFoot"></tfoot>
+                </table>
+
+                <div class="wr-sub-title" id="wrDebtorsTitle" style="margin-top:18px; display:none;">Top Outstanding Balances (All Jobs)</div>
+                <table class="dash-report-table" id="wrDebtorsTable" style="display:none;">
+                    <thead>
+                        <tr>
+                            <th>Customer</th><th>Contract</th><th>Fit Date</th>
+                            <th>Fitter</th>
+                            <th class="text-right">Sale Value</th>
+                            <th class="text-right">Money Due</th>
+                        </tr>
+                    </thead>
+                    <tbody id="wrDebtorsBody"></tbody>
+                    <tfoot id="wrDebtorsFoot"></tfoot>
+                </table>
+            </section>
+
+            <!-- Remedials -->
+            <section class="wr-section">
+                <div class="wr-section-header">
+                    <span class="wr-section-icon" style="--c:#f59e0b"><i class="bi bi-tools"></i></span>
+                    <h2 class="wr-section-title">Remedials &amp; After-care</h2>
+                    <span class="wr-section-badge" id="wrRemedialBadge"></span>
+                </div>
+                <div class="wr-stat-row" id="wrRemedialsRow"></div>
+                <div id="wrRemedialsEmpty" style="display:none;" class="wr-empty-state" style="margin-top:12px;">
+                    <i class="bi bi-check-circle"></i> No open remedials. All clear.
+                </div>
+                <table class="dash-report-table" id="wrRemedialsTable" style="display:none; margin-top:12px;">
+                    <thead>
+                        <tr>
+                            <th>Remedial</th><th>Customer</th><th>Reason</th>
+                            <th>Scheduled</th>
+                            <th class="text-center">Days Open</th>
+                            <th class="text-center">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="wrRemedialsBody"></tbody>
+                </table>
+            </section>
+
+            <!-- Operations -->
+            <section class="wr-section">
+                <div class="wr-section-header">
+                    <span class="wr-section-icon" style="--c:#f59e0b"><i class="bi bi-gear"></i></span>
+                    <h2 class="wr-section-title">Operations</h2>
+                </div>
+                <div class="wr-sub-title">Stock Levels &amp; Purchase Orders</div>
+                <div class="wr-stat-row wr-ops-row" id="wrOpsRow"></div>
+                <div class="wr-po-breakdown" id="wrPoBreakdown"></div>
+            </section>
+
+            <!-- Insights -->
+            <section class="wr-section">
+                <div class="wr-section-header">
+                    <span class="wr-section-icon" style="--c:#29e8eb"><i class="bi bi-lightbulb"></i></span>
+                    <h2 class="wr-section-title">Insights &amp; Recommendations</h2>
+                </div>
+                <div class="wr-insights" id="wrInsights"></div>
+            </section>
+
+        </div><!-- /wrContent -->
+    </div><!-- /wr-body -->
+</dialog>
+
+<script>
+/* ===== Weekly Summary Report ===== */
+(function () {
+    var GBP = '\u00A3';
+    var NDASH = '\u2013';
+    var MDASH = '\u2014';
+    const fmt  = n => GBP + Number(n).toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    const fmtD = n => (n >= 0 ? '+' : '') + GBP + Math.abs(n).toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+
+    const STATUS_LABELS = {
+        received:     {text: 'Received', cls: 'wr-ms-ok'},
+        ordered:      {text: 'Ordered',  cls: 'wr-ms-ordered'},
+        not_required: {text: 'N/A',      cls: 'wr-ms-na'},
+        no_po:        {text: 'No PO',    cls: 'wr-ms-warn'},
+        pending:      {text: 'Pending',  cls: 'wr-ms-warn'},
+        unknown:      {text: '?',        cls: 'wr-ms-warn'},
+    };
+
+    function matBadge(status) {
+        const s = STATUS_LABELS[status] || STATUS_LABELS.unknown;
+        return `<span class="wr-mat-badge ${s.cls}">${s.text}</span>`;
+    }
+
+    function readyBadge(ready) {
+        return ready
+            ? '<span class="wr-ready-badge wr-ready-ok"><i class="bi bi-check-circle-fill"></i> Ready</span>'
+            : '<span class="wr-ready-badge wr-ready-no"><i class="bi bi-exclamation-circle-fill"></i> Not Ready</span>';
+    }
+
+    const PAY_CLS = {paid: 'wr-pay-ok', part: 'wr-pay-part', unpaid: 'wr-pay-no'};
+    function payBadge(key, label) {
+        return `<span class="wr-pay-badge ${PAY_CLS[key] || 'wr-pay-no'}">${label}</span>`;
+    }
+
+    const REM_CLS = {overdue: 'wr-rem-overdue', awaiting: 'wr-rem-awaiting', scheduled: 'wr-rem-scheduled', unscheduled: 'wr-rem-unscheduled'};
+    function remBadge(key, label) {
+        return `<span class="wr-rem-badge ${REM_CLS[key] || 'wr-rem-unscheduled'}">${label}</span>`;
+    }
+
+    window.openWeeklySummary = function () {
+        const modal = document.getElementById('weeklySummaryModal');
+        document.getElementById('wrLoading').style.display = 'flex';
+        document.getElementById('wrContent').style.display = 'none';
+        modal.showModal();
+
+        fetch('/dashboard/weekly-summary/')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+                render(d);
+                document.getElementById('wrLoading').style.display = 'none';
+                document.getElementById('wrContent').style.display = 'block';
+            })
+            .catch(() => {
+                document.getElementById('wrLoading').innerHTML =
+                    '<span style="color:var(--danger-color)">Failed to load report. Please try again.</span>';
+            });
+    };
+
+    // Print via an on-page print container shown only by @media print.
+    // This prints the main document (so all stylesheets/fonts are already loaded),
+    // and reliably avoids blank pages from zero-size iframes / dialog top-layer issues.
+    window.printWeeklyReport = function () {
+        const content = document.getElementById('wrContent').innerHTML;
+        let area = document.getElementById('wrPrintArea');
+        if (!area) {
+            area = document.createElement('div');
+            area.id = 'wrPrintArea';
+            document.body.appendChild(area);
+        }
+        area.innerHTML =
+            '<div class="wr-print-head">' +
+                '<span class="wr-logo-mark">S</span>' +
+                '<div><div class="wr-brand-name">Sliderobes</div>' +
+                '<div class="wr-brand-sub">Weekly Operations Report</div></div>' +
+            '</div>' + content;
+
+        document.body.classList.add('wr-printing');
+        const cleanup = () => {
+            document.body.classList.remove('wr-printing');
+            window.removeEventListener('afterprint', cleanup);
+        };
+        window.addEventListener('afterprint', cleanup);
+        // Fallback cleanup in case afterprint never fires
+        setTimeout(() => { if (document.body.classList.contains('wr-printing')) cleanup(); }, 60000);
+        setTimeout(() => window.print(), 150);
+    };
+
+    function renderDayGrid(el, days, highlightToday) {
+        const maxDay = Math.max(...days.map(s => s.total), 1);
+        const todayStr = new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
+        el.innerHTML = days.map(day => {
+            const pct = Math.max(Math.round((day.total / maxDay) * 100), day.total > 0 ? 4 : 0);
+            const isToday = highlightToday && day.date === todayStr;
+            return `<div class="wr-day-col${isToday ? ' wr-day-today' : ''}">
+                <div class="wr-day-bar-wrap"><div class="wr-day-bar" style="height:${pct}%"></div></div>
+                <div class="wr-day-value">${day.count ? fmt(day.total) : MDASH}</div>
+                <div class="wr-day-count">${day.count ? day.count + ' fit' + (day.count > 1 ? 's' : '') : ''}</div>
+                <div class="wr-day-label">${day.label}<br><span class="wr-day-date">${day.date}</span></div>
+            </div>`;
+        }).join('');
+    }
+
+    function renderMaterialsTable(bodyEl, tableEl, emptyEl, rows, footEl) {
+        if (rows.length === 0) {
+            emptyEl.style.display = 'flex';
+            tableEl.style.display = 'none';
+            if (footEl) footEl.innerHTML = '';
+        } else {
+            emptyEl.style.display = 'none';
+            tableEl.style.display = 'table';
+            bodyEl.innerHTML = rows.map(r =>
+                `<tr class="${r.ready ? '' : 'wr-row-warn'}">
+                    <td>${r.customer}</td>
+                    <td>${r.fit_date}</td>
+                    <td>${r.fitter || MDASH}</td>
+                    <td class="text-center">${matBadge(r.boards_status)}</td>
+                    <td class="text-center">${matBadge(r.os_doors_status)}</td>
+                    <td class="text-center">${readyBadge(r.ready)}</td>
+                    <td class="text-right">${r.value ? fmt(r.value) : MDASH}</td>
+                    <td class="text-right" style="${r.money_due > 0 ? 'color:var(--danger-color);font-weight:600;' : ''}">${r.money_due == null ? MDASH : (r.money_due > 0 ? fmt(r.money_due) : MDASH)}</td>
+                </tr>`
+            ).join('');
+            if (footEl) {
+                const totalValue = rows.reduce((a, r) => a + (r.value || 0), 0);
+                const totalDue = rows.reduce((a, r) => a + (r.money_due || 0), 0);
+                footEl.innerHTML =
+                    `<tr class="wr-subtotal-row">
+                        <td colspan="6" class="text-right">Subtotal</td>
+                        <td class="text-right">${fmt(totalValue)}</td>
+                        <td class="text-right" style="${totalDue > 0 ? 'color:var(--danger-color);font-weight:600;' : ''}">${fmt(totalDue)}</td>
+                    </tr>`;
+            }
+        }
+    }
+
+    function render(d) {
+        const lastRange = d.last_week.start + ' ' + NDASH + ' ' + d.last_week.end;
+        const thisRange = d.this_week.start + ' ' + NDASH + ' ' + d.this_week.end;
+        const nextRange = d.next_week.start + ' ' + NDASH + ' ' + d.next_week.end;
+
+        document.getElementById('wrHeaderMeta').textContent = 'Generated ' + d.generated_at;
+        document.getElementById('wrReportPeriod').textContent =
+            'Reporting period: ' + d.last_week.start + ' ' + NDASH + ' ' + d.next_week.end + '  \u00B7  Generated ' + d.generated_at;
+        if (d.payments_linked > 0) {
+            document.getElementById('wrReportPeriod').textContent +=
+                '  \u00B7  ' + d.payments_linked + ' new payment' + (d.payments_linked === 1 ? '' : 's') + ' linked from Xero';
+        }
+        document.getElementById('wrLastChapterRange').textContent = lastRange;
+        document.getElementById('wrThisChapterRange').textContent = thisRange;
+        document.getElementById('wrNextChapterRange').textContent = nextRange;
+
+        // -- Executive Summary KPIs --
+        const lw = d.last_week_sales, tw = d.this_week_sales, nw = d.next_week_sales;
+        const delta = lw.total ? ((tw.total - lw.total) / lw.total * 100) : 0;
+        const deltaClass = delta >= 0 ? 'wr-kpi-positive' : 'wr-kpi-negative';
+        const deltaArrow = delta >= 0 ? '&#9650;' : '&#9660;';
+        document.getElementById('wrKpiGrid').innerHTML = `
+            <div class="wr-kpi-card">
+                <div class="wr-kpi-label">This Week Revenue</div>
+                <div class="wr-kpi-value">${fmt(tw.total)}</div>
+                <div class="wr-kpi-sub ${deltaClass}">${deltaArrow} ${Math.abs(delta).toFixed(0)}% vs last week</div>
+            </div>
+            <div class="wr-kpi-card">
+                <div class="wr-kpi-label">This Week Fits</div>
+                <div class="wr-kpi-value">${tw.count}</div>
+                <div class="wr-kpi-sub">jobs installing</div>
+            </div>
+            <div class="wr-kpi-card">
+                <div class="wr-kpi-label">Avg Job Value</div>
+                <div class="wr-kpi-value">${tw.count ? fmt(tw.total / tw.count) : MDASH}</div>
+                <div class="wr-kpi-sub">per installation</div>
+            </div>
+            <div class="wr-kpi-card wr-kpi-accent-stock">
+                <div class="wr-kpi-label">Stock Value</div>
+                <div class="wr-kpi-value">${fmt(d.stock_value)}</div>
+                <div class="wr-kpi-sub ${d.stock_delta >= 0 ? 'wr-kpi-positive' : 'wr-kpi-negative'}">${fmtD(d.stock_delta)} (7d)</div>
+            </div>
+            <div class="wr-kpi-card wr-kpi-accent-danger">
+                <div class="wr-kpi-label">Total Outstanding</div>
+                <div class="wr-kpi-value">${fmt(d.total_outstanding)}</div>
+                <div class="wr-kpi-sub">${d.outstanding_count} customer${d.outstanding_count !== 1 ? 's' : ''} with balance</div>
+            </div>
+            <div class="wr-kpi-card ${d.materials_not_ready > 0 ? 'wr-kpi-accent-danger' : 'wr-kpi-accent-ok'}">
+                <div class="wr-kpi-label">Materials Ready</div>
+                <div class="wr-kpi-value">${d.materials_rows.length - d.materials_not_ready} / ${d.materials_rows.length}</div>
+                <div class="wr-kpi-sub">${d.materials_not_ready > 0 ? d.materials_not_ready + ' job(s) need action' : 'All jobs covered'}</div>
+            </div>
+        `;
+
+        // -- Chapter stat chips --
+        function chapterStats(sales) {
+            const avg = sales.count ? (sales.total / sales.count) : 0;
+            const collected = sales.collected || 0;
+            const outstanding = sales.outstanding || 0;
+            return `<div class="wr-cs-chip"><div class="wr-cs-value">${fmt(sales.total)}</div><div class="wr-cs-label">Sales</div></div>
+                    <div class="wr-cs-chip"><div class="wr-cs-value">${sales.count}</div><div class="wr-cs-label">Fits</div></div>
+                    <div class="wr-cs-chip"><div class="wr-cs-value">${sales.count ? fmt(avg) : MDASH}</div><div class="wr-cs-label">Avg Value</div></div>
+                    <div class="wr-cs-chip"><div class="wr-cs-value">${fmt(collected)}</div><div class="wr-cs-label">Paid</div></div>
+                    <div class="wr-cs-chip"><div class="wr-cs-value" style="${outstanding > 0 ? 'color:var(--danger-color);' : ''}">${fmt(outstanding)}</div><div class="wr-cs-label">Left to Collect</div></div>`;
+        }
+        document.getElementById('wrLastChapterStats').innerHTML = chapterStats(d.last_week_sales);
+        document.getElementById('wrThisChapterStats').innerHTML = chapterStats(d.this_week_sales);
+        document.getElementById('wrNextChapterStats').innerHTML = chapterStats(d.next_week_sales);
+
+        // -- Day charts --
+        renderDayGrid(document.getElementById('wrLastDayGrid'), d.last_day_sales, false);
+        renderDayGrid(document.getElementById('wrThisDayGrid'), d.day_sales, true);
+
+        // -- Last week completed jobs (with payment status) --
+        const lastJobs = (d.payment_status_rows || []).filter(p => p.week === 'last');
+        if (lastJobs.length === 0) {
+            document.getElementById('wrLastJobsEmpty').style.display = 'flex';
+            document.getElementById('wrLastJobsTable').style.display = 'none';
+        } else {
+            document.getElementById('wrLastJobsEmpty').style.display = 'none';
+            document.getElementById('wrLastJobsTable').style.display = 'table';
+            document.getElementById('wrLastJobsBody').innerHTML = lastJobs.map(p =>
+                `<tr class="${p.pay_key === 'unpaid' ? 'wr-row-warn' : ''}">
+                    <td>${p.customer}</td>
+                    <td>${p.contract}</td>
+                    <td>${p.fit_date}</td>
+                    <td>${p.fitter || MDASH}</td>
+                    <td class="text-right">${fmt(p.sale_value)}</td>
+                    <td class="text-right" style="${p.outstanding > 0 ? 'color:var(--danger-color);font-weight:600;' : ''}">${p.outstanding > 0 ? fmt(p.outstanding) : MDASH}</td>
+                    <td class="text-center">${p.remedial ? '<span class="wr-pay-badge wr-pay-no">Yes</span>' : '<span class="wr-pay-badge wr-pay-ok">No</span>'}</td>
+                    <td class="text-center">${payBadge(p.pay_key, p.pay_label)}</td>
+                </tr>`
+            ).join('');
+            const lastSaleTotal = lastJobs.reduce((a, p) => a + (p.sale_value || 0), 0);
+            const lastDueTotal = lastJobs.reduce((a, p) => a + (p.outstanding || 0), 0);
+            document.getElementById('wrLastJobsFoot').innerHTML =
+                `<tr class="wr-subtotal-row">
+                    <td colspan="4" class="text-right">Subtotal</td>
+                    <td class="text-right">${fmt(lastSaleTotal)}</td>
+                    <td class="text-right" style="${lastDueTotal > 0 ? 'color:var(--danger-color);font-weight:600;' : ''}">${fmt(lastDueTotal)}</td>
+                    <td></td><td></td>
+                </tr>`;
+        }
+
+        // -- Materials split by week --
+        const thisMat = d.materials_rows.filter(r => r.fit_week === 'this');
+        const nextMat = d.materials_rows.filter(r => r.fit_week === 'next');
+        renderMaterialsTable(
+            document.getElementById('wrThisMaterialsBody'),
+            document.getElementById('wrThisMaterialsTable'),
+            document.getElementById('wrThisMaterialsEmpty'),
+            thisMat,
+            document.getElementById('wrThisMaterialsFoot')
+        );
+        renderMaterialsTable(
+            document.getElementById('wrNextMaterialsBody'),
+            document.getElementById('wrNextMaterialsTable'),
+            document.getElementById('wrNextMaterialsEmpty'),
+            nextMat,
+            document.getElementById('wrNextMaterialsFoot')
+        );
+
+        // -- Payment status --
+        const ps = d.payment_summary || {paid:0, part:0, unpaid:0};
+        const totalPayJobs = d.payment_status_rows.length;
+        document.getElementById('wrPaymentBadge').textContent =
+            ps.unpaid > 0 ? (ps.unpaid + ' unpaid') : (ps.part > 0 ? (ps.part + ' part paid') : 'All collected');
+        document.getElementById('wrPaymentBadge').className =
+            'wr-section-badge ' + (ps.unpaid > 0 ? 'wr-badge-warn' : 'wr-badge-ok');
+        document.getElementById('wrPaymentSummary').innerHTML = `
+            <div class="wr-pay-chip wr-pay-chip-ok"><div class="wr-pay-chip-num">${ps.paid}</div><div class="wr-pay-chip-lbl">Paid in Full</div></div>
+            <div class="wr-pay-chip wr-pay-chip-part"><div class="wr-pay-chip-num">${ps.part}</div><div class="wr-pay-chip-lbl">Part Paid</div></div>
+            <div class="wr-pay-chip wr-pay-chip-no"><div class="wr-pay-chip-num">${ps.unpaid}</div><div class="wr-pay-chip-lbl">Unpaid</div></div>
+        `;
+        if (totalPayJobs === 0) {
+            document.getElementById('wrPaymentEmpty').style.display = 'flex';
+            document.getElementById('wrPaymentTable').style.display = 'none';
+        } else {
+            document.getElementById('wrPaymentEmpty').style.display = 'none';
+            document.getElementById('wrPaymentTable').style.display = 'table';
+            document.getElementById('wrPaymentBody').innerHTML = d.payment_status_rows.map(p =>
+                `<tr class="${p.pay_key === 'unpaid' ? 'wr-row-warn' : ''}">
+                    <td>${p.customer}</td>
+                    <td>${p.contract}</td>
+                    <td>${p.fit_date}</td>
+                    <td>${p.fitter || MDASH}</td>
+                    <td class="text-right">${fmt(p.sale_value)}</td>
+                    <td class="text-right">${fmt(p.paid)}</td>
+                    <td class="text-right" style="${p.outstanding > 0 ? 'color:var(--danger-color);font-weight:600;' : ''}">${p.outstanding > 0 ? fmt(p.outstanding) : MDASH}</td>
+                    <td class="text-center">${payBadge(p.pay_key, p.pay_label)}</td>
+                </tr>`
+            ).join('');
+            const paySaleTotal = d.payment_status_rows.reduce((a, p) => a + (p.sale_value || 0), 0);
+            const payPaidTotal = d.payment_status_rows.reduce((a, p) => a + (p.paid || 0), 0);
+            const payDueTotal = d.payment_status_rows.reduce((a, p) => a + (p.outstanding || 0), 0);
+            document.getElementById('wrPaymentFoot').innerHTML =
+                `<tr class="wr-subtotal-row">
+                    <td colspan="4" class="text-right">Subtotal</td>
+                    <td class="text-right">${fmt(paySaleTotal)}</td>
+                    <td class="text-right">${fmt(payPaidTotal)}</td>
+                    <td class="text-right" style="${payDueTotal > 0 ? 'color:var(--danger-color);font-weight:600;' : ''}">${fmt(payDueTotal)}</td>
+                    <td></td>
+                </tr>`;
+        }
+
+        // -- Top outstanding debtors (all jobs) --
+        const debtors = d.top_debtors || [];
+        if (debtors.length > 0) {
+            document.getElementById('wrDebtorsTitle').style.display = 'block';
+            document.getElementById('wrDebtorsTable').style.display = 'table';
+            document.getElementById('wrDebtorsBody').innerHTML = debtors.map(t =>
+                `<tr>
+                    <td>${t.customer}</td>
+                    <td>${t.contract}</td>
+                    <td>${t.fit_date}</td>
+                    <td>${t.fitter || MDASH}</td>
+                    <td class="text-right">${fmt(t.sale_value)}</td>
+                    <td class="text-right" style="color:var(--danger-color);font-weight:600;">${fmt(t.outstanding)}</td>
+                </tr>`
+            ).join('');
+            const debtSaleTotal = debtors.reduce((a, t) => a + (t.sale_value || 0), 0);
+            const debtDueTotal = debtors.reduce((a, t) => a + (t.outstanding || 0), 0);
+            document.getElementById('wrDebtorsFoot').innerHTML =
+                `<tr class="wr-subtotal-row">
+                    <td colspan="4" class="text-right">Subtotal</td>
+                    <td class="text-right">${fmt(debtSaleTotal)}</td>
+                    <td class="text-right" style="color:var(--danger-color);font-weight:600;">${fmt(debtDueTotal)}</td>
+                </tr>`;
+        }
+
+        // -- Remedials --
+        document.getElementById('wrRemedialBadge').textContent =
+            d.open_remedials > 0 ? (d.open_remedials + ' open') : 'None open';
+        document.getElementById('wrRemedialBadge').className =
+            'wr-section-badge ' + (d.open_remedials > 5 ? 'wr-badge-warn' : 'wr-badge-ok');
+        document.getElementById('wrRemedialsRow').innerHTML = `
+            <div class="wr-stat-card ${d.open_remedials > 5 ? 'wr-stat-warning' : ''}">
+                <div class="wr-stat-label">Open Remedials (Total)</div>
+                <div class="wr-stat-value">${d.open_remedials}</div>
+            </div>
+            <div class="wr-stat-card">
+                <div class="wr-stat-label">Scheduled This &amp; Next Week</div>
+                <div class="wr-stat-value">${d.scheduled_remedials}</div>
+            </div>
+        `;
+        const remList = d.remedials_list || [];
+        if (remList.length === 0) {
+            document.getElementById('wrRemedialsEmpty').style.display = 'flex';
+            document.getElementById('wrRemedialsTable').style.display = 'none';
+        } else {
+            document.getElementById('wrRemedialsEmpty').style.display = 'none';
+            document.getElementById('wrRemedialsTable').style.display = 'table';
+            document.getElementById('wrRemedialsBody').innerHTML = remList.map(r =>
+                `<tr class="${r.status_key === 'overdue' ? 'wr-row-warn' : ''}">
+                    <td>${r.number}</td>
+                    <td>${r.customer}</td>
+                    <td style="max-width:280px;">${r.reason}</td>
+                    <td>${r.scheduled}</td>
+                    <td class="text-center">${r.days_open}</td>
+                    <td class="text-center">${remBadge(r.status_key, r.status_label)}</td>
+                </tr>`
+            ).join('');
+        }
+
+        // -- Operations (stock + purchase orders in one row) --
+        const sdCls = d.stock_delta >= 0 ? 'wr-stat-positive' : 'wr-stat-negative';
+        document.getElementById('wrOpsRow').innerHTML = `
+            <div class="wr-stat-card">
+                <div class="wr-stat-label">Total Stock Value</div>
+                <div class="wr-stat-value">${fmt(d.stock_value)}</div>
+            </div>
+            <div class="wr-stat-card">
+                <div class="wr-stat-label">7-Day Change</div>
+                <div class="wr-stat-value ${sdCls}">${fmtD(d.stock_delta)}</div>
+            </div>
+            <div class="wr-stat-card ${d.shortage_count > 0 ? 'wr-stat-danger' : ''}">
+                <div class="wr-stat-label">Items Below Par</div>
+                <div class="wr-stat-value">${d.shortage_count}</div>
+            </div>
+            <div class="wr-stat-card">
+                <div class="wr-stat-label">Open PO Value</div>
+                <div class="wr-stat-value">${fmt(d.pending_po_total)}</div>
+            </div>
+            <div class="wr-stat-card">
+                <div class="wr-stat-label">Open PO Count</div>
+                <div class="wr-stat-value">${d.pending_po_count}</div>
+            </div>
+            <div class="wr-stat-card">
+                <div class="wr-stat-label">Spend (last 4 wks)</div>
+                <div class="wr-stat-value">${fmt(d.recent_po_spend)}</div>
+            </div>
+        `;
+        const statusCls = {Approved:'wr-po-approved', Ordered:'wr-po-ordered', Sent:'wr-po-sent', Received:'wr-po-received'};
+        document.getElementById('wrPoBreakdown').innerHTML = d.po_status_breakdown.map(s =>
+            `<div class="wr-po-pill ${statusCls[s.status]||''}">
+                <span class="wr-po-pill-label">${s.status}</span>
+                <span class="wr-po-pill-count">${s.count}</span>
+                <span class="wr-po-pill-val">${fmt(s.total)}</span>
+            </div>`
+        ).join('');
+
+        // -- Insights --
+        const insightCls = {positive:'wr-insight-ok', info:'wr-insight-info', warning:'wr-insight-warn', danger:'wr-insight-danger'};
+        document.getElementById('wrInsights').innerHTML = d.insights.map(i =>
+            `<div class="wr-insight ${insightCls[i.type]||'wr-insight-info'}">
+                <i class="bi ${i.icon} wr-insight-icon"></i>
+                <span>${i.text}</span>
+            </div>`
+        ).join('');
+    }
+})();
+</script>
 
 {% endblock %}

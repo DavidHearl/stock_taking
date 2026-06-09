@@ -43,6 +43,7 @@
                 <!-- Bulk action bar (visible when rows are checked) -->
                 <div class="ts-bulk-bar" id="ts-bulk-bar">
                     <span><span class="ts-bulk-count" id="ts-bulk-count">0</span> selected</span>
+                    {% if is_role_admin or user_role == 'director' %}
                     <div class="ts-linked-row">
                         <div class="ts-form-field">
                             <label>Rate (£/hr)</label>
@@ -59,6 +60,7 @@
                             <input type="number" id="ts-bulk-total" class="form-input ts-bulk-field" step="0.01" min="0" placeholder="Total" oninput="tsBulkCalcRate()">
                         </div>
                     </div>
+                    {% endif %}
                     <button class="btn btn-primary btn-sm" onclick="tsBulkApply()"><i class="bi bi-floppy"></i> Apply to selected</button>
                     <button class="btn btn-secondary btn-sm" onclick="tsBulkClear()">Clear selection</button>
                 </div>
@@ -68,7 +70,7 @@
                             <tr>
                                 <th class="ts-th-cb"><input type="checkbox" id="ts-select-all" onchange="tsToggleAll(this)"></th>
                                 <th>Date</th><th>Order</th><th>Type</th><th>Worker</th>
-                                <th>Hours</th><th>Rate</th><th>Total</th><th>Description</th>
+                                <th>Hours</th>{% if is_role_admin or user_role == 'director' %}<th>Rate</th><th>Total</th>{% endif %}<th>Description</th>
                                 <th class="ts-th-actions"></th>
                             </tr>
                         </thead>
@@ -257,6 +259,7 @@
             </div>
         </div>
         <!-- Linked rate × hours = total row -->
+        {% if is_role_admin or user_role == 'director' %}
         <div class="ts-linked-row">
             <div class="ts-form-field">
                 <label>Rate (£/hr)</label>
@@ -273,6 +276,7 @@
                 <input type="number" id="ts-edit-total" class="form-input" step="0.01" min="0" oninput="tsEditCalcRate()" placeholder="auto">
             </div>
         </div>
+        {% endif %}
         <div class="ts-form-field">
             <label>Description</label>
             <textarea id="ts-edit-desc" class="form-input" rows="2"></textarea>
@@ -465,6 +469,8 @@ let _tsTotal   = 0;
 let _tsPages   = 1;
 let _tsSearchTimer = null;
 let _tsCurrentRows = [];   // cache of current page rows for edit modal
+const TS_CAN_VIEW_RATES = {% if is_role_admin or user_role == 'director' %}true{% else %}false{% endif %};
+const TS_COLSPAN = TS_CAN_VIEW_RATES ? 10 : 8;
 
 function tsSetType(type, btn) {
     document.querySelectorAll('#ts-type-tabs .ts-type-tab').forEach(b => b.classList.remove('active'));
@@ -492,7 +498,7 @@ function tsChangePage(delta) {
 
 function tsLoad() {
     const tbody = document.getElementById('ts-tbody');
-    tbody.innerHTML = '<tr><td colspan="10" class="ts-table-msg">Loading\u2026</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="${TS_COLSPAN}" class="ts-table-msg">Loading\u2026</td></tr>`;
     const params = new URLSearchParams({ page: _tsPage, type: _tsType, q: _tsSearch });
     fetch(`/api/timesheets/?${params}`)
         .then(r => r.json())
@@ -505,14 +511,14 @@ function tsLoad() {
             tsUpdateBulkBar();
         })
         .catch(() => {
-            tbody.innerHTML = '<tr><td colspan="10" class="ts-table-msg ts-table-msg-err">Failed to load timesheets.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="${TS_COLSPAN}" class="ts-table-msg ts-table-msg-err">Failed to load timesheets.</td></tr>`;
         });
 }
 
 function tsRenderRows(rows) {
     const tbody = document.getElementById('ts-tbody');
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="ts-table-msg">No timesheets found.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${TS_COLSPAN}" class="ts-table-msg">No timesheets found.</td></tr>`;
         return;
     }
     tbody.innerHTML = rows.map(ts => {
@@ -533,8 +539,7 @@ function tsRenderRows(rows) {
             <td>${typeBadge}</td>
             <td>${escHtml(ts.worker_name)}</td>
             <td>${hoursCell}</td>
-            <td>${rateCell}</td>
-            <td><strong>${totalCell}</strong></td>
+            ${TS_CAN_VIEW_RATES ? `<td>${rateCell}</td><td><strong>${totalCell}</strong></td>` : ''}
             <td title="${escHtml(ts.display_description || '')}">${descCell}</td>
             <td class="ts-td-actions">
                 <button class="btn-inline-edit"  onclick="openTsEdit(${ts.id})" title="Edit"><i class="bi bi-pencil"></i></button>
@@ -619,8 +624,10 @@ function tsBulkCalcRate() {
 function tsBulkApply() {
     const ids   = tsSelectedIds();
     if (!ids.length) return;
-    const rate  = document.getElementById('ts-bulk-rate').value  || null;
-    const hours = document.getElementById('ts-bulk-hours').value || null;
+    const rateEl  = document.getElementById('ts-bulk-rate');
+    const hoursEl = document.getElementById('ts-bulk-hours');
+    const rate  = rateEl  ? (rateEl.value  || null) : null;
+    const hours = hoursEl ? (hoursEl.value || null) : null;
     const payload = {};
     if (rate)  payload.hourly_rate = rate;
     if (hours) payload.hours       = hours;
@@ -644,9 +651,9 @@ function openTsEdit(id) {
     if (!ts) return;
     _tsEditId = id;
     document.getElementById('ts-edit-date').value  = ts.date;
-    document.getElementById('ts-edit-hours').value = ts.hours || '';
-    document.getElementById('ts-edit-rate').value  = ts.hourly_rate || '';
-    document.getElementById('ts-edit-total').value = ts.total_cost ? parseFloat(ts.total_cost).toFixed(2) : '';
+    const _hEl = document.getElementById('ts-edit-hours'); if (_hEl) _hEl.value = ts.hours || '';
+    const _rEl = document.getElementById('ts-edit-rate');  if (_rEl) _rEl.value = ts.hourly_rate || '';
+    const _tEl = document.getElementById('ts-edit-total'); if (_tEl) _tEl.value = ts.total_cost ? parseFloat(ts.total_cost).toFixed(2) : '';
     document.getElementById('ts-edit-desc').value  = ts.display_description || '';
     const sel = document.getElementById('ts-edit-worker');
     const workerVal = ts.fitter_id ? `fitter-${ts.fitter_id}` : ts.factory_worker_id ? `factory-${ts.factory_worker_id}` : '';
@@ -680,8 +687,8 @@ function saveTsEdit() {
     const selVal = document.getElementById('ts-edit-worker').value;
     const payload = {
         date:        document.getElementById('ts-edit-date').value,
-        hours:       document.getElementById('ts-edit-hours').value || null,
-        hourly_rate: document.getElementById('ts-edit-rate').value  || null,
+        hours:       (document.getElementById('ts-edit-hours') || {}).value || null,
+        hourly_rate: (document.getElementById('ts-edit-rate') || {}).value || null,
         description: document.getElementById('ts-edit-desc').value,
     };
     if (selVal.startsWith('fitter-'))  payload.fitter_id          = selVal.replace('fitter-', '');

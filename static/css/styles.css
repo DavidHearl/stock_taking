@@ -788,6 +788,20 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
     flex: 1;
 }
 
+.page-content {
+    display: flex;
+    flex-direction: column;
+    margin: 0 auto;
+    max-width: 1620px;
+    padding: 16px;
+    padding-top: 0;
+    gap: 24px;
+}
+
+.page-content.card {
+    border-radius: 16px;
+}
+
 .page-title {
     font-size: 1.1rem;
     font-weight: 600;
@@ -1242,15 +1256,20 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
 }
 
 /* ===== Kebab Menu ===== */
-/* Reusable 3-dot contextual menu. Structure:
+/* Single, site-wide 3-dot contextual menu. Structure:
    <div class="kebab-menu">
-     <button class="kebab-trigger">⋮</button>
+     <button class="kebab-trigger" onclick="toggleKebab(this, event)">
+       <i class="bi bi-three-dots-vertical"></i>
+     </button>
      <div class="kebab-dropdown">
-       <button class="kebab-item">…</button>
+       <a class="kebab-item">…</a>
+       <button class="kebab-item danger">…</button>
+       <div class="kebab-divider"></div>
+       <span class="kebab-label">Section</span>
      </div>
    </div>
-   Toggle open/close: this.closest('.kebab-menu').classList.toggle('open')
-   Close on outside click: add a document listener filtering on .kebab-menu */
+   The global toggleKebab()/closeAllKebabs() helpers in base.html handle open/close
+   and position the dropdown (position:fixed) so it escapes any clipping container. */
 .kebab-menu {
     position: relative;
     display: inline-flex;
@@ -1261,35 +1280,35 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     padding: 0;
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     cursor: pointer;
     font-size: 1rem;
-    transition: color 0.15s;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
 .kebab-trigger:hover,
 .kebab-menu.open .kebab-trigger {
+    background: var(--bg-hover);
     color: var(--text-primary);
-    background: transparent;
+    border-color: var(--border-color);
 }
 
 .kebab-dropdown {
     display: none;
-    position: absolute;
-    right: 0;
-    top: calc(100% + 4px);
+    position: fixed;
+    z-index: 9000;
+    min-width: 210px;
+    padding: 6px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-md);
-    z-index: 9000;
-    min-width: 190px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
     flex-direction: column;
     /* overflow visible so nested popovers (e.g. edging diagram) can escape */
     overflow: visible;
@@ -1303,61 +1322,67 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
 .kebab-item {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 10px 14px;
-    font-size: 0.82rem;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 0.85rem;
     font-weight: 500;
     color: var(--text-primary);
-    background: transparent;
+    background: none;
     border: none;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     text-decoration: none;
-    white-space: nowrap;
-    width: 100%;
     text-align: left;
+    white-space: nowrap;
     transition: background 0.12s;
 }
 
 .kebab-item:hover {
-    background: var(--bg-tertiary);
+    background: var(--bg-hover);
     color: var(--text-primary);
 }
 
 .kebab-item i {
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-    width: 14px;
+    font-size: 1rem;
+    color: var(--success-color);
+    width: 16px;
     text-align: center;
     flex-shrink: 0;
 }
 
+/* Muted (e.g. "add missing data") variant */
+.kebab-item.muted i,
+.kebab-item-muted i {
+    color: var(--text-muted);
+}
+
+/* Danger variant */
+.kebab-item.danger,
 .kebab-item-danger {
     color: var(--danger-color);
 }
 
+.kebab-item.danger i,
 .kebab-item-danger i {
     color: var(--danger-color);
 }
 
+.kebab-item.danger:hover,
 .kebab-item-danger:hover {
     background: var(--danger-subtle);
     color: var(--danger-color);
 }
 
-/* .danger modifier alias for inline class usage */
-.kebab-item.danger {
-    color: var(--danger-color);
+.kebab-item.disabled,
+.kebab-item-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
-.kebab-item.danger i {
-    color: var(--danger-color);
-}
-
-.kebab-item.danger:hover {
-    background: var(--danger-subtle);
-    color: var(--danger-color);
-}
-
+/* Divider + section label inside the dropdown */
+.kebab-divider,
 .kebab-separator {
     height: 1px;
     background: var(--border-color);
@@ -1368,6 +1393,17 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
     border: none;
     border-top: 1px solid var(--border-color);
     margin: 4px 0;
+}
+
+.kebab-label,
+.kebab-dropdown-header {
+    display: block;
+    padding: 6px 10px 2px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
 }
 
 .kebab-item.active {
@@ -1384,6 +1420,29 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
 
 .kebab-item.active .kebab-check-icon {
     opacity: 1;
+}
+
+/* Toggle item variant: label row with a checkbox/control on the right */
+.kebab-item-toggle {
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.kebab-item-toggle > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.kebab-item-toggle i {
+    color: inherit;
+}
+
+.kebab-item-toggle input[type="checkbox"] {
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--success-color);
 }
 
 /* ===== Buttons ===== */
@@ -2524,6 +2583,23 @@ dialog::backdrop {
     gap: var(--sp-6);
 }
 
+/* ===== Global Utilities ===== */
+.icon-warning {
+    color: #f59e0b;
+}
+
+.required-star {
+    color: var(--danger-color);
+}
+
+.modal-body .form-group {
+    margin-bottom: var(--sp-4);
+}
+
+.modal-body .form-check {
+    margin-bottom: var(--sp-2);
+}
+
 /* ===== Empty State ===== */
 .empty-state {
     text-align: center;
@@ -2964,31 +3040,47 @@ dialog::backdrop {
 
 .detail-tab-bar {
     display: flex;
-    margin-top: 8px;
     gap: 4px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 2px solid var(--border-color);
 }
 
 .detail-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    padding: var(--sp-2) var(--sp-4);
+    padding: 12px 20px;
     font-size: 0.88rem;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-secondary);
     cursor: pointer;
-    margin-bottom: -1px;
-    transition: color 0.2s, border-color 0.2s;
+    margin-bottom: -2px;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    white-space: nowrap;
+    transition: color 0.2s, border-color 0.2s, background-color 0.2s;
 }
 
 .detail-tab.active {
     color: var(--primary-color);
     border-bottom-color: var(--primary-color);
+    background-color: rgba(90, 157, 230, 0.06);
 }
 
 .detail-tab:hover:not(.active) {
     color: var(--text-primary);
+    background-color: var(--bg-hover);
+}
+
+.detail-tab .tab-count {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.detail-tab.active .tab-count {
+    background: rgba(var(--primary-rgb, 33, 150, 243), 0.15);
+    color: var(--primary-color);
 }
 
 .detail-tab-panel {
@@ -2997,7 +3089,7 @@ dialog::backdrop {
 
 .detail-tab-panel.active {
     display: block;
-    padding-top: var(--sp-4);
+    padding-top: 16px;
 }
 
 .detail-tab-empty {

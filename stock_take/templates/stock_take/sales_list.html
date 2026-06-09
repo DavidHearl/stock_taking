@@ -41,57 +41,6 @@
     border: 1px solid var(--border-color);
     font-weight: 500;
 }
-/* Kebab menu */
-.sales-kebab-wrap {
-    position: relative;
-    flex-shrink: 0;
-}
-.sales-kebab-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 1rem;
-    transition: background 0.12s, color 0.12s;
-}
-.sales-kebab-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-.sales-kebab-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 500;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
-    min-width: 200px;
-}
-.sales-kebab-item {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    width: 100%;
-    padding: 8px var(--sp-3);
-    background: none;
-    border: none;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.12s;
-}
-.sales-kebab-item:hover {
-    background: var(--bg-hover);
-}
 /* Designer totals modal */
 .designer-totals-dialog {
     border: 1px solid var(--border-color);
@@ -264,6 +213,9 @@
     color: #10b981;
     border: 1px solid rgba(16, 185, 129, 0.35);
 }
+/* Per-row actions kebab */
+.th-actions { width: 44px; }
+.row-actions-cell { text-align: center; width: 44px; }
 </style>
 {% endblock %}
 
@@ -312,12 +264,12 @@
 
     {% if is_david_hearl %}
     <div class="tab-actions">
-        <div class="sales-kebab-wrap">
-            <button class="sales-kebab-btn" id="sales-kebab-btn" onclick="toggleSalesKebab(event)" title="Options">
+        <div class="kebab-menu">
+            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Options">
                 <i class="bi bi-three-dots-vertical"></i>
             </button>
-            <div class="sales-kebab-menu" id="sales-kebab-menu" style="display:none;">
-                <button class="sales-kebab-item" onclick="openDesignerTotals(); closeSalesKebab();">
+            <div class="kebab-dropdown">
+                <button class="kebab-item" onclick="openDesignerTotals();">
                     <i class="bi bi-bar-chart"></i> Sales by Designer
                 </button>
             </div>
@@ -335,17 +287,16 @@
                     <th>Customer</th>
                     <th>Assigned To</th>
                     <th>Value</th>
-                    <th>Date</th>
                     <th>Fit Date</th>
                     <th>Location</th>
                     <th>Status</th>
-                    <th>Anthill</th>
+                    <th class="th-actions"></th>
                 </tr>
             </thead>
             <tbody id="sales-tbody">
                 {% if pfp_sales %}
                 <tr class="pfp-toggle-row" onclick="togglePfpSales()">
-                    <td colspan="9" class="pfp-toggle-cell">
+                    <td colspan="8" class="pfp-toggle-cell">
                         <i class="bi bi-chevron-right pfp-toggle-chevron" id="pfp-chevron"></i>
                         <span class="badge-pfp">PFP</span>
                         <span class="pfp-toggle-label">Pending Fit Planning &middot; {{ pfp_sales|length }} sale{{ pfp_sales|length|pluralize }} with no fit date</span>
@@ -468,7 +419,7 @@ function insertSalesTodayDivider() {
             const divider = document.createElement('tr');
             divider.id = 'sales-today-divider';
             divider.className = 'today-divider-row';
-            divider.innerHTML = `<td colspan="9" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
+            divider.innerHTML = `<td colspan="8" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
             row.parentNode.insertBefore(divider, row);
             break;
         }
@@ -494,23 +445,10 @@ if (searchInput) {
 {% if is_david_hearl %}
 const DESIGNER_TOTALS_URL = "{% url 'sales_by_designer_api' %}";
 
-function toggleSalesKebab(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('sales-kebab-menu');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-}
-function closeSalesKebab() {
-    const menu = document.getElementById('sales-kebab-menu');
-    if (menu) menu.style.display = 'none';
-}
 function openDesignerTotals() {
     document.getElementById('designerTotalsDialog').showModal();
     loadDesignerTotals();
 }
-document.addEventListener('click', function(e) {
-    const btn = document.getElementById('sales-kebab-btn');
-    if (btn && !btn.contains(e.target)) closeSalesKebab();
-});
 
 function fmtCurrency(n) {
     return '£' + Math.round(n).toLocaleString('en-GB');

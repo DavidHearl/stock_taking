@@ -857,6 +857,10 @@ class Accessory(models.Model):
     @property
     def allocated_quantity(self):
         """Get quantity allocated to other non-completed jobs (excluding already-allocated items)"""
+        # Reuse a batch-precomputed value when one has been attached to the instance
+        # (set by the order detail view to avoid a per-row aggregate query).
+        if hasattr(self, '_allocated_quantity_cache'):
+            return self._allocated_quantity_cache
         from django.db.models import Sum
         # Get all accessories with same SKU, excluding current order, completed jobs,
         # and items that have already been allocated (stock already deducted)
@@ -872,6 +876,10 @@ class Accessory(models.Model):
     @property
     def incoming_quantity(self):
         """Get quantity on order (Approved POs not yet received) for this SKU"""
+        # Reuse a batch-precomputed value when one has been attached to the instance
+        # (set by the order detail view to avoid a per-row aggregate query).
+        if hasattr(self, '_incoming_quantity_cache'):
+            return self._incoming_quantity_cache
         from django.db.models import Sum, F, Value
         from django.db.models.functions import Coalesce
         incoming = PurchaseOrderProduct.objects.filter(

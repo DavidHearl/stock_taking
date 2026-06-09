@@ -104,7 +104,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 
         <!-- 3-dot settings menu -->
         <div class="kebab-menu">
-            <button class="kebab-trigger" id="kebab-btn" onclick="toggleKebab(event)" title="Options">
+            <button class="kebab-trigger" id="kebab-btn" onclick="toggleKebab(this, event)" title="Options">
                 <i class="bi bi-three-dots-vertical"></i>
             </button>
             <div class="kebab-dropdown" id="kebab-menu">
@@ -1070,15 +1070,9 @@ function formatBytes(bytes) {
 }
 
 // ── Kebab menu ────────────────────────────────────────────────────────────────
-function toggleKebab(e) {
-    e.stopPropagation();
-    document.getElementById('kebab-menu').classList.toggle('open');
-}
-function closeKebab() {
-    document.getElementById('kebab-menu').classList.remove('open');
-}
+// Toggling/positioning/closing handled by the global controller in base.html.
+function closeKebab() { closeAllKebabs(); }
 document.addEventListener('click', () => {
-    closeKebab();
     document.querySelectorAll('.apay-att-overflow-menu').forEach(m => m.style.display = 'none');
 });
 
@@ -1516,46 +1510,9 @@ function removeSupplierRule(id) {
 }
 
 // ── Per-row kebab menu ────────────────────────────────────────────────────────
-function toggleRowKebab(btn, e) {
-    if (e) e.stopPropagation();
-    const menu = btn.nextElementSibling;
-    const isOpen = menu.classList.contains('open');
-    // Close all open menus and clear any fixed positioning
-    document.querySelectorAll('.kebab-dropdown.open').forEach(m => {
-        m.classList.remove('open');
-        m.style.top = '';
-        m.style.right = '';
-        m.style.left = '';
-    });
-    if (!isOpen) {
-        // Position with fixed coords so the menu escapes the overflow:auto scroll container
-        const rect = btn.getBoundingClientRect();
-        menu.style.position = 'fixed';
-        menu.style.top = (rect.bottom + 4) + 'px';
-        menu.style.left = '';
-        menu.style.right = (window.innerWidth - rect.right) + 'px';
-        menu.classList.add('open');
-    }
-}
-
-function closeRowKebab(itemBtn) {
-    const menu = itemBtn.closest('.kebab-dropdown');
-    if (menu) {
-        menu.classList.remove('open');
-        menu.style.top = '';
-        menu.style.right = '';
-        menu.style.left = '';
-    }
-}
-
-document.addEventListener('click', function () {
-    document.querySelectorAll('.kebab-dropdown.open').forEach(m => {
-        m.classList.remove('open');
-        m.style.top = '';
-        m.style.right = '';
-        m.style.left = '';
-    });
-});
+// Delegates to the global kebab controller (base.html).
+function toggleRowKebab(btn, e) { toggleKebab(btn, e); }
+function closeRowKebab() { closeAllKebabs(); }
 
 function rescanEmailPO(emailId) {
     const cell = document.getElementById('po-cell-' + emailId);
