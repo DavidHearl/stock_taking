@@ -142,7 +142,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 <th class="apay-th-po">PO</th>
                 <th class="apay-th-date">Received</th>
                 <th class="apay-th-att">Attachments</th>
-                <th class="apay-th-status">Status</th>
+                <th class="apay-th-amount">Amount</th>
                 <th class="apay-th-action">Action</th>
             </tr>
         </thead>
@@ -159,7 +159,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 </td>
                 <td class="apay-from-cell">
                     <div class="apay-from-email" title="{{ email.sender_email }}">{% if email.is_priority and not email.is_processed %}<i class="bi bi-lightning-fill apay-priority-badge" title="Priority — process immediately"></i>{% endif %}{{ email.sender_email|default:"(unknown)" }}</div>
-                    <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}{% if email.extracted_total %}<span class="apay-extracted-total" id="extracted-total-{{ email.id }}">£{{ email.extracted_total|floatformat:2 }}</span>{% elif not email.is_processed and email.has_pdf %}<span class="apay-extracted-total" id="extracted-total-{{ email.id }}" data-total-id="{{ email.id }}" style="display:none"></span>{% else %}<span class="apay-extracted-total" id="extracted-total-{{ email.id }}" style="display:none"></span>{% endif %}</div>
+                    <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}</div>
                 </td>
                 <td class="apay-td-center" id="po-cell-{{ email.id }}">
                     {% if email.matched_po %}
@@ -169,9 +169,9 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                        target="_blank">{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}</a>
                     {% elif email.po_match %}
                     <a href="{% url 'purchase_order_detail' email.po_match.workguru_id %}"
-                       class="apay-po-badge {% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% elif email.po_match.status == 'Draft' %}apay-po-badge--draft{% else %}apay-po-badge--approved{% endif %}"
-                       title="{{ email.po_match.supplier_name }} &ndash; {{ email.po_match.status }}"
-                       target="_blank">{{ email.po_match.display_number|default:email.po_match.workguru_id }}</a>
+                       class="apay-po-badge {% if email.po_match_amount %}apay-po-badge--guess {% endif %}{% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% elif email.po_match.status == 'Draft' %}apay-po-badge--draft{% else %}apay-po-badge--approved{% endif %}"
+                       title="{{ email.po_match.supplier_name }} &ndash; {{ email.po_match.status }}{% if email.po_match_fuzzy %} &ndash; approx. amount match (carriage?){% elif email.po_match_amount %} &ndash; matched on amount{% endif %}"
+                       target="_blank">{% if email.po_match_fuzzy %}<i class="bi bi-question-circle apay-po-guess-icon"></i>{% elif email.po_match_amount %}<i class="bi bi-magic apay-po-guess-icon"></i>{% endif %}{{ email.po_match.display_number|default:email.po_match.workguru_id }}</a>
                     {% elif not email.is_processed and email.has_pdf %}
                     <span class="apay-po-scan-pending" data-scan-id="{{ email.id }}">
                         <span class="apay-po-scan-dot"></span>
@@ -219,13 +219,14 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                     <span class="apay-att-none"><i class="bi bi-dash"></i></span>
                     {% endif %}
                 </td>
-                <td class="apay-td-center">
-                    {% if email.is_processed %}
-                    <span class="apay-status processed" title="{% if email.processed_by %}Processed by {{ email.processed_by.get_full_name|default:email.processed_by.username }}{% else %}Processed{% endif %}"><i class="bi bi-check-circle-fill"></i></span>
-                    {% elif email.is_ignored %}
-                    <span class="apay-status ignored" title="Ignored"><i class="bi bi-slash-circle"></i></span>
+                <td class="apay-td-center apay-amount-cell">
+                    {% if email.extracted_total %}
+                    <span class="apay-extracted-total" id="extracted-total-{{ email.id }}">£{{ email.extracted_total|floatformat:2 }}</span>
+                    {% elif not email.is_processed and email.has_pdf %}
+                    <span class="apay-extracted-total" id="extracted-total-{{ email.id }}" data-total-id="{{ email.id }}" style="display:none"></span>
                     {% else %}
-                    <span class="apay-status unprocessed" title="Unprocessed"><i class="bi bi-circle"></i></span>
+                    <span class="apay-extracted-total" id="extracted-total-{{ email.id }}" style="display:none"></span>
+                    <span class="apay-no-match">&ndash;</span>
                     {% endif %}
                 </td>
                 <td>
@@ -413,7 +414,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
         <table class="apay-po-table">
             <tbody>
                 {% for po in approved_unreceived_pos %}
-                <tr class="apay-po-tr" data-po-supplier="{{ po.supplier_name|escapejs }}">
+                <tr class="apay-po-tr" data-po-supplier="{{ po.supplier_name }}">
                     <td class="apay-po-td-main">
                         <div class="apay-po-row-top">
                             <a href="{% url 'purchase_order_detail' po.workguru_id %}" target="_blank" class="apay-po-row-num">{{ po.display_number|default:po.workguru_id }}</a>
@@ -1132,9 +1133,11 @@ function submitCreateInvoice() {
         const desc     = row.querySelector('.pinv-line-desc').value.trim();
         const qty      = parseFloat(row.querySelector('.pinv-line-qty')?.value) || 1;
         const rate     = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        const totalRaw = parseFloat(row.querySelector('.pinv-line-total')?.value);
+        const total    = Number.isFinite(totalRaw) ? totalRaw : null;
         const ordInp   = row.querySelector('.pinv-line-order-input');
         const orderId  = ordInp ? (ordInp.dataset.orderId || null) : null;
-        if (desc) lineItems.push({ description: desc, quantity: qty, rate, order_id: orderId, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1', is_surcharge: row.dataset.isSurcharge === '1' });
+        if (desc) lineItems.push({ description: desc, quantity: qty, rate, line_total: total, order_id: orderId, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1', is_surcharge: row.dataset.isSurcharge === '1' });
     });
 
     const fd = new FormData();
@@ -1162,6 +1165,7 @@ function submitCreateInvoice() {
         fd.append(`line_desc_${i}`, li.description);
         fd.append(`line_qty_${i}`, li.quantity);
         fd.append(`line_rate_${i}`, li.rate);
+        if (li.line_total !== null && li.line_total !== undefined) fd.append(`line_total_${i}`, li.line_total);
         fd.append(`line_order_${i}`, li.order_id || '');
         if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);
     });
@@ -1665,6 +1669,34 @@ function removeSupplierRule(id) {
 function toggleRowKebab(btn, e) { toggleKebab(btn, e); }
 function closeRowKebab() { closeAllKebabs(); }
 
+// ── Shared PO badge renderer ──────────────────────────────────────────────────
+// Renders a PO badge into a cell, mirroring the server-side template so an
+// amount-based "educated guess" looks identical whether it appears on page load
+// or after a (re)scan: dashed border + a magic/question icon and an explanatory
+// tooltip. A confirmed match (explicit reference) renders as a solid badge.
+function apayRenderPoBadge(cell, po, opts) {
+    if (!cell || !po) return;
+    opts = opts || {};
+    const amountMatch = !!opts.amountMatch;
+    const amountFuzzy = !!opts.amountFuzzy;
+    const statusCls = (po.status === 'Received' || po.status === 'Partially Received')
+        ? 'apay-po-badge--received'
+        : po.status === 'Draft' ? 'apay-po-badge--draft' : 'apay-po-badge--approved';
+    const guessCls = amountMatch ? 'apay-po-badge--guess ' : '';
+    const label = po.display_number || po.workguru_id;
+    let amountNote = '';
+    if (amountFuzzy) amountNote = ' \u2013 approx. amount match (carriage?)';
+    else if (amountMatch) amountNote = ' \u2013 matched on amount';
+    let icon = '';
+    if (amountFuzzy) icon = '<i class="bi bi-question-circle apay-po-guess-icon"></i>';
+    else if (amountMatch) icon = '<i class="bi bi-magic apay-po-guess-icon"></i>';
+    const title = `${po.supplier_name || ''}${po.supplier_name ? ' \u2013 ' : ''}${po.status}${amountNote}`.trim();
+    cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
+        class="apay-po-badge ${guessCls}${statusCls}"
+        title="${title.replace(/"/g, '&quot;')}"
+        target="_blank">${icon}${label}</a>`;
+}
+
 function rescanEmailPO(emailId) {
     const cell = document.getElementById('po-cell-' + emailId);
     if (cell) {
@@ -1685,14 +1717,10 @@ function rescanEmailPO(emailId) {
         if (!cell) return;
         if (status === 200 && data.success && data.po) {
             const po = data.po;
-            const cls = (po.status === 'Received' || po.status === 'Partially Received')
-                ? 'apay-po-badge--received'
-                : po.status === 'Draft' ? 'apay-po-badge--draft' : 'apay-po-badge--approved';
-            const supplier = po.supplier_name ? ` \u2013 ${po.supplier_name}` : '';
-            cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
-                class="apay-po-badge ${cls}"
-                title="${po.status}${supplier}"
-                target="_blank">${po.display_number || po.workguru_id}</a>`;
+            apayRenderPoBadge(cell, po, {
+                amountMatch: !!data.amount_match,
+                amountFuzzy: !!data.amount_fuzzy,
+            });
             const createBtn = document.querySelector(
                 `button.apay-icon-btn.create[data-email-id="${emailId}"]`
             );
@@ -1839,14 +1867,10 @@ function confirmSplitEmail() {
         .then(data => {
             const cell = document.getElementById('po-cell-' + emailId);
             if (cell && data.success && data.po) {
-                const po = data.po;
-                const cls = poStatusClass(po.status);
-                const label = po.display_number || po.workguru_id;
-                const supplier = po.supplier_name ? ` \u2013 ${po.supplier_name}` : '';
-                cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
-                    class="apay-po-badge ${cls}"
-                    title="${po.status}${supplier}"
-                    target="_blank">${label}</a>`;
+                apayRenderPoBadge(cell, data.po, {
+                    amountMatch: !!data.amount_match,
+                    amountFuzzy: !!data.amount_fuzzy,
+                });
             } else if (cell) {
                 const spinner = cell.querySelector('.apay-po-scan-pending');
                 if (spinner) spinner.remove();

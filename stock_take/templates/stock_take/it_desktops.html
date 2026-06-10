@@ -15,11 +15,306 @@
     <div class="it-header">
         <div class="it-header-left">
             <h1 class="it-title"><i class="bi bi-display"></i> Desktops</h1>
+            <p class="it-subtitle">Build and compare desktop configurations by component.</p>
+        </div>
+        <div class="it-header-right">
+            <button class="btn btn-success" id="addMachineBtn">
+                <i class="bi bi-plus-lg"></i> New Machine
+            </button>
         </div>
     </div>
-    <div class="it-placeholder">
-        <i class="bi bi-display"></i>
-        <p>Desktop asset register coming soon.</p>
+
+    <div id="desktopMachineEmpty" class="it-placeholder desktop-spec-empty">
+        <i class="bi bi-pc-display"></i>
+        <p>No machine specs yet. Click <strong>New Machine</strong> to start.</p>
+    </div>
+
+    <div id="desktopMachineGrid" class="desktop-machine-grid"></div>
+
+    <div class="modal-overlay" id="desktopSpecModal">
+        <div class="modal-dialog desktop-spec-modal">
+            <div class="modal-header">
+                <h3 id="desktopSpecTitle"><i class="bi bi-pc-display-horizontal"></i> New Machine Spec</h3>
+                <button class="modal-close" id="closeDesktopSpecModal">&times;</button>
+            </div>
+            <div class="modal-body device-form-body">
+                <div class="device-form-section">
+                    <div class="form-group form-group-grow">
+                        <label for="machineNameInput">Machine Name</label>
+                        <input type="text" id="machineNameInput" class="form-control" placeholder="Office CAD Build / Sales PC A...">
+                    </div>
+                </div>
+
+                <div class="device-form-section">
+                    <div class="desktop-spec-toolbar">
+                        <div class="device-form-section-header" style="margin-bottom:0;">
+                            <i class="bi bi-motherboard"></i> Components
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="addComponentRowBtn">
+                            <i class="bi bi-plus"></i> Add Component
+                        </button>
+                    </div>
+
+                    <div class="it-table-wrapper">
+                        <table class="it-table desktop-spec-table">
+                            <thead>
+                                <tr>
+                                    <th>Component Type</th>
+                                    <th>Name</th>
+                                    <th>Store</th>
+                                    <th>Price (&pound;)</th>
+                                    <th class="center"><i class="bi bi-link-45deg"></i></th>
+                                    <th class="center"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="componentRowsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-cancel" id="cancelDesktopSpecModal">Cancel</button>
+                <button type="button" class="btn btn-success" id="saveDesktopSpecBtn">
+                    <i class="bi bi-check-lg"></i> Save Machine
+                </button>
+            </div>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+
+    var STORAGE_KEY = 'atlasDesktopMachineConfigs';
+    var machines = [];
+    var editingIndex = null;
+
+    var machineGrid = document.getElementById('desktopMachineGrid');
+    var emptyState = document.getElementById('desktopMachineEmpty');
+    var modal = document.getElementById('desktopSpecModal');
+    var modalTitle = document.getElementById('desktopSpecTitle');
+    var machineNameInput = document.getElementById('machineNameInput');
+    var componentRowsBody = document.getElementById('componentRowsBody');
+
+    function openModal() {
+        modal.classList.add('active');
+    }
+
+    function closeModal() {
+        modal.classList.remove('active');
+    }
+
+    function safeNumber(value) {
+        var n = parseFloat(value);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function formatCurrency(value) {
+        return safeNumber(value).toFixed(2);
+    }
+
+    function createComponentRow(component) {
+        var tr = document.createElement('tr');
+        tr.className = 'desktop-component-row';
+        tr.innerHTML = '' +
+            '<td><input type="text" class="form-control component-type" placeholder="CPU" value="' + (component && component.type ? component.type : '') + '"></td>' +
+            '<td><input type="text" class="form-control component-name" placeholder="Ryzen 7 7800X3D" value="' + (component && component.name ? component.name : '') + '"></td>' +
+            '<td><input type="text" class="form-control component-source" placeholder="Amazon" value="' + (component && component.source ? component.source : '') + '"></td>' +
+            '<td><input type="number" min="0" step="0.01" class="form-control component-price" placeholder="0.00" value="' + (component && component.price ? component.price : '') + '"></td>' +
+            '<td><input type="url" class="form-control component-link" placeholder="https://" value="' + (component && component.link ? component.link : '') + '"></td>' +
+            '<td class="actions-cell"><button type="button" class="btn-icon remove-component-btn" title="Remove component"><i class="bi bi-trash"></i></button></td>';
+        componentRowsBody.appendChild(tr);
+    }
+
+    function collectRows() {
+        var rows = [];
+        componentRowsBody.querySelectorAll('.desktop-component-row').forEach(function (row) {
+            var type = row.querySelector('.component-type').value.trim();
+            var name = row.querySelector('.component-name').value.trim();
+            var source = row.querySelector('.component-source').value.trim();
+            var price = row.querySelector('.component-price').value.trim();
+            var link = row.querySelector('.component-link').value.trim();
+
+            if (type || name || source || price || link) {
+                rows.push({
+                    type: type,
+                    name: name,
+                    source: source,
+                    price: formatCurrency(price),
+                    link: link
+                });
+            }
+        });
+        return rows;
+    }
+
+    function saveMachines() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(machines));
+    }
+
+    function loadMachines() {
+        try {
+            var raw = localStorage.getItem(STORAGE_KEY);
+            machines = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(machines)) machines = [];
+        } catch (e) {
+            machines = [];
+        }
+    }
+
+    function machineTotal(components) {
+        return components.reduce(function (acc, component) {
+            return acc + safeNumber(component.price);
+        }, 0);
+    }
+
+    function renderMachines() {
+        machineGrid.innerHTML = '';
+        emptyState.style.display = machines.length ? 'none' : '';
+
+        machines.forEach(function (machine, index) {
+            var wrap = document.createElement('div');
+            wrap.className = 'desktop-machine-card';
+
+            var rows = machine.components.map(function (component) {
+                var linkCell = component.link
+                    ? '<a class="desktop-component-link" href="' + component.link + '" target="_blank" rel="noopener" title="Open component link"><i class="bi bi-link-45deg"></i></a>'
+                    : '<span class="desktop-component-link desktop-component-link-empty" title="No link"><i class="bi bi-link-45deg"></i></span>';
+
+                return '' +
+                    '<tr>' +
+                        '<td>' + (component.type || '&mdash;') + '</td>' +
+                        '<td>' + (component.name || '&mdash;') + '</td>' +
+                        '<td>' + (component.source || '&mdash;') + '</td>' +
+                        '<td>&pound;' + formatCurrency(component.price) + '</td>' +
+                        '<td class="center">' + linkCell + '</td>' +
+                    '</tr>';
+            }).join('');
+
+            wrap.innerHTML = '' +
+                '<div class="desktop-machine-card-top">' +
+                    '<div>' +
+                        '<h3 class="desktop-machine-title">' + machine.name + '</h3>' +
+                        '<p class="desktop-machine-meta">' + machine.components.length + ' components</p>' +
+                    '</div>' +
+                    '<div class="desktop-machine-actions">' +
+                        '<button type="button" class="btn-icon edit-machine-btn" data-index="' + index + '" title="Edit machine"><i class="bi bi-pencil"></i></button>' +
+                        '<button type="button" class="btn-icon delete-machine-btn" data-index="' + index + '" title="Delete machine"><i class="bi bi-trash"></i></button>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="it-table-wrapper">' +
+                    '<table class="it-table desktop-spec-view-table">' +
+                        '<thead>' +
+                            '<tr>' +
+                                '<th>Component Type</th>' +
+                                '<th>Name</th>' +
+                                '<th>Store</th>' +
+                                '<th>Price</th>' +
+                                '<th class="center"><i class="bi bi-link-45deg"></i></th>' +
+                            '</tr>' +
+                        '</thead>' +
+                        '<tbody>' + rows + '</tbody>' +
+                    '</table>' +
+                '</div>' +
+                '<div class="desktop-machine-total">Total: &pound;' + formatCurrency(machineTotal(machine.components)) + '</div>';
+
+            machineGrid.appendChild(wrap);
+        });
+    }
+
+    function resetEditor(machine) {
+        componentRowsBody.innerHTML = '';
+        machineNameInput.value = machine ? machine.name : '';
+        var components = machine && machine.components && machine.components.length ? machine.components : [{}];
+        components.forEach(function (component) {
+            if (!component.source) component.source = '';
+            createComponentRow(component);
+        });
+    }
+
+    document.getElementById('addMachineBtn').addEventListener('click', function () {
+        editingIndex = null;
+        modalTitle.innerHTML = '<i class="bi bi-pc-display-horizontal"></i> New Machine Spec';
+        resetEditor(null);
+        openModal();
+    });
+
+    document.getElementById('closeDesktopSpecModal').addEventListener('click', closeModal);
+    document.getElementById('cancelDesktopSpecModal').addEventListener('click', closeModal);
+
+    modal.addEventListener('click', function (event) {
+        if (event.target === modal) closeModal();
+    });
+
+    document.getElementById('addComponentRowBtn').addEventListener('click', function () {
+        createComponentRow({});
+    });
+
+    componentRowsBody.addEventListener('click', function (event) {
+        var btn = event.target.closest('.remove-component-btn');
+        if (!btn) return;
+        var row = btn.closest('.desktop-component-row');
+        if (row) row.remove();
+        if (!componentRowsBody.querySelector('.desktop-component-row')) {
+            createComponentRow({});
+        }
+    });
+
+    machineGrid.addEventListener('click', function (event) {
+        var editBtn = event.target.closest('.edit-machine-btn');
+        if (editBtn) {
+            editingIndex = parseInt(editBtn.dataset.index, 10);
+            modalTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Machine Spec';
+            resetEditor(machines[editingIndex]);
+            openModal();
+            return;
+        }
+
+        var deleteBtn = event.target.closest('.delete-machine-btn');
+        if (deleteBtn) {
+            var index = parseInt(deleteBtn.dataset.index, 10);
+            machines.splice(index, 1);
+            saveMachines();
+            renderMachines();
+        }
+    });
+
+    document.getElementById('saveDesktopSpecBtn').addEventListener('click', function () {
+        var name = machineNameInput.value.trim();
+        var components = collectRows();
+
+        if (!name) {
+            alert('Please enter a machine name.');
+            machineNameInput.focus();
+            return;
+        }
+
+        if (!components.length) {
+            alert('Please add at least one component.');
+            return;
+        }
+
+        var payload = {
+            name: name,
+            components: components
+        };
+
+        if (editingIndex === null) {
+            machines.push(payload);
+        } else {
+            machines[editingIndex] = payload;
+        }
+
+        saveMachines();
+        renderMachines();
+        closeModal();
+    });
+
+    loadMachines();
+    renderMachines();
+}());
+</script>
 {% endblock %}

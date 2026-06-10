@@ -584,9 +584,15 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
         # ── YOUR REFERENCE / PO auto-match ──────────────────────────────────
         # Suppliers often quote our PO number back to us.
         # e.g. OS Doors: "YOUR REFERENCE: PO1668 - Raymond Lusty (42079"
+        #      Flanagan: "Your Ref. PO1634"
+        # The separator class includes "." so a trailing dot on the label
+        # (e.g. "Your Ref.") does not break the capture.
         your_ref_m = re.search(
             r'(?:YOUR\s+REFERENCE|Your\s+Ref(?:erence)?'
-            r'|Cust(?:omer)?\.?\s*(?:Order\s*)?(?:P\.?O\.?|Ref(?:erence)?))[:\s]+([^\n]{1,120})',
+            r'|Your\s+Order|Order\s+(?:No\.?|Number|Ref(?:erence)?)'
+            r'|P\.?O\.?\s*(?:No\.?|Number|Ref(?:erence)?)'
+            r'|Cust(?:omer)?\.?\s*(?:Order\s*)?(?:P\.?O\.?|Ref(?:erence)?))'
+            r'[\s.:]+([^\n]{1,120})',
             full_text, re.IGNORECASE,
         )
         if your_ref_m:
@@ -877,11 +883,13 @@ def create_purchase_invoice(request):
             rate     = _parse_decimal(data.get(f'line_rate_{idx}', '0'))
             order_id = data.get(f'line_order_{idx}', '') or None
             po_product_id = (data.get(f'line_po_product_{idx}') or '').strip()
+            raw_total = data.get(f'line_total_{idx}')
             if desc:
                 line_items_raw.append({
                     'description': desc, 'quantity': qty,
                     'rate': rate, 'order_id': order_id,
                     'po_product_id': po_product_id,
+                    'line_total': raw_total if raw_total not in (None, '') else None,
                 })
             idx += 1
     else:
@@ -894,15 +902,20 @@ def create_purchase_invoice(request):
             rate          = _parse_decimal(item.get('rate', '0'))
             order_id      = item.get('order_id')
             po_product_id = (item.get('po_product_id') or '').strip()
+            raw_total     = item.get('line_total')
         else:
-            desc, qty, rate, order_id, po_product_id = str(item), Decimal('1'), Decimal('0'), None, ''
+            desc, qty, rate, order_id, po_product_id, raw_total = str(item), Decimal('1'), Decimal('0'), None, '', None
         if desc:
+            # Prefer the exact line total supplied by the modal so rounding of the
+            # unit rate (e.g. 66.80 / 12 = 5.5666… → 5.57) does not introduce a
+            # penny discrepancy (5.57 × 12 = 66.84). Fall back to qty × rate.
+            line_total = _parse_decimal(raw_total) if raw_total not in (None, '') else qty * rate
             line = PurchaseInvoiceLineItem.objects.create(
                 invoice     = invoice,
                 description = desc,
                 quantity    = qty,
                 rate        = rate,
-                line_total  = qty * rate,
+                line_total  = line_total,
                 sort_order  = i,
             )
             if order_id:

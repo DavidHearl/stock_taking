@@ -10,6 +10,7 @@ import html as _html
 import logging
 import re as _re
 from datetime import timedelta, datetime
+from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
@@ -44,6 +45,67 @@ _PERSONAL_DOMAINS = frozenset({
     'icloud.com', 'me.com', 'mac.com',
     'aol.com', 'protonmail.com', 'proton.me',
 })
+
+
+def _amounts_match(a, b, tol=Decimal('0.05')):
+    """True when two monetary values are equal within a small tolerance.
+
+    A few pence of slack absorbs rounding differences between the invoice total
+    extracted from a PDF and the stored PO total (e.g. 771.06 vs 771.05).
+    """
+    if a is None or b is None:
+        return False
+    try:
+        return abs(Decimal(str(a)) - Decimal(str(b))) <= tol
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
+def _fuzzy_amount_po(etotal, pos, exclude_ids=()):
+    """Return the single most plausible PO whose total is *close to* the invoice
+    total, or None when the guess would be ambiguous.
+
+    Carriage (and the odd small surcharge) is added on the supplier's invoice
+    but is often absent from the PO, so the invoice total is typically a little
+    ABOVE the PO total — e.g. invoice £331.13 vs PO £323.46. We allow the PO to
+    sit a touch above too, to absorb rounding or minor discounts.
+
+    To avoid coincidental collisions we only return a guess when there is a
+    single clear front-runner: the closest PO must beat the runner-up by a
+    meaningful margin.
+    """
+    try:
+        inv = Decimal(str(etotal))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if inv <= 0:
+        return None
+    # Plausible carriage uplift: the greater of £30 or 12% of the invoice.
+    cap = max(Decimal('30'), (inv * Decimal('0.12')))
+    lower = Decimal('-2.00')  # PO may be marginally above (rounding / small discount)
+
+    scored = []
+    for po in pos:
+        if po['id'] in exclude_ids:
+            continue
+        total = po.get('total')
+        if total is None:
+            continue
+        try:
+            diff = inv - Decimal(str(total))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if lower <= diff <= cap:
+            scored.append((abs(diff), po))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda t: t[0])
+    best_diff, best_po = scored[0]
+    # Require a clear winner — if the runner-up is almost as close, don't guess.
+    if len(scored) > 1 and (scored[1][0] - best_diff) < Decimal('5.00'):
+        return None
+    return best_po
 
 
 def _find_po_matches(emails, supplier_rules=None):
@@ -135,9 +197,6 @@ def _find_po_matches(emails, supplier_rules=None):
                 if len(words) >= 2 and sum(1 for w in words if w in sender_text) >= 2:
                     found[po['id']] = po
 
-        if found:
-            result[email.id] = list(found.values())
-
         # Signal 3: SupplierEmailRule maps this sender to a known supplier.
         # Used when the domain alone doesn't text-match the supplier name
         # (e.g. financedept@osdoors.com → "O & S Doors").
@@ -153,8 +212,57 @@ def _find_po_matches(emails, supplier_rules=None):
                         continue
                     if (po['supplier_name'] or '').strip().lower() == rname:
                         found[po['id']] = po
+
+        # Signal 4: the extracted invoice amount points at a PO total. This is
+        # the "educated guess" layer. It works in two passes:
+        #   (a) Exact — invoice total == PO total (±5p). Strongest amount signal.
+        #   (b) Fuzzy — invoice total is a little ABOVE a PO total (carriage that
+        #       is on the invoice but not the PO). Only used when there is a
+        #       single clear candidate, so it never guesses ambiguously.
+        etotal = getattr(email, 'extracted_total', None)
+        amount_ids = set()   # PO ids matched on amount (exact or fuzzy)
+        fuzzy_ids = set()    # subset of amount_ids that were fuzzy/approximate
+        if etotal is not None:
             if found:
-                result[email.id] = list(found.values())
+                # Supplier already identified — tag whichever found PO(s) match
+                # the invoice amount so the UI can surface the most likely one.
+                exact_hit = False
+                for pid, po in found.items():
+                    if _amounts_match(etotal, po['total']):
+                        amount_ids.add(pid)
+                        exact_hit = True
+                # No exact hit among the supplier's POs — fall back to a
+                # carriage-tolerant guess within that same set.
+                if not exact_hit:
+                    fpo = _fuzzy_amount_po(etotal, list(found.values()))
+                    if fpo:
+                        amount_ids.add(fpo['id'])
+                        fuzzy_ids.add(fpo['id'])
+            else:
+                exact_pos = [po for po in pos if _amounts_match(etotal, po['total'])]
+                if len(exact_pos) == 1:
+                    po = exact_pos[0]
+                    found[po['id']] = po
+                    amount_ids.add(po['id'])
+                elif not exact_pos:
+                    # Discretionary carriage-tolerant guess across all open POs,
+                    # accepted only when one candidate clearly stands out.
+                    fpo = _fuzzy_amount_po(etotal, pos)
+                    if fpo:
+                        found[fpo['id']] = fpo
+                        amount_ids.add(fpo['id'])
+                        fuzzy_ids.add(fpo['id'])
+
+        if found:
+            # Tag amount matches on a per-email copy so the flag never leaks
+            # across emails that share the same underlying po dict.
+            email_matches = []
+            for pid, po in found.items():
+                po_copy = dict(po)
+                po_copy['_amount_match'] = pid in amount_ids
+                po_copy['_amount_fuzzy'] = pid in fuzzy_ids
+                email_matches.append(po_copy)
+            result[email.id] = email_matches
 
     return result
 
@@ -292,7 +400,7 @@ def accounts_payable_inbox(request):
         # with the deferred traversal restriction on processed_by.
         lightweight = list(
             MailboxEmail.objects.filter(is_processed=False, is_ignored=False, is_split=False)
-            .only('id', 'subject', 'sender_name', 'sender_email', 'attachment_names')
+            .only('id', 'subject', 'sender_name', 'sender_email', 'attachment_names', 'extracted_total')
         )
         email_po_matches_all = _find_po_matches(lightweight, supplier_rules=_supplier_rules)
         matched_ids = list(email_po_matches_all.keys())
@@ -327,20 +435,34 @@ def accounts_payable_inbox(request):
 
     email_po_matches = _find_po_matches(page_obj.object_list, supplier_rules=_supplier_rules)
 
-    # Annotate each email with the single best PO match
+    # Annotate each email with the single best PO match.
+    # Amount matches are the strongest signal — an exact amount match wins
+    # outright, then a fuzzy (carriage-tolerant) amount match, then PO status.
     # Priority: Draft < Approved < Partially Received < Received
     _STATUS_PRIORITY = {'Draft': 0, 'Approved': 1, 'Partially Received': 2, 'Received': 3}
     for email in page_obj.object_list:
         matched = email_po_matches.get(email.id, [])
         if matched:
-            best = min(matched, key=lambda p: _STATUS_PRIORITY.get(p['status'], 9))
+            def _rank(p):
+                if p.get('_amount_match') and not p.get('_amount_fuzzy'):
+                    amount_rank = 0  # exact amount
+                elif p.get('_amount_match'):
+                    amount_rank = 1  # fuzzy amount
+                else:
+                    amount_rank = 2
+                return (amount_rank, _STATUS_PRIORITY.get(p['status'], 9))
+            best = min(matched, key=_rank)
             email.po_match = best
+            email.po_match_amount = bool(best.get('_amount_match'))
+            email.po_match_fuzzy = bool(best.get('_amount_fuzzy'))
             email.po_match_class = (
                 'po-received' if best['status'] in ('Received', 'Partially Received')
                 else 'po-approved'
             )
         else:
             email.po_match = None
+            email.po_match_amount = False
+            email.po_match_fuzzy = False
             email.po_match_class = ''
 
     # Annotate each email with a matched supplier name from SupplierEmailRule
@@ -576,6 +698,11 @@ def create_invoice_from_email(request, email_id):
             desc = (data.get(f'line_desc_{idx}') or '').strip()
             qty = _parse_decimal(data.get(f'line_qty_{idx}', '1'), '1')
             rate = _parse_decimal(data.get(f'line_rate_{idx}', '0'))
+            # Prefer the exact line total from the modal so rounding of the unit
+            # rate (e.g. 66.80 / 12 = 5.5666… → 5.57) does not introduce a penny
+            # discrepancy (5.57 × 12 = 66.84). Fall back to qty × rate when absent.
+            raw_total = data.get(f'line_total_{idx}')
+            line_total = _parse_decimal(raw_total) if raw_total not in (None, '') else qty * rate
             order_id = data.get(f'line_order_{idx}', '') or None
             po_product_id = (data.get(f'line_po_product_{idx}') or '').strip()
             if desc:
@@ -584,7 +711,7 @@ def create_invoice_from_email(request, email_id):
                     description=desc,
                     quantity=qty,
                     rate=rate,
-                    line_total=qty * rate,
+                    line_total=line_total,
                     sort_order=idx,
                 )
                 if order_id:
@@ -770,6 +897,8 @@ def scan_email_attachment_po(request, email_id):
 
     spo = extracted.get('suggested_po')
     po_data = None
+    amount_match = False
+    amount_fuzzy = False
     if spo:
         try:
             po = PurchaseOrder.objects.get(workguru_id=spo['workguru_id'])
@@ -796,8 +925,50 @@ def scan_email_attachment_po(request, email_id):
             'po_type': po.po_type,
         }
 
+    # No explicit PO reference in the PDF and nothing stored — fall back to the
+    # same educated-guess logic the inbox page uses (subject PO / supplier name /
+    # supplier rule / amount / carriage-tolerant amount). This keeps a rescan
+    # consistent with the page-load view instead of wiping a plausible match
+    # back to a blank dash. Guesses are returned for display but NOT persisted
+    # to matched_po — only an explicit reference is treated as confirmed.
+    if po_data is None:
+        _supplier_rules = {
+            r.email_pattern.lower(): r.supplier_name
+            for r in SupplierEmailRule.objects.all()
+        }
+        guesses = _find_po_matches([email], supplier_rules=_supplier_rules)
+        matched = guesses.get(email.id, [])
+        if matched:
+            _STATUS_PRIORITY = {'Draft': 0, 'Approved': 1, 'Partially Received': 2, 'Received': 3}
+
+            def _rank(p):
+                if p.get('_amount_match') and not p.get('_amount_fuzzy'):
+                    amount_rank = 0
+                elif p.get('_amount_match'):
+                    amount_rank = 1
+                else:
+                    amount_rank = 2
+                return (amount_rank, _STATUS_PRIORITY.get(p['status'], 9))
+
+            best = min(matched, key=_rank)
+            amount_match = bool(best.get('_amount_match'))
+            amount_fuzzy = bool(best.get('_amount_fuzzy'))
+            po_data = {
+                'workguru_id': best['workguru_id'],
+                'display_number': best['display_number'] or best['number'] or str(best['workguru_id']),
+                'supplier_name': best['supplier_name'] or '',
+                'status': best['status'] or '',
+                'po_type': best['po_type'],
+            }
+
     total_str = str(email.extracted_total) if email.extracted_total is not None else None
-    resp = {'success': True, 'po': po_data, 'total': total_str}
+    resp = {
+        'success': True,
+        'po': po_data,
+        'total': total_str,
+        'amount_match': amount_match,
+        'amount_fuzzy': amount_fuzzy,
+    }
     if total_str is None:
         # Include raw text so the caller can debug why extraction failed
         resp['_debug_text'] = extracted.get('_raw_text', '')[:800]

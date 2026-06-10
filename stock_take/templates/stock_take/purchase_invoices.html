@@ -184,9 +184,11 @@ function submitCreateInvoice() {
         const desc    = row.querySelector('.pinv-line-desc').value.trim();
         const qty     = parseFloat(row.querySelector('.pinv-line-qty')?.value) || 1;
         const rate    = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        const totalRaw = parseFloat(row.querySelector('.pinv-line-total')?.value);
+        const total    = Number.isFinite(totalRaw) ? totalRaw : null;
         const ordInp  = row.querySelector('.pinv-line-order-input');
         const orderId = ordInp ? (ordInp.dataset.orderId || null) : null;
-        if (desc) lineItems.push({ description: desc, quantity: qty, rate, order_id: orderId || null, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1' });
+        if (desc) lineItems.push({ description: desc, quantity: qty, rate, line_total: total, order_id: orderId || null, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1' });
     });
 
     // Use FormData to support file upload
@@ -212,6 +214,7 @@ function submitCreateInvoice() {
         fd.append(`line_desc_${i}`, li.description);
         fd.append(`line_qty_${i}`, li.quantity);
         fd.append(`line_rate_${i}`, li.rate);
+        if (li.line_total !== null && li.line_total !== undefined) fd.append(`line_total_${i}`, li.line_total);
         fd.append(`line_order_${i}`, li.order_id || '');
         if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);
     });
