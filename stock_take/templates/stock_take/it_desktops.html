@@ -81,6 +81,8 @@
         </div>
     </div>
 </div>
+{% csrf_token %}
+{{ machines|json_script:"desktopMachinesData" }}
 {% endblock %}
 
 {% block extra_js %}
@@ -88,9 +90,22 @@
 (function () {
     'use strict';
 
-    var STORAGE_KEY = 'atlasDesktopMachineConfigs';
     var machines = [];
-    var editingIndex = null;
+    var editingId = null;
+
+    function loadMachines() {
+        try {
+            var raw = document.getElementById('desktopMachinesData').textContent;
+            machines = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(machines)) machines = [];
+        } catch (e) {
+            machines = [];
+        }
+    }
+
+    function getCsrf() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
 
     var machineGrid = document.getElementById('desktopMachineGrid');
     var emptyState = document.getElementById('desktopMachineEmpty');
@@ -98,6 +113,7 @@
     var modalTitle = document.getElementById('desktopSpecTitle');
     var machineNameInput = document.getElementById('machineNameInput');
     var componentRowsBody = document.getElementById('componentRowsBody');
+    var saveBtn = document.getElementById('saveDesktopSpecBtn');
 
     function openModal() {
         modal.classList.add('active');
@@ -116,15 +132,24 @@
         return safeNumber(value).toFixed(2);
     }
 
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function createComponentRow(component) {
         var tr = document.createElement('tr');
         tr.className = 'desktop-component-row';
         tr.innerHTML = '' +
-            '<td><input type="text" class="form-control component-type" placeholder="CPU" value="' + (component && component.type ? component.type : '') + '"></td>' +
-            '<td><input type="text" class="form-control component-name" placeholder="Ryzen 7 7800X3D" value="' + (component && component.name ? component.name : '') + '"></td>' +
-            '<td><input type="text" class="form-control component-source" placeholder="Amazon" value="' + (component && component.source ? component.source : '') + '"></td>' +
-            '<td><input type="number" min="0" step="0.01" class="form-control component-price" placeholder="0.00" value="' + (component && component.price ? component.price : '') + '"></td>' +
-            '<td><input type="url" class="form-control component-link" placeholder="https://" value="' + (component && component.link ? component.link : '') + '"></td>' +
+            '<td><input type="text" class="form-control component-type" placeholder="CPU" value="' + escapeHtml(component && component.type ? component.type : '') + '"></td>' +
+            '<td><input type="text" class="form-control component-name" placeholder="Ryzen 7 7800X3D" value="' + escapeHtml(component && component.name ? component.name : '') + '"></td>' +
+            '<td><input type="text" class="form-control component-source" placeholder="Amazon" value="' + escapeHtml(component && component.source ? component.source : '') + '"></td>' +
+            '<td><input type="number" min="0" step="0.01" class="form-control component-price" placeholder="0.00" value="' + escapeHtml(component && component.price ? component.price : '') + '"></td>' +
+            '<td><input type="url" class="form-control component-link" placeholder="https://" value="' + escapeHtml(component && component.link ? component.link : '') + '"></td>' +
             '<td class="actions-cell"><button type="button" class="btn-icon remove-component-btn" title="Remove component"><i class="bi bi-trash"></i></button></td>';
         componentRowsBody.appendChild(tr);
     }
@@ -151,22 +176,9 @@
         return rows;
     }
 
-    function saveMachines() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(machines));
-    }
-
-    function loadMachines() {
-        try {
-            var raw = localStorage.getItem(STORAGE_KEY);
-            machines = raw ? JSON.parse(raw) : [];
-            if (!Array.isArray(machines)) machines = [];
-        } catch (e) {
-            machines = [];
-        }
-    }
-
-    function machineTotal(components) {
-        return components.reduce(function (acc, component) {
+    function machineTotal(machine) {
+        if (machine.total != null) return machine.total;
+        return (machine.components || []).reduce(function (acc, component) {
             return acc + safeNumber(component.price);
         }, 0);
     }
@@ -175,20 +187,21 @@
         machineGrid.innerHTML = '';
         emptyState.style.display = machines.length ? 'none' : '';
 
-        machines.forEach(function (machine, index) {
+        machines.forEach(function (machine) {
             var wrap = document.createElement('div');
             wrap.className = 'desktop-machine-card';
 
             var rows = machine.components.map(function (component) {
+                var safeLink = escapeHtml(component.link);
                 var linkCell = component.link
-                    ? '<a class="desktop-component-link" href="' + component.link + '" target="_blank" rel="noopener" title="Open component link"><i class="bi bi-link-45deg"></i></a>'
+                    ? '<a class="desktop-component-link" href="' + safeLink + '" target="_blank" rel="noopener" title="Open component link"><i class="bi bi-link-45deg"></i></a>'
                     : '<span class="desktop-component-link desktop-component-link-empty" title="No link"><i class="bi bi-link-45deg"></i></span>';
 
                 return '' +
                     '<tr>' +
-                        '<td>' + (component.type || '&mdash;') + '</td>' +
-                        '<td>' + (component.name || '&mdash;') + '</td>' +
-                        '<td>' + (component.source || '&mdash;') + '</td>' +
+                        '<td>' + (escapeHtml(component.type) || '&mdash;') + '</td>' +
+                        '<td>' + (escapeHtml(component.name) || '&mdash;') + '</td>' +
+                        '<td>' + (escapeHtml(component.source) || '&mdash;') + '</td>' +
                         '<td>&pound;' + formatCurrency(component.price) + '</td>' +
                         '<td class="center">' + linkCell + '</td>' +
                     '</tr>';
@@ -197,12 +210,12 @@
             wrap.innerHTML = '' +
                 '<div class="desktop-machine-card-top">' +
                     '<div>' +
-                        '<h3 class="desktop-machine-title">' + machine.name + '</h3>' +
+                        '<h3 class="desktop-machine-title">' + escapeHtml(machine.name) + '</h3>' +
                         '<p class="desktop-machine-meta">' + machine.components.length + ' components</p>' +
                     '</div>' +
                     '<div class="desktop-machine-actions">' +
-                        '<button type="button" class="btn-icon edit-machine-btn" data-index="' + index + '" title="Edit machine"><i class="bi bi-pencil"></i></button>' +
-                        '<button type="button" class="btn-icon delete-machine-btn" data-index="' + index + '" title="Delete machine"><i class="bi bi-trash"></i></button>' +
+                        '<button type="button" class="btn-icon edit-machine-btn" data-id="' + machine.id + '" title="Edit machine"><i class="bi bi-pencil"></i></button>' +
+                        '<button type="button" class="btn-icon delete-machine-btn" data-id="' + machine.id + '" title="Delete machine"><i class="bi bi-trash"></i></button>' +
                     '</div>' +
                 '</div>' +
                 '<div class="it-table-wrapper">' +
@@ -219,10 +232,17 @@
                         '<tbody>' + rows + '</tbody>' +
                     '</table>' +
                 '</div>' +
-                '<div class="desktop-machine-total">Total: &pound;' + formatCurrency(machineTotal(machine.components)) + '</div>';
+                '<div class="desktop-machine-total">Total: &pound;' + formatCurrency(machineTotal(machine)) + '</div>';
 
             machineGrid.appendChild(wrap);
         });
+    }
+
+    function findMachine(id) {
+        for (var i = 0; i < machines.length; i++) {
+            if (machines[i].id === id) return machines[i];
+        }
+        return null;
     }
 
     function resetEditor(machine) {
@@ -236,7 +256,7 @@
     }
 
     document.getElementById('addMachineBtn').addEventListener('click', function () {
-        editingIndex = null;
+        editingId = null;
         modalTitle.innerHTML = '<i class="bi bi-pc-display-horizontal"></i> New Machine Spec';
         resetEditor(null);
         openModal();
@@ -266,23 +286,32 @@
     machineGrid.addEventListener('click', function (event) {
         var editBtn = event.target.closest('.edit-machine-btn');
         if (editBtn) {
-            editingIndex = parseInt(editBtn.dataset.index, 10);
+            editingId = parseInt(editBtn.dataset.id, 10);
             modalTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Machine Spec';
-            resetEditor(machines[editingIndex]);
+            resetEditor(findMachine(editingId));
             openModal();
             return;
         }
 
         var deleteBtn = event.target.closest('.delete-machine-btn');
         if (deleteBtn) {
-            var index = parseInt(deleteBtn.dataset.index, 10);
-            machines.splice(index, 1);
-            saveMachines();
-            renderMachines();
+            var id = parseInt(deleteBtn.dataset.id, 10);
+            if (!confirm('Delete this machine spec?')) return;
+            fetch('/it/desktops/' + id + '/delete/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCsrf() }
+            })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (!data.success) throw new Error(data.error || 'Delete failed');
+                    machines = machines.filter(function (m) { return m.id !== id; });
+                    renderMachines();
+                })
+                .catch(function (err) { alert(err.message || 'Could not delete machine.'); });
         }
     });
 
-    document.getElementById('saveDesktopSpecBtn').addEventListener('click', function () {
+    saveBtn.addEventListener('click', function () {
         var name = machineNameInput.value.trim();
         var components = collectRows();
 
@@ -297,20 +326,37 @@
             return;
         }
 
-        var payload = {
-            name: name,
-            components: components
-        };
+        var url = editingId === null
+            ? '/it/desktops/save/'
+            : '/it/desktops/' + editingId + '/save/';
 
-        if (editingIndex === null) {
-            machines.push(payload);
-        } else {
-            machines[editingIndex] = payload;
-        }
-
-        saveMachines();
-        renderMachines();
-        closeModal();
+        saveBtn.disabled = true;
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrf()
+            },
+            body: JSON.stringify({ name: name, components: components })
+        })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.success) throw new Error(data.error || 'Save failed');
+                if (editingId === null) {
+                    machines.push(data.machine);
+                } else {
+                    for (var i = 0; i < machines.length; i++) {
+                        if (machines[i].id === editingId) {
+                            machines[i] = data.machine;
+                            break;
+                        }
+                    }
+                }
+                renderMachines();
+                closeModal();
+            })
+            .catch(function (err) { alert(err.message || 'Could not save machine.'); })
+            .finally(function () { saveBtn.disabled = false; });
     });
 
     loadMachines();

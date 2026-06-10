@@ -1,10 +1,14 @@
+import json
+from decimal import Decimal, InvalidOperation
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.db import transaction
 from django.http import JsonResponse
 from django.db.models import Sum
 from django.contrib.auth.models import User
-from .models import MobileDevice, PhoneTemplate
+from .models import MobileDevice, PhoneTemplate, DesktopMachine, DesktopComponent
 from .permissions import page_permission_required
 
 
@@ -227,4 +231,95 @@ def laptop_devices(request):
 @login_required
 @page_permission_required('desktop_devices')
 def desktop_devices(request):
-    return render(request, 'stock_take/it_desktops.html', {})
+    """IT – Desktop machine spec builder (database-backed)."""
+    machines = [
+        _serialize_machine(machine)
+        for machine in DesktopMachine.objects.prefetch_related('components')
+    ]
+    return render(request, 'stock_take/it_desktops.html', {'machines': machines})
+
+
+def _serialize_machine(machine):
+    """Build a plain dict for a DesktopMachine and its components."""
+    components = [
+        {
+            'type': c.component_type,
+            'name': c.name,
+            'source': c.source,
+            'price': '{:.2f}'.format(c.price),
+            'link': c.link,
+        }
+        for c in machine.components.all()
+    ]
+    return {
+        'id': machine.id,
+        'name': machine.name,
+        'components': components,
+        'total': '{:.2f}'.format(machine.total_price),
+    }
+
+
+def _parse_price(value):
+    """Parse a price string/number into a Decimal, defaulting to 0."""
+    try:
+        cleaned = str(value).replace('£', '').replace(',', '').strip()
+        return Decimal(cleaned) if cleaned else Decimal('0')
+    except (InvalidOperation, ValueError):
+        return Decimal('0')
+
+
+@login_required
+@page_permission_required('desktop_devices', action='edit')
+def desktop_machine_save(request, machine_id=None):
+    """Create or update a desktop machine spec and its components (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    name = (payload.get('name') or '').strip()
+    if not name:
+        return JsonResponse({'error': 'Machine name is required'}, status=400)
+
+    components = payload.get('components') or []
+    if not isinstance(components, list) or not components:
+        return JsonResponse({'error': 'At least one component is required'}, status=400)
+
+    with transaction.atomic():
+        if machine_id:
+            machine = get_object_or_404(DesktopMachine, id=machine_id)
+            machine.name = name
+            machine.save()
+            machine.components.all().delete()
+        else:
+            machine = DesktopMachine.objects.create(name=name)
+
+        for index, component in enumerate(components):
+            if not isinstance(component, dict):
+                continue
+            DesktopComponent.objects.create(
+                machine=machine,
+                component_type=(component.get('type') or '').strip()[:100],
+                name=(component.get('name') or '').strip()[:200],
+                source=(component.get('source') or '').strip()[:120],
+                price=_parse_price(component.get('price')),
+                link=(component.get('link') or '').strip()[:500],
+                position=index,
+            )
+
+    machine = DesktopMachine.objects.prefetch_related('components').get(id=machine.id)
+    return JsonResponse({'success': True, 'machine': _serialize_machine(machine)})
+
+
+@login_required
+@page_permission_required('desktop_devices', action='delete')
+def desktop_machine_delete(request, machine_id):
+    """Delete a desktop machine spec (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    machine = get_object_or_404(DesktopMachine, id=machine_id)
+    machine.delete()
+    return JsonResponse({'success': True})

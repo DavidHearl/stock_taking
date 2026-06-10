@@ -3312,6 +3312,46 @@ class MobileDevice(models.Model):
         return f"{self.get_device_type_display()} {self.model} – {name}"
 
 
+class DesktopMachine(models.Model):
+    """A desktop PC build/spec used to compare configurations by component."""
+
+    name = models.CharField(max_length=150)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Desktop Machine'
+        verbose_name_plural = 'Desktop Machines'
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def total_price(self):
+        return sum((c.price for c in self.components.all()), Decimal('0'))
+
+
+class DesktopComponent(models.Model):
+    """A single component line within a DesktopMachine build."""
+
+    machine = models.ForeignKey(
+        DesktopMachine, on_delete=models.CASCADE, related_name='components'
+    )
+    component_type = models.CharField(max_length=100, blank=True, default='')
+    name = models.CharField(max_length=200, blank=True, default='')
+    source = models.CharField(max_length=120, blank=True, default='')
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    link = models.URLField(max_length=500, blank=True, default='')
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['position', 'id']
+
+    def __str__(self):
+        return f"{self.component_type}: {self.name}"
+
+
 class OverheadPurchaseOrder(models.Model):
     """Manually-created purchase order for overhead / non-Cost-of-Sales spend.
 

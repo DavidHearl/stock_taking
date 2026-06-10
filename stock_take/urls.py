@@ -12,7 +12,7 @@ from .about_views import about_page
 from .it_views import (
     mobile_devices, mobile_device_save, mobile_device_create, mobile_device_delete, mobile_sim_transfer,
     mobile_phone_templates, mobile_phone_template_create,
-    laptop_devices, desktop_devices,
+    laptop_devices, desktop_devices, desktop_machine_save, desktop_machine_delete,
 )
 from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, sync_invoices_from_anthill, create_invoices_from_anthill, invoice_search, create_invoice, create_amendment_invoice, po_create_invoice, po_link_invoice, po_unlink_invoice, invoice_link_po, invoice_unlink_po, invoice_upload_attachment, invoice_delete_attachment, po_products_for_linking, invoice_set_linked_products, push_invoice_to_xero, check_invoices_in_xero, recalculate_invoice
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
@@ -644,4 +644,7 @@ urlpatterns = [
     path('it/mobile/<int:device_id>/transfer-sim/', mobile_sim_transfer, name='mobile_sim_transfer'),
     path('it/laptops/', laptop_devices, name='laptop_devices'),
     path('it/desktops/', desktop_devices, name='desktop_devices'),
+    path('it/desktops/save/', desktop_machine_save, name='desktop_machine_create'),
+    path('it/desktops/<int:machine_id>/save/', desktop_machine_save, name='desktop_machine_save'),
+    path('it/desktops/<int:machine_id>/delete/', desktop_machine_delete, name='desktop_machine_delete'),
 ]
