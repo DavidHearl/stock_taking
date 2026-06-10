@@ -844,7 +844,18 @@
         }
         if (!e.target.closest('.kebab-dropdown')) closeAllKebabs();
     });
-    window.addEventListener('scroll', closeAllKebabs, true);
+    window.addEventListener('scroll', function(e) {
+        // Ignore scrolling that happens inside an open dropdown (e.g. a long
+        // attachment list) or inside any scrollable sidebar/container that sits
+        // behind an open kebab — only close when the page itself scrolls.
+        const t = e.target;
+        if (t && t.closest) {
+            if (t.closest('.kebab-dropdown')) return;
+            if (t.closest('.apay-po-sidebar')) return;
+            if (t.closest('.apay-table-container')) return;
+        }
+        closeAllKebabs();
+    }, true);
     window.addEventListener('resize', closeAllKebabs);
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') closeAllKebabs();

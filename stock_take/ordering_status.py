@@ -10,7 +10,7 @@ can be reused by the sales list.
 import datetime
 from collections import defaultdict
 
-from django.db.models import Sum, F
+from django.db.models import Sum, F, Value, DecimalField, ExpressionWrapper
 from django.db.models.functions import Coalesce
 
 from .models import Accessory, StockItem, PurchaseOrderProduct
@@ -45,9 +45,19 @@ def get_short_sale_numbers():
 
     incoming_rows = (
         PurchaseOrderProduct.objects
-        .filter(sku__in=unique_skus, purchase_order__status='Approved')
+        .filter(
+            sku__in=unique_skus,
+            purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+        )
+        .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
         .values('sku')
-        .annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+        .annotate(total=Sum(
+            ExpressionWrapper(
+                (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                output_field=DecimalField()
+            )
+        ))
     )
     incoming_qtys = {r['sku']: float(r['total'] or 0) for r in incoming_rows}
 

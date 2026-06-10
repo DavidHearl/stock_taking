@@ -126,6 +126,8 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 </div>
 
 <!-- Email table -->
+<div class="apay-layout">
+<div class="apay-main">
 <div class="apay-table-container">
 
     {% if emails %}
@@ -157,7 +159,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 </td>
                 <td class="apay-from-cell">
                     <div class="apay-from-email" title="{{ email.sender_email }}">{% if email.is_priority and not email.is_processed %}<i class="bi bi-lightning-fill apay-priority-badge" title="Priority — process immediately"></i>{% endif %}{{ email.sender_email|default:"(unknown)" }}</div>
-                    <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}</div>
+                    <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}{% if email.extracted_total %}<span class="apay-extracted-total" id="extracted-total-{{ email.id }}">£{{ email.extracted_total|floatformat:2 }}</span>{% elif not email.is_processed and email.has_pdf %}<span class="apay-extracted-total" id="extracted-total-{{ email.id }}" data-total-id="{{ email.id }}" style="display:none"></span>{% else %}<span class="apay-extracted-total" id="extracted-total-{{ email.id }}" style="display:none"></span>{% endif %}</div>
                 </td>
                 <td class="apay-td-center" id="po-cell-{{ email.id }}">
                     {% if email.matched_po %}
@@ -186,14 +188,14 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                 <td class="apay-td-center">
                     {% if email.attachment_list %}
                     {% if email.attachment_list|length > 2 %}
-                    <div class="apay-att-overflow-wrap">
-                        <button class="apay-att-overflow-btn" onclick="toggleAttDropdown(event,this)" title="{{ email.attachment_list|length }} attachments">
+                    <div class="kebab-menu apay-att-overflow-wrap">
+                        <button class="kebab-trigger apay-att-overflow-btn" onclick="toggleKebab(this, event)" title="{{ email.attachment_list|length }} attachments">
                             <i class="bi bi-paperclip"></i> {{ email.attachment_list|length }}
                         </button>
-                        <div class="apay-att-overflow-menu">
+                        <div class="kebab-dropdown apay-att-overflow-menu">
                             {% for att in email.attachment_list %}
                             <a href="/accounts-payable/{{ email.id }}/attachment/{{ att.id }}/" target="_blank"
-                               class="apay-att-overflow-link {% if 'pdf' in att.content_type %}pdf{% endif %}">
+                               class="kebab-item apay-att-overflow-link {% if 'pdf' in att.content_type %}pdf{% endif %}">
                                 <i class="bi {% if 'pdf' in att.content_type %}bi-file-earmark-pdf{% else %}bi-file-earmark{% endif %}"></i>
                                 <span class="apay-att-overflow-name">{{ att.name }}</span>
                             </a>
@@ -308,6 +310,12 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                                         onclick="closeRowKebab(this); openLinkModal(this)">
                                     <i class="bi bi-link-45deg"></i> Link to Invoice
                                 </button>
+                                {% if email.attachment_list|length > 1 %}
+                                <button class="kebab-item"
+                                        onclick="closeRowKebab(this); splitEmail({{ email.id }}, {{ email.attachment_list|length }})">
+                                    <i class="bi bi-scissors"></i> Split into {{ email.attachment_list|length }} emails
+                                </button>
+                                {% endif %}
                                 <button class="kebab-item"
                                         data-email-id="{{ email.id }}"
                                         onclick="closeRowKebab(this); ignoreEmail(this)">
@@ -383,6 +391,59 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
     <span class="apay-page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &mdash; {{ page_obj.paginator.count|intcomma }} emails</span>
 </div>
 {% endif %}
+</div><!-- /.apay-main -->
+
+<!-- Received POs awaiting invoice -->
+<aside class="apay-po-sidebar">
+    <div class="apay-po-sidebar-head">
+        <h3 class="apay-po-sidebar-title">Awaiting Invoice</h3>
+        <span class="apay-po-sidebar-count" id="po-sidebar-count">{{ approved_unreceived_pos|length }}</span>
+        <div class="kebab-menu" style="margin-left:auto">
+            <button class="kebab-trigger" id="po-filter-trigger" onclick="toggleKebab(this, event)" title="Filter by supplier">
+                <i class="bi bi-funnel" id="po-filter-icon"></i>
+            </button>
+            <div class="kebab-dropdown" id="po-supplier-dropdown">
+                <!-- built dynamically by buildPoSupplierFilter() on page load -->
+            </div>
+        </div>
+    </div>
+    <p class="apay-po-sidebar-sub">Received POs with no invoice linked. Use the search to find matching emails in the inbox.</p>
+    <div class="apay-po-sidebar-table-wrap">
+        {% if approved_unreceived_pos %}
+        <table class="apay-po-table">
+            <tbody>
+                {% for po in approved_unreceived_pos %}
+                <tr class="apay-po-tr" data-po-supplier="{{ po.supplier_name|escapejs }}">
+                    <td class="apay-po-td-main">
+                        <div class="apay-po-row-top">
+                            <a href="{% url 'purchase_order_detail' po.workguru_id %}" target="_blank" class="apay-po-row-num">{{ po.display_number|default:po.workguru_id }}</a>
+                            <span class="apay-po-row-date">{% if po.sidebar_date %}{{ po.sidebar_date|date:"d M Y" }}{% else %}&ndash;{% endif %}</span>
+                        </div>
+                        <div class="apay-po-row-bottom">
+                            <span class="apay-po-row-supplier" title="{{ po.supplier_name }}">{{ po.supplier_name|default:"(no supplier)" }}</span>
+                            <span class="apay-po-row-total">{{ po.currency|default:"GBP" }} {{ po.total|floatformat:2|intcomma }}</span>
+                        </div>
+                    </td>
+                    <td class="apay-po-td-search">
+                        <button type="button" class="apay-po-search-btn"
+                                onclick="searchPoEmails('{{ po.search_email|escapejs }}', '{{ po.supplier_name|escapejs }}')"
+                                title="Find emails {% if po.search_email %}from {{ po.search_email }}{% else %}from {{ po.supplier_name|default:'this supplier' }}{% endif %}">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="apay-po-sidebar-empty">
+            <i class="bi bi-check2-circle"></i>
+            <p>No received POs awaiting an invoice.</p>
+        </div>
+        {% endif %}
+    </div>
+</aside>
+</div><!-- /.apay-layout -->
 
 <!-- Filter action toast -->
 <div id="filter-toast" class="apay-filter-toast">
@@ -546,6 +607,25 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
     </div>
 </div>
 
+<!-- Split Email Confirmation Modal -->
+<div class="modal-overlay" id="split-email-modal" onclick="closeSplitEmailModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3>Split Email</h3>
+            <button class="modal-close" onclick="closeSplitEmailModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="split-email-message" class="apay-link-hint"></p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeSplitEmailModal()">Cancel</button>
+            <button type="button" class="btn-save" id="split-email-confirm-btn" onclick="confirmSplitEmail()">
+                <i class="bi bi-scissors"></i> Split
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -557,6 +637,8 @@ let currentAttachmentId = null;
 let linkEmailId = null;
 let selectedInvoiceId = null;
 let linkSearchTimer = null;
+let splitEmailId = null;
+let splitEmailCount = 0;
 
 // â”€â”€ Sync from mailbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _doSync(force) {
@@ -600,6 +682,86 @@ function _doSync(force) {
 }
 function syncMailbox() { _doSync(false); }
 function fullResync() { _doSync(true); }
+
+// ── PO sidebar supplier filter ────────────────────────────────────────────────
+let _poSupplierFilter = '';
+
+function buildPoSupplierFilter() {
+    const rows = document.querySelectorAll('.apay-po-tr[data-po-supplier]');
+    const seen = new Set();
+    const suppliers = [];
+    rows.forEach(r => {
+        const s = r.dataset.poSupplier || '';
+        if (s && !seen.has(s)) { seen.add(s); suppliers.push(s); }
+    });
+    const menu = document.getElementById('po-supplier-dropdown');
+    if (!menu || suppliers.length <= 1) return; // nothing worth filtering
+    let html = `<button class="kebab-item po-supplier-filter-item" data-supplier=""
+            onclick="filterPoSidebar(''); closeAllKebabs();">
+        <i class="bi bi-check-lg po-filter-check" style="visibility:visible"></i> All suppliers
+    </button>
+    <hr style="margin:4px 0;border-color:var(--border-color)">`;
+    suppliers.forEach(s => {
+        const safe = s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const esc = s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        html += `<button class="kebab-item po-supplier-filter-item" data-supplier="${esc}"
+                onclick="filterPoSidebar('${safe}'); closeAllKebabs();">
+            <i class="bi bi-check-lg po-filter-check" style="visibility:hidden"></i> ${esc}
+        </button>`;
+    });
+    menu.innerHTML = html;
+
+    // Restore persisted filter after rebuilding the menu
+    const saved = sessionStorage.getItem('poSidebarSupplierFilter') || '';
+    if (saved) filterPoSidebar(saved);
+}
+
+function filterPoSidebar(supplier) {
+    _poSupplierFilter = supplier;
+    // Persist so the filter survives page reloads triggered by the search button
+    try { sessionStorage.setItem('poSidebarSupplierFilter', supplier); } catch(e) {}
+    const rows = document.querySelectorAll('.apay-po-tr[data-po-supplier]');
+    let visible = 0;
+    rows.forEach(r => {
+        const match = !supplier || r.dataset.poSupplier === supplier;
+        r.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+    const countEl = document.getElementById('po-sidebar-count');
+    if (countEl) countEl.textContent = visible;
+    document.querySelectorAll('.po-supplier-filter-item').forEach(btn => {
+        const check = btn.querySelector('.po-filter-check');
+        if (check) check.style.visibility = (btn.dataset.supplier === supplier) ? 'visible' : 'hidden';
+    });
+    const icon = document.getElementById('po-filter-icon');
+    if (icon) {
+        icon.className = supplier ? 'bi bi-funnel-fill' : 'bi bi-funnel';
+        icon.style.color = supplier ? 'var(--primary-color)' : '';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', buildPoSupplierFilter);
+
+// â”€â”€ Search inbox by PO supplier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Prefer the supplier's linked email (from the Rules section) so we can find
+// the matching invoice email by sender. Fall back to the supplier name
+// (stripped of common company suffixes) when no rule exists.
+function searchPoEmails(searchEmail, supplierName) {
+    let q = (searchEmail || '').trim();
+    if (!q) {
+        q = (supplierName || '').trim()
+            .replace(/\b(ltd|limited|llp|plc|inc|co|company|uk|group|holdings|services)\b\.?/gi, ' ')
+            .replace(/[.,&]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!q) q = (supplierName || '').trim();
+    }
+    const input = document.getElementById('apay-search');
+    if (input) {
+        input.value = q;
+        input.form.submit();
+    }
+}
 
 // â”€â”€ Ignore / Unignore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ignoreEmail(btn) {
@@ -1072,17 +1234,6 @@ function formatBytes(bytes) {
 // ── Kebab menu ────────────────────────────────────────────────────────────────
 // Toggling/positioning/closing handled by the global controller in base.html.
 function closeKebab() { closeAllKebabs(); }
-document.addEventListener('click', () => {
-    document.querySelectorAll('.apay-att-overflow-menu').forEach(m => m.style.display = 'none');
-});
-
-function toggleAttDropdown(event, btn) {
-    event.stopPropagation();
-    const menu = btn.nextElementSibling;
-    const isOpen = menu.style.display !== 'none';
-    document.querySelectorAll('.apay-att-overflow-menu').forEach(m => m.style.display = 'none');
-    menu.style.display = isOpen ? 'none' : 'block';
-}
 
 // ── Hide unmatched rows ───────────────────────────────────────────────────────
 let _hideUnmatched = {{ matched_only|yesno:'true,false' }};
@@ -1588,13 +1739,72 @@ function deleteEmail(emailId) {
     });
 }
 
+// ── Split email into per-attachment emails ────────────────────────────────────
+function splitEmail(emailId, count) {
+    splitEmailId = emailId;
+    splitEmailCount = count;
+    const msg = document.getElementById('split-email-message');
+    if (msg) {
+        msg.textContent = `Split this email into ${count} separate emails (one per attachment)?`;
+    }
+    const modal = document.getElementById('split-email-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeSplitEmailModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    const modal = document.getElementById('split-email-modal');
+    if (modal) modal.style.display = 'none';
+    splitEmailId = null;
+    splitEmailCount = 0;
+}
+
+function confirmSplitEmail() {
+    if (!splitEmailId) return;
+    const emailId = splitEmailId;
+    const confirmBtn = document.getElementById('split-email-confirm-btn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Splitting...';
+    }
+    fetch(`/accounts-payable/${emailId}/split/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.reload();
+        } else {
+            closeSplitEmailModal();
+            alert('Split failed: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => {
+        closeSplitEmailModal();
+        alert('Network error during split');
+    })
+    .finally(() => {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-scissors"></i> Split';
+        }
+    });
+}
+
 // ── Auto-scan PDF attachments for PO references ───────────────────────────────
 // For each inbox row that has a PDF but no stored PO match, fire a scan request
 // sequentially (one at a time) so the PO column fills in without a page reload.
+// A second pass also scans rows that have a PDF but no extracted_total yet,
+// so the amount is filled in even when the PO column is already resolved.
 (function () {
+    // Primary queue: rows needing PO match (shows spinner in PO column)
     const pending = Array.from(document.querySelectorAll('[data-scan-id]'))
                          .map(el => el.dataset.scanId);
-    if (!pending.length) return;
+    // Secondary queue: rows with a PDF but no total yet (no spinner needed)
+    const pendingTotal = Array.from(document.querySelectorAll('[data-total-id]'))
+                              .map(el => el.dataset.totalId)
+                              .filter(id => !pending.includes(id)); // don't double-scan
 
     function poStatusClass(status) {
         if (status === 'Received' || status === 'Partially Received') return 'apay-po-badge--received';
@@ -1602,10 +1812,25 @@ function deleteEmail(emailId) {
         return 'apay-po-badge--approved';
     }
 
+    function injectTotal(emailId, total) {
+        if (!total) return;
+        const totalEl = document.getElementById('extracted-total-' + emailId);
+        if (totalEl) {
+            const formatted = parseFloat(total).toLocaleString('en-GB', {
+                minimumFractionDigits: 2, maximumFractionDigits: 2
+            });
+            totalEl.textContent = '\u00a3' + formatted;
+            totalEl.style.display = '';
+        }
+    }
+
     function scanNext() {
         const emailId = pending.shift();
-        if (!emailId) return;
-
+        if (!emailId) {
+            // Primary queue done — start secondary (total-only) pass
+            setTimeout(scanTotalNext, 200);
+            return;
+        }
         fetch(`/accounts-payable/${emailId}/scan-po/`, {
             method: 'POST',
             headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
@@ -1617,7 +1842,7 @@ function deleteEmail(emailId) {
                 const po = data.po;
                 const cls = poStatusClass(po.status);
                 const label = po.display_number || po.workguru_id;
-                const supplier = po.supplier_name ? ` – ${po.supplier_name}` : '';
+                const supplier = po.supplier_name ? ` \u2013 ${po.supplier_name}` : '';
                 cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
                     class="apay-po-badge ${cls}"
                     title="${po.status}${supplier}"
@@ -1626,13 +1851,33 @@ function deleteEmail(emailId) {
                 const spinner = cell.querySelector('.apay-po-scan-pending');
                 if (spinner) spinner.remove();
             }
+            injectTotal(emailId, data.total);
             setTimeout(scanNext, 150);
         })
         .catch(() => setTimeout(scanNext, 600));
     }
 
+    function scanTotalNext() {
+        const emailId = pendingTotal.shift();
+        if (!emailId) return;
+        fetch(`/accounts-payable/${emailId}/scan-po/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(r => r.json())
+        .then(data => {
+            injectTotal(emailId, data.total);
+            setTimeout(scanTotalNext, 200);
+        })
+        .catch(() => setTimeout(scanTotalNext, 800));
+    }
+
     // Stagger start slightly so the page is fully rendered first
-    setTimeout(scanNext, 800);
+    if (pending.length) {
+        setTimeout(scanNext, 800);
+    } else if (pendingTotal.length) {
+        setTimeout(scanTotalNext, 800);
+    }
 }());
 </script>
 {% endblock %}

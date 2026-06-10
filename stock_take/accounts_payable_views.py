@@ -9,7 +9,7 @@ import json
 import html as _html
 import logging
 import re as _re
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
@@ -160,6 +160,89 @@ def _find_po_matches(emails, supplier_rules=None):
 
 
 
+_PO_DATE_FORMATS = (
+    '%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d',
+    '%d/%m/%Y', '%d-%m-%Y',
+)
+
+
+def _parse_po_date(value):
+    """Parse a PurchaseOrder string date (mixed formats) into a date, or None."""
+    if not value:
+        return None
+    raw = value.strip()
+    for fmt in _PO_DATE_FORMATS:
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    # Fall back to parsing the ISO date prefix (e.g. "2026-01-05T...")
+    try:
+        return datetime.strptime(raw[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _get_approved_unreceived_pos():
+    """Received POs from 2026 onward that have no linked invoice (neither an
+    uploaded PO invoice nor a linked PurchaseInvoice). An item must be received
+    before an invoice can be issued."""
+    pos = (
+        PurchaseOrder.objects
+        .filter(status__in=('Received', 'Partially Received'))
+        .exclude(supplier_name__icontains='Carnehill')
+        .annotate(
+            _po_invoice_count=db_models.Count('invoices', distinct=True),
+            _linked_invoice_count=db_models.Count('linked_purchase_invoices', distinct=True),
+        )
+        .filter(_po_invoice_count=0, _linked_invoice_count=0)
+    )
+
+    # Map supplier name → best search term from the Rules section, so the
+    # sidebar search can target the supplier's known sender address/domain
+    # instead of the raw supplier name. A supplier may have several rules
+    # (e.g. two staff addresses on the same domain) — in that case search by
+    # the shared domain so all of them match. Strip a leading '@' so a domain
+    # rule (e.g. '@hafele.ie') still matches sender addresses.
+    supplier_rules = {}
+    for rule in SupplierEmailRule.objects.all():
+        key = (rule.supplier_name or '').strip().lower()
+        pattern = rule.email_pattern.lstrip('@').strip()
+        if key and pattern:
+            supplier_rules.setdefault(key, []).append(pattern)
+
+    supplier_email_map = {}
+    for key, patterns in supplier_rules.items():
+        domains = {p.split('@', 1)[1] if '@' in p else p for p in patterns}
+        # Single shared domain → search by domain (matches every address on it).
+        # Otherwise fall back to the first specific pattern.
+        supplier_email_map[key] = next(iter(domains)) if len(domains) == 1 else patterns[0]
+
+    result = []
+    for po in pos:
+        po_date = _parse_po_date(po.received_date) or _parse_po_date(po.approved_date) or _parse_po_date(po.issue_date)
+        if not po_date or po_date.year < 2026:
+            continue
+        po.sidebar_date = po_date
+        po.search_email = supplier_email_map.get((po.supplier_name or '').strip().lower(), '')
+        result.append(po)
+
+    # Order by PO number descending (e.g. PO1760, PO1758, ...), keeping split
+    # orders (e.g. PO1760_1) directly next to their original PO. We sort on the
+    # base PO number first, then by the split suffix ascending so the original
+    # (no suffix) comes before _1, _2, etc.
+    def _po_sort_key(p):
+        raw = p.display_number or p.number or ''
+        m = _re.match(r'^\D*(\d+)(?:_(\d+))?', raw)
+        base = int(m.group(1)) if m and m.group(1) else 0
+        suffix = int(m.group(2)) if m and m.group(2) else 0
+        # reverse=True applied below: negate suffix so the original sorts first
+        return (base, -suffix)
+
+    result.sort(key=_po_sort_key, reverse=True)
+    return result
+
+
 @login_required
 @page_permission_required('accounts_payable')
 def accounts_payable_inbox(request):
@@ -167,6 +250,10 @@ def accounts_payable_inbox(request):
     mailbox = graph_api._get_settings()['mailbox']
 
     emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by', 'matched_po').all()
+
+    # Hide emails that have been split into per-attachment child emails — the
+    # children are shown instead.
+    emails = emails.exclude(is_split=True)
 
     # Entity tab filter (All / RJL / Group / Statements)
     entity_tab = request.GET.get('tab', '')
@@ -204,26 +291,26 @@ def accounts_payable_inbox(request):
         # Use a fresh queryset (no select_related) so .only() doesn't conflict
         # with the deferred traversal restriction on processed_by.
         lightweight = list(
-            MailboxEmail.objects.filter(is_processed=False, is_ignored=False)
+            MailboxEmail.objects.filter(is_processed=False, is_ignored=False, is_split=False)
             .only('id', 'subject', 'sender_name', 'sender_email', 'attachment_names')
         )
         email_po_matches_all = _find_po_matches(lightweight, supplier_rules=_supplier_rules)
         matched_ids = list(email_po_matches_all.keys())
         emails = emails.filter(id__in=matched_ids)
 
-    total = MailboxEmail.objects.filter(is_ignored=False).count()
-    unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False).count()
-    processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True).count()
-    ignored = MailboxEmail.objects.filter(is_ignored=True).count()
+    total = MailboxEmail.objects.filter(is_ignored=False, is_split=False).count()
+    unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False, is_split=False).count()
+    processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True, is_split=False).count()
+    ignored = MailboxEmail.objects.filter(is_ignored=True, is_split=False).count()
     # Tab badge counts — respect the current status filter so badges match the visible rows
     if status_filter == 'ignored':
-        _count_base = MailboxEmail.objects.filter(is_ignored=True)
+        _count_base = MailboxEmail.objects.filter(is_ignored=True, is_split=False)
     elif status_filter == 'processed':
-        _count_base = MailboxEmail.objects.filter(is_processed=True, is_ignored=False)
+        _count_base = MailboxEmail.objects.filter(is_processed=True, is_ignored=False, is_split=False)
     elif status_filter == 'all':
-        _count_base = MailboxEmail.objects.filter(is_ignored=False)
+        _count_base = MailboxEmail.objects.filter(is_ignored=False, is_split=False)
     else:  # unprocessed (default)
-        _count_base = MailboxEmail.objects.filter(is_processed=False, is_ignored=False)
+        _count_base = MailboxEmail.objects.filter(is_processed=False, is_ignored=False, is_split=False)
     total_count = _count_base.exclude(tab='statements').count()
     rjl_count = _count_base.filter(tab='rjl').count()
     group_count = _count_base.filter(tab='group').count()
@@ -295,6 +382,7 @@ def accounts_payable_inbox(request):
         'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
         'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
         'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
+        'approved_unreceived_pos': _get_approved_unreceived_pos(),
     })
 
 
@@ -524,7 +612,7 @@ def create_invoice_from_email(request, email_id):
     if chosen:
         mailbox = graph_api._get_settings().get('mailbox', '')
         content, filename, _att_ct, err = graph_api.download_attachment(
-            mailbox, email.graph_message_id, chosen['id']
+            mailbox, email.source_graph_message_id, chosen['id']
         )
         if not err:
             invoice.attachment.save(filename, ContentFile(content), save=True)
@@ -590,7 +678,7 @@ def parse_email_attachment(request, email_id, attachment_id):
 
     mailbox = graph_api._get_settings()['mailbox']
     content, _filename, _ct, err = graph_api.download_attachment(
-        mailbox, email.graph_message_id, attachment_id
+        mailbox, email.source_graph_message_id, attachment_id
     )
     if err:
         return JsonResponse({'success': False, 'error': f'Could not download attachment: {err}'})
@@ -632,8 +720,10 @@ def scan_email_attachment_po(request, email_id):
     except Exception:
         pass
 
-    # If already scanned and not forcing, just return the stored result
-    if email.matched_po_id and not force:
+    # If already scanned and not forcing, return early ONLY when we also have
+    # the extracted total — otherwise fall through to download the PDF so the
+    # total can be extracted even when the PO match is already stored.
+    if email.matched_po_id and not force and email.extracted_total is not None:
         po = email.matched_po
         return JsonResponse({'success': True, 'po': {
             'workguru_id': po.workguru_id,
@@ -641,7 +731,7 @@ def scan_email_attachment_po(request, email_id):
             'supplier_name': po.supplier_name or '',
             'status': po.status or '',
             'po_type': po.po_type,
-        }})
+        }, 'total': str(email.extracted_total)})
 
     # Clear any previously stored match when forcing a rescan
     if force and email.matched_po_id:
@@ -657,37 +747,61 @@ def scan_email_attachment_po(request, email_id):
         None,
     )
     if not pdf_att:
-        return JsonResponse({'success': True, 'po': None})
+        return JsonResponse({'success': True, 'po': None, 'total': None})
 
     mailbox = graph_api._get_settings()['mailbox']
     content, _filename, _ct, err = graph_api.download_attachment(
-        mailbox, email.graph_message_id, pdf_att['id']
+        mailbox, email.source_graph_message_id, pdf_att['id']
     )
     if err:
         return JsonResponse({'success': False, 'error': str(err)})
 
     extracted = _extract_pdf_fields(content)
-    spo = extracted.get('suggested_po')
-    if not spo:
-        return JsonResponse({
-            'success': True,
-            'po': None,
-            '_debug_text': extracted.get('_raw_text', '')[:500],
-        })
 
-    try:
-        po = PurchaseOrder.objects.get(workguru_id=spo['workguru_id'])
-        email.matched_po = po
-        email.save(update_fields=['matched_po'])
-        return JsonResponse({'success': True, 'po': {
+    # Persist extracted total regardless of whether a PO was found
+    raw_total = extracted.get('total')
+    if raw_total is not None:
+        from decimal import Decimal, InvalidOperation
+        try:
+            email.extracted_total = Decimal(str(raw_total))
+            email.save(update_fields=['extracted_total'])
+        except (InvalidOperation, TypeError):
+            pass
+
+    spo = extracted.get('suggested_po')
+    po_data = None
+    if spo:
+        try:
+            po = PurchaseOrder.objects.get(workguru_id=spo['workguru_id'])
+            if not email.matched_po_id:
+                email.matched_po = po
+                email.save(update_fields=['matched_po'])
+            po_data = {
+                'workguru_id': po.workguru_id,
+                'display_number': po.display_number or po.number or str(po.workguru_id),
+                'supplier_name': po.supplier_name or '',
+                'status': po.status or '',
+                'po_type': po.po_type,
+            }
+        except PurchaseOrder.DoesNotExist:
+            pass
+    elif email.matched_po_id:
+        # PO was already matched; keep it
+        po = email.matched_po
+        po_data = {
             'workguru_id': po.workguru_id,
             'display_number': po.display_number or po.number or str(po.workguru_id),
             'supplier_name': po.supplier_name or '',
             'status': po.status or '',
             'po_type': po.po_type,
-        }})
-    except PurchaseOrder.DoesNotExist:
-        return JsonResponse({'success': True, 'po': None})
+        }
+
+    total_str = str(email.extracted_total) if email.extracted_total is not None else None
+    resp = {'success': True, 'po': po_data, 'total': total_str}
+    if total_str is None:
+        # Include raw text so the caller can debug why extraction failed
+        resp['_debug_text'] = extracted.get('_raw_text', '')[:800]
+    return JsonResponse(resp)
 
 
 # ── Ignore email ──────────────────────────────────────────────────────────────
@@ -717,6 +831,59 @@ def delete_email(request, email_id):
     email = get_object_or_404(MailboxEmail, id=email_id)
     email.delete()
     return JsonResponse({'success': True})
+
+
+# ── Split email into per-attachment emails ────────────────────────────────────
+
+@login_required
+def split_email(request, email_id):
+    """Split an email that has multiple attachments into one email per attachment.
+
+    Each child email is a copy of the original carrying a single attachment, so
+    each invoice can be processed independently. The original is kept (hidden
+    from the inbox via ``is_split``) so a future mailbox sync does not re-create
+    it, and child emails download their attachment bytes from the parent's
+    Graph message.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    email = get_object_or_404(MailboxEmail, id=email_id)
+
+    if email.parent_email_id:
+        return JsonResponse({'success': False, 'error': 'This email is already a split part.'}, status=400)
+
+    attachments = email.attachment_list
+    if len(attachments) < 2:
+        return JsonResponse({'success': False, 'error': 'Need at least 2 attachments to split.'}, status=400)
+
+    created = 0
+    for idx, att in enumerate(attachments, start=1):
+        synthetic_id = f'{email.graph_message_id}::part::{idx}'
+        # Skip if this part already exists (idempotent re-split)
+        if MailboxEmail.objects.filter(graph_message_id=synthetic_id).exists():
+            continue
+        att_name = att.get('name') or f'Attachment {idx}'
+        MailboxEmail.objects.create(
+            graph_message_id=synthetic_id,
+            parent_email=email,
+            subject=f'{email.subject} ({att_name})' if email.subject else att_name,
+            sender_name=email.sender_name,
+            sender_email=email.sender_email,
+            received_at=email.received_at,
+            body_preview=email.body_preview,
+            is_read=email.is_read,
+            attachment_names=json.dumps([att]),
+            tab=email.tab,
+            is_priority=email.is_priority,
+        )
+        created += 1
+
+    email.is_split = True
+    email.save(update_fields=['is_split'])
+
+    return JsonResponse({'success': True, 'created': created})
+
 
 # ── Mark email as filed (statements) ─────────────────────────────────────
 
@@ -949,7 +1116,7 @@ def download_mailbox_attachment(request, email_id, attachment_id):
         return HttpResponse('Attachment not found', status=404)
 
     content, filename, content_type, err = graph_api.download_attachment(
-        mailbox, email.graph_message_id, attachment_id
+        mailbox, email.source_graph_message_id, attachment_id
     )
     if err:
         return HttpResponse(f'Error downloading attachment: {err}', status=502)

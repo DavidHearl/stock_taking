@@ -3,8 +3,55 @@ import csv
 import io
 import math
 import contextlib
+import logging
 
-def generate_workguru_csv(system_number, conn, products_db_path):
+logger = logging.getLogger(__name__)
+
+
+def _workguru_system_diagnostics(conn, system_number):
+    """Collect counts that explain why a system may produce no accessory rows.
+
+    Never raises - diagnostics must not break generation.
+    """
+    info = {
+        'system': system_number,
+        'total_components': 0,
+        'accessory_components': 0,
+        'glass_components': 0,
+        'raumplus_components': 0,
+        'missing_codes': 0,
+        'rows': 0,
+        'missing_rows': 0,
+        'messages': [],
+    }
+    try:
+        cur = conn.cursor()
+        info['total_components'] = cur.execute(
+            "SELECT COUNT(*) FROM DISTINTAT WHERE NUMERO = ?", (system_number,)
+        ).fetchone()[0]
+        info['accessory_components'] = cur.execute(
+            "SELECT COUNT(*) FROM DISTINTAT d JOIN articoli a ON d.CODCOMP = a.cod "
+            "WHERE d.NUMERO = ? AND a.REPARTO IN ('002', '003', '006')", (system_number,)
+        ).fetchone()[0]
+        info['glass_components'] = cur.execute(
+            "SELECT COUNT(*) FROM DISTINTAT d JOIN articoli a ON d.CODCOMP = a.cod "
+            "WHERE d.NUMERO = ? AND a.REPARTO = '005'", (system_number,)
+        ).fetchone()[0]
+        info['raumplus_components'] = cur.execute(
+            "SELECT COUNT(*) FROM DISTINTAT d JOIN articoli a ON d.CODCOMP = a.cod "
+            "WHERE d.NUMERO = ? AND a.REPARTO = '004'", (system_number,)
+        ).fetchone()[0]
+        info['missing_codes'] = cur.execute(
+            "SELECT COUNT(DISTINCT CODCOMP) FROM DISTINTAT WHERE NUMERO = ? AND "
+            "CODCOMP NOT IN (SELECT cod FROM articoli WHERE cod IS NOT NULL)", (system_number,)
+        ).fetchone()[0]
+    except Exception as e:
+        logger.error(f"System {system_number}: accessory diagnostics failed: {e}")
+        info['messages'].append(f"System {system_number}: diagnostic check failed ({e}).")
+    return info
+
+
+def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
     """
     Generates the CSV content for a single system number for WorkGuru import.
     This now includes Accessories, Glass, and Raumplus components.
@@ -13,10 +60,13 @@ def generate_workguru_csv(system_number, conn, products_db_path):
         system_number (int): The job number to process.
         conn: An open SQLite connection to the CAD data database.
         products_db_path (str): The file path to the products SQLite database.
+        summary (dict, optional): If provided, populated with a diagnostic
+            breakdown for this system so callers can show the user what happened.
 
     Returns:
         str: The content of the generated CSV file as a string.
     """
+    logger.info(f"Starting WorkGuru CSV generation for system {system_number}")
     output_in_memory = io.StringIO()
     csvwriter = csv.writer(output_in_memory, delimiter=',')
     csvwriter.writerow(["Sku", "Name", "Description", "CostPrice", "SellPrice", "Quantity", "Billable"])
@@ -206,8 +256,60 @@ def generate_workguru_csv(system_number, conn, products_db_path):
             cursor.execute("DETACH DATABASE workguru_db")
 
     except sqlite3.Error as e:
+        logger.error(f"Database error for system number {system_number}: {e}")
         print(f"Database error for system number {system_number}: {e}")
         csvwriter.writerow([f"ERROR: {e}", "", "", "", "", "", ""])
+        if summary is not None:
+            summary['error'] = str(e)
 
     output_in_memory.seek(0)
-    return output_in_memory.read()
+    content = output_in_memory.read()
+
+    # Populate the per-system summary for the caller / UI
+    if summary is not None:
+        info = _workguru_system_diagnostics(conn, system_number)
+        data_rows = 0
+        missing_rows = 0
+        reader = csv.reader(io.StringIO(content))
+        next(reader, None)  # skip header
+        for r in reader:
+            if not r or not r[0] or r[0].startswith('ERROR:'):
+                continue
+            data_rows += 1
+            if 'MISSING' in r:
+                missing_rows += 1
+        info['rows'] = data_rows
+        info['missing_rows'] = missing_rows
+
+        if info['total_components'] == 0:
+            info['messages'].append(
+                f"System {system_number}: not found in the CAD data (0 components). The job may be "
+                f"outside the synced data window or the number may be incorrect."
+            )
+        elif data_rows == 0:
+            info['messages'].append(
+                f"System {system_number}: has {info['total_components']} component(s) but no accessory, "
+                f"glass or Raumplus rows matched. Check that the component codes exist in the 'articoli' "
+                f"reference table with the expected departments."
+            )
+
+        if info['missing_codes'] > 0:
+            info['messages'].append(
+                f"System {system_number}: {info['missing_codes']} component code(s) are missing from the "
+                f"'articoli' reference table and were skipped - re-sync the CAD data if this is unexpected."
+            )
+        if missing_rows > 0:
+            info['messages'].append(
+                f"System {system_number}: {missing_rows} item(s) have no matching WorkGuru product and "
+                f"were written as 'MISSING'."
+            )
+
+        for m in info['messages']:
+            logger.warning(m)
+        logger.info(
+            f"System {system_number}: generated {data_rows} accessory row(s) "
+            f"({missing_rows} missing-product placeholder(s))"
+        )
+        summary['system'] = info
+
+    return content

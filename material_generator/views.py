@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 import io
+import base64
 import zipfile
 import logging
 import sqlite3
@@ -85,11 +86,54 @@ def get_workguru_logic():
     return _workguru_logic if _workguru_logic is not False else None
 
 
+def _format_board_summary(summary):
+    """Turn the board generation summary dict into user-friendly report lines."""
+    lines = []
+    for s in summary.get('systems', []):
+        lines.append(
+            f"System {s['system']}: {s['board_rows']} board row(s) generated "
+            f"(components: {s['total_components']}, board components: {s['board_components']})."
+        )
+        for m in s.get('messages', []):
+            lines.append(f"  Warning: {m}")
+    lines.append(f"Total board rows generated: {summary.get('total_data_rows', 0)}")
+    return lines
+
+
+def _format_accessory_summary(systems):
+    """Turn a list of per-system accessory summaries into report lines."""
+    lines = []
+    total = 0
+    for s in systems:
+        total += s.get('rows', 0)
+        lines.append(
+            f"System {s['system']}: {s.get('rows', 0)} accessory row(s) generated "
+            f"(components: {s['total_components']}, accessories: {s['accessory_components']}, "
+            f"glass: {s['glass_components']}, raumplus: {s['raumplus_components']})."
+        )
+        for m in s.get('messages', []):
+            lines.append(f"  Warning: {m}")
+    lines.append(f"Total accessory rows generated: {total}")
+    return lines
+
+
+def _wants_json(request):
+    """Detect an AJAX/fetch request expecting a JSON response."""
+    return (
+        request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        or 'application/json' in request.headers.get('Accept', '')
+    )
+
+
 @login_required
 def generate_materials(request):
     """Main page for generating PNX and CSV files"""
     logger.info(f"User {request.user.username} accessed generate_materials page")
-    
+    return render(request, 'material_generator/generate.html', _generate_context())
+
+
+def _generate_context():
+    """Build the context (DB stats + module status) for the generate page."""
     # Get database stats
     db_stats = {
         'database_exists': False,
@@ -126,13 +170,11 @@ def generate_materials(request):
     board_logic = get_board_logic()
     workguru_logic = get_workguru_logic()
     
-    context = {
+    return {
         'page_title': 'Order Generator',
         'db_stats': db_stats,
         'modules_loaded': board_logic is not None and workguru_logic is not None,
     }
-    
-    return render(request, 'material_generator/generate.html', context)
 
 
 @login_required
@@ -178,21 +220,51 @@ def generate_pnx(request):
         # Open CAD database from cloud storage into memory
         conn = _open_cad_db()
         logger.info("Calling generate_board_order_file function")
-        pnx_content = board_logic.generate_board_order_file(system_numbers, conn)
+        summary = {}
+        pnx_content = board_logic.generate_board_order_file(system_numbers, conn, summary=summary)
         _close_cad_db(conn)
-        logger.info(f"PNX file generated successfully, size: {len(pnx_content)} bytes")
-        
-        # Prepare the file for download
+
+        report_lines = _format_board_summary(summary)
+        for line in report_lines:
+            logger.info(f"PNX summary: {line}")
+        total_rows = summary.get('total_data_rows', 0)
+        logger.info(f"PNX file generated, {total_rows} data row(s), size: {len(pnx_content)} bytes")
+
+        # Nothing was generated - tell the user WHY instead of returning an empty file
+        if total_rows == 0:
+            logger.warning(f"PNX Generation produced 0 rows for PO {po_label}")
+            if _wants_json(request):
+                return JsonResponse({
+                    'success': False,
+                    'no_data': True,
+                    'message': 'No board rows were generated. See the details below.',
+                    'summary': report_lines,
+                })
+            messages.warning(request, 'No board rows were generated. ' + ' '.join(report_lines))
+            return render(request, 'material_generator/generate.html', _generate_context())
+
+        filename = f'Boards_Order_{po_label}.pnx'
+
+        if _wants_json(request):
+            return JsonResponse({
+                'success': True,
+                'filename': filename,
+                'content_type': 'text/csv',
+                'file_b64': base64.b64encode(pnx_content.encode('utf-8')).decode('ascii'),
+                'summary': report_lines,
+            })
+
+        # Fallback (non-AJAX) - direct file download
         response = HttpResponse(pnx_content, content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="Boards_Order_{po_label}.pnx"'
-        
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
         logger.info(f"PNX file download initiated for PO {po_label}")
         messages.success(request, f'PNX file generated successfully for PO {po_label}')
-        
         return response
-        
+
     except Exception as e:
         logger.exception(f"Error generating PNX file: {e}")
+        if _wants_json(request):
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
         messages.error(request, f'Error generating PNX file: {str(e)}')
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -244,54 +316,95 @@ def generate_csv(request):
         
         if len(numList) == 0:
             logger.error("CSV Generation failed: No valid system numbers provided")
+            _close_cad_db(conn)
+            if _wants_json(request):
+                return JsonResponse({'success': False, 'error': 'No valid system numbers'}, status=400)
             messages.error(request, 'No valid system numbers provided')
             return JsonResponse({'error': 'No valid system numbers'}, status=400)
-        
+
+        # Generate a CSV for every system number, collecting per-system diagnostics
+        per_system = {}
+        system_summaries = []
+        total_rows = 0
+        for sysNum in numList:
+            logger.info(f"Generating CSV for system number: {sysNum}")
+            sys_summary = {}
+            csv_content = workguru_logic.generate_workguru_csv(
+                sysNum, conn, str(PRODUCTS_DB_PATH), summary=sys_summary
+            )
+            per_system[sysNum] = csv_content
+            info = sys_summary.get('system', {'system': sysNum, 'rows': 0, 'total_components': 0,
+                                              'accessory_components': 0, 'glass_components': 0,
+                                              'raumplus_components': 0, 'messages': []})
+            system_summaries.append(info)
+            total_rows += info.get('rows', 0)
+            logger.info(f"System {sysNum}: {info.get('rows', 0)} row(s), size: {len(csv_content)} bytes")
+
+        _close_cad_db(conn)
+
+        report_lines = _format_accessory_summary(system_summaries)
+        for line in report_lines:
+            logger.info(f"CSV summary: {line}")
+
+        # Nothing was generated for ANY system - explain why instead of an empty file
+        if total_rows == 0:
+            logger.warning("CSV Generation produced 0 rows for all systems")
+            if _wants_json(request):
+                return JsonResponse({
+                    'success': False,
+                    'no_data': True,
+                    'message': 'No accessory rows were generated. See the details below.',
+                    'summary': report_lines,
+                })
+            messages.warning(request, 'No accessory rows were generated. ' + ' '.join(report_lines))
+            return render(request, 'material_generator/generate.html', _generate_context())
+
+        # Build the download payload (single CSV or a ZIP for multiple systems)
         if len(numList) == 1:
-            # Single file generation
             sysNum = numList[0]
-            logger.info(f"Generating single CSV for system number: {sysNum}")
-            
-            csv_content = workguru_logic.generate_workguru_csv(sysNum, conn, str(PRODUCTS_DB_PATH))
-            logger.info(f"CSV generated successfully for {sysNum}, size: {len(csv_content)} bytes")
-            
-            response = HttpResponse(csv_content, content_type='text/csv')
-            response['Content-Disposition'] = f'attachment; filename="WG_Products_Import_{sysNum}.csv"'
-            
-            logger.info(f"Single CSV file download initiated for system {sysNum}")
-            messages.success(request, f'CSV file generated successfully for system {sysNum}')
-            _close_cad_db(conn)
-            return response
-        
+            filename = f"WG_Products_Import_{sysNum}.csv"
+            file_bytes = per_system[sysNum].encode('utf-8')
+            content_type = 'text/csv'
         else:
-            # Multiple files - create zip
-            logger.info(f"Generating zip archive for {len(numList)} CSV files")
             memory_file = io.BytesIO()
-            
             with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for sysNum in numList:
-                    logger.info(f"Generating CSV for system number: {sysNum}")
-                    csv_content = workguru_logic.generate_workguru_csv(sysNum, conn, str(PRODUCTS_DB_PATH))
                     file_name = f"WG_Products_Import_{sysNum}.csv"
-                    zf.writestr(file_name, csv_content)
-                    logger.info(f"Added {file_name} to zip archive, size: {len(csv_content)} bytes")
-            
+                    zf.writestr(file_name, per_system[sysNum])
+                    logger.info(f"Added {file_name} to zip archive")
             memory_file.seek(0)
-            
-            response = HttpResponse(memory_file.getvalue(), content_type='application/zip')
-            response['Content-Disposition'] = 'attachment; filename="WorkGuru_Imports.zip"'
-            
-            logger.info(f"Zip archive created successfully with {len(numList)} files")
-            messages.success(request, f'ZIP file generated successfully with {len(numList)} CSV files')
-            _close_cad_db(conn)
-            return response
-        
+            file_bytes = memory_file.getvalue()
+            filename = 'WorkGuru_Imports.zip'
+            content_type = 'application/zip'
+
+        if _wants_json(request):
+            return JsonResponse({
+                'success': True,
+                'filename': filename,
+                'content_type': content_type,
+                'file_b64': base64.b64encode(file_bytes).decode('ascii'),
+                'summary': report_lines,
+            })
+
+        # Fallback (non-AJAX) - direct file download
+        response = HttpResponse(file_bytes, content_type=content_type)
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        messages.success(request, f'File generated successfully for {len(numList)} system(s)')
+        return response
+
     except ValueError as e:
         logger.error(f"CSV Generation failed: Invalid system number format - {e}")
+        if _wants_json(request):
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid system number format. Please enter numeric values only (one per line).'
+            }, status=400)
         messages.error(request, 'Invalid system number format. Please enter numeric values only.')
         return JsonResponse({'error': 'Invalid system number format'}, status=400)
     
     except Exception as e:
         logger.exception(f"Error generating CSV file: {e}")
+        if _wants_json(request):
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
         messages.error(request, f'Error generating CSV file: {str(e)}')
         return JsonResponse({'error': str(e)}, status=500)

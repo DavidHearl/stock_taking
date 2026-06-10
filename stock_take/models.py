@@ -875,19 +875,28 @@ class Accessory(models.Model):
 
     @property
     def incoming_quantity(self):
-        """Get quantity on order (Approved POs not yet received) for this SKU"""
+        """Get remaining un-received quantity across all open/partially-received POs for this SKU."""
         # Reuse a batch-precomputed value when one has been attached to the instance
         # (set by the order detail view to avoid a per-row aggregate query).
         if hasattr(self, '_incoming_quantity_cache'):
             return self._incoming_quantity_cache
-        from django.db.models import Sum, F, Value
+        from django.db.models import Sum, F, Value, DecimalField, ExpressionWrapper
         from django.db.models.functions import Coalesce
-        incoming = PurchaseOrderProduct.objects.filter(
-            sku=self.sku,
-            purchase_order__status='Approved'
-        ).aggregate(
-            total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), Value(1)))
-        )['total'] or 0
+        incoming = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku=self.sku,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+            .aggregate(total=Sum(
+                ExpressionWrapper(
+                    (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                    * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                    output_field=DecimalField()
+                )
+            ))['total'] or 0
+        )
         return incoming
 
     def __str__(self):
@@ -2348,6 +2357,21 @@ class MailboxEmail(models.Model):
         related_name='matched_emails',
         help_text='Specific PO matched from PDF scan of the email attachment',
     )
+    extracted_total = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Total amount extracted from the PDF attachment during auto-scan',
+    )
+    parent_email = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True, blank=True,
+        related_name='split_children',
+        help_text='If this email was created by splitting another email, the original it came from',
+    )
+    is_split = models.BooleanField(
+        default=False, db_index=True,
+        help_text='True if this email has been split into per-attachment child emails (hidden from the inbox)',
+    )
 
     class Meta:
         ordering = ['-received_at']
@@ -2356,6 +2380,17 @@ class MailboxEmail(models.Model):
 
     def __str__(self):
         return f'{self.sender_email}: {self.subject[:60]}'
+
+    @property
+    def source_graph_message_id(self):
+        """The real Graph API message ID to use when downloading attachments.
+
+        Split child emails share their parent's Graph message; everything else
+        uses its own ID.
+        """
+        if self.parent_email_id:
+            return self.parent_email.graph_message_id
+        return self.graph_message_id
 
     @property
     def attachment_list(self):

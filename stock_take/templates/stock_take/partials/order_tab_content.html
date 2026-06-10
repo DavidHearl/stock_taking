@@ -42,13 +42,13 @@
                             <div class="kebab-dropdown" id="job-info-dropdown" data-keep-open>
                                 <div class="kebab-label">Job Status</div>
                                 <label class="kebab-item kebab-item-toggle" for="boardsNotRequired">
-                                    <span><i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Boards Not Required</span>
+                                    <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
                                     <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
                                            {% if order.boards_not_required %}checked{% endif %}
                                            onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
                                 </label>
                                 <label class="kebab-item kebab-item-toggle" for="accessoriesNotRequired">
-                                    <span><i class="bi bi-slash-circle" style="color:#f59e0b;"></i> Accessories Not Required</span>
+                                    <span><i class="bi bi-slash-circle icon-warning"></i> Accessories Not Required</span>
                                     <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
                                            {% if order.accessories_not_required %}checked{% endif %}
                                            onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
@@ -176,10 +176,10 @@
                 <div class="header-actions">
                     <div class="section-actions">
                         {% if bpo_data.pnx_items %}
-                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected" data-boards-po-id="{{ bpo_data.po.id }}" style="display: none;">
+                            <button type="button" class="btn btn-danger btn-sm btn-delete-selected d-none-init" data-boards-po-id="{{ bpo_data.po.id }}">
                                 <i class="bi bi-trash"></i> Delete Selected
                             </button>
-                            <button type="button" class="btn btn-save-dims btn-save-changes save-pnx-btn" data-boards-po-id="{{ bpo_data.po.id }}" style="display: none;">
+                            <button type="button" class="btn btn-save-dims btn-save-changes save-pnx-btn d-none-init" data-boards-po-id="{{ bpo_data.po.id }}">
                                 <i class="bi bi-check-lg"></i> Save Changes
                             </button>
                         {% endif %}
@@ -232,7 +232,7 @@
                                 {% else %}
                                 <label class="kebab-item">
                                     <i class="bi bi-upload"></i> Upload DWG
-                                    <input type="file" accept=".dwg,.DWG" style="display:none" onchange="uploadDWG({{ bpo_data.po.id }}, this)">
+                                    <input type="file" accept=".dwg,.DWG" class="d-none-init" onchange="uploadDWG({{ bpo_data.po.id }}, this)">
                                 </label>
                                 {% endif %}
                                 <div class="kebab-divider"></div>
@@ -288,8 +288,8 @@
                                     <th title="PRFID2">E2</th>
                                     <th class="col-stock">Stock</th>
                                     <th class="col-cost">Cost</th>
-                                    {% if bpo_data.po.is_angled %}<th style="width:36px;"></th>{% endif %}
-                                    <th style="width:48px;"></th>
+                                    {% if bpo_data.po.is_angled %}<th class="col-board-preview"></th>{% endif %}
+                                    <th class="col-board-actions"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -433,9 +433,9 @@
                                     </td>
                                     <td class="col-cost">£{{ item.calculated_cost|floatformat:2 }}</td>
                                     {% if bpo_data.po.is_angled %}
-                                    <td style="text-align:center;">
-                                        {% if item.left_height %}
-                                        <button type="button" class="btn-board-preview" title="Preview shape"
+                                    <td class="text-center">
+                                        {% if item.is_angled %}
+                                        <button type="button" class="btn-row-icon" title="Preview board shape"
                                                 onclick="openBoardPreview({{ item.left_height|floatformat:0 }}, {{ item.right_height|floatformat:0 }}, {{ item.cwidth|floatformat:0 }}, {{ item.top_edge|floatformat:0 }})">
                                             <i class="bi bi-eye"></i>
                                         </button>
@@ -455,15 +455,14 @@
                                 {% endfor %}
                             </tbody>
                             <tfoot>
-                                <tr class="board-total-row" aria-hidden="true">
-                                    <td colspan="100" class="board-total-cell">
-                                        <div class="board-total-inner">
-                                            <span class="boards-total-badge boards-count-badge">
-                                                <span class="boards-total-label">Items</span>{{ bpo_data.pnx_items|length }}
-                                            </span>
-                                            <span class="boards-total-badge">
-                                                <span class="boards-total-label">Total</span>£{{ bpo_data.total_cost|floatformat:2 }}
-                                            </span>
+                                <tr class="tbl-subtotal-row" aria-hidden="true">
+                                    <td colspan="100" class="tbl-subtotal-cell">
+                                        <div class="tbl-subtotal-inner">
+                                            <span class="tbl-subtotal-count">{{ bpo_data.pnx_items|length }} items</span>
+                                            <div class="tbl-subtotal-cost">
+                                                <span class="tbl-subtotal-label">Total Cost (Ex VAT)</span>
+                                                <span class="tbl-subtotal-value">£{{ bpo_data.total_cost|floatformat:2 }}</span>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -512,7 +511,7 @@
                         </button>
                         {% endif %}
                         {% if order.accessories.exists %}
-                        <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-accessory-changes" style="display: none;">
+                        <button type="button" class="btn btn-sm btn-save-dims btn-save-changes d-none-init" id="save-accessory-changes">
                             <i class="bi bi-save"></i> Save Changes
                         </button>
                         <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected" title="Delete selected">
@@ -536,7 +535,7 @@
                         <table class="table accessories-total-table" id="accessories-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 30px;"><input type="checkbox" id="accessory-select-all" title="Select all"></th>
+                                    <th class="col-select-th"><input type="checkbox" id="accessory-select-all" title="Select all"></th>
                                     <th>SKU</th>
                                     <th>Name</th>
                                     <th>Qty</th>
@@ -546,7 +545,7 @@
                                     <th>Required</th>
                                     <th>Ordered</th>
                                     {% endif %}
-                                    <th style="text-align: center;">Replace</th>
+                                    <th class="col-replace-th">Replace</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -606,7 +605,7 @@
                                         {% endif %}
                                     </td>
                                     {% endif %}
-                                    <td style="text-align: center;">
+                                    <td class="col-replace-td">
                                         <button type="button" class="btn btn-sm btn-outline-primary" title="Replace Item" 
                                             onclick="openSwapModal({{ accessory.id }}, '{{ accessory.sku }}', '{{ accessory.name|escapejs }}')">
                                             <i class="bi bi-arrow-repeat"></i> Replace
@@ -616,15 +615,14 @@
                                 {% endfor %}
                             </tbody>
                             <tfoot>
-                                <tr class="board-total-row" aria-hidden="true">
-                                    <td colspan="100" class="board-total-cell">
-                                        <div class="board-total-inner">
-                                            <span class="boards-total-badge boards-count-badge">
-                                                <span class="boards-total-label">Items</span>{{ non_glass_accessories|length }}
-                                            </span>
-                                            <span class="boards-total-badge">
-                                                <span class="boards-total-label">Total</span>£{{ non_glass_accessories|sum_accessory_costs }}
-                                            </span>
+                                <tr class="tbl-subtotal-row" aria-hidden="true">
+                                    <td colspan="100" class="tbl-subtotal-cell">
+                                        <div class="tbl-subtotal-inner">
+                                            <span class="tbl-subtotal-count">{{ non_glass_accessories|length }} items</span>
+                                            <div class="tbl-subtotal-cost">
+                                                <span class="tbl-subtotal-label">Total Cost (Ex VAT)</span>
+                                                <span class="tbl-subtotal-value">£{{ non_glass_accessories|sum_accessory_costs }}</span>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -683,20 +681,19 @@
                     </div>
                 </div>
             </div>
-            <div class="apo-po-search-panel" id="primary-os-doors-po-search" style="display:none;">
-                <div style="position:relative; padding: 8px 16px;">
+            <div class="apo-po-search-panel" id="primary-os-doors-po-search">
+                <div class="apo-po-search-inner">
                     <input type="text" class="form-input" id="os-doors-po-search"
                            placeholder="Search PO to link..."
                            autocomplete="off"
-                           style="width:100%;"
                            oninput="searchOSDoorsPO(this.value)"
                            onfocus="this.select(); searchOSDoorsPO(this.value);">
-                    <div class="boards-po-results" id="os-doors-po-results" style="display:none;"></div>
+                    <div class="boards-po-results d-none-init" id="os-doors-po-results"></div>
                 </div>
             </div>
             <div class="card-body">
                 {% if order.os_doors.all %}
-                <div class="alert alert-info" style="margin-bottom: 1rem;">
+                <div class="alert alert-info">
                     <i class="bi bi-info-circle"></i>
                     {{ order.os_doors.count }} door{{ order.os_doors.count|pluralize }} saved but not linked to a PO — create or link a PO above to organise them.
                 </div>
@@ -704,15 +701,15 @@
                     <table class="table" id="os-doors-table-unlinked">
                         <thead>
                             <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="osd-select-all-unlinked" title="Select all"></th>
+                                <th><input type="checkbox" id="osd-select-all-unlinked" title="Select all"></th>
                                 <th>Door Style</th>
-                                <th style="white-space: nowrap;">Style Colour</th>
+                                <th>Style Colour</th>
                                 <th>Height</th>
                                 <th>Width</th>
                                 <th>Qty</th>
                                 <th>Cost Price</th>
                                 <th>Total Cost</th>
-                                <th style="width: 52px;"></th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -725,22 +722,22 @@
                                         <span class="osd-display osd-display-door-style">{{ os_door.door_style }}</span>
                                         {% with style_img=os_door_style_images|get_item:style_key %}{% if style_img %}<span class="osd-cam-wrap"><i class="bi bi-camera osd-cam-icon"></i><img class="osd-cam-preview" src="{{ style_img }}" alt=""></span>{% endif %}{% endwith %}
                                     </div>
-                                    <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}" style="display:none;">
+                                    <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}">
                                 </td>
                                 <td class="osd-sc-td">
                                     <div class="osd-cell-with-swatch">
                                         {% with sc_img=os_door_colour_images|get_item:sc_key %}{% if sc_img %}<img class="osd-colour-swatch" src="{{ sc_img }}" alt="">{% endif %}{% endwith %}
                                         <span class="osd-display osd-display-style-colour">{{ os_door.style_colour }}</span>
                                     </div>
-                                    <input type="text" class="osd-edit-input osd-input-style-colour" value="{{ os_door.style_colour }}" style="display:none;">
+                                    <input type="text" class="osd-edit-input osd-input-style-colour" value="{{ os_door.style_colour }}">
                                 </td>
                                 <td>
                                     <span class="osd-display osd-display-height">{{ os_door.height|floatformat:0 }}</span>
-                                    <input type="number" class="osd-edit-input osd-input-height no-pnx-spinner" value="{{ os_door.height|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                    <input type="number" class="osd-edit-input osd-input-height no-pnx-spinner" value="{{ os_door.height|floatformat:0 }}" min="1" step="1">
                                 </td>
                                 <td>
                                     <span class="osd-display osd-display-width">{{ os_door.width|floatformat:0 }}</span>
-                                    <input type="number" class="osd-edit-input osd-input-width no-pnx-spinner" value="{{ os_door.width|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                    <input type="number" class="osd-edit-input osd-input-width no-pnx-spinner" value="{{ os_door.width|floatformat:0 }}" min="1" step="1">
                                 </td>
                                 <td>
                                     <div class="qty-stepper-input">
@@ -751,18 +748,18 @@
                                 </td>
                                 <td class="os-door-cost-cell">
                                     <span class="osd-display os-door-cost-display">£{{ os_door.cost_price }}</span>
-                                    <input type="number" step="0.01" min="0" class="osd-edit-input os-door-cost-input-inline os-door-cost-input no-pnx-spinner" value="{{ os_door.cost_price }}" style="display:none;">
+                                    <input type="number" step="0.01" min="0" class="osd-edit-input os-door-cost-input-inline os-door-cost-input no-pnx-spinner" value="{{ os_door.cost_price }}">
                                 </td>
                                 <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
                                     £{{ os_door.cost_price|multiply:os_door.quantity }}
                                 </td>
-                                <td style="text-align: right;">
+                                <td class="text-right">
                                     <div class="os-door-view-actions">
                                         <button type="button" class="btn-row-icon" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
                                             <i class="bi bi-pencil"></i>
                                         </button>
                                     </div>
-                                    <div class="os-door-edit-actions" style="display:none;">
+                                    <div class="os-door-edit-actions">
                                         <button type="button" class="btn-row-save" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
                                             <i class="bi bi-check-lg"></i>
                                         </button>
@@ -776,15 +773,14 @@
                             {% endfor %}
                         </tbody>
                         <tfoot>
-                            <tr class="board-total-row" aria-hidden="true">
-                                <td colspan="100" class="board-total-cell">
-                                    <div class="board-total-inner">
-                                        <span class="boards-total-badge boards-count-badge">
-                                            <span class="boards-total-label">Items</span><span class="osdf-count">0</span>
-                                        </span>
-                                        <span class="boards-total-badge">
-                                            <span class="boards-total-label">Total</span><strong class="os-doors-table-total">£0.00</strong>
-                                        </span>
+                            <tr class="tbl-subtotal-row" aria-hidden="true">
+                                <td colspan="100" class="tbl-subtotal-cell">
+                                    <div class="tbl-subtotal-inner">
+                                        <span class="tbl-subtotal-count"><span class="osdf-count">0</span> items</span>
+                                        <div class="tbl-subtotal-cost">
+                                            <span class="tbl-subtotal-label">Total Cost (Ex VAT)</span>
+                                            <span class="tbl-subtotal-value os-doors-table-total">£0.00</span>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
@@ -856,37 +852,36 @@
                 </div>
             </div>
             {% if apo.display_number == order.os_doors_po %}
-            <form id="clear-os-doors-form" method="POST" action="{% url 'clear_os_doors_ordered' order.id %}" style="display:none;">
+            <form id="clear-os-doors-form" method="POST" action="{% url 'clear_os_doors_ordered' order.id %}" class="hidden">
                 {% csrf_token %}
             </form>
             {% else %}
-            <div class="apo-po-search-panel" id="apo-search-{{ apo.workguru_id }}" style="display:none;">
+            <div class="apo-po-search-panel" id="apo-search-{{ apo.workguru_id }}">
                 <input type="text" class="form-input" placeholder="Search for a PO to link…" autocomplete="off"
                        oninput="searchAdditionalOSDoorPO({{ apo.workguru_id }}, this.value)"
-                       onfocus="if(this.value.length>=2) searchAdditionalOSDoorPO({{ apo.workguru_id }}, this.value)"
-                       style="width:100%;">
-                <div class="boards-po-results" id="apo-po-results-{{ apo.workguru_id }}" style="display:none;"></div>
+                       onfocus="if(this.value.length>=2) searchAdditionalOSDoorPO({{ apo.workguru_id }}, this.value)">
+                <div class="boards-po-results d-none-init" id="apo-po-results-{{ apo.workguru_id }}"></div>
             </div>
             {% endif %}
             <div class="card-body">
+                {% if apo.order_os_doors %}
                 <div class="table-container">
                     <table class="table" id="os-doors-table-{{ apo.workguru_id }}">
                         <thead>
                             <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="osd-select-all-{{ apo.workguru_id }}" title="Select all"></th>
+                                <th class="col-select-th"><input type="checkbox" id="osd-select-all-{{ apo.workguru_id }}" title="Select all"></th>
                                 <th>Door Style</th>
-                                <th style="white-space: nowrap;">Style Colour</th>
+                                <th class="osd-style-colour-th">Style Colour</th>
                                 <th>Height</th>
                                 <th>Width</th>
                                 <th>Qty</th>
                                 <th>Cost Price</th>
                                 <th>Total Cost</th>
-                                <th style="width: 52px;"></th>
+                                <th class="col-board-actions"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for os_door in order.os_doors.all %}
-                            {% if os_door.po_number == apo.display_number or apo.display_number == order.os_doors_po and not os_door.po_number %}
+                            {% for os_door in apo.order_os_doors %}
                             {% with style_key=os_door.door_style|lower sc_key=os_door.style_colour|lower %}
                             <tr data-os-door-id="{{ os_door.id }}">
                                 <td><input type="checkbox" class="checkbox-input osd-select" data-osd-id="{{ os_door.id }}" data-osd-table="{{ apo.workguru_id }}"></td>
@@ -895,22 +890,22 @@
                                         <span class="osd-display osd-display-door-style">{{ os_door.door_style }}</span>
                                         {% with style_img=os_door_style_images|get_item:style_key %}{% if style_img %}<span class="osd-cam-wrap"><i class="bi bi-camera osd-cam-icon"></i><img class="osd-cam-preview" src="{{ style_img }}" alt=""></span>{% endif %}{% endwith %}
                                     </div>
-                                    <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}" style="display:none;">
+                                    <input type="text" class="osd-edit-input osd-input-door-style" value="{{ os_door.door_style }}">
                                 </td>
                                 <td class="osd-sc-td">
                                     <div class="osd-cell-with-swatch">
                                         {% with sc_img=os_door_colour_images|get_item:sc_key %}{% if sc_img %}<img class="osd-colour-swatch" src="{{ sc_img }}" alt="">{% endif %}{% endwith %}
                                         <span class="osd-display osd-display-style-colour">{{ os_door.style_colour }}</span>
                                     </div>
-                                    <input type="text" class="osd-edit-input osd-input-style-colour" value="{{ os_door.style_colour }}" style="display:none;">
+                                    <input type="text" class="osd-edit-input osd-input-style-colour" value="{{ os_door.style_colour }}">
                                 </td>
                                 <td>
                                     <span class="osd-display osd-display-height">{{ os_door.height|floatformat:0 }}</span>
-                                    <input type="number" class="osd-edit-input osd-input-height no-pnx-spinner" value="{{ os_door.height|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                    <input type="number" class="osd-edit-input osd-input-height no-pnx-spinner" value="{{ os_door.height|floatformat:0 }}" min="1" step="1">
                                 </td>
                                 <td>
                                     <span class="osd-display osd-display-width">{{ os_door.width|floatformat:0 }}</span>
-                                    <input type="number" class="osd-edit-input osd-input-width no-pnx-spinner" value="{{ os_door.width|floatformat:0 }}" min="1" step="1" style="display:none;">
+                                    <input type="number" class="osd-edit-input osd-input-width no-pnx-spinner" value="{{ os_door.width|floatformat:0 }}" min="1" step="1">
                                 </td>
                                 <td>
                                     <div class="qty-stepper-input">
@@ -921,18 +916,18 @@
                                 </td>
                                 <td class="os-door-cost-cell">
                                     <span class="osd-display os-door-cost-display">£{{ os_door.cost_price }}</span>
-                                    <input type="number" step="0.01" min="0" class="osd-edit-input os-door-cost-input-inline os-door-cost-input no-pnx-spinner" value="{{ os_door.cost_price }}" style="display:none;">
+                                    <input type="number" step="0.01" min="0" class="osd-edit-input os-door-cost-input-inline os-door-cost-input no-pnx-spinner" value="{{ os_door.cost_price }}">
                                 </td>
                                 <td class="os-door-total-cost" data-os-door-id="{{ os_door.id }}">
                                     £{{ os_door.cost_price|multiply:os_door.quantity }}
                                 </td>
-                                <td style="text-align: right;">
+                                <td class="text-right">
                                     <div class="os-door-view-actions">
                                         <button type="button" class="btn-row-icon" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
                                             <i class="bi bi-pencil"></i>
                                         </button>
                                     </div>
-                                    <div class="os-door-edit-actions" style="display:none;">
+                                    <div class="os-door-edit-actions">
                                         <button type="button" class="btn-row-save" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
                                             <i class="bi bi-check-lg"></i>
                                         </button>
@@ -943,25 +938,24 @@
                                 </td>
                             </tr>
                             {% endwith %}
-                            {% endif %}
                             {% endfor %}
                         </tbody>
                         <tfoot>
-                            <tr class="board-total-row" aria-hidden="true">
-                                <td colspan="100" class="board-total-cell">
-                                    <div class="board-total-inner">
-                                        <span class="boards-total-badge boards-count-badge">
-                                            <span class="boards-total-label">Items</span><span class="osdf-count">0</span>
-                                        </span>
-                                        <span class="boards-total-badge">
-                                            <span class="boards-total-label">Total</span><strong class="os-doors-table-total">£0.00</strong>
-                                        </span>
+                            <tr class="tbl-subtotal-row" aria-hidden="true">
+                                <td colspan="100" class="tbl-subtotal-cell">
+                                    <div class="tbl-subtotal-inner">
+                                        <span class="tbl-subtotal-count"><span class="osdf-count">0</span> items</span>
+                                        <div class="tbl-subtotal-cost">
+                                            <span class="tbl-subtotal-label">Total Cost (Ex VAT)</span>
+                                            <span class="tbl-subtotal-value os-doors-table-total">£0.00</span>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
                         </tfoot>
                     </table>
                 </div>
+                {% endif %}
             </div>
         </div>
         {% endfor %}
@@ -1005,7 +999,7 @@
                     <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
                         <i class="bi bi-plus-lg"></i>
                     </button>
-                    <button type="button" class="btn btn-sm btn-save-dims btn-save-changes" id="save-glass-changes" style="display: none;">
+                    <button type="button" class="btn btn-sm btn-save-dims btn-save-changes d-none-init" id="save-glass-changes">
                         <i class="bi bi-save"></i> Save Changes
                     </button>
                     <button type="button" class="btn btn-sm btn-danger hidden" id="delete-glass-selected" title="Delete selected">
@@ -1022,17 +1016,17 @@
             <div class="card-body">
                 {% if glass_items %}
                 <div class="table-container">
-                    <table class="table" id="glass-table">
+                    <table class="table accessories-total-table" id="glass-table">
                         <thead>
                             <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="glass-select-all" title="Select all"></th>
+                                <th class="col-select-th"><input type="checkbox" id="glass-select-all" title="Select all"></th>
                                 <th>SKU</th>
                                 <th>Name</th>
                                 <th>Cut Size</th>
                                 <th>Qty</th>
                                 <th>Cost</th>
                                 <th>Stock</th>
-                                <th style="text-align: center;">Replace</th>
+                                <th class="col-replace-th">Replace</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1077,9 +1071,9 @@
                                 </td>
                                 <td>
                                     {% if glass.is_cut_to_size and glass.stock_item and glass.stock_item.price_per_sqm %}
-                                    <div style="display:flex;flex-direction:column;gap:2px;">
-                                        <span id="glass-cost-{{ glass.id }}" style="font-weight:500;">£{{ glass.cost_price|floatformat:2 }}</span>
-                                        <span style="font-size:0.75rem;opacity:0.6;">£{{ glass.stock_item.price_per_sqm|floatformat:2 }}/m²</span>
+                                    <div class="glass-cost-column">
+                                        <span id="glass-cost-{{ glass.id }}" class="glass-cost-primary">£{{ glass.cost_price|floatformat:2 }}</span>
+                                        <span class="glass-cost-rate">£{{ glass.stock_item.price_per_sqm|floatformat:2 }}/m²</span>
                                     </div>
                                     {% else %}
                                     <span id="glass-cost-{{ glass.id }}">£{{ glass.cost_price|floatformat:2 }}</span>
@@ -1099,7 +1093,7 @@
                                         <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
-                                <td style="text-align: center;">
+                                <td class="col-replace-td">
                                     <button type="button" class="btn btn-outline-primary btn-sm" title="Replace Item" 
                                         onclick="openSwapModal('{{ glass.id }}', '{{ glass.sku }}', '{{ glass.name|escapejs }}')">
                                         <i class="bi bi-arrow-repeat"></i> Replace
@@ -1107,12 +1101,20 @@
                                 </td>
                             </tr>
                             {% endfor %}
-                            <tr class="table-total-row">
-                                <td colspan="5">Total:</td>
-                                <td>£{{ glass_items|sum_accessory_costs }}</td>
-                                <td colspan="2"></td>
-                            </tr>
                         </tbody>
+                        <tfoot>
+                            <tr class="tbl-subtotal-row" aria-hidden="true">
+                                <td colspan="100" class="tbl-subtotal-cell">
+                                    <div class="tbl-subtotal-inner">
+                                        <span class="tbl-subtotal-count">{{ glass_items|length }} items</span>
+                                        <div class="tbl-subtotal-cost">
+                                            <span class="tbl-subtotal-label">Total Cost (Ex VAT)</span>
+                                            <span class="tbl-subtotal-value">£{{ glass_items|sum_accessory_costs }}</span>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
                 {% else %}
@@ -1164,16 +1166,16 @@
             <div class="card-body">
                 {% if raumplus_accessories %}
                 <div class="table-container">
-                    <table class="table" id="raumplus-table">
+                    <table class="table accessories-total-table" id="raumplus-table">
                         <thead>
                             <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="raumplus-select-all" title="Select all"></th>
+                                <th class="col-select-th"><input type="checkbox" id="raumplus-select-all" title="Select all"></th>
                                 <th>SKU</th>
                                 <th>Name</th>
                                 <th>Qty</th>
                                 <th>Cost</th>
                                 <th>Stock</th>
-                                <th style="text-align: center;">Replace</th>
+                                <th class="col-replace-th">Replace</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1217,7 +1219,7 @@
                                         <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
-                                <td style="text-align: center;">
+                                <td class="col-replace-td">
                                     <button type="button" class="btn btn-sm btn-outline-primary" title="Replace Item" 
                                         onclick="openSwapModal({{ rau.id }}, '{{ rau.sku }}', '{{ rau.name|escapejs }}')">
                                         <i class="bi bi-arrow-repeat"></i> Replace
@@ -1225,12 +1227,20 @@
                                 </td>
                             </tr>
                             {% endfor %}
-                            <tr class="table-total-row">
-                                <td colspan="4">Total:</td>
-                                <td>£{{ raumplus_accessories|sum_accessory_costs }}</td>
-                                <td colspan="2"></td>
-                            </tr>
                         </tbody>
+                        <tfoot>
+                            <tr class="tbl-subtotal-row" aria-hidden="true">
+                                <td colspan="100" class="tbl-subtotal-cell">
+                                    <div class="tbl-subtotal-inner">
+                                        <span class="tbl-subtotal-count">{{ raumplus_accessories|length }} items</span>
+                                        <div class="tbl-subtotal-cost">
+                                            <span class="tbl-subtotal-label">Total Cost (Ex VAT)</span>
+                                            <span class="tbl-subtotal-value">£{{ raumplus_accessories|sum_accessory_costs }}</span>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
                 {% else %}
@@ -1271,7 +1281,7 @@
                     <table class="table">
                         <thead>
                             <tr>
-                                <th style="width:40px"><input type="checkbox" id="selectAllInstallation" onchange="toggleSelectAll('installation', this)"></th>
+                                <th class="col-select-th-md"><input type="checkbox" id="selectAllInstallation" onchange="toggleSelectAll('installation', this)"></th>
                                 <th>Fitter</th>
                                 <th>Date</th>
                                 <th>PO</th>
@@ -1345,7 +1355,7 @@
                     <table class="table">
                         <thead>
                             <tr>
-                                <th style="width:40px"><input type="checkbox" id="selectAllManufacturing" onchange="toggleSelectAll('manufacturing', this)"></th>
+                                <th class="col-select-th-md"><input type="checkbox" id="selectAllManufacturing" onchange="toggleSelectAll('manufacturing', this)"></th>
                                 <th>Worker</th>
                                 <th>Date</th>
                                 <th>Hours</th>
@@ -1531,7 +1541,7 @@
     </div>
     </div>
 <!-- Modal for Confirming Additional OS Doors PO -->
-<div class="modal" id="confirmAdditionalOSDoorsModal" style="display:none;">
+<div class="modal" id="confirmAdditionalOSDoorsModal">
     <div class="modal-overlay" onclick="document.getElementById('confirmAdditionalOSDoorsModal').style.display='none'"></div>
     <div class="modal-dialog">
         <div class="modal-content">
@@ -1641,14 +1651,14 @@
                         </div>
                     </div>
                     <!-- Paste tab -->
-                    <div id="osd-modal-paste-tab" style="display:none;">
+                    <div id="osd-modal-paste-tab">
                         <div class="form-group">
                             <label for="osd-paste-input">Paste row from supplier sheet</label>
                             <textarea class="form-input" id="osd-paste-input" rows="3"
                                       placeholder="e.g. Morris &#9;Superior Matt Light Grey Superior Matt Light Grey &#9;Morris Superior Matt Light Grey Drawer 210 x 960 (MTM) &#9;Light Grey Light Grey &#9;H &#9;£36.58"></textarea>
                             <small class="form-help">Paste a tab-separated row directly from the supplier spreadsheet, then click Parse.</small>
                         </div>
-                        <div class="flex-row-gap" style="margin-bottom: 1rem;">
+                        <div class="flex-row-gap osd-parse-flex-row">
                             <button type="button" class="btn btn-primary" onclick="parseOSDoorPaste()">
                                 <i class="bi bi-magic"></i> Parse
                             </button>
@@ -1656,10 +1666,10 @@
                                 <i class="bi bi-info-circle"></i> Parsing Rules
                             </button>
                         </div>
-                        <div id="osd-parse-rules" class="hidden" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem;">
-                            <h4 style="margin-bottom: 0.5rem;">Parsing Rules</h4>
-                            <p style="margin-bottom: 0.5rem;"><strong>Expected tab-separated columns:</strong></p>
-                            <ol style="margin: 0.5rem 0 1rem; padding-left: 1.5rem;">
+                        <div id="osd-parse-rules" class="hidden osd-parse-rules-box">
+                            <h4>Parsing Rules</h4>
+                            <p><strong>Expected tab-separated columns:</strong></p>
+                            <ol>
                                 <li><strong>Door Style</strong> — e.g. Morris, Lanark</li>
                                 <li><strong>Style Colour</strong> — e.g. Superior Matt Light Grey (may be duplicated)</li>
                                 <li><strong>Item Description</strong> — full description including dimensions</li>
@@ -1669,45 +1679,45 @@
                                 <li><strong>Quantity</strong> — e.g. 2</li>
                                 <li><strong>Total Price</strong> — e.g. £36.58</li>
                             </ol>
-                            <p style="margin-bottom: 0.25rem;"><strong>Dimensions</strong> are extracted from the description (e.g. "210 x 960").</p>
-                            <p style="margin-bottom: 0.5rem;">Empty leading columns are automatically skipped.</p>
-                            <hr style="border-color: var(--border-color); margin: 0.75rem 0;">
-                            <div class="form-grid-2col" style="gap: 0.5rem;">
-                                <div class="form-group" style="margin-bottom: 0;">
-                                    <label for="osd-rules-styles" style="font-size: 0.85rem;"><strong>Known Door Styles</strong> (comma-separated)</label>
+                            <p><strong>Dimensions</strong> are extracted from the description (e.g. "210 x 960").</p>
+                            <p>Empty leading columns are automatically skipped.</p>
+                            <p class="osd-parse-flex-row"><strong>Cornices</strong> (e.g. "SSG Classic Cornice 3050") are detected automatically — paste the full block as copied from the website; no tab-separated columns are needed.</p>
+                            <hr>
+                            <div class="form-grid-2col">
+                                <div class="form-group">
+                                    <label for="osd-rules-styles"><strong>Known Door Styles</strong> (comma-separated)</label>
                                     <input type="text" class="form-input" id="osd-rules-styles"
-                                           value="Morris, Lanark" style="font-size: 0.85rem;">
+                                           value="Morris, Lanark">
                                 </div>
-                                <div class="form-group" style="margin-bottom: 0;">
-                                    <label for="osd-rules-colours" style="font-size: 0.85rem;"><strong>Known Style Colours</strong> (comma-separated)</label>
+                                <div class="form-group">
+                                    <label for="osd-rules-colours"><strong>Known Style Colours</strong> (comma-separated)</label>
                                     <input type="text" class="form-input" id="osd-rules-colours"
-                                           value="Superior Matt Light Grey, Superior Matt White, Superior Matt Cashmere, Superior Matt Anthracite, Superior Matt Dust Grey, Superior Matt Graphite"
-                                           style="font-size: 0.85rem;">
+                                           value="Superior Matt Light Grey, Superior Matt White, Superior Matt Cashmere, Superior Matt Anthracite, Superior Matt Dust Grey, Superior Matt Graphite">
                                 </div>
                             </div>
-                            <small class="form-help" style="margin-top: 0.25rem; display: block;">Edit these lists to add new door styles or colours. Changes are used immediately when you click Parse.</small>
+                            <small class="form-help">Edit these lists to add new door styles or colours. Changes are used immediately when you click Parse.</small>
                         </div>
                         <div id="osd-parse-result" class="hidden">
-                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
-                                <h4 style="margin:0;" id="osd-parse-count">0 doors found</h4>
-                                <small class="form-help" style="margin:0;">Edit Qty or Cost Price inline if needed.</small>
+                            <div class="osd-parse-result-header">
+                                <h4 id="osd-parse-count">0 doors found</h4>
+                                <small class="form-help">Edit Qty or Cost Price inline if needed.</small>
                             </div>
-                            <div style="overflow-x:auto; max-height:340px; overflow-y:auto;">
-                                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                            <div class="osd-parse-scroll">
+                                <table class="osd-parse-table">
                                     <thead>
-                                        <tr style="border-bottom:2px solid var(--border-color); white-space:nowrap;">
-                                            <th style="padding:6px 8px; text-align:left;">Door Style</th>
-                                            <th style="padding:6px 8px; text-align:center;">H &times; W</th>
-                                            <th style="padding:6px 8px; text-align:left;">Colour</th>
-                                            <th style="padding:6px 8px; text-align:center; width:60px;">Qty</th>
-                                            <th style="padding:6px 8px; text-align:right; width:90px;">Cost (£)</th>
-                                            <th style="padding:6px 8px; width:30px;"></th>
+                                        <tr>
+                                            <th>Door Style</th>
+                                            <th class="th-center">H &times; W</th>
+                                            <th>Colour</th>
+                                            <th class="th-qty">Qty</th>
+                                            <th class="th-cost">Cost (&pound;)</th>
+                                            <th class="th-remove"></th>
                                         </tr>
                                     </thead>
                                     <tbody id="osd-parsed-tbody"></tbody>
                                 </table>
                             </div>
-                            <div id="osd-parse-progress" class="hidden" style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-secondary);"></div>
+                            <div id="osd-parse-progress" class="hidden osd-parse-progress"></div>
                         </div>
                     </div>
                 </div>
@@ -1716,7 +1726,7 @@
                     <button type="submit" class="btn btn-success" id="add-os-door-submit">
                         <i class="bi bi-plus-lg"></i> Add OS Door
                     </button>
-                    <button type="button" class="btn btn-success" id="osd-parsed-submit" onclick="submitParsedOSDoor()" disabled style="display:none;">
+                    <button type="button" class="btn btn-success" id="osd-parsed-submit" onclick="submitParsedOSDoor()" disabled>
                         <i class="bi bi-plus-lg"></i> <span id="osd-submit-label">Add OS Door</span>
                     </button>
                 </div>
@@ -1797,7 +1807,7 @@
                         <input type="text" class="form-input" id="add-board-barcode" placeholder="Auto-generated" readonly>
                     </div>
                 </div>
-                <div class="form-group" id="custom-partdesc-group" style="display: none;">
+                <div class="form-group d-none-init" id="custom-partdesc-group">
                     <label for="add-board-partdesc-custom">Custom Description *</label>
                     <input type="text" class="form-input" id="add-board-partdesc-custom" placeholder="e.g., Base Unit Casing Top" oninput="updateBarcodePreview()">
                 </div>
@@ -1961,7 +1971,7 @@
             </div>
             <div class="modal-body">
                 <div id="boardEggerColoursGrid" class="egger-grid">
-                    <div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>
+                    <div class="text-center loading-state-text">Loading...</div>
                 </div>
             </div>
         </div>
@@ -2026,15 +2036,15 @@
 <!-- Confirm Swap Modal -->
 <div class="modal" id="deleteConfirmModal">
     <div class="modal-overlay" onclick="closeModal('deleteConfirmModal')"></div>
-    <div class="modal-dialog" style="max-width:420px;">
+    <div class="modal-dialog modal-dialog-sm">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Confirm Delete</h3>
                 <button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">&#x2715;</button>
             </div>
             <div class="modal-body">
-                <p id="deleteConfirmMessage" style="margin:0;"></p>
-                <p style="margin-top:8px;font-size:0.82rem;color:var(--text-secondary);">This cannot be undone.</p>
+                <p id="deleteConfirmMessage" class="modal-confirm-msg"></p>
+                <p class="modal-confirm-warn">This cannot be undone.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmModal')">Cancel</button>
@@ -2054,7 +2064,7 @@
             </div>
             <div class="modal-body">
                 <p>Swap to <strong id="confirmSwapSku"></strong> - <span id="confirmSwapName"></span>?</p>
-                <p class="text-muted" style="margin-top: 8px;">This will update the accessory and regenerate the processed CSV.</p>
+                <p class="text-muted modal-swap-note">This will update the accessory and regenerate the processed CSV.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('confirmSwapModal')">Cancel</button>
@@ -2065,7 +2075,7 @@
 </div>
 
 <!-- Modal for Update Boards PO Confirmation -->
-<div class="modal" id="confirmUpdateBoardsPOModal" style="display:none;">
+<div class="modal" id="confirmUpdateBoardsPOModal">
     <div class="modal-overlay" onclick="closeUpdateBoardsPOModal()"></div>
     <div class="modal-dialog">
         <div class="modal-content">
@@ -2085,7 +2095,7 @@
 </div>
 
 <!-- Modal for PNX Unsaved Changes Warning -->
-<div class="modal" id="pnxUnsavedChangesModal" style="display:none;">
+<div class="modal" id="pnxUnsavedChangesModal">
     <div class="modal-overlay" onclick="document.getElementById('pnxUnsavedChangesModal').style.display='none'"></div>
     <div class="modal-dialog">
         <div class="modal-content">
@@ -2178,10 +2188,10 @@
                 <!-- For installation: linked PO -->
                 <div class="form-group" id="po-group">
                     <label for="timesheet_po_search">Purchase Order</label>
-                    <div style="position: relative;">
+                    <div class="autocomplete-wrapper">
                         <input type="text" class="form-input" id="timesheet_po_search" placeholder="Search PO by number or supplier..." autocomplete="off">
                         <input type="hidden" id="timesheet_po_id">
-                        <div id="timesheet_po_results" class="autocomplete-dropdown" style="display:none;"></div>
+                        <div id="timesheet_po_results" class="autocomplete-dropdown d-none-init"></div>
                     </div>
                 </div>
                 
@@ -2281,18 +2291,18 @@
 <!-- Accessory Quantity Modal -->
 <div class="modal" id="accessoryQtyModal">
     <div class="modal-overlay" onclick="closeModal('accessoryQtyModal')"></div>
-    <div class="modal-dialog" style="max-width: 360px;">
+    <div class="modal-dialog modal-dialog-xs">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Set Quantity</h3>
                 <button type="button" class="modal-close" onclick="closeModal('accessoryQtyModal')">✕</button>
             </div>
-            <div class="modal-body" style="padding: 20px;">
-                <p id="accessory-qty-sku" style="font-weight: 600; margin: 0 0 4px;"></p>
-                <p id="accessory-qty-name" style="font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 16px;"></p>
+            <div class="modal-body">
+                <p id="accessory-qty-sku" class="modal-qty-sku"></p>
+                <p id="accessory-qty-name" class="modal-qty-name"></p>
                 <label for="accessory-qty-input" class="field-label">Quantity</label>
-                <input type="number" class="form-input" id="accessory-qty-input" 
-                       min="1" step="1" value="1" style="margin-top: 4px;"
+                <input type="number" class="form-input modal-qty-input-mt" id="accessory-qty-input" 
+                       min="1" step="1" value="1"
                        onkeydown="if(event.key==='Enter'){confirmAccessoryQty();}">
             </div>
             <div class="modal-footer">
@@ -2306,15 +2316,15 @@
 <!-- Board Shape Preview Modal -->
 <div class="modal" id="boardPreviewModal">
     <div class="modal-overlay" onclick="closeModal('boardPreviewModal')"></div>
-    <div class="modal-dialog" style="max-width: 420px;">
+    <div class="modal-dialog modal-dialog-sm">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Board Preview</h3>
                 <button type="button" class="modal-close" onclick="closeModal('boardPreviewModal')">✕</button>
             </div>
-            <div class="modal-body" style="padding: 20px; text-align: center;">
+            <div class="modal-body text-center">
                 <canvas id="board-preview-canvas" width="380" height="260"
-                        style="width: 100%; max-width: 380px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary);"></canvas>
+                        class="board-preview-canvas"></canvas>
             </div>
         </div>
     </div>
@@ -2518,16 +2528,12 @@
                 <div class="modal-body">
                     <div class="form-group">
                         <label for="additional-po-number">PO Number</label>
-                        <div style="position:relative;">
+                        <div class="autocomplete-wrapper">
                             <input type="text" id="additional-po-number" name="po_number" class="form-input"
                                    placeholder="Leave blank to auto-generate, or type to find existing"
                                    autocomplete="off"
                                    oninput="searchAdditionalPO(this.value)">
-                            <div id="additional-po-results"
-                                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:500;
-                                        background:var(--bg-primary);border:1px solid var(--border-color);
-                                        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.18);
-                                        max-height:200px;overflow-y:auto;margin-top:2px;"></div>
+                            <div id="additional-po-results" class="po-autocomplete-results"></div>
                         </div>
                         <small class="form-help">Type to search for an existing PO to link, or leave blank to create a new one</small>
                     </div>
@@ -2537,7 +2543,7 @@
                         <small class="form-help">DWG drawing file to send to the manufacturer</small>
                     </div>
                     <div class="form-group">
-                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <label class="checkbox-label">
                             <input type="checkbox" id="additional-po-angled" name="is_angled">
                             <span>Angled Boards PO</span>
                         </label>
@@ -2562,30 +2568,30 @@
                 <button type="button" class="modal-close" onclick="cancelAllocation()">✕</button>
             </div>
             <div class="modal-body">
-                <div style="padding: 12px 16px; background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; margin-bottom: 16px;">
-                    <p style="margin: 0 0 8px 0; font-weight: 600; color: var(--text-primary); font-size: 0.95rem;">
-                        <i class="bi bi-exclamation-triangle" style="color: #ffc107;"></i> Before proceeding, please ensure:
+                <div class="alloc-prereq-box">
+                    <p class="alloc-prereq-title">
+                        <i class="bi bi-exclamation-triangle icon-warning"></i> Before proceeding, please ensure:
                     </p>
-                    <ul style="margin: 0; padding-left: 20px; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6;">
+                    <ul class="alloc-prereq-list">
                         <li>All quantities are correct on the order page</li>
                         <li>Any unnecessary items have been removed</li>
                         <li>All items are linked to the correct stock product</li>
                     </ul>
                 </div>
-                <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 0.9rem;">
+                <p class="alloc-description">
                     This will deduct <strong id="alloc-item-count">0</strong> item(s) from stock. This action can be reversed by unchecking the Materials Allocated checkbox.
                 </p>
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
-                    <label for="alloc-date-input" style="font-size:0.9rem;font-weight:600;white-space:nowrap;"><i class="bi bi-calendar3"></i> Allocation Date:</label>
-                    <input type="date" id="alloc-date-input" class="form-input" style="max-width:180px;">
+                <div class="alloc-date-row">
+                    <label for="alloc-date-input" class="alloc-date-label"><i class="bi bi-calendar3"></i> Allocation Date:</label>
+                    <input type="date" id="alloc-date-input" class="form-input alloc-date-input">
                 </div>
-                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+                <div class="table-container alloc-table-wrap">
                     <table class="table" id="allocation-modal-table">
                         <thead>
                             <tr>
                                 <th>SKU</th>
                                 <th>Name</th>
-                                <th style="text-align: center;">Qty</th>
+                                <th class="alloc-qty-th">Qty</th>
                             </tr>
                         </thead>
                         <tbody id="allocation-modal-body">
@@ -2617,17 +2623,17 @@
                 <button type="button" class="modal-close" onclick="cancelUnallocation()">✕</button>
             </div>
             <div class="modal-body">
-                <p style="margin: 0 0 16px 0; color: var(--text-secondary); font-size: 0.9rem;">
+                <p class="unalloc-description">
                     Were the materials from this order actually taken from stock?
                 </p>
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <div style="padding: 12px 16px; background: rgba(220,53,69,0.08); border: 1px solid rgba(220,53,69,0.25); border-radius: 8px;">
-                        <strong style="color: var(--text-primary); font-size: 0.9rem;"><i class="bi bi-arrow-return-left" style="color:#dc3545;"></i> Yes &mdash; return quantities to stock</strong>
-                        <p style="margin: 4px 0 0 0; color: var(--text-secondary); font-size: 0.82rem;">Use this if the order was cancelled or materials were put back. Quantities will be added back to stock.</p>
+                <div class="unalloc-choice-list">
+                    <div class="unalloc-choice-yes">
+                        <strong class="unalloc-choice-title"><i class="bi bi-arrow-return-left icon-danger"></i> Yes &mdash; return quantities to stock</strong>
+                        <p class="unalloc-choice-desc">Use this if the order was cancelled or materials were put back. Quantities will be added back to stock.</p>
                     </div>
-                    <div style="padding: 12px 16px; background: rgba(255,193,7,0.08); border: 1px solid rgba(255,193,7,0.25); border-radius: 8px;">
-                        <strong style="color: var(--text-primary); font-size: 0.9rem;"><i class="bi bi-tag" style="color:#ffc107;"></i> No &mdash; just uncheck (no stock change)</strong>
-                        <p style="margin: 4px 0 0 0; color: var(--text-secondary); font-size: 0.82rem;">Use this if the box was ticked by mistake and materials were never taken from stock.</p>
+                    <div class="unalloc-choice-no">
+                        <strong class="unalloc-choice-title"><i class="bi bi-tag icon-warning"></i> No &mdash; just uncheck (no stock change)</strong>
+                        <p class="unalloc-choice-desc">Use this if the box was ticked by mistake and materials were never taken from stock.</p>
                     </div>
                 </div>
             </div>
@@ -2647,7 +2653,7 @@
 <!-- Modal for Accessories CSV Generation (confirm + loading states) -->
 <div class="modal" id="generateAccessoriesCadModal">
     <div class="modal-overlay" id="gen-acc-overlay" onclick="closeModal('generateAccessoriesCadModal')"></div>
-    <div class="modal-dialog" style="max-width: 420px;">
+    <div class="modal-dialog modal-dialog-sm">
         <div class="modal-content">
             <div class="modal-header" id="gen-acc-modal-header">
                 <h3>Generate Accessories &mdash; CAD</h3>
@@ -2656,16 +2662,16 @@
             <div class="modal-body">
                 <div id="gen-acc-confirm-view">
                     <p>Generate accessories CSV from CAD data?</p>
-                    <p class="text-muted" style="font-size: 0.875rem; margin-bottom: 0;">This will create/update accessories from the CAD database.</p>
+                    <p class="text-muted gen-acc-description">This will create/update accessories from the CAD database.</p>
                 </div>
-                <div id="gen-acc-loading-view" style="display: none; text-align: center; padding: 1.25rem 0;">
-                    <div style="margin-bottom: 1rem;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite; color: var(--primary, #4a90d9);">
+                <div id="gen-acc-loading-view" class="gen-acc-loading">
+                    <div class="gen-acc-spinner-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="spinner-svg">
                             <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                         </svg>
                     </div>
-                    <h4 style="margin: 0 0 0.4rem;">Generating Accessories</h4>
-                    <p class="text-muted" style="margin: 0; font-size: 0.875rem;">Fetching CAD data and building accessories&hellip;</p>
+                    <h4 class="gen-acc-loading-title">Generating Accessories</h4>
+                    <p class="text-muted gen-acc-loading-text">Fetching CAD data and building accessories&hellip;</p>
                 </div>
             </div>
             <div class="modal-footer" id="gen-acc-modal-footer">
@@ -2686,22 +2692,22 @@
                 <button type="button" class="modal-close" id="pnx-modal-close" onclick="closePNXAnalysisModal()">&#x2715;</button>
             </div>
             <div class="modal-body">
-                <div id="pnx-loading-view" style="text-align: center; padding: 2rem 0;">
-                    <div style="margin-bottom: 1rem;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite; color: var(--primary, #4a90d9);">
+                <div id="pnx-loading-view" class="pnx-loading">
+                    <div class="pnx-spinner-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="spinner-svg">
                             <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                         </svg>
                     </div>
-                    <h4 style="margin: 0 0 0.4rem;">Analysing CAD Data</h4>
-                    <p class="text-muted" style="margin: 0; font-size: 0.875rem;">Fetching board data&hellip;</p>
+                    <h4 class="pnx-loading-title">Analysing CAD Data</h4>
+                    <p class="text-muted pnx-loading-text">Fetching board data&hellip;</p>
                 </div>
-                <div id="pnx-analysis-content" style="display: none;">
+                <div id="pnx-analysis-content">
                     <!-- Content will be populated by JavaScript -->
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closePNXAnalysisModal()">Cancel</button>
-                <button type="button" class="btn btn-success" id="confirm-pnx-btn" onclick="confirmPNXGeneration()" style="display: none;">Proceed with Generation</button>
+                <button type="button" class="btn btn-success" id="confirm-pnx-btn" onclick="confirmPNXGeneration()">Proceed with Generation</button>
             </div>
         </div>
     </div>
@@ -2745,10 +2751,10 @@ let _generateAccessoriesUrl = null;
 function generateAccessoriesCSV(url) {
     _generateAccessoriesUrl = url;
     // Reset to confirm state
-    document.getElementById('gen-acc-confirm-view').style.display = '';
+    document.getElementById('gen-acc-confirm-view').style.display = 'block';
     document.getElementById('gen-acc-loading-view').style.display = 'none';
-    document.getElementById('gen-acc-modal-footer').style.display = '';
-    document.getElementById('gen-acc-modal-close').style.display = '';
+    document.getElementById('gen-acc-modal-footer').style.display = 'flex';
+    document.getElementById('gen-acc-modal-close').style.display = 'inline-block';
     document.getElementById('gen-acc-overlay').onclick = function() { closeModal('generateAccessoriesCadModal'); };
     openModal('generateAccessoriesCadModal');
 }
@@ -2756,7 +2762,7 @@ function generateAccessoriesCSV(url) {
 function confirmGenerateAccessoriesCSV() {
     // Transition to loading state
     document.getElementById('gen-acc-confirm-view').style.display = 'none';
-    document.getElementById('gen-acc-loading-view').style.display = '';
+    document.getElementById('gen-acc-loading-view').style.display = 'block';
     document.getElementById('gen-acc-modal-footer').style.display = 'none';
     document.getElementById('gen-acc-modal-close').style.display = 'none';
     document.getElementById('gen-acc-overlay').onclick = null; // prevent dismiss while loading
@@ -4000,7 +4006,7 @@ function toggleMaterialsAllocated(orderId, allocate, checkbox) {
         tr.innerHTML = `
             <td><code>${sku}</code></td>
             <td>${name}</td>
-            <td style="text-align: center;">${qty}</td>
+            <td class="text-center">${qty}</td>
         `;
         tbody.appendChild(tr);
         itemCount++;
@@ -4009,7 +4015,7 @@ function toggleMaterialsAllocated(orderId, allocate, checkbox) {
     document.getElementById('alloc-item-count').textContent = itemCount;
 
     if (itemCount === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:16px;color:var(--text-secondary);">No unallocated items found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center no-items-msg">No unallocated items found.</td></tr>';
         document.getElementById('confirm-allocation-btn').disabled = true;
     } else {
         document.getElementById('confirm-allocation-btn').disabled = false;
@@ -4233,7 +4239,43 @@ function _parseSingleOSDoorRow(cols1, cols2) {
             if (prices.length >= 1) costPrice = prices[0];
         }
     } else {
-        // Fallback: no dimensions found — use positional mapping
+        // Check for cornice/no-dimension item before the generic fallback
+        const corniceColIdx = cols1.findIndex(c => /cornice/i.test(c) && c.trim().length > 0);
+        if (corniceColIdx >= 0) {
+            itemDescription = cols1[corniceColIdx].trim();
+            // Style/colour = first non-empty, non-cornice, non-price column
+            const styleCell = cols1.find(function(c, idx) {
+                return idx !== corniceColIdx && c.trim().length > 0 && extractPrice(c) === 0;
+            }) || '';
+            doorStyle   = styleCell ? deduplicateColour(styleCell) : '';
+            styleColour = doorStyle;
+            colour      = doorStyle;
+            // Collect prices from all non-cornice columns + continuation row
+            let prices = [];
+            cols1.forEach(function(c, idx) {
+                if (idx === corniceColIdx) return;
+                const p = extractPrice(c);
+                if (p > 0) prices.push(p);
+                else if (/^\d+$/.test(c.trim())) quantity = parseInt(c.trim());
+            });
+            if (cols2) {
+                cols2.forEach(function(c) {
+                    const p = extractPrice(c);
+                    if (p > 0) prices.push(p);
+                    else if (/^\d+$/.test(c.trim())) quantity = parseInt(c.trim());
+                });
+            }
+            if (prices.length >= 2) {
+                prices.sort(function(a, b) { return a - b; });
+                prices.pop(); // remove highest (likely the total)
+                costPrice = prices[0] || 0;
+            } else if (prices.length === 1) {
+                costPrice = prices[0];
+            }
+            return { doorStyle, styleColour, itemDescription, colour, height: 0, width: 0, quantity, costPrice, isCornice: true };
+        }
+
+        // Generic positional fallback
         doorStyle       = cols1[0] || '';
         styleColour     = deduplicateColour(cols1[1] || '');
         itemDescription = cols1[2] || cols1.join(' ');
@@ -4296,6 +4338,17 @@ function parseOSDoorPaste() {
         _parsedOSDoors.push(item);
     }
 
+    // Cornice parser — handles items with no H×W dimension (e.g. "SSG Classic Cornice 3050").
+    // These come through as sequential single-column lines rather than tab-separated rows.
+    const corniceItems = _parseCorniceItems(lines);
+    corniceItems.forEach(function(ci) {
+        // Avoid double-adding if somehow already captured by the table-row parser
+        const alreadyAdded = _parsedOSDoors.some(function(d) {
+            return d && d.itemDescription === ci.itemDescription;
+        });
+        if (!alreadyAdded) _parsedOSDoors.push(ci);
+    });
+
     if (_parsedOSDoors.length === 0) {
         showAlert('Could not parse any door items — check the format.', 'warning');
         return;
@@ -4318,19 +4371,23 @@ function renderParsedTable() {
         const tr1 = document.createElement('tr');
         tr1.style.borderTop = '1px solid var(--border-color)';
         tr1.innerHTML =
-            '<td style="padding:5px 8px; white-space:nowrap; font-weight:500;">' + _esc(item.doorStyle) + '</td>' +
-            '<td style="padding:5px 8px; white-space:nowrap; text-align:center;">' + (item.height||'?') + ' &times; ' + (item.width||'?') + '</td>' +
-            '<td style="padding:5px 8px; white-space:nowrap;">' + _esc(item.colour) + '</td>' +
-            '<td style="padding:5px 8px; text-align:center;">' +
-                '<input type="number" min="1" value="' + item.quantity + '" style="width:52px; text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; padding:2px 4px; color:var(--text-primary); font-size:0.82rem;" ' +
+            '<td class="osd-parse-td">' + _esc(item.doorStyle) + '</td>' +
+            '<td class="osd-parse-td-center">' +
+                (item.isCornice
+                    ? '<em class="osd-parse-cornice">cornice</em>'
+                    : (item.height||'?') + ' &times; ' + (item.width||'?')) +
+            '</td>' +
+            '<td class="osd-parse-td-colour">' + _esc(item.colour) + '</td>' +
+            '<td class="osd-parse-td-center">' +
+                '<input type="number" min="1" value="' + item.quantity + '" class="osd-parse-qty-input" ' +
                 'onchange="_parsedOSDoors[' + realIdx + '].quantity=parseInt(this.value)||1">' +
             '</td>' +
-            '<td style="padding:5px 8px; text-align:right;">' +
-                '<input type="number" min="0" step="0.01" value="' + (item.costPrice ? item.costPrice.toFixed(2) : '0.00') + '" style="width:72px; text-align:right; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; padding:2px 4px; color:var(--text-primary); font-size:0.82rem;" ' +
+            '<td class="osd-parse-td-right">' +
+                '<input type="number" min="0" step="0.01" value="' + (item.costPrice ? item.costPrice.toFixed(2) : '0.00') + '" class="osd-parse-cost-input" ' +
                 'onchange="_parsedOSDoors[' + realIdx + '].costPrice=parseFloat(this.value)||0">' +
             '</td>' +
-            '<td style="padding:5px 4px; text-align:center;" rowspan="2">' +
-                '<button type="button" title="Remove" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:1.1rem; padding:0 4px;" ' +
+            '<td class="osd-parse-td-actions" rowspan="2">' +
+                '<button type="button" title="Remove" class="osd-parse-remove-btn" ' +
                 'onclick="_removeParsedRow(' + realIdx + ')">&times;</button>' +
             '</td>';
         tbody.appendChild(tr1);
@@ -4338,7 +4395,7 @@ function renderParsedTable() {
         // Row 2: Description (spans all data columns)
         const tr2 = document.createElement('tr');
         tr2.innerHTML =
-            '<td colspan="5" style="padding:2px 8px 7px 8px; font-size:0.76rem; color:var(--text-secondary); font-style:italic;">' +
+            '<td colspan="5" class="osd-parse-td-desc">' +
             _esc(item.itemDescription) + '</td>';
         tbody.appendChild(tr2);
     });
@@ -4393,6 +4450,92 @@ function extractPrice(str) {
     const match = str.match(/£?([\d]+\.[\d]{2})/);
     if (match) return parseFloat(match[1]);
     return 0;
+}
+
+function _parseCorniceItems(lines) {
+    // Handles items like "SSG Classic Cornice 3050" that have no H×W dimension.
+    // Supports two paste formats:
+    //   A) Tab-separated row  — cornice is one cell among colour/price columns on a single line
+    //   B) Multi-line block   — cornice name is on its own line with prices on following lines
+    const items = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!/cornice/i.test(line)) continue;
+        if (/^!\[/.test(line)) continue; // markdown image
+
+        let itemDescription = line;
+        let colour = '';
+        let doorStyle = '';
+        const prices = [];
+
+        if (line.includes('\t')) {
+            // Format A: extract just the cornice cell; get colour/prices from sibling cells
+            const cells = line.split('\t').map(c => c.trim());
+            const corniceCell = cells.find(c => /cornice/i.test(c) && c.length > 0);
+            if (corniceCell) itemDescription = corniceCell;
+            cells.forEach(function(c) {
+                if (c === itemDescription) return;
+                const p = extractPrice(c);
+                if (p > 0) { prices.push(p); return; }
+                if (c.length > 0 && !/^!\[/.test(c)) {
+                    // First non-price, non-cornice text cell = colour/style
+                    if (!colour) colour = deduplicateColour(c);
+                }
+            });
+            doorStyle = colour;
+        } else {
+            // Format B: plain cornice line — skip if it is itself a price
+            if (extractPrice(line) > 0) continue;
+            // Look back for the colour / style name
+            for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
+                const prev = lines[j];
+                if (!prev) continue;
+                if (extractPrice(prev) > 0) continue;
+                if (/^!\[/.test(prev)) continue;
+                // Use the first non-price text (ignoring tabs in that line too)
+                const candidate = prev.includes('\t') ? prev.split('\t')[0].trim() : prev.trim();
+                if (candidate) { colour = deduplicateColour(candidate); doorStyle = colour; break; }
+            }
+        }
+
+        // Collect prices from following lines (handles both formats)
+        for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) {
+            const next = lines[j];
+            if (!next || /^!\[/.test(next)) continue;
+            if (next.includes('\t')) {
+                next.split('\t').forEach(function(c) {
+                    const p = extractPrice(c.trim());
+                    if (p > 0) prices.push(p);
+                });
+            } else {
+                const p = extractPrice(next);
+                if (p > 0) prices.push(p);
+            }
+        }
+
+        // Trade price = smallest after removing the highest (assumed total)
+        let costPrice = 0;
+        if (prices.length >= 2) {
+            const sorted = prices.slice().sort(function(a, b) { return a - b; });
+            sorted.pop();
+            costPrice = sorted[0] || 0;
+        } else if (prices.length === 1) {
+            costPrice = prices[0];
+        }
+
+        items.push({
+            doorStyle:       doorStyle || 'Cornice',
+            styleColour:     colour,
+            itemDescription: itemDescription,
+            colour:          colour,
+            height:          0,
+            width:           0,
+            quantity:        1,
+            costPrice:       costPrice,
+            isCornice:       true
+        });
+    }
+    return items;
 }
 
 async function submitParsedOSDoor() {
@@ -4491,15 +4634,15 @@ function switchOSDModalTab(tab) {
     const btnPaste = document.getElementById('osd-tab-paste-btn');
     if (tab === 'paste') {
         newTab.style.display = 'none';
-        pasteTab.style.display = '';
+        pasteTab.style.display = 'block';
         newSubmit.style.display = 'none';
-        pasteSubmit.style.display = '';
+        pasteSubmit.style.display = 'inline-flex';
         btnNew.classList.remove('active');
         btnPaste.classList.add('active');
     } else {
-        newTab.style.display = '';
+        newTab.style.display = 'block';
         pasteTab.style.display = 'none';
-        newSubmit.style.display = '';
+        newSubmit.style.display = 'inline-flex';
         pasteSubmit.style.display = 'none';
         btnNew.classList.add('active');
         btnPaste.classList.remove('active');
@@ -4513,10 +4656,10 @@ let _apoPoSearchTimers = {};
 function toggleApoPoSearch(panelId) {
     const panel = document.getElementById(panelId);
     if (!panel) return;
-    const isOpen = panel.style.display !== 'none';
+    const isOpen = panel.style.display === 'block';
     document.querySelectorAll('.apo-po-search-panel').forEach(p => { p.style.display = 'none'; });
     if (!isOpen) {
-        panel.style.display = '';
+        panel.style.display = 'block';
         panel.querySelector('input').focus();
     }
 }
@@ -4734,7 +4877,7 @@ function onPartDescChange() {
     const customInput = document.getElementById('add-board-partdesc-custom');
 
     if (sel.value === 'Custom') {
-        customGroup.style.display = '';
+        customGroup.style.display = 'block';
         customInput.focus();
     } else {
         customGroup.style.display = 'none';
@@ -4763,7 +4906,7 @@ function setPartDescField(value) {
         customInput.value = '';
     } else if (value) {
         sel.value = 'Custom';
-        customGroup.style.display = '';
+        customGroup.style.display = 'block';
         customInput.value = value;
     } else {
         sel.value = '';
@@ -4786,8 +4929,8 @@ function openAddBoardModal(boardsPoId) {
     activePoNumber = (addBtn && addBtn.dataset.poNumber) || '';
 
     // Toggle standard vs angled dimension fields
-    document.getElementById('standard-dims-row').style.display = isAngled ? 'none' : '';
-    document.getElementById('angled-dims-section').style.display = isAngled ? '' : 'none';
+    document.getElementById('standard-dims-row').style.display = isAngled ? 'none' : 'block';
+    document.getElementById('angled-dims-section').style.display = isAngled ? 'block' : 'none';
 
     // Reset queue
     boardQueue = [];
@@ -4972,9 +5115,9 @@ function renderBoardStagingList() {
             ? `L:${b.left_height} R:${b.right_height} W:${b.cwidth}${b.top_edge ? ' TE:' + b.top_edge : ''}`
             : `${b.cleng}&times;${b.cwidth}`;
         return `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg-tertiary,#2a2d35);border-radius:4px;margin-bottom:4px;font-size:0.8rem;">
+        <div class="board-queue-item">
             <span><strong>${b.barcode}</strong> &mdash; ${b.matname} &mdash; ${dims}</span>
-            <button type="button" onclick="removeFromBoardQueue(${i})" style="background:none;border:none;color:var(--text-secondary,#6c757d);cursor:pointer;font-size:1rem;padding:0 4px;line-height:1;">&times;</button>
+            <button type="button" onclick="removeFromBoardQueue(${i})" class="board-queue-remove">&times;</button>
         </div>
     `}).join('');
 }
@@ -5543,11 +5686,11 @@ function displayAddGlassResults(results) {
     const container = document.getElementById('add-glass-results');
     
     if (results.length === 0) {
-        container.innerHTML = '<p class="text-muted" style="padding: 1.5rem;">No items found</p>';
+        container.innerHTML = '<p class="text-muted no-items-msg">No items found</p>';
         return;
     }
     
-    let html = '<table class="table table-hover" style="margin: 0;"><thead style="position: sticky; top: 0; background: rgba(0,0,0,0.05);"><tr><th>SKU</th><th>Name</th><th>Stock</th><th>Action</th></tr></thead><tbody>';
+    let html = '<table class="table table-hover search-result-table-wrap"><thead class="search-result-table-head"><tr><th>SKU</th><th>Name</th><th>Stock</th><th>Action</th></tr></thead><tbody>';
     
     results.forEach(item => {
         const stockBadge = item.quantity > 0 
@@ -6236,10 +6379,10 @@ window.analyzePNXGeneration = function(event, boardsPoId) {
     const queryParam = boardsPoId ? `?boards_po_id=${boardsPoId}` : '';
     
     // Show modal immediately in loading state
-    document.getElementById('pnx-loading-view').style.display = '';
+    document.getElementById('pnx-loading-view').style.display = 'block';
     document.getElementById('pnx-analysis-content').style.display = 'none';
     document.getElementById('confirm-pnx-btn').style.display = 'none';
-    document.getElementById('pnx-modal-close').style.display = '';
+    document.getElementById('pnx-modal-close').style.display = 'inline-block';
     document.getElementById('pnx-modal-overlay').onclick = closePNXAnalysisModal;
     openModal('pnxAnalysisModal');
     
@@ -6279,8 +6422,8 @@ function showPNXAnalysisModal(data) {
     // Render content and switch from loading state
     renderPNXAnalysisModal();
     document.getElementById('pnx-loading-view').style.display = 'none';
-    document.getElementById('pnx-analysis-content').style.display = '';
-    document.getElementById('confirm-pnx-btn').style.display = '';
+    document.getElementById('pnx-analysis-content').style.display = 'block';
+    document.getElementById('confirm-pnx-btn').style.display = 'inline-flex';
 }
 
 function renderPNXAnalysisModal() {
@@ -6292,31 +6435,31 @@ function renderPNXAnalysisModal() {
     const newCount = pnxStagingData.newItems.length;
     
     // Action Summary at the top
-    html += '<div style="background-color: var(--bg-tertiary, #2a2d35); border: 1px solid var(--border-color, #3a3d45); padding: 18px 20px; margin-bottom: 25px; border-radius: 6px;">';
-    html += '<h5 style="margin: 0 0 12px 0; color: var(--text-primary, #e0e0e0); font-weight: 600;"><i class="bi bi-info-circle-fill" style="opacity: 0.7; color: #6ea8fe;"></i> PNX Staging - Review Before Import</h5>';
-    html += '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; font-size: 14px;">';
+    html += '<div class="pnx-staging-info">';
+    html += '<h5 class="pnx-staging-title"><i class="bi bi-info-circle-fill pnx-info-icon"></i> PNX Staging - Review Before Import</h5>';
+    html += '<div class="pnx-staging-stats">';
     
     if (newCount > 0) {
         html += '<div>';
-        html += '<div style="color: #4ade80; font-weight: 600;"><i class="bi bi-plus-circle"></i> Will Add</div>';
-        html += `<div style="font-size: 22px; font-weight: bold; color: #4ade80;">${newCount}</div>`;
-        html += '<div style="font-size: 12px; color: var(--text-secondary, #9ca3af);">new items</div>';
+        html += '<div class="pnx-stat-label pnx-stat-label-add"><i class="bi bi-plus-circle"></i> Will Add</div>';
+        html += `<div class="pnx-stat-value pnx-stat-value-add">${newCount}</div>`;
+        html += '<div class="pnx-stat-desc">new items</div>';
         html += '</div>';
     }
     
     if (updateCount > 0) {
         html += '<div>';
-        html += '<div style="color: #fbbf24; font-weight: 600;"><i class="bi bi-arrow-up-circle"></i> Will Update</div>';
-        html += `<div style="font-size: 22px; font-weight: bold; color: #fbbf24;">${updateCount}</div>`;
-        html += '<div style="font-size: 12px; color: var(--text-secondary, #9ca3af);">quantity changes</div>';
+        html += '<div class="pnx-stat-label pnx-stat-label-update"><i class="bi bi-arrow-up-circle"></i> Will Update</div>';
+        html += `<div class="pnx-stat-value pnx-stat-value-update">${updateCount}</div>`;
+        html += '<div class="pnx-stat-desc">quantity changes</div>';
         html += '</div>';
     }
     
     if (duplicateCount > 0) {
         html += '<div>';
-        html += '<div style="color: #9ca3af; font-weight: 600;"><i class="bi bi-dash-circle"></i> Will Ignore</div>';
-        html += `<div style="font-size: 22px; font-weight: bold; color: #9ca3af;">${duplicateCount}</div>`;
-        html += '<div style="font-size: 12px; color: var(--text-secondary, #9ca3af);">duplicates</div>';
+        html += '<div class="pnx-stat-label pnx-stat-label-ignore"><i class="bi bi-dash-circle"></i> Will Ignore</div>';
+        html += `<div class="pnx-stat-value pnx-stat-value-ignore">${duplicateCount}</div>`;
+        html += '<div class="pnx-stat-desc">duplicates</div>';
         html += '</div>';
     }
     
@@ -6324,13 +6467,13 @@ function renderPNXAnalysisModal() {
     
     // New Items Section
     if (newCount > 0) {
-        html += '<div style="margin-bottom: 25px;">';
-        html += '<h4 style="color: #4ade80; margin-bottom: 15px; border-bottom: 2px solid rgba(74,222,128,0.3); padding-bottom: 10px;">';
+        html += '<div class="pnx-stage-section">';
+        html += '<h4 class="pnx-stage-h4 pnx-stage-h4-add">';
         html += '<i class="bi bi-plus-circle-fill"></i> Items to Add (' + newCount + ')';
         html += '</h4>';
-        html += '<table class="table table-sm" style="font-size: 0.85rem;">';
-        html += '<thead><tr style="border-bottom: 2px solid rgba(74,222,128,0.4);">';
-        html += '<th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Barcode</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Material</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Dimensions</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Customer</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Quantity</th></tr>';
+        html += '<table class="table table-sm pnx-stage-table">';
+        html += '<thead><tr class="pnx-stage-thead-add">';
+        html += '<th class="pnx-stage-th">Barcode</th><th class="pnx-stage-th">Material</th><th class="pnx-stage-th">Dimensions</th><th class="pnx-stage-th">Customer</th><th class="pnx-stage-th">Quantity</th></tr>';
         html += '</thead><tbody>';
         pnxStagingData.newItems.forEach(item => {
             html += '<tr>';
@@ -6338,7 +6481,7 @@ function renderPNXAnalysisModal() {
             html += `<td>${item.matname}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.customer || ''}</td>`;
-            html += `<td><span style="background-color: rgba(74,222,128,0.2); padding: 3px 10px; border-radius: 4px; font-weight: 600; color: #4ade80;">${item.qty}</span></td>`;
+            html += `<td><span class="pnx-stage-qty-add">${item.qty}</span></td>`;
             html += '</tr>';
         });
         html += '</tbody></table>';
@@ -6347,13 +6490,13 @@ function renderPNXAnalysisModal() {
     
     // Updated Items Section
     if (updateCount > 0) {
-        html += '<div style="margin-bottom: 25px;">';
-        html += '<h4 style="color: #fbbf24; margin-bottom: 15px; border-bottom: 2px solid rgba(251,191,36,0.3); padding-bottom: 10px;">';
+        html += '<div class="pnx-stage-section">';
+        html += '<h4 class="pnx-stage-h4 pnx-stage-h4-update">';
         html += '<i class="bi bi-arrow-up-circle-fill"></i> Quantity Updates (' + updateCount + ')';
         html += '</h4>';
-        html += '<table class="table table-sm" style="font-size: 0.85rem;">';
-        html += '<thead><tr style="border-bottom: 2px solid rgba(251,191,36,0.4);">';
-        html += '<th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Barcode</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Material</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Dimensions</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Current</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">New</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Change</th></tr>';
+        html += '<table class="table table-sm pnx-stage-table">';
+        html += '<thead><tr class="pnx-stage-thead-update">';
+        html += '<th class="pnx-stage-th">Barcode</th><th class="pnx-stage-th">Material</th><th class="pnx-stage-th">Dimensions</th><th class="pnx-stage-th">Current</th><th class="pnx-stage-th">New</th><th class="pnx-stage-th">Change</th></tr>';
         html += '</thead><tbody>';
         pnxStagingData.updatedItems.forEach(item => {
             const change = item.qty - item.old_qty;
@@ -6362,8 +6505,8 @@ function renderPNXAnalysisModal() {
             html += `<td>${item.matname}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.old_qty}</td>`;
-            html += `<td><strong style="color: #fbbf24;">${item.qty}</strong></td>`;
-            html += `<td><span style="background-color: rgba(251,191,36,0.2); padding: 3px 10px; border-radius: 4px; font-weight: 600; color: #fbbf24;">+${change}</span></td>`;
+            html += `<td><strong class="pnx-stage-qty-update">${item.qty}</strong></td>`;
+            html += `<td><span class="pnx-stage-change">+${change}</span></td>`;
             html += '</tr>';
         });
         html += '</tbody></table>';
@@ -6372,22 +6515,22 @@ function renderPNXAnalysisModal() {
     
     // Duplicate Items Section
     if (duplicateCount > 0) {
-        html += '<div id="duplicates-section" style="margin-bottom: 25px;">';
-        html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">';
-        html += '<h4 style="color: var(--text-secondary, #9ca3af); margin: 0; border-bottom: 2px solid var(--border-color, #3a3d45); padding-bottom: 10px; flex-grow: 1;">';
+        html += '<div id="duplicates-section" class="pnx-stage-section">';
+        html += '<div class="pnx-dup-header">';
+        html += '<h4 class="pnx-stage-h4 pnx-stage-h4-dup">';
         html += '<i class="bi bi-dash-circle-fill"></i> Items to Ignore (' + duplicateCount + ')';
         html += '</h4>';
-        html += '<button type="button" class="btn btn-sm btn-outline-success" onclick="moveSelectedDuplicatesToImport()" style="margin-left: 15px;">';
+        html += '<button type="button" class="btn btn-sm btn-outline-success pnx-dup-move-btn" onclick="moveSelectedDuplicatesToImport()">';
         html += '<i class="bi bi-arrow-up-circle"></i> Move Selected to Import';
         html += '</button>';
         html += '</div>';
-        html += '<p style="color: #6c757d; font-size: 13px; margin-bottom: 10px;">';
+        html += '<p class="pnx-dup-note">';
         html += '<em>These items already exist with the same quantity. Select items below to include them in the import anyway.</em>';
         html += '</p>';
-        html += '<table class="table table-sm" style="font-size: 0.85rem;">';
-        html += '<thead><tr style="border-bottom: 2px solid var(--border-color, #3a3d45);">';
-        html += '<th style="width: 40px; color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase;"><input type="checkbox" id="select-all-duplicates" onchange="toggleAllDuplicates(this.checked)"></th>';
-        html += '<th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Barcode</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Material</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Dimensions</th><th style="color: var(--text-secondary, #6c757d); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">Quantity</th>';
+        html += '<table class="table table-sm pnx-stage-table">';
+        html += '<thead><tr class="pnx-stage-thead-dup">';
+        html += '<th class="pnx-stage-th pnx-stage-th-checkbox"><input type="checkbox" id="select-all-duplicates" onchange="toggleAllDuplicates(this.checked)"></th>';
+        html += '<th class="pnx-stage-th">Barcode</th><th class="pnx-stage-th">Material</th><th class="pnx-stage-th">Dimensions</th><th class="pnx-stage-th">Quantity</th>';
         html += '</tr>';
         html += '</thead><tbody id="duplicates-tbody">';
         pnxStagingData.duplicateItems.forEach((item, index) => {
@@ -6406,7 +6549,7 @@ function renderPNXAnalysisModal() {
     // If nothing to do
     if (duplicateCount === 0 && updateCount === 0 && newCount === 0) {
         html += '<div class="alert alert-warning">';
-        html += '<p style="margin: 0;">No changes detected. The PNX file contains no new or updated items.</p>';
+        html += '<p class="modal-confirm-msg">No changes detected. The PNX file contains no new or updated items.</p>';
         html += '</div>';
     }
     
@@ -7234,7 +7377,7 @@ function startOsDoorEdit(osDoorId) {
     if (!row) return;
     row.classList.add('os-door-editing');
     row.querySelectorAll('.osd-display').forEach(el => el.style.display = 'none');
-    row.querySelectorAll('.osd-edit-input').forEach(el => { el.style.display = ''; });
+    row.querySelectorAll('.osd-edit-input').forEach(el => { el.style.display = 'block'; });
     const viewActions = row.querySelector('.os-door-view-actions');
     const editActions = row.querySelector('.os-door-edit-actions');
     if (viewActions) viewActions.style.display = 'none';
@@ -7260,11 +7403,11 @@ function cancelOsDoorEdit(osDoorId) {
         const inp = row.querySelector(inpSel);
         if (disp && inp) inp.value = disp.textContent.replace('£', '').trim();
     });
-    row.querySelectorAll('.osd-display').forEach(el => el.style.display = '');
+    row.querySelectorAll('.osd-display').forEach(el => el.style.display = 'block');
     row.querySelectorAll('.osd-edit-input').forEach(el => el.style.display = 'none');
     const viewActions = row.querySelector('.os-door-view-actions');
     const editActions = row.querySelector('.os-door-edit-actions');
-    if (viewActions) viewActions.style.display = '';
+    if (viewActions) viewActions.style.display = 'flex';
     if (editActions) editActions.style.display = 'none';
 }
 
@@ -7306,11 +7449,11 @@ function saveOsDoorInlineEdit(osDoorId) {
             if (colourInput) row.querySelector('.osd-display-colour').textContent = changes.colour;
             const costDisplay = row.querySelector('.os-door-cost-display');
             if (costDisplay) costDisplay.textContent = '£' + changes.cost_price.toFixed(2);
-            row.querySelectorAll('.osd-display').forEach(el => el.style.display = '');
+            row.querySelectorAll('.osd-display').forEach(el => el.style.display = 'block');
             row.querySelectorAll('.osd-edit-input').forEach(el => el.style.display = 'none');
             const viewActions = row.querySelector('.os-door-view-actions');
             const editActions = row.querySelector('.os-door-edit-actions');
-            if (viewActions) viewActions.style.display = '';
+            if (viewActions) viewActions.style.display = 'flex';
             if (editActions) editActions.style.display = 'none';
             recalcOsDoorTotal(row);
             showAlert('Saved', 'success');
@@ -7427,11 +7570,10 @@ function searchAdditionalPO(query) {
                 const num = po.display_number || po.id;
                 const sup = po.supplier_name ? ` – ${po.supplier_name}` : '';
                 const sta = po.status ? ` (${po.status})` : '';
-                return `<div style="padding:7px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid var(--border-color);"
-                             onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
+                return `<div class="autocomplete-item"
                              onclick="document.getElementById('additional-po-number').value='${String(num).replace(/'/g,"\\'")}';
                                       document.getElementById('additional-po-results').style.display='none';">
-                            <strong>${num}</strong><span style="color:var(--text-secondary);">${sup}${sta}</span>
+                            <strong>${num}</strong><span class="text-muted">${sup}${sta}</span>
                         </div>`;
             }).join('');
             dd.style.display = 'block';
@@ -7666,7 +7808,7 @@ function saveNewWorker() {
                     .then(data => {
                         resultsDiv.innerHTML = '';
                         if (!data.results || !data.results.length) {
-                            resultsDiv.innerHTML = '<div class="autocomplete-item" style="color:#999;">No POs found</div>';
+                            resultsDiv.innerHTML = '<div class="autocomplete-item text-muted">No POs found</div>';
                         } else {
                             data.results.forEach(po => {
                                 const div = document.createElement('div');
@@ -8001,7 +8143,7 @@ function setThickness(value) {
 function openBoardEggerModal() {
     openModal('boardEggerColoursModal');
     const grid = document.getElementById('boardEggerColoursGrid');
-    grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>';
+    grid.innerHTML = '<div class="text-center loading-state-text">Loading...</div>';
 
     fetch("{% url 'egger_colours' %}", {
         headers: {'X-Requested-With': 'XMLHttpRequest'}
@@ -8009,7 +8151,7 @@ function openBoardEggerModal() {
     .then(r => r.json())
     .then(data => {
         if (!data.colours || data.colours.length === 0) {
-            grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">No Egger colours with images found</div>';
+            grid.innerHTML = '<div class="text-center loading-state-text">No Egger colours with images found</div>';
             return;
         }
         grid.innerHTML = data.colours.map(c => `
@@ -8020,7 +8162,7 @@ function openBoardEggerModal() {
         `).join('');
     })
     .catch(() => {
-        grid.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--text-secondary);">Failed to load colours</div>';
+        grid.innerHTML = '<div class="text-center loading-state-text">Failed to load colours</div>';
     });
 }
 
@@ -8098,12 +8240,12 @@ document.addEventListener('click', function(e) {
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="bi bi-check2-circle" style="color: #28a745; margin-right: 8px;"></i>Mark Job as Finished?</h3>
+                <h3><i class="bi bi-check2-circle icon-success"></i>Mark Job as Finished?</h3>
                 <button class="modal-close" onclick="cancelJobFinished()">&#x2715;</button>
             </div>
             <div class="modal-body">
-                <p style="margin: 0 0 10px;">This will mark the job as complete and allocate any outstanding accessories.</p>
-                <p style="margin: 0; color: var(--text-secondary); font-size: 0.88rem;">Are you sure you want to mark this job as finished?</p>
+                <p class="modal-confirm-msg modal-confirm-msg--mb">This will mark the job as complete and allocate any outstanding accessories.</p>
+                <p class="modal-confirm-warn">Are you sure you want to mark this job as finished?</p>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="cancelJobFinished()">Cancel</button>

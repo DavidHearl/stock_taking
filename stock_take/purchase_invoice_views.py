@@ -372,18 +372,83 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
                         break
 
         # ── Total amount ──────────────────────────────────────────
-        total_patterns = [
-            r'(?:Total\s*(?:Amount\s*)?(?:Due|Payable)?|Amount\s*(?:Due|Payable)|Grand\s*Total'
-            r'|Invoice\s*Total|Balance\s*Due|Net\s*(?:Total|Amount)|Total\s*(?:to\s*Pay|Inc(?:l?\.?\s*VAT)?))[:\s]+'
-            r'[£\$€]?\s*([\d,]+\.?\d*)',
-            r'\bTotal\b[:\s]+[£\$€]?\s*([\d,]+\.?\d*)',
-        ]
-        for pat in total_patterns:
-            total_m = re.search(pat, full_text, re.IGNORECASE)
-            if total_m:
+        # Strategy 1: scan extracted tables for a "Total" row.
+        # pdfplumber keeps "Total", "£", "313.27" as separate cells so this is
+        # the most reliable way to read invoices like Flanagan Fittings.
+        _TOTAL_LABEL_RE = re.compile(
+            r'^(?:Total|Grand\s*Total|Invoice\s*Total|Amount\s*(?:Due|Payable)|'
+            r'Balance\s*(?:Due|Outstanding|Payable)|Total\s*(?:Due|Payable|to\s*Pay)|'
+            r'Net\s*Amount|Gross\s*(?:Total|Amount)|Total\s*Payable)\s*$',
+            re.IGNORECASE,
+        )
+        _MONEY_RE = re.compile(r'^\s*[£\$€]?\s*([\d,]+\.\d{2})\s*$')
+        for table in all_tables:
+            if extracted.get('total'):
+                break
+            for row in (table or []):
+                if not row:
+                    continue
+                cells = [str(c or '').strip() for c in row]
+                # Find the label cell
+                label_idx = next((i for i, c in enumerate(cells) if _TOTAL_LABEL_RE.match(c)), None)
+                if label_idx is None:
+                    continue
+                # Look for a money amount in any subsequent cell on the same row
+                for cell in cells[label_idx + 1:]:
+                    m = _MONEY_RE.match(cell)
+                    if m:
+                        try:
+                            val = Decimal(m.group(1).replace(',', ''))
+                            if val > 0:
+                                extracted['total'] = str(val)
+                        except (InvalidOperation, ValueError):
+                            pass
+                    if extracted.get('total'):
+                        break
+
+        # Strategy 2: text-based regex (handles flat-text PDFs where tables aren't detected).
+        # Use [^\d\n]{0,25} to skip currency symbols regardless of their encoding —
+        # the £ in pdfplumber output may not match the literal £ in a regex character class.
+        if 'total' not in extracted:
+            total_label = (
+                r'(?:Total\s*(?:Amount\s*)?(?:Due|Payable|Inc(?:l?\.?\s*VAT)?)?'
+                r'|Amount\s*(?:Due|Payable)'
+                r'|Grand\s*Total'
+                r'|Invoice\s*Total'
+                r'|Balance\s*(?:Due|Outstanding|Payable)'
+                r'|Net\s*Amount'
+                r'|Total\s*(?:to\s*Pay|Payable)'
+                r'|Gross\s*(?:Total|Amount)'
+                r')'
+            )
+            total_patterns = [
+                # Label + any non-digit separator (handles £ as any encoding) + amount
+                total_label + r'[^\d\n]{0,25}([\d,]+\.\d{2})',
+                # Simple "Total" with any non-digit gap
+                r'\bTotal\b[^\d\n]{0,25}([\d,]+\.\d{2})',
+                # "Total" on one line, amount on the very next line
+                r'\bTotal\b[^\n]*\n\s*[^\d\n]{0,10}([\d,]+\.\d{2})',
+            ]
+            for pat in total_patterns:
+                m = re.search(pat, full_text, re.IGNORECASE | re.MULTILINE)
+                if m:
+                    try:
+                        val = Decimal(m.group(1).replace(',', ''))
+                        if val > 0:
+                            extracted['total'] = str(val)
+                            break
+                    except (InvalidOperation, ValueError):
+                        pass
+
+        # Strategy 3: largest currency-prefixed amount in the document.
+        # Intentionally permissive about the £ character encoding.
+        if 'total' not in extracted:
+            amounts = re.findall(r'(?:[£\$€\xA3\u20AC]|\bGBP\b)\s*([\d,]+\.\d{2})', full_text, re.IGNORECASE)
+            if amounts:
                 try:
-                    extracted['total'] = str(Decimal(total_m.group(1).replace(',', '')))
-                    break
+                    best = max(Decimal(a.replace(',', '')) for a in amounts)
+                    if best > 0:
+                        extracted['total'] = str(best)
                 except (InvalidOperation, ValueError):
                     pass
 
@@ -527,23 +592,36 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
         if your_ref_m:
             extracted['your_reference'] = your_ref_m.group(1).strip()
 
-        # Extract a PO\d+ token from the reference label first, then fall back
-        # to searching the whole text.
+        # Extract a PO\d+ token only from the explicit reference label.
+        # We deliberately do NOT fall back to full-text search — a PO number
+        # appearing anywhere in the document (job description, delivery note,
+        # etc.) is not a reliable match and causes incorrect PO suggestions.
         po_candidate = None
         ref_text = extracted.get('your_reference', '')
         _po_in_ref = re.search(r'\bPO[-\s]?(\d{3,})\b', ref_text, re.IGNORECASE)
         if _po_in_ref:
             po_candidate = f"PO{_po_in_ref.group(1)}"
-        else:
-            _po_in_text = re.search(r'\bPO(\d{3,})\b', full_text, re.IGNORECASE)
-            if _po_in_text:
-                po_candidate = f"PO{_po_in_text.group(1)}"
 
         if po_candidate:
             try:
-                po = PurchaseOrder.objects.filter(
+                po_qs = PurchaseOrder.objects.filter(
                     Q(display_number__iexact=po_candidate) | Q(number__iexact=po_candidate)
-                ).first()
+                )
+                # Narrow by supplier name when we extracted one, to avoid
+                # suggesting a PO that belongs to a completely different supplier.
+                supplier_hint = (extracted.get('supplier_name') or '').strip().lower()
+                if supplier_hint and po_qs.count() > 1:
+                    po_qs = po_qs.filter(supplier_name__icontains=supplier_hint) or po_qs
+                po = po_qs.first()
+                if po:
+                    # Final guard: if the PO's supplier name is known and bears
+                    # no resemblance to the extracted supplier, skip the match.
+                    po_supplier = (po.supplier_name or '').strip().lower()
+                    if supplier_hint and po_supplier:
+                        hint_words = set(supplier_hint.split())
+                        po_words   = set(po_supplier.split())
+                        if not (hint_words & po_words):
+                            po = None  # no overlapping words — too risky
                 if po:
                     extracted['suggested_po'] = {
                         'workguru_id': po.workguru_id,
@@ -604,6 +682,15 @@ def purchase_invoices_list(request):
         )
 
     invoices = list(qs)
+
+    # Order by invoice number, largest first (e.g. INV-A00-014 then INV-A00-013).
+    # Use a natural sort key so the numeric suffix sorts numerically and the
+    # alpha prefix groups correctly, rather than a plain string comparison.
+    def _invoice_sort_key(inv):
+        parts = re.split(r'(\d+)', inv.invoice_number or '')
+        return [int(p) if p.isdigit() else p.lower() for p in parts]
+
+    invoices.sort(key=_invoice_sort_key, reverse=True)
 
     total_value       = sum(inv.total for inv in invoices)
     total_outstanding = sum(inv.amount_outstanding for inv in invoices)
@@ -895,6 +982,8 @@ def update_purchase_invoice(request, invoice_id):
         invoice.invoice_number = data['invoice_number'].strip()
     if 'supplier_name' in data:
         invoice.supplier_name = data['supplier_name'].strip()
+    if 'supplier_reference' in data:
+        invoice.supplier_reference = (data['supplier_reference'] or '').strip()
     if 'date' in data:
         invoice.date = _parse_date(data['date'])
     if 'due_date' in data:
@@ -943,7 +1032,8 @@ def update_purchase_invoice(request, invoice_id):
     invoice.save()
     # If no specific field was updated this is a pure recalculate call – recompute from lines.
     _update_keys = ('invoice_number', 'supplier_name', 'date', 'due_date', 'status',
-                    'payment_status', 'total', 'amount_paid', 'notes', 'currency', 'vat_rate')
+                    'payment_status', 'total', 'amount_paid', 'notes', 'currency', 'vat_rate',
+                    'supplier_reference')
     if not any(k in data for k in _update_keys):
         _recalc_invoice_total(invoice)
         invoice.refresh_from_db()
@@ -957,6 +1047,7 @@ def update_purchase_invoice(request, invoice_id):
         'success':           True,
         'invoice_number':    invoice.invoice_number,
         'supplier_name':     invoice.supplier_name or '',
+        'supplier_reference': invoice.supplier_reference or '',
         'date':              invoice.date.strftime('%d/%m/%Y') if invoice.date else '',
         'due_date':          invoice.due_date.strftime('%d/%m/%Y') if invoice.due_date else '',
         'status':            invoice.status,
@@ -1661,6 +1752,34 @@ def void_xero_purchase_invoice(request, invoice_id):
     return JsonResponse({'success': True})
 
 
+# ── Sync reference to an already-pushed Xero bill ─────────────────
+@login_required
+def sync_xero_purchase_invoice_reference(request, invoice_id):
+    """Update the Reference field on an already-linked Xero bill to match the
+    invoice's current supplier_reference. Used to correct bills pushed before
+    the reference was set/changed, without re-creating the Xero draft."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+    if not invoice.xero_id:
+        return JsonResponse({'success': False, 'error': 'Invoice is not linked to Xero'}, status=400)
+
+    from stock_take.services import xero_api
+    payload = {'Invoices': [{
+        'InvoiceID': invoice.xero_id,
+        # ACCPAY bills show the API "InvoiceNumber" as "Reference" in Xero's UI,
+        # so update that field (plus the Reference field) to the supplier ref.
+        'InvoiceNumber': invoice.supplier_reference or invoice.invoice_number,
+        'Reference': invoice.supplier_reference or '',
+    }]}
+    result = xero_api._api_post('Invoices', payload)
+    if result is None:
+        err = xero_api.get_last_api_error() or 'Could not update Xero invoice reference'
+        return JsonResponse({'success': False, 'error': err})
+
+    return JsonResponse({'success': True, 'reference': invoice.supplier_reference or ''})
+
+
 # ── Push to Xero ──────────────────────────────────────────────────
 @login_required
 def push_purchase_invoice_to_xero(request, invoice_id):
@@ -1797,11 +1916,14 @@ def push_purchase_invoice_to_xero(request, invoice_id):
         'Type': 'ACCPAY',
         'Contact': {'ContactID': contact_id},
         'Status': 'DRAFT',
-        'InvoiceNumber': invoice.invoice_number,
+        # For ACCPAY bills, Xero displays the API "InvoiceNumber" field as
+        # "Reference" in its UI. Use the supplier's own reference there so the
+        # bill shows the supplier reference, falling back to our invoice number.
+        'InvoiceNumber': invoice.supplier_reference or invoice.invoice_number,
         'CurrencyCode': invoice.currency or 'GBP',
         'LineAmountTypes': line_amount_type,
         'LineItems': xero_lines,
-        'Reference': invoice.notes or '',
+        'Reference': invoice.supplier_reference or '',
     }
 
     if invoice.date:

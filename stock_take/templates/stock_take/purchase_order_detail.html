@@ -102,7 +102,7 @@
                 <i class="bi bi-envelope"></i> Send
             </button>
             <div class="kebab-menu">
-                <button class="btn btn-sm btn-secondary" onclick="toggleMoreMenu(event)" title="More actions">
+                <button class="btn btn-sm btn-secondary kebab-trigger" onclick="toggleKebab(this, event)" title="More actions">
                     <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <div class="kebab-dropdown" id="po-more-dropdown">
@@ -217,7 +217,7 @@
                     </div>
                     <div class="po-projects-list" id="project-display">
                         {% for proj in po_projects %}
-                        <div class="po-project-entry {% if proj.project_type == 'stock' %}is-stock{% endif %}" data-project-id="{{ proj.id }}">
+                        <div class="po-project-entry {% if proj.project_type == 'stock' %}is-stock{% endif %}" data-project-id="{{ proj.id }}" data-order-id="{{ proj.order.id|default:'' }}">
                             {% if proj.project_type == 'stock' %}
                                 <span class="po-stock-badge">Stock</span>
                             {% elif proj.order %}
@@ -697,7 +697,7 @@
                         <th class="text-right">Hours</th>
                         <th class="text-right">Rate (£/hr)</th>
                         <th class="text-right">Total</th>
-                        <th class="text-center" style="width: 90px;"></th>
+                        <th class="text-center" style="width: 60px;"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -732,7 +732,7 @@
                     {% for ts in po_timesheets %}
                     <tr data-timesheet-id="{{ ts.id }}" data-date="{{ ts.date|date:'Y-m-d' }}" data-order-id="{{ ts.order_id|default:'' }}" data-description="{{ ts.display_description|default:'' }}" data-hours="{{ ts.hours }}" data-rate="{{ ts.hourly_rate }}">
                         <td><input type="checkbox" class="ts-row-check" value="{{ ts.id }}" onchange="updateTsDeleteBtn()"></td>
-                        <td>{{ ts.date|date:"d/m/Y" }}</td>
+                        <td class="ts-date-cell">{{ ts.date|date:"d/m/Y" }}</td>
                         <td>
                             {% if ts.order %}
                             <a href="{% url 'order_details' ts.order.id %}" class="po-project-link">{{ ts.order.sale_number }}{% if ts.order.customer_name %} — {{ ts.order.customer_name }}{% endif %}</a>
@@ -744,11 +744,22 @@
                         <td class="text-right ts-hours-cell">{{ ts.hours|floatformat:1 }}</td>
                         <td class="text-right ts-rate-cell">£{{ ts.hourly_rate|floatformat:2 }}</td>
                         <td class="text-right ts-total-cell">£{{ ts.line_total|floatformat:2 }}</td>
-                        <td class="text-center" style="white-space: nowrap;">
+                        <td class="text-center ts-actions-cell">
                             <button class="btn-inline-edit" onclick="editTimesheet({{ ts.id }}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
-                            <button class="btn-inline-edit" onclick="copyTimesheet(this)" title="Copy line"><i class="bi bi-copy"></i></button>
-                            <button class="btn-inline-link" onclick="unlinkTimesheet({{ ts.id }}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
-                            <button class="btn-inline-delete" onclick="deleteTimesheet({{ ts.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+                            <div class="kebab-menu">
+                                <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More actions"><i class="bi bi-three-dots-vertical"></i></button>
+                                <div class="kebab-dropdown">
+                                    <button class="kebab-item" onclick="copyTimesheet(this)">
+                                        <i class="bi bi-copy"></i> Copy line
+                                    </button>
+                                    <button class="kebab-item" onclick="unlinkTimesheet({{ ts.id }}, this)">
+                                        <i class="bi bi-link-45deg"></i> Unlink from PO
+                                    </button>
+                                    <button class="kebab-item danger" onclick="deleteTimesheet({{ ts.id }}, this)">
+                                        <i class="bi bi-trash"></i> Delete
+                                    </button>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
@@ -1894,6 +1905,25 @@ function selectProjectOrder(orderId, saleNumber, customerName) {
     document.getElementById('project-search-results').style.display = 'none';
 }
 
+// Add an order option to a timesheet/expense ORDER dropdown (no-op if present).
+function addOrderOption(selectId, orderId, label) {
+    const sel = document.getElementById(selectId);
+    if (!sel || !orderId) return;
+    if (sel.querySelector(`option[value="${orderId}"]`)) return;
+    const opt = document.createElement('option');
+    opt.value = orderId;
+    opt.textContent = label;
+    sel.appendChild(opt);
+}
+
+// Remove an order option from a timesheet/expense ORDER dropdown.
+function removeOrderOption(selectId, orderId) {
+    const sel = document.getElementById(selectId);
+    if (!sel || !orderId) return;
+    const opt = sel.querySelector(`option[value="${orderId}"]`);
+    if (opt) opt.remove();
+}
+
 function addProjectCustomer() {
     const orderId = document.getElementById('project-search-order-id').value;
     if (!orderId) {
@@ -1919,6 +1949,7 @@ function addProjectCustomer() {
             const entry = document.createElement('div');
             entry.className = 'po-project-entry';
             entry.dataset.projectId = data.project.id;
+            entry.dataset.orderId = data.project.order_id || '';
             const orderUrl = data.project.order_id ? `/order/${data.project.order_id}/` : '#';
             entry.innerHTML = `
                 <a href="${orderUrl}" class="po-project-link" title="View order ${data.project.sale_number}">
@@ -1927,6 +1958,13 @@ function addProjectCustomer() {
                 <button class="btn-project-remove" onclick="removeProject(${poId}, ${data.project.id}, this)" title="Remove"><i class="bi bi-x-lg"></i></button>
             `;
             list.appendChild(entry);
+
+            // Also add the order to the timesheet & expense ORDER dropdowns so it's
+            // selectable immediately without a full page reload.
+            if (data.project.order_id) {
+                addOrderOption('new-ts-order', data.project.order_id, data.project.label);
+                addOrderOption('new-exp-order', data.project.order_id, data.project.label);
+            }
 
             // Reset search
             toggleProjectCustomerSearch();
@@ -1953,11 +1991,21 @@ function removeProject(poId, projectId, btn) {
     .then(data => {
         if (data.success) {
             const entry = btn.closest('.po-project-entry');
+            const removedOrderId = entry ? (entry.dataset.orderId || '') : '';
             if (entry) entry.remove();
             // Show empty placeholder if none left
             const list = document.getElementById('project-display');
             if (!list.querySelector('.po-project-entry')) {
                 list.innerHTML = '<span class="po-projects-empty">No projects assigned</span>';
+            }
+            // Remove the order from the timesheet & expense dropdowns, unless another
+            // remaining project still references the same order.
+            if (removedOrderId) {
+                const stillUsed = !!list.querySelector(`.po-project-entry[data-order-id="${removedOrderId}"]`);
+                if (!stillUsed) {
+                    removeOrderOption('new-ts-order', removedOrderId);
+                    removeOrderOption('new-exp-order', removedOrderId);
+                }
             }
             showNotification('Project entry removed', 'success');
         } else {
@@ -2176,8 +2224,15 @@ function confirmReceivePO() {
     .then(res => res.json())
     .then(result => {
         if (result.success) {
-            showNotification(result.received_items + ' item(s) received. Status: ' + result.status, 'success');
-            setTimeout(() => location.reload(), 800);
+            if (result.split_po) {
+                showNotification(
+                    result.received_items + ' item(s) received. Remaining items moved to ' + result.split_po + ' (expected in 7 days).',
+                    'success'
+                );
+            } else {
+                showNotification(result.received_items + ' item(s) received. Status: ' + result.status, 'success');
+            }
+            setTimeout(() => location.reload(), 1200);
         } else {
             showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
             btn.disabled = false;
@@ -2800,18 +2855,6 @@ function convertPoType(newType) {
 }
 
 // ---- More Menu ----
-function toggleMoreMenu(e) {
-    e.stopPropagation();
-    const dropdown = document.getElementById('po-more-dropdown');
-    dropdown.classList.toggle('open');
-}
-
-document.addEventListener('click', function(e) {
-    const dropdown = document.getElementById('po-more-dropdown');
-    if (dropdown && !e.target.closest('.kebab-menu')) {
-        dropdown.classList.remove('open');
-    }
-});
 
 function removeXeroSync() {
     if (!confirm('Remove the Xero sync for this purchase order? This will not delete it from Xero.')) return;
@@ -4125,15 +4168,20 @@ function unlinkTimesheet(tsId, btn) {
 
 function editTimesheet(tsId, btn) {
     const row = btn.closest('tr');
+    const dateCell = row.querySelector('.ts-date-cell');
     const hoursCell = row.querySelector('.ts-hours-cell');
     const rateCell = row.querySelector('.ts-rate-cell');
     const totalCell = row.querySelector('.ts-total-cell');
     const actionsCell = row.querySelector('td:last-child');
 
     // Store original values
+    const origDate = row.dataset.date || '';
     const origHours = hoursCell.textContent.trim();
     const origRate = rateCell.textContent.replace('£', '').trim();
     const origTotal = totalCell.textContent.replace('£', '').trim();
+
+    // Replace date cell with date input
+    dateCell.innerHTML = `<input type="date" class="po-inline-input" id="edit-ts-date-${tsId}" value="${origDate}" style="width:100%;">`;
 
     // Replace cells with inputs
     hoursCell.innerHTML = `<input type="number" class="po-inline-input text-right" id="edit-ts-hours-${tsId}" value="${origHours}" step="0.5" min="0" style="width:70px;" oninput="editTsCalcTotal(${tsId})">`;
@@ -4143,7 +4191,7 @@ function editTimesheet(tsId, btn) {
     // Replace actions with save/cancel
     actionsCell.innerHTML = `
         <button class="btn-inline-save" onclick="saveTimesheetEdit(${tsId}, this)" title="Save"><i class="bi bi-check-lg"></i></button>
-        <button class="btn-inline-cancel" onclick="cancelTimesheetEdit(${tsId}, this, '${origHours}', '${origRate}', '${origTotal}')" title="Cancel"><i class="bi bi-x-lg"></i></button>
+        <button class="btn-inline-cancel" onclick="cancelTimesheetEdit(${tsId}, this, '${origDate}', '${origHours}', '${origRate}', '${origTotal}')" title="Cancel"><i class="bi bi-x-lg"></i></button>
     `;
 }
 
@@ -4165,30 +4213,39 @@ function editTsCalcRate(tsId) {
 
 function saveTimesheetEdit(tsId, btn) {
     const row = btn.closest('tr');
+    const dateInput = document.getElementById('edit-ts-date-' + tsId);
     const hoursInput = row.querySelector('.ts-hours-cell input');
     const rateInput = row.querySelector('.ts-rate-cell input');
+    const date = dateInput ? dateInput.value : '';
     const hours = parseFloat(hoursInput.value) || 0;
     const hourlyRate = parseFloat(rateInput.value) || 0;
-    // Note: total is derived server-side from hours × rate
 
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
     fetch(`/purchase-order/{{ purchase_order.workguru_id }}/update-timesheet/${tsId}/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-        body: JSON.stringify({ hours, hourly_rate: hourlyRate }),
+        body: JSON.stringify({ date, hours, hourly_rate: hourlyRate }),
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            // Update data-date attribute so re-editing works correctly
+            row.dataset.date = data.date || date;
+            row.querySelector('.ts-date-cell').textContent = data.date_display || date;
             row.querySelector('.ts-hours-cell').textContent = parseFloat(data.hours).toFixed(1);
             row.querySelector('.ts-rate-cell').textContent = '£' + parseFloat(data.hourly_rate).toFixed(2);
             row.querySelector('.ts-total-cell').textContent = '£' + parseFloat(data.line_total).toFixed(2);
             // Restore action buttons
             row.querySelector('td:last-child').innerHTML = `
                 <button class="btn-inline-edit" onclick="editTimesheet(${tsId}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
-                <button class="btn-inline-edit" onclick="copyTimesheet(this)" title="Copy line"><i class="bi bi-copy"></i></button>
-                <button class="btn-inline-link" onclick="unlinkTimesheet(${tsId}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
-                <button class="btn-inline-delete" onclick="deleteTimesheet(${tsId}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+                <div class="kebab-menu">
+                    <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More actions"><i class="bi bi-three-dots-vertical"></i></button>
+                    <div class="kebab-dropdown">
+                        <button class="kebab-item" onclick="copyTimesheet(this)"><i class="bi bi-copy"></i> Copy line</button>
+                        <button class="kebab-item" onclick="unlinkTimesheet(${tsId}, this)"><i class="bi bi-link-45deg"></i> Unlink from PO</button>
+                        <button class="kebab-item danger" onclick="deleteTimesheet(${tsId}, this)"><i class="bi bi-trash"></i> Delete</button>
+                    </div>
+                </div>
             `;
             showNotification('Timesheet updated');
         } else {
@@ -4198,16 +4255,26 @@ function saveTimesheetEdit(tsId, btn) {
     .catch(() => showNotification('Network error', 'error'));
 }
 
-function cancelTimesheetEdit(tsId, btn, origHours, origRate, origTotal) {
+function cancelTimesheetEdit(tsId, btn, origDate, origHours, origRate, origTotal) {
     const row = btn.closest('tr');
+    // Restore date display (format as DD/MM/YYYY)
+    if (origDate) {
+        const [y, m, d] = origDate.split('-');
+        row.querySelector('.ts-date-cell').textContent = d && m && y ? `${d}/${m}/${y}` : origDate;
+    }
     row.querySelector('.ts-hours-cell').textContent = origHours;
     row.querySelector('.ts-rate-cell').textContent = '£' + parseFloat(origRate).toFixed(2);
     row.querySelector('.ts-total-cell').textContent = '£' + parseFloat(origTotal).toFixed(2);
     row.querySelector('td:last-child').innerHTML = `
         <button class="btn-inline-edit" onclick="editTimesheet(${tsId}, this)" title="Edit"><i class="bi bi-pencil"></i></button>
-        <button class="btn-inline-edit" onclick="copyTimesheet(this)" title="Copy line"><i class="bi bi-copy"></i></button>
-        <button class="btn-inline-link" onclick="unlinkTimesheet(${tsId}, this)" title="Unlink from PO"><i class="bi bi-link-45deg"></i></button>
-        <button class="btn-inline-delete" onclick="deleteTimesheet(${tsId}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+        <div class="kebab-menu">
+            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More actions"><i class="bi bi-three-dots-vertical"></i></button>
+            <div class="kebab-dropdown">
+                <button class="kebab-item" onclick="copyTimesheet(this)"><i class="bi bi-copy"></i> Copy line</button>
+                <button class="kebab-item" onclick="unlinkTimesheet(${tsId}, this)"><i class="bi bi-link-45deg"></i> Unlink from PO</button>
+                <button class="kebab-item danger" onclick="deleteTimesheet(${tsId}, this)"><i class="bi bi-trash"></i> Delete</button>
+            </div>
+        </div>
     `;
 }
 

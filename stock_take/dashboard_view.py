@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery, F
+from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery, F, ExpressionWrapper
 from django.db.models.functions import TruncWeek, TruncMonth, Coalesce
 from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
@@ -313,13 +313,23 @@ def dashboard(request):
         .order_by('quantity')
     )
 
-    # Incoming quantities from approved POs (not yet received)
+    # Incoming quantities from open/partially-received POs (not yet fully received)
     shortage_skus = [s.sku for s in shortage_items]
     incoming_data = (
         PurchaseOrderProduct.objects
-        .filter(sku__in=shortage_skus, purchase_order__status='Approved')
+        .filter(
+            sku__in=shortage_skus,
+            purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+        )
+        .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
         .values('sku')
-        .annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), Value(1))))
+        .annotate(total=Sum(
+            ExpressionWrapper(
+                (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                output_field=DecimalField()
+            )
+        ))
     )
     incoming_map = {item['sku']: float(item['total'] or 0) for item in incoming_data}
 
@@ -342,7 +352,7 @@ def dashboard(request):
     incoming_products = (
         PurchaseOrderProduct.objects
         .filter(
-            purchase_order__status__in=['Approved', 'Ordered', 'Sent'],
+            purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
         )
         .exclude(purchase_order__supplier_name__icontains='carnehill')
         .exclude(purchase_order__supplier_name__icontains='os doors')
@@ -355,6 +365,7 @@ def dashboard(request):
         outstanding = float(((p.order_quantity or 0) - (p.received_quantity or 0)) * pack_size)
         if outstanding <= 0:
             continue
+        effective_date = p.purchase_order.expected_date or ''
         sku_key = p.sku or p.name or str(p.id)
         if sku_key in incoming_by_sku:
             incoming_by_sku[sku_key]['qty_outstanding'] += outstanding
@@ -362,10 +373,9 @@ def dashboard(request):
             if po_num not in incoming_by_sku[sku_key]['po_numbers']:
                 incoming_by_sku[sku_key]['po_numbers'].append(po_num)
             # Keep the earliest expected date
-            new_date = p.purchase_order.expected_date or ''
             existing_date = incoming_by_sku[sku_key]['expected_date']
-            if new_date and (not existing_date or existing_date == '-' or new_date < existing_date):
-                incoming_by_sku[sku_key]['expected_date'] = new_date
+            if effective_date and (not existing_date or existing_date == '-' or effective_date < existing_date):
+                incoming_by_sku[sku_key]['expected_date'] = effective_date
         else:
             incoming_by_sku[sku_key] = {
                 'sku': p.sku or '-',
@@ -373,7 +383,7 @@ def dashboard(request):
                 'supplier': p.purchase_order.supplier_name or '-',
                 'po_numbers': [p.purchase_order.display_number or str(p.purchase_order.id)],
                 'qty_outstanding': outstanding,
-                'expected_date': p.purchase_order.expected_date or '-',
+                'expected_date': effective_date or '-',
                 'status': p.purchase_order.status,
             }
     # Build the final list sorted by name for grouping same items together

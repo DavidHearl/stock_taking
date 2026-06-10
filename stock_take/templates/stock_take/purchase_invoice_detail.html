@@ -57,6 +57,9 @@
                 </button>
                 <div class="kebab-dropdown" id="kebab-menu">
                     {% if invoice.xero_id %}
+                    <button class="kebab-item" onclick="syncXeroReference()" title="Update the Reference field on the linked Xero bill to match the Supplier Reference">
+                        <i class="bi bi-arrow-repeat"></i> Sync reference to Xero
+                    </button>
                     <button class="kebab-item" onclick="confirmRemoveXeroLink()">
                         <i class="bi bi-cloud-slash"></i> Remove Xero link
                     </button>
@@ -97,6 +100,10 @@
             <div class="pinv-meta-item">
                 <span class="meta-label">Supplier</span>
                 <span class="meta-value" id="view-supplier">{{ invoice.supplier_name|default:"—" }}</span>
+            </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Supplier Ref</span>
+                <span class="meta-value" id="view-supplier-ref">{{ invoice.supplier_reference|default:"—" }}</span>
             </div>
             <div class="pinv-meta-item">
                 <span class="meta-label">Invoice Date</span>
@@ -171,6 +178,10 @@
             <div class="pinv-form-row">
                 <label class="pinv-label">Supplier</label>
                 <input type="text" id="edit-supplier" class="pinv-input" value="{{ invoice.supplier_name|default:'' }}">
+            </div>
+            <div class="pinv-form-row">
+                <label class="pinv-label">Supplier Reference</label>
+                <input type="text" id="edit-supplier-ref" class="pinv-input" value="{{ invoice.supplier_reference|default:'' }}" placeholder="Supplier's invoice number / ref (sent to Xero Reference)">
             </div>
             <div class="pinv-form-row">
                 <label class="pinv-label">Invoice Date</label>
@@ -687,8 +698,9 @@ function toggleHeaderEdit() {
 
 function saveHeader() {
     const payload = {
-        invoice_number: document.getElementById('edit-number').value,
-        supplier_name:  document.getElementById('edit-supplier').value,
+        invoice_number:     document.getElementById('edit-number').value,
+        supplier_name:      document.getElementById('edit-supplier').value,
+        supplier_reference: document.getElementById('edit-supplier-ref').value,
         date:           document.getElementById('edit-date').value,
         due_date:       document.getElementById('edit-due-date').value,
         status:         document.getElementById('edit-status').value,
@@ -707,6 +719,7 @@ function saveHeader() {
     .then(data => {
         if (data.success) {
             document.getElementById('view-supplier').textContent = data.supplier_name || '—';
+            document.getElementById('view-supplier-ref').textContent = data.supplier_reference || '—';
             document.getElementById('view-date').textContent     = data.date         || '—';
             document.getElementById('view-due-date').textContent = data.due_date     || '—';
             document.getElementById('view-notes').textContent    = data.notes        || '—';
@@ -1794,6 +1807,23 @@ function doRemoveXeroLink() {
 
 function pushToXero() {
     document.getElementById('xero-confirm-modal').style.display = 'flex';
+}
+
+function syncXeroReference() {
+    closeAllKebabs();
+    fetch(`/purchase-invoices/${INVOICE_ID}/sync-xero-reference/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(`Xero reference updated to "${data.reference || '(blank)'}".`, 'success');
+        } else {
+            showAlert('Error: ' + (data.error || 'Failed to update Xero reference'), 'danger');
+        }
+    })
+    .catch(err => showAlert('Network error: ' + err.message, 'danger'));
 }
 
 function xeroConfirmed(forceNoVat = false) {

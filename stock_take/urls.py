@@ -33,7 +33,7 @@ from .purchase_invoice_views import (
     order_purchase_invoice_lines, parse_purchase_invoice_pdf,
     link_purchase_invoice_po, unlink_purchase_invoice_po, search_purchase_invoices,
     push_purchase_invoice_to_xero, search_purchase_invoice_in_xero, remove_xero_link,
-    void_xero_purchase_invoice,
+    void_xero_purchase_invoice, sync_xero_purchase_invoice_reference,
     create_opo_from_invoice, link_opo_to_invoice, unlink_opo_from_invoice,
     search_opos_for_invoice, create_po_from_invoice, create_po_standalone,
     manual_link_xero, sync_xero_payment_statuses, next_invoice_number, supplier_search,
@@ -48,6 +48,7 @@ from .accounts_payable_views import (
     scan_email_attachment_po,
     ignore_email,
     delete_email,
+    split_email,
     unprocess_email,
     mark_email_filed,
     download_mailbox_attachment,
@@ -122,6 +123,7 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/link-po/', link_purchase_invoice_po, name='link_purchase_invoice_po'),
     path('purchase-invoices/<int:invoice_id>/unlink-po/<int:po_id>/', unlink_purchase_invoice_po, name='unlink_purchase_invoice_po'),
     path('purchase-invoices/<int:invoice_id>/push-to-xero/', push_purchase_invoice_to_xero, name='push_purchase_invoice_to_xero'),
+    path('purchase-invoices/<int:invoice_id>/sync-xero-reference/', sync_xero_purchase_invoice_reference, name='sync_xero_purchase_invoice_reference'),
     path('purchase-invoices/<int:invoice_id>/flatten-vat/', flatten_vat_to_line_item, name='flatten_vat_to_line_item'),
     path('purchase-invoices/<int:invoice_id>/void-xero/', void_xero_purchase_invoice, name='void_xero_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/search-in-xero/', search_purchase_invoice_in_xero, name='search_purchase_invoice_in_xero'),
@@ -157,6 +159,7 @@ urlpatterns = [
     path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
     path('accounts-payable/<int:email_id>/scan-po/', scan_email_attachment_po, name='scan_email_attachment_po'),
     path('accounts-payable/<int:email_id>/delete/', delete_email, name='delete_email'),
+    path('accounts-payable/<int:email_id>/split/', split_email, name='split_email'),
 
     # Overhead Purchase Orders
     path('overhead-purchase-orders/', overhead_po_list, name='overhead_po_list'),

@@ -1543,7 +1543,7 @@ def _do_receive_po(request, po, data):
 
     # ── Determine new status ────────────────────────────────────────────────
     # Refresh products from DB to get updated received quantities
-    all_products_fresh = list(po.products.all())
+    all_products_fresh = list(po.products.select_related('stock_item').all())
     if all_products_fresh:
         all_received = all(
             p.received_quantity >= p.order_quantity
@@ -1552,12 +1552,133 @@ def _do_receive_po(request, po, data):
         )
         new_status = 'Received' if all_received else 'Partially Received'
     else:
-        # No regular product lines (boards / OS doors PO) — mark fully received
         new_status = 'Received'
 
-    po.status = new_status
-    po.received_date = today
-    po.save(update_fields=['status', 'received_date'])
+    if new_status == 'Partially Received':
+        # ── Auto-split: move un-received lines to a new child PO ─────────────
+        from datetime import timedelta as _td
+        import re as _re
+        from decimal import Decimal as _Dec
+
+        _today_date = timezone.now().date()
+        _expected_date_new = (_today_date + _td(days=7)).strftime('%d/%m/%Y')
+
+        # Work out the next _N suffix for the split child
+        base_display = po.display_number or ''
+        root_match = _re.match(r'^(PO\d+)(?:_\d+)?$', base_display)
+        root_number = root_match.group(1) if root_match else base_display
+        existing_suffixes = PurchaseOrder.objects.filter(
+            display_number__startswith=root_number + '_'
+        ).values_list('display_number', flat=True)
+        max_suffix = 0
+        for dn in existing_suffixes:
+            m = _re.match(r'^' + _re.escape(root_number) + r'_(\d+)$', dn)
+            if m:
+                max_suffix = max(max_suffix, int(m.group(1)))
+        new_display = f'{root_number}_{max_suffix + 1}'
+
+        max_wg_id = PurchaseOrder.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+        new_wg_id = max(max_wg_id + 1, 800000)
+
+        # Create the child PO for remaining items
+        child_po = PurchaseOrder.objects.create(
+            workguru_id=new_wg_id,
+            number=new_display,
+            display_number=new_display,
+            description=f'Remaining items from {po.display_number}',
+            parent_po=po,
+            po_type=po.po_type,
+            supplier_id=po.supplier_id,
+            supplier_name=po.supplier_name,
+            fitter=po.fitter,
+            project_id=po.project_id,
+            project_number=po.project_number,
+            project_name=po.project_name,
+            currency=po.currency,
+            exchange_rate=po.exchange_rate,
+            warehouse_id=po.warehouse_id,
+            warehouse_name=po.warehouse_name,
+            delivery_address_1=po.delivery_address_1,
+            delivery_address_2=po.delivery_address_2,
+            delivery_instructions=po.delivery_instructions,
+            suburb=po.suburb,
+            state=po.state,
+            postcode=po.postcode,
+            client_id_wg=po.client_id_wg,
+            client_name=po.client_name,
+            contact_name=po.contact_name,
+            creator_name=request.user.get_full_name() or request.user.username,
+            status='Approved',
+            expected_date=_expected_date_new,
+        )
+
+        # Copy project links
+        for proj in po.projects.all():
+            PurchaseOrderProject.objects.create(
+                purchase_order=child_po,
+                project_type=proj.project_type,
+                order=proj.order,
+                label=proj.label,
+                sort_order=proj.sort_order,
+            )
+
+        # Move un-received lines to the child PO
+        child_total = _Dec('0')
+        for idx, product in enumerate(all_products_fresh):
+            remaining = float(product.order_quantity) - float(product.received_quantity)
+            if remaining <= 0:
+                continue
+            remaining_dec = _Dec(str(remaining))
+            line_total = product.order_price * remaining_dec
+            child_total += line_total
+            PurchaseOrderProduct.objects.create(
+                purchase_order=child_po,
+                product_id=product.product_id,
+                sku=product.sku,
+                supplier_code=product.supplier_code,
+                name=product.name,
+                description=product.description,
+                notes=product.notes,
+                order_price=product.order_price,
+                order_quantity=remaining_dec,
+                quantity=remaining_dec,
+                received_quantity=_Dec('0'),
+                invoice_price=product.invoice_price,
+                line_total=line_total,
+                unit_cost=product.unit_cost,
+                tax_type=product.tax_type,
+                tax_name=product.tax_name,
+                tax_rate=product.tax_rate,
+                account_code=product.account_code,
+                expense_account_code=product.expense_account_code,
+                sort_order=idx,
+                stock_item=product.stock_item,
+            )
+            # Trim the original line to only the received quantity and remove if nothing received
+            if product.received_quantity > 0:
+                product.order_quantity = product.received_quantity
+                product.quantity = product.received_quantity
+                product.line_total = product.order_price * product.received_quantity
+                product.save(update_fields=['order_quantity', 'quantity', 'line_total'])
+            else:
+                product.delete()
+
+        child_po.total = child_total
+        child_po.save(update_fields=['total'])
+
+        # Mark the original PO as fully received
+        po.status = 'Received'
+        po.received_date = today
+        po.save(update_fields=['status', 'received_date'])
+
+        split_display = new_display
+
+    else:
+        # Fully received — no split needed
+        po.status = 'Received'
+        po.received_date = today
+        po.save(update_fields=['status', 'received_date'])
+        split_display = None
 
     # Mark the linked BoardsPO as ordered (Approved or Received both mean it was ordered)
     if po.display_number:
@@ -1568,6 +1689,7 @@ def _do_receive_po(request, po, data):
         'received_items': received_items,
         'status': po.status,
         'received_date': po.received_date,
+        'split_po': split_display,
     })
 
 
@@ -1950,21 +2072,32 @@ def po_update_timesheet(request, po_id, timesheet_id):
 
     hours = data.get('hours')
     hourly_rate = data.get('hourly_rate')
+    date_str = data.get('date', '').strip()
 
+    update_fields = []
     try:
+        if date_str:
+            from datetime import date as date_type
+            ts.date = date_type.fromisoformat(date_str)
+            update_fields.append('date')
         if hours is not None:
             ts.hours = float(hours)
+            update_fields.append('hours')
         if hourly_rate is not None:
             ts.hourly_rate = float(hourly_rate)
+            update_fields.append('hourly_rate')
     except (ValueError, TypeError):
-        return JsonResponse({'error': 'Invalid hours or rate'}, status=400)
+        return JsonResponse({'error': 'Invalid data'}, status=400)
 
-    ts.save(update_fields=['hours', 'hourly_rate'])
+    if update_fields:
+        ts.save(update_fields=update_fields)
 
     line_total = round(float(ts.hours or 0) * float(ts.hourly_rate or 0), 2)
 
     return JsonResponse({
         'success': True,
+        'date': ts.date.strftime('%Y-%m-%d') if ts.date else '',
+        'date_display': ts.date.strftime('%d/%m/%Y') if ts.date else '',
         'hours': str(ts.hours),
         'hourly_rate': str(ts.hourly_rate),
         'line_total': f'{line_total:.2f}',

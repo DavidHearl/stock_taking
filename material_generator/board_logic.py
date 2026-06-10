@@ -7,8 +7,61 @@ import contextlib
 logger = logging.getLogger(__name__)
 
 
-def generate_board_order_file(system_numbers_str, conn):
-    """Generate PNX board order file from system numbers"""
+def _board_system_diagnostics(conn, sysNum):
+    """Collect counts that explain why a system may produce no board rows.
+
+    Returns a dict with component counts and any human-readable warnings.
+    Never raises - diagnostics must not break generation.
+    """
+    info = {
+        'system': sysNum,
+        'total_components': 0,
+        'board_components': 0,
+        'missing_codes': 0,
+        'board_rows': 0,
+        'messages': [],
+    }
+    try:
+        cur = conn.cursor()
+        info['total_components'] = cur.execute(
+            "SELECT COUNT(*) FROM DISTINTAT WHERE numero = ?", (sysNum,)
+        ).fetchone()[0]
+        info['board_components'] = cur.execute(
+            "SELECT COUNT(*) FROM DISTINTAT d WHERE numero = ? AND "
+            "(SELECT reparto FROM articoli WHERE cod LIKE d.CODCOMP) = '001'",
+            (sysNum,)
+        ).fetchone()[0]
+        info['missing_codes'] = cur.execute(
+            "SELECT COUNT(DISTINCT CODCOMP) FROM DISTINTAT WHERE numero = ? AND "
+            "CODCOMP NOT IN (SELECT cod FROM articoli WHERE cod IS NOT NULL)", (sysNum,)
+        ).fetchone()[0]
+    except Exception as e:
+        logger.error(f"System {sysNum}: board diagnostics failed: {e}")
+        info['messages'].append(f"System {sysNum}: diagnostic check failed ({e}).")
+    return info
+
+
+def _count_rows_per_system(content, order_col=11, delimiter=';'):
+    """Count produced data rows grouped by the ORDERNAME column (system number)."""
+    counts = {}
+    reader = csv.reader(io.StringIO(content), delimiter=delimiter)
+    next(reader, None)  # skip header
+    for row in reader:
+        if not row or len(row) <= order_col:
+            continue
+        key = str(row[order_col]).strip()
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def generate_board_order_file(system_numbers_str, conn, summary=None):
+    """Generate PNX board order file from system numbers.
+
+    If a mutable ``summary`` dict is supplied, it is populated with a per-system
+    breakdown (component counts, missing reference codes, rows generated and any
+    warnings) so callers can show the user exactly what happened.
+    """
     logger.info(f"Starting board order file generation")
     logger.info(f"Raw system numbers input: {system_numbers_str}")
     
@@ -40,6 +93,17 @@ def generate_board_order_file(system_numbers_str, conn):
             ]
             csvwriter.writerow(new_header)
             logger.info("Header row written to PNX file")
+
+            # Pre-pass diagnostics so we can tell the user why a job may be empty
+            diagnostics = {}
+            if summary is not None:
+                for sysNum in numList:
+                    diagnostics[sysNum] = _board_system_diagnostics(conn, sysNum)
+                    d = diagnostics[sysNum]
+                    logger.info(
+                        f"System {sysNum} diagnostics - components: {d['total_components']}, "
+                        f"board components: {d['board_components']}, missing codes: {d['missing_codes']}"
+                    )
 
             N3_excl = "'','U961 ST2 Graphite Grey','X - Scrap','Richmond','Richmond Open','Tullymore','Tullymore Open','Venice','Aldridge'"
             max_rip_length = 2750
@@ -440,4 +504,47 @@ def generate_board_order_file(system_numbers_str, conn):
     logger.info(f"PNX file generation complete: {line_count} data rows generated")
     logger.info(f"File size: {len(content)} bytes")
     
+    # Populate the per-system summary for the caller / UI
+    if summary is not None:
+        rows_per_system = _count_rows_per_system(content)
+        total_rows = 0
+        systems = []
+        for sysNum in numList:
+            info = diagnostics.get(sysNum, {
+                'system': sysNum, 'total_components': 0, 'board_components': 0,
+                'missing_codes': 0, 'board_rows': 0, 'messages': [],
+            })
+            info['board_rows'] = rows_per_system.get(str(sysNum), 0)
+            total_rows += info['board_rows']
+
+            if info['total_components'] == 0:
+                info['messages'].append(
+                    f"System {sysNum}: not found in the CAD data (0 components). The job may be "
+                    f"outside the synced data window or the number may be incorrect."
+                )
+            elif info['board_components'] == 0:
+                info['messages'].append(
+                    f"System {sysNum}: has {info['total_components']} component(s) but none are "
+                    f"boards (department '001'), so no boards were generated."
+                )
+            elif info['board_rows'] == 0:
+                info['messages'].append(
+                    f"System {sysNum}: board components exist but no rows were produced. This is "
+                    f"usually caused by colour/edging filters or component codes missing from the "
+                    f"'articoli' reference table."
+                )
+
+            if info['missing_codes'] > 0:
+                info['messages'].append(
+                    f"System {sysNum}: {info['missing_codes']} component code(s) are missing from the "
+                    f"'articoli' reference table and were skipped - re-sync the CAD data if this is unexpected."
+                )
+
+            systems.append(info)
+            for m in info['messages']:
+                logger.warning(m)
+
+        summary['systems'] = systems
+        summary['total_data_rows'] = total_rows
+
     return content

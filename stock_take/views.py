@@ -15,7 +15,7 @@ from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
-from django.db.models import Sum, F, Count, Q, Prefetch
+from django.db.models import Sum, F, Count, Q, Prefetch, Value, DecimalField, ExpressionWrapper
 from django.db.models.functions import Greatest, Coalesce
 from django.db import models
 from django.views.decorators.http import require_http_methods, require_POST
@@ -578,11 +578,21 @@ def load_order_indicators_ajax(request):
             StockItem.objects.filter(sku__in=unique_skus).values_list('sku', 'quantity')
         )
 
-        # Incoming quantities on Approved (not yet received) POs
+        # Incoming quantities on open / partially-received POs (remaining un-received qty only)
         incoming_rows = (
             PurchaseOrderProduct.objects
-            .filter(sku__in=unique_skus, purchase_order__status='Approved')
-            .values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+            .filter(
+                sku__in=unique_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+            .values('sku').annotate(total=Sum(
+                ExpressionWrapper(
+                    (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                    * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                    output_field=DecimalField()
+                )
+            ))
         )
         incoming_qtys = {r['sku']: float(r['total'] or 0) for r in incoming_rows}
 
@@ -1755,10 +1765,21 @@ def shortages(request):
         # Get incoming quantities from approved purchase orders
         from django.db.models import Sum as RauSum
         rau_incoming_skus = list(upcoming_requirements.keys())
-        rau_incoming_data = PurchaseOrderProduct.objects.filter(
-            sku__in=rau_incoming_skus,
-            purchase_order__status='Approved'
-        ).values('sku').annotate(total=RauSum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+        rau_incoming_data = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku__in=rau_incoming_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+            .values('sku').annotate(total=RauSum(
+                ExpressionWrapper(
+                    (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                    * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                    output_field=DecimalField()
+                )
+            ))
+        )
         rau_incoming_map = {item['sku']: float(item['total'] or 0) for item in rau_incoming_data}
         
         for key, data in upcoming_requirements.items():
@@ -1843,10 +1864,21 @@ def shortages(request):
 
         # Attach incoming stock quantities to predicted items
         predicted_skus = list(historical_usage.keys())
-        predicted_incoming_data = PurchaseOrderProduct.objects.filter(
-            sku__in=predicted_skus,
-            purchase_order__status='Approved'
-        ).values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+        predicted_incoming_data = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku__in=predicted_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+            .values('sku').annotate(total=Sum(
+                ExpressionWrapper(
+                    (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                    * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                    output_field=DecimalField()
+                )
+            ))
+        )
         predicted_incoming_map = {item['sku']: float(item['total'] or 0) for item in predicted_incoming_data}
         for key, data in historical_usage.items():
             data['incoming_qty'] = predicted_incoming_map.get(key, 0)
@@ -2054,10 +2086,21 @@ def shortages(request):
                 sku__in=list(threshold_exclude_skus)
             ))
 
-            track_incoming_data = PurchaseOrderProduct.objects.filter(
-                sku__in=[item.sku for item in track_stock_items],
-                purchase_order__status='Approved'
-            ).values('sku').annotate(total=RauSum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+            track_incoming_data = (
+                PurchaseOrderProduct.objects
+                .filter(
+                    sku__in=[item.sku for item in track_stock_items],
+                    purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+                )
+                .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                .values('sku').annotate(total=RauSum(
+                    ExpressionWrapper(
+                        (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                        * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                        output_field=DecimalField()
+                    )
+                ))
+            )
             track_incoming_map = {item['sku']: float(item['total'] or 0) for item in track_incoming_data}
 
             for stock_item in track_stock_items:
@@ -2728,10 +2771,21 @@ def shortages(request):
         
         # Get incoming quantities from approved purchase orders
         incoming_skus = list(upcoming_requirements.keys())
-        incoming_data = PurchaseOrderProduct.objects.filter(
-            sku__in=incoming_skus,
-            purchase_order__status='Approved'
-        ).values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+        incoming_data = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku__in=incoming_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+            .values('sku').annotate(total=Sum(
+                ExpressionWrapper(
+                    (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                    * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                    output_field=DecimalField()
+                )
+            ))
+        )
         incoming_map = {item['sku']: float(item['total'] or 0) for item in incoming_data}
         
         for key, data in upcoming_requirements.items():
@@ -2807,10 +2861,21 @@ def shortages(request):
 
         # Attach incoming stock quantities to predicted items
         stock_predicted_skus = list(historical_usage.keys())
-        stock_predicted_incoming_data = PurchaseOrderProduct.objects.filter(
-            sku__in=stock_predicted_skus,
-            purchase_order__status='Approved'
-        ).values('sku').annotate(total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1)))
+        stock_predicted_incoming_data = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku__in=stock_predicted_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+            .values('sku').annotate(total=Sum(
+                ExpressionWrapper(
+                    (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                    * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                    output_field=DecimalField()
+                )
+            ))
+        )
         stock_predicted_incoming_map = {row['sku']: float(row['total'] or 0) for row in stock_predicted_incoming_data}
         for key, data in historical_usage.items():
             data['incoming_qty'] = stock_predicted_incoming_map.get(key, 0)
@@ -4253,11 +4318,17 @@ def raumplus_style_jobs_report(request):
     # ── 4. Get incoming quantities (approved POs) ────────────────────────
     incoming_map = {}
     if all_style_skus:
-        incoming_data = PurchaseOrderProduct.objects.filter(
-            sku__in=all_style_skus,
-            purchase_order__status='Approved'
-        ).values('sku').annotate(
-            total=_Sum(_F('order_quantity') * _Coalesce(_F('stock_item__pack_size'), 1))
+        incoming_data = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku__in=all_style_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=_Coalesce(_F('received_quantity'), 0))
+            .values('sku').annotate(total=_Sum(
+                (_F('order_quantity') - _Coalesce(_F('received_quantity'), 0))
+                * _Coalesce(_F('stock_item__pack_size'), 1)
+            ))
         )
         incoming_map = {row['sku']: float(row['total'] or 0) for row in incoming_data}
 
@@ -4333,11 +4404,17 @@ def raumplus_style_jobs_report(request):
     # Fetch incoming for any SKUs not already in incoming_map
     extra_skus = {row['sku'] for row in all_style_qs} - all_style_skus
     if extra_skus:
-        extra_incoming = PurchaseOrderProduct.objects.filter(
-            sku__in=extra_skus,
-            purchase_order__status='Approved'
-        ).values('sku').annotate(
-            total=_Sum(_F('order_quantity') * _Coalesce(_F('stock_item__pack_size'), 1))
+        extra_incoming = (
+            PurchaseOrderProduct.objects
+            .filter(
+                sku__in=extra_skus,
+                purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+            )
+            .filter(order_quantity__gt=_Coalesce(_F('received_quantity'), 0))
+            .values('sku').annotate(total=_Sum(
+                (_F('order_quantity') - _Coalesce(_F('received_quantity'), 0))
+                * _Coalesce(_F('stock_item__pack_size'), 1)
+            ))
         )
         for row in extra_incoming:
             incoming_map[row['sku']] = float(row['total'] or 0)
@@ -6870,10 +6947,20 @@ def _build_order_context(order, request):
         }
         inc_by_sku = {
             r['sku']: (r['total'] or 0)
-            for r in PurchaseOrderProduct.objects.filter(
-                sku__in=acc_skus, purchase_order__status='Approved'
-            ).values('sku').annotate(
-                total=Sum(F('order_quantity') * Coalesce(F('stock_item__pack_size'), 1))
+            for r in (
+                PurchaseOrderProduct.objects
+                .filter(
+                    sku__in=acc_skus,
+                    purchase_order__status__in=['Approved', 'Ordered', 'Sent', 'Partially Received'],
+                )
+                .filter(order_quantity__gt=Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                .values('sku').annotate(total=Sum(
+                    ExpressionWrapper(
+                        (F('order_quantity') - Coalesce(F('received_quantity'), Value(0, output_field=DecimalField())))
+                        * Coalesce(F('stock_item__pack_size'), Value(1, output_field=DecimalField())),
+                        output_field=DecimalField()
+                    )
+                ))
             )
         }
     for a in all_accessories:
@@ -6952,6 +7039,12 @@ def _build_order_context(order, request):
     all_os_doors_pos_list = (
         [os_doors_purchase_order] if os_doors_purchase_order else []
     ) + additional_os_doors_pos_list
+
+    # Attach the relevant OSDoor rows to each PO so the template can iterate them.
+    _all_order_os_doors = list(order.os_doors.all())
+    for _apo in all_os_doors_pos_list:
+        if _apo is not None:
+            _apo.order_os_doors = [d for d in _all_order_os_doors if d.po_number == _apo.display_number]
 
     # Build a quick lookup of OS Door style/colour images from the library.
     os_door_style_images = {}
@@ -10840,14 +10933,36 @@ def update_stock_items_batch(request):
                         item.sku = item_data['sku']
                     if 'name' in item_data:
                         item.name = item_data['name']
-                    if 'cost' in item_data:
-                        item.cost = Decimal(str(item_data['cost']))
+
+                    # Pricing: the product page always sends both cost and pack_cost_price.
+                    # Compare each against the current DB value to detect which one the user
+                    # actually changed, then set accordingly so sync_pack_pricing() does the
+                    # right thing instead of silently reverting the edit.
+                    if 'pack_cost_price' in item_data and 'cost' in item_data:
+                        new_pack_raw = item_data['pack_cost_price']
+                        new_pack = Decimal(str(new_pack_raw)).quantize(Decimal('0.001')) if new_pack_raw else None
+                        new_cost = Decimal(str(item_data['cost'])).quantize(Decimal('0.001'))
+                        pack_changed = (new_pack != (item.pack_cost_price.quantize(Decimal('0.001')) if item.pack_cost_price is not None else None))
+                        cost_changed = (new_cost != item.cost.quantize(Decimal('0.001')))
+                        if pack_changed:
+                            # pack_cost_price is the source of truth; sync will derive unit cost
+                            item.pack_cost_price = new_pack
+                        elif cost_changed:
+                            # unit cost changed; back-calculate pack_cost_price so sync is consistent
+                            pack_size = int(item.pack_size or 1)
+                            if pack_size < 1:
+                                pack_size = 1
+                            item.cost = new_cost
+                            item.pack_cost_price = (new_cost * Decimal(pack_size)).quantize(Decimal('0.001'))
+                        # else neither changed — leave both alone
+                    elif 'cost' in item_data:
+                        new_cost = Decimal(str(item_data['cost']))
                         pack_size = int(item.pack_size or 1)
                         if pack_size < 1:
                             pack_size = 1
-                        # Manual unit cost edits should persist; sync pack cost explicitly.
-                        item.pack_cost_price = (item.cost * Decimal(pack_size)).quantize(Decimal('0.001'))
-                    if 'pack_cost_price' in item_data:
+                        item.cost = new_cost
+                        item.pack_cost_price = (new_cost * Decimal(pack_size)).quantize(Decimal('0.001'))
+                    elif 'pack_cost_price' in item_data:
                         value = item_data['pack_cost_price']
                         item.pack_cost_price = Decimal(str(value)) if value else None
                     if 'location' in item_data:
