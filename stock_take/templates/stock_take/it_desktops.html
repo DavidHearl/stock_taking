@@ -64,7 +64,7 @@
                                     <th>Store</th>
                                     <th>Price (&pound;)</th>
                                     <th class="center"><i class="bi bi-link-45deg"></i></th>
-                                    <th class="center"></th>
+                                    <th class="center">Order</th>
                                 </tr>
                             </thead>
                             <tbody id="componentRowsBody"></tbody>
@@ -107,11 +107,30 @@
         return document.querySelector('[name=csrfmiddlewaretoken]').value;
     }
 
+    function parseJsonResponse(res) {
+        return res.text().then(function (text) {
+            var data = {};
+            if (text) {
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    data = { error: text };
+                }
+            }
+            if (!res.ok) {
+                throw new Error(data.error || ('Request failed (' + res.status + ')'));
+            }
+            return data;
+        });
+    }
+
     var machineGrid = document.getElementById('desktopMachineGrid');
     var emptyState = document.getElementById('desktopMachineEmpty');
     var modal = document.getElementById('desktopSpecModal');
     var modalTitle = document.getElementById('desktopSpecTitle');
     var machineNameInput = document.getElementById('machineNameInput');
+        var machineVramInput = document.getElementById('machine-vram-input');
+        var machinePflopsInput = document.getElementById('machine-pflops-input');
     var componentRowsBody = document.getElementById('componentRowsBody');
     var saveBtn = document.getElementById('saveDesktopSpecBtn');
 
@@ -132,6 +151,10 @@
         return safeNumber(value).toFixed(2);
     }
 
+    function formatMetric(value, decimals) {
+        return safeNumber(value).toFixed(typeof decimals === 'number' ? decimals : 1);
+    }
+
     function escapeHtml(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;')
@@ -139,6 +162,62 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function getMachineMetrics(machine) {
+        var metrics = { vram: 0, pflops: 0 };
+
+        (machine.components || []).forEach(function (component) {
+            var label = [component.type, component.name, component.source].join(' ').toLowerCase();
+            var isGpu = /\b(gpu|graphics|geforce|rtx|gtx|radeon|rx\s*\d|nvidia|amd)\b/.test(label);
+            if (!isGpu) return;
+
+            var explicitVram = label.match(/(\d+(?:\.\d+)?)\s*(?:gb|gib)\b/);
+            var vramValue = explicitVram ? parseFloat(explicitVram[1]) : 0;
+            if (!vramValue) {
+                if (/5090/.test(label)) vramValue = 32;
+                else if (/4090/.test(label)) vramValue = 24;
+                else if (/4080/.test(label)) vramValue = 16;
+                else if (/4070/.test(label)) vramValue = 12;
+                else if (/7900\s*xtx/.test(label)) vramValue = 24;
+                else if (/7900\s*xt/.test(label)) vramValue = 20;
+                else if (/7800\s*xt/.test(label)) vramValue = 16;
+                else if (/6800\s*xt/.test(label)) vramValue = 16;
+                else if (/3090/.test(label)) vramValue = 24;
+                else if (/3080/.test(label)) vramValue = 10;
+            }
+
+            var explicitPflops = label.match(/(\d+(?:\.\d+)?)\s*pflops?\b/);
+            var pflopsValue = explicitPflops ? parseFloat(explicitPflops[1]) : 0;
+            if (!pflopsValue) {
+                if (/5090/.test(label)) pflopsValue = 4.0;
+                else if (/4090/.test(label)) pflopsValue = 1.4;
+                else if (/4080/.test(label)) pflopsValue = 1.0;
+                else if (/4070/.test(label)) pflopsValue = 0.7;
+                else if (/7900\s*xtx/.test(label)) pflopsValue = 1.1;
+                else if (/7900\s*xt/.test(label)) pflopsValue = 0.9;
+                else if (/7800\s*xt/.test(label)) pflopsValue = 0.7;
+                else if (/6800\s*xt/.test(label)) pflopsValue = 0.5;
+                else if (/3090/.test(label)) pflopsValue = 0.4;
+                else if (/3080/.test(label)) pflopsValue = 0.3;
+                else if (vramValue) pflopsValue = Math.max(vramValue * 0.08, 0.1);
+            }
+
+            metrics.vram += vramValue;
+            metrics.pflops += pflopsValue;
+        });
+
+        return metrics;
+    }
+
+    function moveComponentRow(row, direction) {
+        var target = direction === 'up' ? row.previousElementSibling : row.nextElementSibling;
+        if (!target) return;
+        if (direction === 'up') {
+            componentRowsBody.insertBefore(row, target);
+        } else {
+            componentRowsBody.insertBefore(target, row);
+        }
     }
 
     function createComponentRow(component) {
@@ -150,7 +229,11 @@
             '<td><input type="text" class="form-control component-source" placeholder="Amazon" value="' + escapeHtml(component && component.source ? component.source : '') + '"></td>' +
             '<td><input type="number" min="0" step="0.01" class="form-control component-price" placeholder="0.00" value="' + escapeHtml(component && component.price ? component.price : '') + '"></td>' +
             '<td><input type="url" class="form-control component-link" placeholder="https://" value="' + escapeHtml(component && component.link ? component.link : '') + '"></td>' +
-            '<td class="actions-cell"><button type="button" class="btn-icon remove-component-btn" title="Remove component"><i class="bi bi-trash"></i></button></td>';
+            '<td class="actions-cell desktop-row-actions">' +
+                '<button type="button" class="btn-icon move-component-up-btn" title="Move up"><i class="bi bi-chevron-up"></i></button>' +
+                '<button type="button" class="btn-icon move-component-down-btn" title="Move down"><i class="bi bi-chevron-down"></i></button>' +
+                '<button type="button" class="btn-icon remove-component-btn" title="Remove component"><i class="bi bi-trash"></i></button>' +
+            '</td>';
         componentRowsBody.appendChild(tr);
     }
 
@@ -183,11 +266,17 @@
         }, 0);
     }
 
+    function setMachineCollapsed(machine, collapsed) {
+        machine._collapsed = !!collapsed;
+    }
+
     function renderMachines() {
         machineGrid.innerHTML = '';
         emptyState.style.display = machines.length ? 'none' : '';
 
         machines.forEach(function (machine) {
+            var metrics = getMachineMetrics(machine);
+            var isCollapsed = !!machine._collapsed;
             var wrap = document.createElement('div');
             wrap.className = 'desktop-machine-card';
 
@@ -209,15 +298,21 @@
 
             wrap.innerHTML = '' +
                 '<div class="desktop-machine-card-top">' +
-                    '<div>' +
+                    '<div class="desktop-machine-header-copy">' +
                         '<h3 class="desktop-machine-title">' + escapeHtml(machine.name) + '</h3>' +
                         '<p class="desktop-machine-meta">' + machine.components.length + ' components</p>' +
+                        '<div class="desktop-machine-metrics">' +
+                            '<span class="desktop-machine-metric" title="Estimated total VRAM across GPU rows"><span>VRAM</span><strong>' + formatMetric(metrics.vram, 0) + ' GB</strong></span>' +
+                            '<span class="desktop-machine-metric" title="Estimated peak compute across GPU rows"><span>PFLOPs</span><strong>' + formatMetric(metrics.pflops, 1) + '</strong></span>' +
+                        '</div>' +
                     '</div>' +
                     '<div class="desktop-machine-actions">' +
+                        '<button type="button" class="btn-icon toggle-machine-btn" data-id="' + machine.id + '" title="' + (isCollapsed ? 'Expand table' : 'Collapse table') + '"><i class="bi bi-chevron-' + (isCollapsed ? 'down' : 'up') + '"></i></button>' +
                         '<button type="button" class="btn-icon edit-machine-btn" data-id="' + machine.id + '" title="Edit machine"><i class="bi bi-pencil"></i></button>' +
                         '<button type="button" class="btn-icon delete-machine-btn" data-id="' + machine.id + '" title="Delete machine"><i class="bi bi-trash"></i></button>' +
                     '</div>' +
                 '</div>' +
+                '<div class="desktop-machine-body' + (isCollapsed ? ' collapsed' : '') + '" id="desktopMachineBody-' + machine.id + '">' +
                 '<div class="it-table-wrapper">' +
                     '<table class="it-table desktop-spec-view-table">' +
                         '<thead>' +
@@ -232,7 +327,8 @@
                         '<tbody>' + rows + '</tbody>' +
                     '</table>' +
                 '</div>' +
-                '<div class="desktop-machine-total">Total: &pound;' + formatCurrency(machineTotal(machine)) + '</div>';
+                '<div class="desktop-machine-total">Total: &pound;' + formatCurrency(machineTotal(machine)) + '</div>' +
+                '</div>';
 
             machineGrid.appendChild(wrap);
         });
@@ -274,6 +370,20 @@
     });
 
     componentRowsBody.addEventListener('click', function (event) {
+        var moveUpBtn = event.target.closest('.move-component-up-btn');
+        if (moveUpBtn) {
+            var upRow = moveUpBtn.closest('.desktop-component-row');
+            if (upRow) moveComponentRow(upRow, 'up');
+            return;
+        }
+
+        var moveDownBtn = event.target.closest('.move-component-down-btn');
+        if (moveDownBtn) {
+            var downRow = moveDownBtn.closest('.desktop-component-row');
+            if (downRow) moveComponentRow(downRow, 'down');
+            return;
+        }
+
         var btn = event.target.closest('.remove-component-btn');
         if (!btn) return;
         var row = btn.closest('.desktop-component-row');
@@ -284,6 +394,19 @@
     });
 
     machineGrid.addEventListener('click', function (event) {
+        var toggleBtn = event.target.closest('.toggle-machine-btn');
+        if (toggleBtn) {
+            var toggleId = parseInt(toggleBtn.dataset.id, 10);
+            for (var t = 0; t < machines.length; t++) {
+                if (machines[t].id === toggleId) {
+                    setMachineCollapsed(machines[t], !machines[t]._collapsed);
+                    break;
+                }
+            }
+            renderMachines();
+            return;
+        }
+
         var editBtn = event.target.closest('.edit-machine-btn');
         if (editBtn) {
             editingId = parseInt(editBtn.dataset.id, 10);
@@ -299,9 +422,12 @@
             if (!confirm('Delete this machine spec?')) return;
             fetch('/it/desktops/' + id + '/delete/', {
                 method: 'POST',
-                headers: { 'X-CSRFToken': getCsrf() }
+                headers: {
+                    'X-CSRFToken': getCsrf(),
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
             })
-                .then(function (res) { return res.json(); })
+                .then(parseJsonResponse)
                 .then(function (data) {
                     if (!data.success) throw new Error(data.error || 'Delete failed');
                     machines = machines.filter(function (m) { return m.id !== id; });
@@ -335,18 +461,21 @@
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': getCsrf()
+                'X-CSRFToken': getCsrf(),
+                'X-Requested-With': 'XMLHttpRequest'
             },
             body: JSON.stringify({ name: name, components: components })
         })
-            .then(function (res) { return res.json(); })
+            .then(parseJsonResponse)
             .then(function (data) {
                 if (!data.success) throw new Error(data.error || 'Save failed');
                 if (editingId === null) {
+                    data.machine._collapsed = false;
                     machines.push(data.machine);
                 } else {
                     for (var i = 0; i < machines.length; i++) {
                         if (machines[i].id === editingId) {
+                            data.machine._collapsed = machines[i]._collapsed;
                             machines[i] = data.machine;
                             break;
                         }
@@ -362,5 +491,74 @@
     loadMachines();
     renderMachines();
 }());
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var machineNameInput = document.getElementById('machineNameInput');
+    if (!machineNameInput) {
+        return;
+    }
+
+    if (!document.getElementById('machine-vram-input') || !document.getElementById('machine-pflops-input')) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'it-modal-metrics-grid';
+        wrapper.style.display = 'grid';
+        wrapper.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
+        wrapper.style.gap = '0.75rem';
+        wrapper.style.marginTop = '0.75rem';
+        wrapper.innerHTML = [
+            '<div>',
+            '  <label for="machine-vram-input">VRAM (GB)</label>',
+            '  <input id="machine-vram-input" type="number" min="0" step="0.01" placeholder="e.g. 24">',
+            '</div>',
+            '<div>',
+            '  <label for="machine-pflops-input">PFLOPs</label>',
+            '  <input id="machine-pflops-input" type="number" min="0" step="0.001" placeholder="e.g. 1.25">',
+            '</div>'
+        ].join('');
+
+        var nameFieldContainer = machineNameInput.closest('.it-field') || machineNameInput.parentElement;
+        if (nameFieldContainer && nameFieldContainer.parentNode) {
+            nameFieldContainer.parentNode.insertBefore(wrapper, nameFieldContainer.nextSibling);
+        }
+    }
+
+    if (typeof window.getMachineMetrics === 'function') {
+        var previousGetMachineMetrics = window.getMachineMetrics;
+        window.getMachineMetrics = function (machine) {
+            var explicitVram = Number(machine && machine.vram_gb);
+            var explicitPflops = Number(machine && machine.pflops);
+            if (Number.isFinite(explicitVram) || Number.isFinite(explicitPflops)) {
+                return {
+                    vramGb: Number.isFinite(explicitVram) ? explicitVram : 0,
+                    pflops: Number.isFinite(explicitPflops) ? explicitPflops : 0
+                };
+            }
+            return previousGetMachineMetrics(machine);
+        };
+    }
+
+    var originalFetch = window.fetch.bind(window);
+    window.fetch = function (url, options) {
+        try {
+            var requestUrl = String(url || '');
+            var isDesktopSave = requestUrl.indexOf('/it/desktops/') !== -1 && requestUrl.indexOf('/save/') !== -1;
+            if (isDesktopSave && options && options.body && typeof options.body === 'string') {
+                var payload = JSON.parse(options.body);
+                if (payload && typeof payload === 'object' && 'components' in payload && 'name' in payload) {
+                    var vramInput = document.getElementById('machine-vram-input');
+                    var pflopsInput = document.getElementById('machine-pflops-input');
+                    payload.vram_gb = vramInput && vramInput.value !== '' ? Number(vramInput.value) : null;
+                    payload.pflops = pflopsInput && pflopsInput.value !== '' ? Number(pflopsInput.value) : null;
+                    options.body = JSON.stringify(payload);
+                }
+            }
+        } catch (err) {
+            // Keep original request untouched if enhancement parsing fails.
+        }
+
+        return originalFetch(url, options);
+    };
+});
 </script>
 {% endblock %}

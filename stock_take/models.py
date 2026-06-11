@@ -940,6 +940,8 @@ class StockTakeGroup(models.Model):
     ]
     
     name = models.CharField(max_length=100)
+    vram_gb = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    pflops = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     description = models.TextField(blank=True)
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='stock_take_groups')
     weighting = models.IntegerField(choices=WEIGHTING_CHOICES, default=2, 

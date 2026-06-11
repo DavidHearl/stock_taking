@@ -254,9 +254,37 @@ def _serialize_machine(machine):
     return {
         'id': machine.id,
         'name': machine.name,
+        'vram_gb': float(machine.vram_gb) if machine.vram_gb is not None else None,
+        'pflops': float(machine.pflops) if machine.pflops is not None else None,
         'components': components,
         'total': '{:.2f}'.format(machine.total_price),
     }
+
+
+def _parse_optional_decimal(value, field_name, max_digits, decimal_places):
+    if value in (None, ""):
+        return None
+
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError(f"{field_name} must be a valid number")
+
+    if parsed < 0:
+        raise ValueError(f"{field_name} cannot be negative")
+
+    try:
+        quantized = parsed.quantize(Decimal(1).scaleb(-decimal_places))
+    except InvalidOperation:
+        raise ValueError(f"{field_name} has too many decimal places")
+
+    digits = len(quantized.as_tuple().digits)
+    exponent = -quantized.as_tuple().exponent
+    integer_digits = max(digits - exponent, 0)
+    if integer_digits > (max_digits - decimal_places):
+        raise ValueError(f"{field_name} is too large")
+
+    return quantized
 
 
 def _parse_price(value):
@@ -281,6 +309,11 @@ def desktop_machine_save(request, machine_id=None):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
     name = (payload.get('name') or '').strip()
+    try:
+        vram_gb = _parse_optional_decimal(payload.get('vram_gb'), 'VRAM', 8, 2)
+        pflops = _parse_optional_decimal(payload.get('pflops'), 'PFLOPs', 10, 3)
+    except ValueError as exc:
+        return JsonResponse({'success': False, 'error': str(exc)}, status=400)
     if not name:
         return JsonResponse({'error': 'Machine name is required'}, status=400)
 
@@ -292,10 +325,12 @@ def desktop_machine_save(request, machine_id=None):
         if machine_id:
             machine = get_object_or_404(DesktopMachine, id=machine_id)
             machine.name = name
+            machine.vram_gb = vram_gb
+            machine.pflops = pflops
             machine.save()
             machine.components.all().delete()
         else:
-            machine = DesktopMachine.objects.create(name=name)
+            machine = DesktopMachine.objects.create(name=name, vram_gb=vram_gb, pflops=pflops)
 
         for index, component in enumerate(components):
             if not isinstance(component, dict):
