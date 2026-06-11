@@ -11,6 +11,7 @@ Built with **Django 5.2** and deployed on DigitalOcean App Platform behind Traef
 - [Features & Pages](#features--pages)
 - [Project Structure](#project-structure)
 - [Setup](#setup)
+- [Testing](#testing)
 - [Environment Variables](#environment-variables)
 - [Management Commands](#management-commands)
 - [External Integrations](#external-integrations)
@@ -197,6 +198,66 @@ python manage.py createsuperuser
 # Run development server
 python manage.py runserver
 ```
+
+---
+
+## Testing
+
+### Quick Start
+
+```bash
+# Activate local virtual environment
+source virtual_environment/bin/activate
+
+# Run all tests
+python manage.py test
+
+# Run a single test class (example)
+python manage.py test stock_take.tests.DesktopMachineViewTests
+```
+
+### Recommended Local Command
+
+Use `--keepdb` to speed up repeat runs and reduce local PostgreSQL teardown issues:
+
+```bash
+python manage.py test stock_take.tests.DesktopMachineViewTests --keepdb --noinput --verbosity 2
+```
+
+### Common Test Commands
+
+```bash
+# Run one app's tests
+python manage.py test stock_take
+
+# Run one specific test method
+python manage.py test stock_take.tests.DesktopMachineViewTests.test_create_desktop_machine_with_metrics
+
+# Keep existing test DB between runs
+python manage.py test --keepdb --noinput
+```
+
+### Troubleshooting
+
+If you see:
+
+- `django.db.utils.ProgrammingError: column stock_take_desktopmachine.vram_gb does not exist`
+
+Apply migrations in your current environment/database:
+
+```bash
+python manage.py migrate stock_take
+```
+
+If you see teardown failures like:
+
+- `cannot drop the currently open database`
+
+Use `--keepdb --noinput` for local runs, and ensure no other process is connected to the Django test database.
+
+Detailed guide: [docs/testing.md](docs/testing.md)
+
+For repository-specific notes about legacy root test scripts, see [docs/test_file_audit.md](docs/test_file_audit.md).
 
 ---
 

@@ -3,6 +3,7 @@ Unit tests for the stock_take application.
 
 Run with: python manage.py test stock_take
 """
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -13,7 +14,7 @@ from django.urls import reverse
 
 from .models import (
     AnthillPayment, AnthillSale, Accessory, BoardsPO, Category, Customer,
-    Expense, Fitter, Lead, OSDoor, Order, PNXItem, PagePermission,
+    DesktopComponent, DesktopMachine, Expense, Fitter, Lead, OSDoor, Order, PNXItem, PagePermission,
     PurchaseOrder, Role, StockHistory, StockItem, Timesheet, UserProfile,
 )
 from .forms import BoardsPOForm, OrderForm
@@ -761,3 +762,141 @@ class OrderOSDoorsTests(TestCase):
     def test_os_doors_not_required(self):
         order = _create_order(os_doors_required=False)
         self.assertFalse(order.os_doors_received)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  IT DESKTOP MACHINE TESTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@override_settings(
+    STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+    STORAGES=_SIMPLE_STORAGES,
+)
+class DesktopMachineViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = _create_user('it_editor')
+        role = _create_role('it_editor')
+        PagePermission.objects.create(
+            role=role,
+            page_codename='desktop_devices',
+            can_view=True,
+            can_edit=True,
+            can_delete=True,
+        )
+        self.user.profile.role = role
+        self.user.profile.save()
+        self.client.login(username='it_editor', password='testpass123')
+
+    def _json_post(self, url, payload):
+        return self.client.post(
+            url,
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+    def test_create_desktop_machine_with_metrics(self):
+        payload = {
+            'name': 'Render Workstation',
+            'vram_gb': 24,
+            'pflops': 1.234,
+            'components': [
+                {'type': 'GPU', 'name': 'RTX 4090', 'source': 'Vendor A', 'price': '1599.99'},
+                {'type': 'CPU', 'name': 'Ryzen 9', 'source': 'Vendor B', 'price': '599.50'},
+            ],
+        }
+
+        response = self._json_post(reverse('desktop_machine_create'), payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+
+        machine = DesktopMachine.objects.get(name='Render Workstation')
+        self.assertEqual(machine.vram_gb, Decimal('24.00'))
+        self.assertEqual(machine.pflops, Decimal('1.234'))
+
+        components = list(machine.components.order_by('position'))
+        self.assertEqual(len(components), 2)
+        self.assertEqual(components[0].name, 'RTX 4090')
+        self.assertEqual(components[1].name, 'Ryzen 9')
+        self.assertEqual(components[0].position, 0)
+        self.assertEqual(components[1].position, 1)
+
+    def test_create_rejects_negative_metric(self):
+        payload = {
+            'name': 'Invalid Build',
+            'vram_gb': -1,
+            'components': [{'type': 'GPU', 'name': 'Test', 'price': '1.00'}],
+        }
+
+        response = self._json_post(reverse('desktop_machine_create'), payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('cannot be negative', response.json()['error'])
+
+    def test_create_requires_components(self):
+        payload = {
+            'name': 'No Components',
+            'vram_gb': 8,
+            'pflops': 0.5,
+            'components': [],
+        }
+
+        response = self._json_post(reverse('desktop_machine_create'), payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('At least one component is required', response.json()['error'])
+
+    def test_update_replaces_components_and_metrics(self):
+        machine = DesktopMachine.objects.create(name='Original', vram_gb=Decimal('8.00'), pflops=Decimal('0.200'))
+        DesktopComponent.objects.create(
+            machine=machine,
+            component_type='GPU',
+            name='Old GPU',
+            source='Old Source',
+            price=Decimal('123.45'),
+            position=0,
+        )
+
+        payload = {
+            'name': 'Updated Build',
+            'vram_gb': 48,
+            'pflops': 2.5,
+            'components': [
+                {'type': 'GPU', 'name': 'New GPU', 'source': 'Vendor A', 'price': '1999.00'},
+                {'type': 'RAM', 'name': '128GB DDR5', 'source': 'Vendor B', 'price': '399.00'},
+            ],
+        }
+
+        response = self._json_post(reverse('desktop_machine_save', args=[machine.id]), payload)
+        self.assertEqual(response.status_code, 200)
+
+        machine.refresh_from_db()
+        self.assertEqual(machine.name, 'Updated Build')
+        self.assertEqual(machine.vram_gb, Decimal('48.00'))
+        self.assertEqual(machine.pflops, Decimal('2.500'))
+
+        components = list(machine.components.order_by('position'))
+        self.assertEqual(len(components), 2)
+        self.assertEqual([c.name for c in components], ['New GPU', '128GB DDR5'])
+
+    def test_save_requires_edit_permission(self):
+        restricted_user = _create_user('it_viewer')
+        restricted_role = _create_role('it_viewer')
+        PagePermission.objects.create(
+            role=restricted_role,
+            page_codename='desktop_devices',
+            can_view=True,
+            can_edit=False,
+        )
+        restricted_user.profile.role = restricted_role
+        restricted_user.profile.save()
+
+        self.client.logout()
+        self.client.login(username='it_viewer', password='testpass123')
+
+        payload = {
+            'name': 'Blocked Build',
+            'components': [{'type': 'GPU', 'name': 'Test', 'price': '1.00'}],
+        }
+        response = self._json_post(reverse('desktop_machine_create'), payload)
+        self.assertEqual(response.status_code, 403)
