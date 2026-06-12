@@ -299,6 +299,7 @@ def _get_approved_unreceived_pos():
         PurchaseOrder.objects
         .filter(status__in=('Received', 'Partially Received'))
         .exclude(supplier_name__icontains='Carnehill')
+        .exclude(invoice_not_required=True)
         .annotate(
             _po_invoice_count=db_models.Count('invoices', distinct=True),
             _linked_invoice_count=db_models.Count('linked_purchase_invoices', distinct=True),

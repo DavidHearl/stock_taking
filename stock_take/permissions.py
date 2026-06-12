@@ -67,6 +67,7 @@ URL_TO_PAGE = {
     'create_invoice_from_email': 'accounts_payable',
     'ignore_email': 'accounts_payable',
     'unprocess_email': 'accounts_payable',
+    'po_toggle_invoice_not_required': 'accounts_payable',
     'download_mailbox_attachment': 'accounts_payable',
     'manage_exemptions': 'accounts_payable',
     'bulk_email_action': 'accounts_payable',

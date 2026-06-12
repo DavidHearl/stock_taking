@@ -414,7 +414,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
         <table class="apay-po-table">
             <tbody>
                 {% for po in approved_unreceived_pos %}
-                <tr class="apay-po-tr" data-po-supplier="{{ po.supplier_name }}">
+                <tr class="apay-po-tr" data-po-supplier="{{ po.supplier_name }}" data-po-id="{{ po.workguru_id }}">
                     <td class="apay-po-td-main">
                         <div class="apay-po-row-top">
                             <a href="{% url 'purchase_order_detail' po.workguru_id %}" target="_blank" class="apay-po-row-num">{{ po.display_number|default:po.workguru_id }}</a>
@@ -426,11 +426,21 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                         </div>
                     </td>
                     <td class="apay-po-td-search">
-                        <button type="button" class="apay-po-search-btn"
-                                onclick="searchPoEmails('{{ po.search_email|escapejs }}', '{{ po.supplier_name|escapejs }}')"
-                                title="Find emails {% if po.search_email %}from {{ po.search_email }}{% else %}from {{ po.supplier_name|default:'this supplier' }}{% endif %}">
-                            <i class="bi bi-search"></i>
-                        </button>
+                        <div class="kebab-menu">
+                            <button type="button" class="kebab-trigger apay-po-kebab-trigger" onclick="toggleKebab(this, event)" title="Actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                <button type="button" class="kebab-item"
+                                        onclick="closeAllKebabs(); searchPoEmails('{{ po.search_email|escapejs }}', '{{ po.supplier_name|escapejs }}')">
+                                    <i class="bi bi-search"></i> Search
+                                </button>
+                                <button type="button" class="kebab-item danger"
+                                        onclick="closeAllKebabs(); ignorePoInvoice('{{ po.workguru_id }}')">
+                                    <i class="bi bi-slash-circle"></i> Ignore
+                                </button>
+                            </div>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -764,7 +774,40 @@ function searchPoEmails(searchEmail, supplierName) {
     }
 }
 
+// Mark a PO as not requiring an invoice and remove it from the Awaiting list.
+function ignorePoInvoice(poId) {
+    fetch(`/purchase-order/${poId}/toggle-invoice-not-required/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ not_required: true }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) return;
+        const row = document.querySelector(`.apay-po-tr[data-po-id="${poId}"]`);
+        if (row) {
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 300);
+        }
+        const countEl = document.getElementById('po-sidebar-count');
+        if (countEl) {
+            const current = parseInt((countEl.textContent || '').replace(/[^0-9]/g, ''), 10);
+            if (!isNaN(current) && current > 0) countEl.textContent = current - 1;
+        }
+    });
+}
+
 // â”€â”€ Ignore / Unignore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Decrement the active entity tab's count badge when a row leaves the list.
+function decrementActiveTabCount() {
+    const activeTab = document.querySelector('.apay-entity-tab.active .apay-entity-tab-count');
+    if (!activeTab) return;
+    const current = parseInt((activeTab.textContent || '').replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(current) && current > 0) {
+        activeTab.textContent = (current - 1).toLocaleString();
+    }
+}
+
 function ignoreEmail(btn) {
     const emailId = btn.dataset.emailId;
     btn.disabled = true;

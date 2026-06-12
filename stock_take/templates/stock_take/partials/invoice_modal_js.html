@@ -950,8 +950,9 @@ function pullPOLines() {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'same-origin',
     })
-    .then(r => r.json())
+    .then(r => r.json().catch(() => { throw new Error(`Server returned ${r.status}`); }))
     .then(data => {
+        if (data.error) { alert('Could not load PO lines: ' + data.error); return; }
         const results = data.results || [];
         if (!results.length) { alert('No line items found on this purchase order.'); return; }
 
@@ -1045,6 +1046,11 @@ function pullPOLines() {
         // Append any existing rows that were NOT matched to a PO line (e.g. surcharges from PDF)
         existingSnapshots.forEach((snap, i) => {
             if (matchedExistingIndices.has(i)) return;
+            // Skip blank rows (e.g. the default empty line the modal opens with) so they
+            // don't get re-added as an empty extra line that has to be manually deleted.
+            const isBlank = !snap.desc && !(snap.qty > 0) && !(snap.rate > 0)
+                && !snap.poProductId && !snap.isCarriage && !snap.isSurcharge;
+            if (isBlank) return;
             addModalLine();
             const rows = document.querySelectorAll('.pinv-line-row');
             const row  = rows[rows.length - 1];

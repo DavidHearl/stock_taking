@@ -1093,7 +1093,16 @@
     <!-- Invoices Section -->
     <div class="po-products-section">
         <div class="po-products-section-container">
-            <h3><i class="bi bi-receipt"></i> Invoices</h3>
+            <h3>
+                <i class="bi bi-receipt"></i> Invoices
+                {% if purchase_order.invoice_not_required %}
+                <button type="button" id="po-no-invoice-badge" onclick="clearInvoiceNotRequired()"
+                      title="Marked as not requiring a supplier invoice — click to undo"
+                      style="display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:2px 10px;font-size:0.72rem;font-weight:600;border:none;border-radius:12px;background:rgba(220,53,69,0.12);color:#dc3545;vertical-align:middle;cursor:pointer;">
+                    <i class="bi bi-slash-circle"></i> No invoice required
+                </button>
+                {% endif %}
+            </h3>
             <div style="display: flex; gap: 8px;">
                 <button class="btn btn-md btn-primary" onclick="toggleLinkedInvoiceSearch()">
                     <i class="bi bi-search"></i> Link Invoice
@@ -2876,6 +2885,23 @@ function removeXeroSync() {
         }
     })
     .catch(err => showNotification('Network error: ' + err.message, 'error'));
+}
+
+// ---- Invoice not required flag ----
+function clearInvoiceNotRequired() {
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/toggle-invoice-not-required/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ not_required: false }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const badge = document.getElementById('po-no-invoice-badge');
+            if (badge) badge.remove();
+            showNotification('PO will now appear in the Awaiting Invoice list again', 'success');
+        }
+    });
 }
 
 // ---- Attachments ----

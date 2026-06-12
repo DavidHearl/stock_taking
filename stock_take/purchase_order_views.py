@@ -996,6 +996,32 @@ def purchase_order_toggle_project(request, po_id):
 
 
 @login_required
+def po_toggle_invoice_not_required(request, po_id):
+    """Mark a PO as not requiring a supplier invoice (or clear that mark) (AJAX).
+
+    Used by the Accounts Payable "Awaiting Invoice" sidebar so POs that will
+    never be invoiced can be removed from the list instead of lingering.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        data = {}
+
+    po.invoice_not_required = bool(data.get('not_required', True))
+    po.save(update_fields=['invoice_not_required'])
+
+    return JsonResponse({
+        'success': True,
+        'invoice_not_required': po.invoice_not_required,
+    })
+
+
+@login_required
 def po_add_project(request, po_id):
     """Add a project entry (Stock or Customer order) to a PO (AJAX)."""
     if request.method != 'POST':
@@ -2500,6 +2526,9 @@ def supplier_save(request, supplier_id):
                     val = int(val) if val else None
                 except (ValueError, TypeError):
                     val = None
+            elif field == 'xero_default_account_code':
+                # DB column is NOT NULL; clear to empty string rather than None.
+                val = (str(val).strip() if val not in (None, '') else '')
             elif field == 'email':
                 val = val if val and '@' in val else None
             elif field == 'website':
@@ -4510,7 +4539,7 @@ def po_lines_api(request):
         return JsonResponse({'error': 'workguru_id required'}, status=400)
     try:
         po = PurchaseOrder.objects.get(workguru_id=workguru_id)
-    except PurchaseOrder.DoesNotExist:
+    except (PurchaseOrder.DoesNotExist, ValueError, TypeError):
         return JsonResponse({'error': 'PO not found'}, status=404)
 
     if po.po_type == 'fitter':

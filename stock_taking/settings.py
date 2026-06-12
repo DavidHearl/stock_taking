@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import tempfile
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -219,10 +220,13 @@ MEDIA_URL = f'{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/{AWS_LOCATION}/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Caching
+# NOTE: The cache directory must live OUTSIDE the OneDrive-synced project folder.
+# OneDrive locks files while syncing, which causes Django's cache culling/delete
+# to fail on Windows with: PermissionError [WinError 32] (file in use by another process).
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
-        'LOCATION': BASE_DIR / 'cache',
+        'LOCATION': Path(tempfile.gettempdir()) / 'stock_taking_cache',
         'TIMEOUT': 60 * 60 * 24,  # 24 hours
         'OPTIONS': {
             'MAX_ENTRIES': 1000

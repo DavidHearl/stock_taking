@@ -1293,6 +1293,7 @@ class PurchaseOrder(models.Model):
     is_rfq = models.BooleanField(default=False)
     is_landed_costs_po = models.BooleanField(default=False)
     stock_used_on_projects = models.BooleanField(default=False)
+    invoice_not_required = models.BooleanField(default=False, db_default=False, help_text='Marked as not requiring a supplier invoice (hidden from Awaiting Invoice list)')
     
     # Metadata
     creator_name = models.CharField(max_length=200, blank=True, null=True)
