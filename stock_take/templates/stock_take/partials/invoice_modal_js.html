@@ -1,10 +1,10 @@
 <script>
-// ── Shared invoice modal functions ────────────────────────────────────────────
+// -- Shared invoice modal functions --------------------------------------------
 // Included by: purchase_invoices.html, accounts_payable.html (and any future page)
 // Page-specific functions required by the including template:
-//   openCreateModal()    – open and reset the modal (page-specific init)
-//   closeCreateModal(e)  – close (may reset page-specific state)
-//   submitCreateInvoice()– form submission (different URL per page)
+//   openCreateModal()    - open and reset the modal (page-specific init)
+//   closeCreateModal(e)  - close (may reset page-specific state)
+//   submitCreateInvoice()- form submission (different URL per page)
 
 let modalLineCount = 0;
 let modalOrderDebounce = {};
@@ -21,7 +21,7 @@ function todayISO() {
 
 function autoSetDueDate(invoiceDateVal) {
     // Set due date to the last day of the month following the invoice date.
-    // e.g. 21/04/2026 → 31/05/2026
+    // e.g. 21/04/2026 -> 31/05/2026
     if (!invoiceDateVal) return;
     const dueDateEl = document.getElementById('new-pinv-due-date');
     if (!dueDateEl) return;
@@ -33,6 +33,85 @@ function autoSetDueDate(invoiceDateVal) {
         String(lastDay.getDate()).padStart(2, '0');
 }
 let modalPOSearchTimer = null;
+
+// Apply fields extracted from a PDF to the open invoice modal.
+// ex   - the `extracted` object returned by the parse endpoints.
+// opts - { skipSupplier } to preserve an already-matched supplier.
+function applyExtractedToModal(ex, opts) {
+    opts = opts || {};
+    if (!ex) return;
+
+    // Supplier's own invoice number -> supplier reference
+    if (ex.invoice_number) {
+        const srEl = document.getElementById('new-pinv-supplier-ref');
+        if (srEl && !srEl.value) srEl.value = ex.invoice_number;
+    }
+
+    // Currency (default GBP; only switch when the PDF clearly uses EUR)
+    if (ex.currency === 'EUR') setModalCurrency('EUR');
+
+    // Supplier (also sets the supplier's default VAT rate)
+    if (ex.supplier_name && !opts.skipSupplier) selectModalSupplier(ex.supplier_name);
+
+    // Dates
+    if (ex.date) {
+        const dEl = document.getElementById('new-pinv-date');
+        if (dEl) dEl.value = ex.date;
+    }
+    if (ex.due_date) {
+        const ddEl = document.getElementById('new-pinv-due-date');
+        if (ddEl) ddEl.value = ex.due_date;
+    } else if (ex.date) {
+        autoSetDueDate(ex.date);
+    }
+
+    // Line items - or a single fallback line derived from the totals
+    if (ex.line_items && ex.line_items.length > 0) {
+        modalLineCount = 0;
+        document.getElementById('modal-lines').innerHTML = '';
+        ex.line_items.forEach(li => {
+            addModalLine();
+            const lastRow = document.getElementById('modal-lines').lastElementChild;
+            if (!lastRow) return;
+            const descInput  = lastRow.querySelector('.pinv-line-desc');
+            const rateInput  = lastRow.querySelector('.pinv-line-rate');
+            const totalInput = lastRow.querySelector('.pinv-line-total');
+            if (descInput)  descInput.value  = li.description || '';
+            if (rateInput)  rateInput.value  = li.amount != null ? li.amount : '';
+            if (totalInput) totalInput.value = li.amount != null ? li.amount : '';
+            if (li.description) autoLinkOrder(lastRow, li.description);
+        });
+        // Apply an explicit VAT rate from the PDF when one was found
+        if (ex.vat_rate != null && ex.vat_rate > 0) _setModalVatRate(ex.vat_rate);
+    } else if ((ex.subtotal != null && parseFloat(ex.subtotal) > 0) ||
+               (ex.total != null && parseFloat(ex.total) > 0)) {
+        const hasNet = ex.subtotal != null && parseFloat(ex.subtotal) > 0;
+        const amount = hasNet ? parseFloat(ex.subtotal) : parseFloat(ex.total);
+        modalLineCount = 0;
+        document.getElementById('modal-lines').innerHTML = '';
+        addModalLine();
+        const row = document.getElementById('modal-lines').lastElementChild;
+        if (row) {
+            const desc = row.querySelector('.pinv-line-desc');
+            const rate = row.querySelector('.pinv-line-rate');
+            const tot  = row.querySelector('.pinv-line-total');
+            if (desc) desc.value = ex.invoice_number ? ('Invoice ' + ex.invoice_number) : 'Invoice total';
+            if (rate) rate.value = amount.toFixed(2);
+            if (tot)  tot.value  = amount.toFixed(2);
+        }
+        if (hasNet && ex.vat_rate != null && ex.vat_rate > 0) {
+            // Net line + VAT rate -> gross matches the PDF
+            _setModalVatRate(ex.vat_rate);
+        } else {
+            // The single line already equals the gross total - make sure VAT
+            // (possibly enabled by the supplier default) isn't added on top.
+            const cb = document.getElementById('modal-vat-enabled');
+            if (cb) cb.checked = false;
+        }
+    }
+
+    recalcModalTotal();
+}
 
 // Show/hide the "open PO" preview button next to the PO search input
 function updateModalPoOpenBtn() {
@@ -77,8 +156,8 @@ function modalSearchPO(q) {
                 const status = o.status ? ` <span style="opacity:.6;font-size:.75rem;">(${o.status})</span>` : '';
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
                              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
-                             onclick="selectModalPO('${o.id}','${String(label).replace(/'/g,"\\'")}','${o.po_type || 'supplier'}')">
-                            <strong>${label}</strong>${supplier ? ` <span style="color:var(--text-secondary);"> – ${supplier}</span>` : ''}${status}
+                             onclick="selectModalPOFromSearch('${o.id}','${String(label).replace(/'/g,"\\'")}','${o.po_type || 'supplier'}')">
+                            <strong>${label}</strong>${supplier ? ` <span style="color:var(--text-secondary);"> \u2013 ${supplier}</span>` : ''}${status}
                         </div>`;
             }).join('');
             dd.style.display = 'block';
@@ -95,6 +174,12 @@ function selectModalPO(id, label, poType) {
     input.dataset.poType = poType || 'supplier';
     dd.style.display = 'none';
     updateModalPoOpenBtn();
+}
+
+// User picked a PO from the search dropdown - select it and auto-pull its lines.
+function selectModalPOFromSearch(id, label, poType) {
+    selectModalPO(id, label, poType);
+    pullPOLines({ silent: true });
 }
 
 function clearModalPO() {
@@ -148,7 +233,7 @@ function modalSearchSupplier(q) {
                 return;
             }
             dd.innerHTML = results.map(s => {
-                const city = s.city ? ` <span style="color:var(--text-secondary);"> – ${s.city}</span>` : '';
+                const city = s.city ? ` <span style="color:var(--text-secondary);"> \u2013 ${s.city}</span>` : '';
                 const esc = String(s.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 const vr = (s.vat_rate !== undefined && s.vat_rate !== null) ? s.vat_rate : 'null';
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
@@ -263,7 +348,7 @@ function linkDuplicateAndProcess() {
     if (!duplicateInvoiceId || typeof currentEmailId === 'undefined' || !currentEmailId) return;
     const btn = document.getElementById('modal-duplicate-process-btn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving…';
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving\u2026';
     fetch(`/accounts-payable/${currentEmailId}/link-invoice/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': (typeof CSRF_TOKEN !== 'undefined' ? CSRF_TOKEN : ''), 'Content-Type': 'application/json' },
@@ -628,7 +713,7 @@ function copyModalLine(row) {
     recalcModalTotal();
 }
 
-// ── Drag-to-reorder line items ────────────────────────────────────────────────
+// -- Drag-to-reorder line items ------------------------------------------------
 let _dragRow = null;
 document.addEventListener('dragstart', function(e) {
     const handle = e.target.closest('.pinv-line-drag-handle');
@@ -705,7 +790,7 @@ function autoPopulateFromFilename(filename) {
     }
 }
 
-// ─── Inline OPO Quick-Create Modal ───────────────────────────────────────────
+// -- Inline OPO Quick-Create Modal ---------------------------------------------
 
 let iopoSupplierTimer = null;
 
@@ -761,7 +846,7 @@ function openInlineOPOFromLines() {
         alert('Add some line items first.');
         return;
     }
-    const description = lines.map(l => l.amount ? `${l.desc || '(no description)'}  £${l.amount.toFixed(2)}` : l.desc).join('\n');
+    const description = lines.map(l => l.amount ? `${l.desc || '(no description)'}  \u00a3${l.amount.toFixed(2)}` : l.desc).join('\n');
     const invoiceDate = document.getElementById('new-pinv-date')?.value || '';
     openInlineOPOModal({ gross: total, description, date: invoiceDate });
 }
@@ -795,7 +880,7 @@ function iopoSearchSupplier(q) {
                 return;
             }
             dd.innerHTML = results.map(s => {
-                const city = s.city ? ` <span style="color:var(--text-secondary);"> – ${s.city}</span>` : '';
+                const city = s.city ? ` <span style="color:var(--text-secondary);"> \u2013 ${s.city}</span>` : '';
                 const esc = String(s.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
                              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
@@ -837,7 +922,7 @@ function submitInlineOPO() {
     }
     const btn = document.getElementById('iopo-submit-btn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating…';
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating\u2026';
 
     const payload = {
         supplier_name: supplier,
@@ -896,7 +981,7 @@ function submitInlineOPO() {
     });
 }
 
-// ── Invoice modal PO kebab ────────────────────────────────────
+// -- Invoice modal PO kebab ----------------------------------------------------
 function toggleInvoicePoKebab(e) {
     toggleKebab(e.currentTarget || e.target, e);
 }
@@ -914,7 +999,7 @@ function openInlinePoFromLines() {
             total += amount;
         }
     });
-    const description = lines.map(l => l.amount ? `${l.desc || '(no description)'}  £${l.amount.toFixed(2)}` : l.desc).join('\n');
+    const description = lines.map(l => l.amount ? `${l.desc || '(no description)'}  \u00a3${l.amount.toFixed(2)}` : l.desc).join('\n');
     // Pre-fill the PO search with description as a hint, and show a confirm
     const supplier = document.getElementById('new-pinv-supplier')?.value?.trim() || '';
     if (!confirm(`Create a new Purchase Order${supplier ? ' for ' + supplier : ''}?\nA local PO will be created and linked to this invoice.`)) return;
@@ -938,12 +1023,14 @@ function openInlinePoFromLines() {
     .catch(() => alert('Network error'));
 }
 
-// ── Pull line items from the selected PO ──────────────────────
-function pullPOLines() {
+// -- Pull line items from the selected PO --------------------------------------
+// opts.silent - suppress alert() popups (used for auto-pull on PO selection).
+function pullPOLines(opts) {
+    const silent = !!(opts && opts.silent);
     const poInput = document.getElementById('new-pinv-po-search');
     const poId = poInput ? poInput.dataset.poId : '';
     if (!poId) {
-        alert('Select a purchase order first.');
+        if (!silent) alert('Select a purchase order first.');
         return;
     }
     fetch(`/api/po-lines/?workguru_id=${encodeURIComponent(poId)}`, {
@@ -952,11 +1039,11 @@ function pullPOLines() {
     })
     .then(r => r.json().catch(() => { throw new Error(`Server returned ${r.status}`); }))
     .then(data => {
-        if (data.error) { alert('Could not load PO lines: ' + data.error); return; }
+        if (data.error) { if (!silent) alert('Could not load PO lines: ' + data.error); return; }
         const results = data.results || [];
-        if (!results.length) { alert('No line items found on this purchase order.'); return; }
+        if (!results.length) { if (!silent) alert('No line items found on this purchase order.'); return; }
 
-        // ── Snapshot existing rows so we can preserve unmatched ones (e.g. surcharges) ──
+        // -- Snapshot existing rows so we can preserve unmatched ones (e.g. surcharges) --
         const existingRows = Array.from(document.querySelectorAll('.pinv-line-row'));
         const existingSnapshots = existingRows.map(row => ({
             desc:        (row.querySelector('.pinv-line-desc')?.value  || '').trim(),
@@ -975,8 +1062,8 @@ function pullPOLines() {
         // Normalise a description for loose matching (lowercase, collapse whitespace)
         const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
-        // Extract 3-4 digit integers — panel dimensions like 2206, 599, 210, 458 etc.
-        // Used to match cryptic PDF descriptions ("2206 599 1 280.85") to PO names ("(2206×599mm)").
+        // Extract 3-4 digit integers - panel dimensions like 2206, 599, 210, 458 etc.
+        // Used to match cryptic PDF descriptions ("2206 599 1 280.85") to PO names ("(2206x599mm)").
         const extractDims = s => new Set((s.match(/\b\d{3,4}\b/g) || []));
         const countSharedDims = (a, b) => { let n = 0; for (const d of a) if (b.has(d)) n++; return n; };
 
@@ -994,14 +1081,14 @@ function pullPOLines() {
             // Try to find a matching existing row:
             //   1. Exact or containment description match
             //   2. Same unit rate
-            //   3. 2+ shared 3-4 digit integers (panel dimensions, e.g. 2206 and 599 in "2206 599 1 280.85" vs "(2206×599mm)")
+            //   3. 2+ shared 3-4 digit integers (panel dimensions, e.g. 2206 and 599 in "2206 599 1 280.85" vs "(2206x599mm)")
             let matchIdx = -1;
             for (let i = 0; i < existingSnapshots.length; i++) {
                 if (matchedExistingIndices.has(i)) continue;
                 const snap = existingSnapshots[i];
                 if (snap.poProductId) continue; // already linked to a PO product, skip
                 const snapNorm  = norm(snap.desc);
-                // Accept exact, or containment in either direction (e.g. "surcharge" ⊆ "surcharge from invoice INV-xxx")
+                // Accept exact, or containment in either direction (e.g. "surcharge" within "surcharge from invoice INV-xxx")
                 const descMatch = itemNorm && snapNorm && (
                     snapNorm === itemNorm ||
                     itemNorm.includes(snapNorm) ||
@@ -1036,7 +1123,7 @@ function pullPOLines() {
             row.dataset.poProductId = item.id;
             if (invoicedQty > 0) {
                 const label = remaining <= 0
-                    ? `Fully invoiced (${invoicedQty} of ${orderQty}) — adjust qty if this invoice covers an additional charge`
+                    ? `Fully invoiced (${invoicedQty} of ${orderQty}) \u2014 adjust qty if this invoice covers an additional charge`
                     : `${invoicedQty} of ${orderQty} already invoiced`;
                 row.title = label;
                 row.classList.add('pinv-line-partial');
@@ -1075,6 +1162,6 @@ function pullPOLines() {
         }
         recalcModalTotal();
     })
-    .catch(err => alert('Error fetching PO lines: ' + err.message));
+    .catch(err => { if (!silent) alert('Error fetching PO lines: ' + err.message); });
 }
 </script>

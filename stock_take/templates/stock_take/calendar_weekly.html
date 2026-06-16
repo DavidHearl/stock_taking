@@ -15,31 +15,52 @@
 
 <!-- Appointment Detail Modal -->
 <div id="appointmentDetailModal" class="modal">
-    <div class="modal-content" style="max-width: 640px;">
+    <div class="modal-overlay" onclick="closeModal('appointmentDetailModal')"></div>
+    <div class="modal-content">
         <div class="modal-header">
             <h3 id="detailCustomerName">Appointment</h3>
-            <span class="close" onclick="closeModal('appointmentDetailModal')">&times;</span>
+            <button type="button" class="modal-close" onclick="closeModal('appointmentDetailModal')">&times;</button>
         </div>
         <div class="modal-body">
             <!-- Quick links -->
             <div class="detail-links">
                 <a id="detailOrderLink" href="#" class="detail-link-btn" target="_blank">
-                    <i class="bi bi-box-seam"></i> View Order
+                    View Sale
                 </a>
                 <a id="detailAnthillLink" href="#" class="detail-link-btn detail-link-anthill" target="_blank">
                     <i class="bi bi-box-arrow-up-right"></i> Open in Anthill
                 </a>
-                <a id="detailSaleLink" href="#" class="detail-link-btn detail-link-sale" target="_blank" style="display:none;">
-                    <i class="bi bi-currency-pound"></i> Sale &amp; Payments
-                </a>
+            </div>
+
+            <!-- Section: Financials -->
+            <div class="detail-section-label">Financials</div>
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <label>Sale Value</label>
+                    <span id="detailSaleValue" class="detail-val-money">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Paid</label>
+                    <span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Outstanding</label>
+                    <span id="detailOutstanding" class="detail-val-money">-</span>
+                </div>
+            </div>
+            <div class="detail-payment-wrap" id="detailPaymentBar" style="display:none;">
+                <div class="detail-payment-track">
+                    <div class="detail-payment-fill" id="detailPaymentFill"></div>
+                </div>
+                <span class="detail-payment-pct" id="detailPaymentPct">0% paid</span>
             </div>
 
             <!-- Section: Customer & Order -->
             <div class="detail-section-label">Customer &amp; Order</div>
             <div class="detail-grid">
                 <div class="detail-row">
-                    <label>Sale Number</label>
-                    <span id="detailSaleNumber">-</span>
+                    <label>Contract Number</label>
+                    <span id="detailContractNumber">-</span>
                 </div>
                 <div class="detail-row">
                     <label>Customer No.</label>
@@ -63,71 +84,50 @@
                 </div>
             </div>
 
-            <!-- Section: Product -->
-            <div class="detail-section-label">Product</div>
-            <div class="detail-grid">
-                <div class="detail-row">
-                    <label>Range</label>
-                    <span id="detailRange">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Door Type</label>
-                    <span id="detailDoorType">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Source</label>
-                    <span id="detailSource">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Contract No.</label>
-                    <span id="detailContractNumber">-</span>
-                </div>
-            </div>
-
-            <!-- Section: Financials -->
-            <div class="detail-section-label">Financials</div>
-            <div class="detail-grid detail-grid-3">
-                <div class="detail-row">
-                    <label>Sale Value</label>
-                    <span id="detailSaleValue" class="detail-val-money">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Paid</label>
-                    <span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Outstanding</label>
-                    <span id="detailOutstanding" class="detail-val-money">-</span>
-                </div>
-            </div>
-            <div class="detail-payment-bar" id="detailPaymentBar" style="display:none;">
-                <div class="detail-payment-fill" id="detailPaymentFill"></div>
+            <!-- Section: Purchase Orders -->
+            <div class="detail-section-label">Purchase Orders</div>
+            <div class="detail-po-list" id="detailPoList">
+                <span class="detail-po-empty">No linked purchase orders.</span>
             </div>
 
             <!-- Section: Fit Assignment -->
-            <div class="detail-section-label">Fit Assignment</div>
-            <div class="detail-grid" style="grid-template-columns: 1fr 1fr 1fr;">
-                <div class="detail-row">
-                    <label>Fitter</label>
-                    <select id="detailFitterSelect" class="modal-select" style="margin-bottom:0;">
-                        {% for code, name in fitters %}
-                        <option value="{{ code }}">{{ name }} ({{ code }})</option>
-                        {% endfor %}
-                    </select>
+            <div class="detail-section-head">
+                <span class="detail-section-label">Fit Assignment</span>
+                <button type="button" class="detail-edit-toggle" id="fitEditToggle" onclick="toggleFitEdit()">
+                    <i class="bi bi-pencil"></i> Edit
+                </button>
+            </div>
+            <div class="detail-edit-list" id="fitEditList">
+                <div class="detail-edit-row">
+                    <label for="detailFitterSelect">Fitter</label>
+                    <div class="detail-edit-control">
+                        <span class="detail-edit-value" id="detailFitterValue">-</span>
+                        <select id="detailFitterSelect" class="modal-select detail-edit-input" onchange="syncDetailEditValue('Fitter')">
+                            {% for code, name in fitters %}
+                            <option value="{{ code }}">{{ name }} ({{ code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
                 </div>
-                <div class="detail-row">
-                    <label>Fit Date</label>
-                    <input type="date" id="detailFitDate" class="modal-select" style="margin-bottom:0;">
+                <div class="detail-edit-row">
+                    <label for="detailFitDate">Fit Date</label>
+                    <div class="detail-edit-control">
+                        <span class="detail-edit-value" id="detailFitDateValue">-</span>
+                        <input type="date" id="detailFitDate" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDate')">
+                    </div>
                 </div>
-                <div class="detail-row">
-                    <label>Duration (days)</label>
-                    <select id="detailFitDuration" class="modal-select" style="margin-bottom:0;">
-                        <option value="1">1 day</option>
-                        <option value="2">2 days</option>
-                        <option value="3">3 days</option>
-                        <option value="4">4 days</option>
-                        <option value="5">5 days</option>
-                    </select>
+                <div class="detail-edit-row">
+                    <label for="detailFitDuration">Duration</label>
+                    <div class="detail-edit-control">
+                        <span class="detail-edit-value" id="detailFitDurationValue">-</span>
+                        <select id="detailFitDuration" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDuration')">
+                            <option value="1">1 day</option>
+                            <option value="2">2 days</option>
+                            <option value="3">3 days</option>
+                            <option value="4">4 days</option>
+                            <option value="5">5 days</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -135,29 +135,29 @@
             <div class="detail-section-label">Completion Status</div>
             <div class="detail-checks">
                 <div class="detail-check-item">
-                    <input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
                     <label for="detail-interior">Interior</label>
+                    <input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
                 </div>
                 <div class="detail-check-item">
-                    <input type="checkbox" id="detail-door" onchange="updateDetailStatus('door', this.checked)">
                     <label for="detail-door">Doors</label>
+                    <input type="checkbox" id="detail-door" onchange="updateDetailStatus('door', this.checked)">
                 </div>
                 <div class="detail-check-item">
-                    <input type="checkbox" id="detail-accessories" onchange="updateDetailStatus('accessories', this.checked)">
                     <label for="detail-accessories">Accessories</label>
+                    <input type="checkbox" id="detail-accessories" onchange="updateDetailStatus('accessories', this.checked)">
                 </div>
                 <div class="detail-check-item">
-                    <input type="checkbox" id="detail-materials" onchange="updateDetailStatus('materials', this.checked)">
                     <label for="detail-materials">Materials</label>
+                    <input type="checkbox" id="detail-materials" onchange="updateDetailStatus('materials', this.checked)">
                 </div>
                 <div class="detail-check-item">
-                    <input type="checkbox" id="detail-paperwork" onchange="updateDetailStatus('paperwork', this.checked)">
                     <label for="detail-paperwork">Paperwork</label>
+                    <input type="checkbox" id="detail-paperwork" onchange="updateDetailStatus('paperwork', this.checked)">
                 </div>
             </div>
         </div>
         <div class="modal-footer">
-            <button type="button" class="btn btn-danger" style="margin-right:auto;" onclick="deleteDetailAppointment()">Delete</button>
+            <button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Delete</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
             <button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
         </div>
@@ -167,33 +167,37 @@
 <!-- Page-level calendar toolbar -->
 <div class="cal-toolbar">
     <div class="calendar-nav">
-        <a href="?year={{ prev_week.year }}&month={{ prev_week.month }}&day={{ prev_week.day }}" class="btn btn-secondary">&larr;</a>
-        <h2 class="calendar-date">{{ week_start|date:"j M" }} &ndash; {{ week_end|date:"j M Y" }}</h2>
-        <a href="?year={{ next_week.year }}&month={{ next_week.month }}&day={{ next_week.day }}" class="btn btn-secondary">&rarr;</a>
-        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="btn btn-primary">Today</a>
-        <button class="btn btn-success" id="btnRefreshAnthill" onclick="refreshAnthillDates()" title="Sync fit dates from Anthill CRM">
-            <i class="bi bi-arrow-repeat"></i> Sync
-        </button>
-        <a href="{% url 'calendar_pdf' %}" class="btn btn-outline-secondary" title="Download 5-week fit schedule PDF" target="_blank">
-            <i class="bi bi-file-earmark-pdf"></i> PDF
-        </a>
-        <div class="cal-more-menu">
-            <button class="btn btn-secondary cal-more-btn" onclick="toggleCalMenu(event)" title="More options">
-                <i class="bi bi-three-dots-vertical"></i>
+        <div class="cal-week-nav">
+            <a href="?year={{ prev_week.year }}&month={{ prev_week.month }}&day={{ prev_week.day }}" class="btn btn-secondary cal-nav-arrow" title="Previous week">&larr;</a>
+            <h2 class="calendar-date">{{ week_start|date:"j M" }} &ndash; {{ week_end|date:"j M Y" }}</h2>
+            <a href="?year={{ next_week.year }}&month={{ next_week.month }}&day={{ next_week.day }}" class="btn btn-secondary cal-nav-arrow" title="Next week">&rarr;</a>
+            <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="btn btn-primary cal-today-btn">Today</a>
+        </div>
+        <div class="cal-actions">
+            <button class="btn btn-success" id="btnRefreshAnthill" onclick="refreshAnthillDates()" title="Sync fit dates from Anthill CRM">
+                <i class="bi bi-arrow-repeat"></i> Sync
             </button>
-            <div class="cal-more-dropdown" id="cal-more-dropdown">
-                <button class="cal-more-item" id="toggleDeliveriesBtn" onclick="toggleDeliveries()">
-                    <i class="bi bi-truck"></i> Deliveries
-                    <i class="bi bi-check2 cal-more-check-icon"></i>
+            <a href="{% url 'calendar_pdf' %}" class="btn btn-outline-secondary" title="Download 5-week fit schedule PDF" target="_blank">
+                <i class="bi bi-file-earmark-pdf"></i> PDF
+            </a>
+            <div class="kebab-menu">
+                <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More options">
+                    <i class="bi bi-three-dots-vertical"></i>
                 </button>
-                <button class="cal-more-item" id="toggleSalesBtn" onclick="toggleSales()">
-                    <i class="bi bi-calendar-event"></i> Design Appts
-                    <i class="bi bi-check2 cal-more-check-icon"></i>
-                </button>
-                <div class="cal-more-separator"></div>
-                <button class="cal-more-item" onclick="openModal('fitterManagementModal')">
-                    <i class="bi bi-people"></i> Manage Fitters
-                </button>
+                <div class="kebab-dropdown" id="cal-more-dropdown">
+                    <button class="kebab-item" id="toggleDeliveriesBtn" onclick="toggleDeliveries()" data-keep-open>
+                        <i class="bi bi-truck"></i> Deliveries
+                        <i class="bi bi-check2 kebab-check-icon"></i>
+                    </button>
+                    <button class="kebab-item" id="toggleSalesBtn" onclick="toggleSales()" data-keep-open>
+                        <i class="bi bi-calendar-event"></i> Design Appts
+                        <i class="bi bi-check2 kebab-check-icon"></i>
+                    </button>
+                    <div class="kebab-divider"></div>
+                    <button class="kebab-item" onclick="openModal('fitterManagementModal')">
+                        <i class="bi bi-people"></i> Manage Fitters
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -295,6 +299,7 @@
                      {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
                      data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
                      data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
+                     data-value-estimated="{{ appt.fin.value_estimated|yesno:'1,' }}"
                      data-anthill-sale-pk="{{ appt.fin.anthill_sale_pk }}"
                      data-range-name="{{ appt.fin.range_name }}"
                      data-door-type="{{ appt.fin.door_type }}"
@@ -303,14 +308,14 @@
                      data-assigned-to="{{ appt.fin.assigned_to_name }}"
                      data-discount="{{ appt.fin.discount|floatformat:0 }}"
                      {% endif %}
+                     data-pos="{{ appt.pos_json|default:'[]' }}"
                      onclick="selectAppointmentFromCard(this)">
                     <div class="wk-card-header">
-                        <span class="wk-card-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
-                        <span class="wk-card-meta">
-                            {% if appt.fin and appt.fin.sale_value %}<span class="wk-card-outstanding {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>{% endif %}
-                            {% if appt.span_total > 1 %}<span class="wk-card-days">{{ appt.span_total }}d</span>{% endif %}
+                        <div class="wk-card-info">
+                            <span class="wk-card-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
                             <span class="wk-card-salenum">{{ appt.order.sale_number }}</span>
-                        </span>
+                        </div>
+                        {% if appt.fin and appt.fin.sale_value %}<span class="wk-card-outstanding {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>{% endif %}
                     </div>
                 </div>
                 {% elif appt.remedial %}
@@ -335,11 +340,10 @@
                      data-postcode="{{ appt.remedial.postcode|default:'-' }}"
                      onclick="selectAppointmentFromCard(this)">
                     <div class="wk-card-header">
-                        <span class="wk-card-name">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
-                        <span class="wk-card-meta">
-                            {% if appt.span_total > 1 %}<span class="wk-card-days">{{ appt.span_total }}d</span>{% endif %}
+                        <div class="wk-card-info">
+                            <span class="wk-card-name">{{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
                             <span class="wk-card-salenum">{{ appt.remedial.remedial_number }}</span>
-                        </span>
+                        </div>
                     </div>
                 </div>
                 {% endif %}
@@ -365,7 +369,7 @@
                         </div>
                         <table class="wk-delivery-rows">
                             {% for po in group.pos %}
-                            <tr class="wk-delivery-row" onclick="openDeliveryDetail({{ po.workguru_id }}, '{{ po.display_number|escapejs }}', '{{ po.supplier_name|escapejs }}', '{{ po.project_name|default:""|escapejs }}')" style="cursor:pointer;">
+                            <tr class="wk-delivery-row" onclick="openDeliveryDetail({{ po.workguru_id }}, '{{ po.display_number|escapejs }}', '{{ po.supplier_name|escapejs }}', '{{ po.project_name|default:""|escapejs }}')">
                                 <td class="wk-delivery-po"><a href="{% url 'purchase_order_detail' po.workguru_id %}" onclick="event.stopPropagation();">{{ po.display_number }}</a></td>
                                 <td class="wk-delivery-customer">
                                     {% for proj in po.projects.all %}
@@ -389,7 +393,7 @@
         <div class="swim-section-separator" id="salesContainer" style="display: none;">
             <div class="swim-section-header">
                 <span class="swim-section-title"><i class="bi bi-calendar-event"></i> Design Appointments</span>
-                <button class="btn btn-primary btn-sm" onclick="openSalesModal()" style="padding: 1px 8px; font-size: 0.65rem;"><i class="bi bi-plus-lg"></i> Add</button>
+                <button class="btn btn-primary btn-sm cal-section-add" onclick="openSalesModal()"><i class="bi bi-plus-lg"></i> Add</button>
             </div>
             <div class="swim-section-body">
             <div class="fitter-lane-label"></div>
@@ -438,24 +442,54 @@
 </div>
 
 {% if last_anthill_sync %}
-<div class="wk-sync-banner">
+<div class="wk-sync-banner" id="wkSyncBanner">
     <i class="bi bi-cloud-check"></i>
     Last synced with Anthill: {{ last_anthill_sync.ran_at|timesince }} ago
     {% if last_anthill_sync.notes %}<span class="wk-sync-by">{{ last_anthill_sync.notes }}</span>{% endif %}
+    <button type="button" class="wk-sync-log-toggle" onclick="toggleSyncLog()" title="Show sync activity">
+        <i class="bi bi-list-ul"></i> Activity
+    </button>
 </div>
 {% else %}
-<div class="wk-sync-banner wk-sync-never">
+<div class="wk-sync-banner wk-sync-never" id="wkSyncBanner">
     <i class="bi bi-cloud-slash"></i>
     Anthill data has not been synced yet
+    <button type="button" class="wk-sync-log-toggle" onclick="toggleSyncLog()" title="Show sync activity">
+        <i class="bi bi-list-ul"></i> Activity
+    </button>
 </div>
 {% endif %}
 
+<!-- Sync activity log panel -->
+<div class="wk-sync-log" id="wkSyncLog" style="display:none;">
+    <div class="wk-sync-log-head">
+        <span><i class="bi bi-terminal"></i> Sync Activity</span>
+        <button type="button" class="wk-sync-log-close" onclick="toggleSyncLog()" title="Close">&times;</button>
+    </div>
+    <div class="wk-sync-log-body" id="wkSyncLogBody">
+        <div class="wk-sync-log-empty">Press <strong>Sync</strong> to fetch the latest fit dates from Anthill. Live activity appears here.</div>
+    </div>
+    {% if recent_syncs %}
+    <div class="wk-sync-log-history">
+        <div class="wk-sync-log-history-title">Recent syncs</div>
+        {% for s in recent_syncs %}
+        <div class="wk-sync-log-history-row wk-sync-status-{{ s.status }}">
+            <span class="wk-sync-hist-time">{{ s.ran_at|date:"d M H:i" }}</span>
+            <span class="wk-sync-hist-stats">{{ s.records_updated }} upd &middot; {{ s.records_created }} new &middot; {{ s.errors }} err</span>
+            <span class="wk-sync-hist-note" title="{{ s.notes }}">{{ s.notes }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
 <!-- Sales Appointment Modal -->
 <div id="salesAppointmentModal" class="modal">
-    <div class="modal-content" style="max-width: 480px;">
+    <div class="modal-overlay" onclick="closeModal('salesAppointmentModal')"></div>
+    <div class="modal-content cal-modal cal-modal--xs">
         <div class="modal-header">
             <h3 id="salesModalTitle">Add Event</h3>
-            <span class="close" onclick="closeModal('salesAppointmentModal')">&times;</span>
+            <button type="button" class="modal-close" onclick="closeModal('salesAppointmentModal')">&times;</button>
         </div>
         <div class="modal-body">
             <input type="hidden" id="salesEditId" value="">
@@ -479,16 +513,16 @@
                 <input type="text" id="salesPostcode" class="modal-select" placeholder="BT...">
             </div>
             <label for="salesDate">Date:</label>
-            <div style="display:flex; gap:8px; align-items:center;">
-                <input type="date" id="salesDate" class="modal-select" style="flex:1;">
-                <button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;" onclick="setSalesDateToday()">Today</button>
+            <div class="cal-field-row">
+                <input type="date" id="salesDate" class="modal-select cal-field-grow">
+                <button type="button" class="btn btn-secondary btn-sm cal-nowrap" onclick="setSalesDateToday()">Today</button>
             </div>
-            <div style="display:flex; gap:10px;">
-                <div style="flex:1;">
+            <div class="cal-field-row cal-field-row--times">
+                <div class="cal-field-grow">
                     <label for="salesStartTime">Start Time:</label>
                     <input type="time" id="salesStartTime" class="modal-select">
                 </div>
-                <div style="flex:1;">
+                <div class="cal-field-grow">
                     <label for="salesEndTime">End Time:</label>
                     <input type="time" id="salesEndTime" class="modal-select">
                 </div>
@@ -497,7 +531,7 @@
             <textarea id="salesNotes" class="modal-select" rows="2" placeholder="Optional notes"></textarea>
         </div>
         <div class="modal-footer">
-            <button type="button" class="btn btn-danger" id="salesDeleteBtn" style="margin-right:auto;display:none;" onclick="deleteSalesAppointment()">Delete</button>
+            <button type="button" class="btn btn-danger cal-footer-left" id="salesDeleteBtn" style="display:none;" onclick="deleteSalesAppointment()">Delete</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('salesAppointmentModal')">Cancel</button>
             <button type="button" class="btn btn-primary" onclick="saveSalesAppointment()">Save</button>
         </div>
@@ -515,17 +549,18 @@
 
 <!-- Fitter Management Modal -->
 <div id="fitterManagementModal" class="modal">
-    <div class="modal-content" style="max-width: 500px;">
+    <div class="modal-overlay" onclick="closeModal('fitterManagementModal')"></div>
+    <div class="modal-content cal-modal cal-modal--sm">
         <div class="modal-header">
             <h3>Manage Fitters</h3>
-            <span class="close" onclick="closeModal('fitterManagementModal')">&times;</span>
+            <button type="button" class="modal-close" onclick="closeModal('fitterManagementModal')">&times;</button>
         </div>
         <div class="modal-body">
-            <div id="fitterList" style="margin-bottom: 16px;">
+            <div id="fitterList" class="cal-fitter-list">
                 <!-- Populated by JS -->
             </div>
-            <div style="display:flex; gap:8px;">
-                <input type="text" id="newFitterName" placeholder="New fitter name" class="modal-select" style="flex:1;">
+            <div class="cal-field-row">
+                <input type="text" id="newFitterName" placeholder="New fitter name" class="modal-select cal-field-grow">
                 <button class="btn btn-primary" onclick="addFitter()">Add Fitter</button>
             </div>
         </div>
@@ -537,10 +572,11 @@
 
 <!-- Delivery Order Assignment Modal -->
 <div id="deliveryDetailModal" class="modal">
-    <div class="modal-content" style="max-width: 500px;">
+    <div class="modal-overlay" onclick="closeModal('deliveryDetailModal')"></div>
+    <div class="modal-content cal-modal cal-modal--sm">
         <div class="modal-header">
             <h3 id="deliveryModalTitle">Delivery</h3>
-            <span class="close" onclick="closeModal('deliveryDetailModal')">&times;</span>
+            <button type="button" class="modal-close" onclick="closeModal('deliveryDetailModal')">&times;</button>
         </div>
         <div class="modal-body">
             <div class="detail-section-label">PO Details</div>
@@ -563,8 +599,8 @@
             <div id="deliveryLinkedOrders" class="delivery-linked-orders"></div>
 
             <div class="detail-section-label">Assign Order</div>
-            <div style="position:relative;">
-                <input type="text" class="modal-select" id="delivery-order-search" placeholder="Search by sale number or customer name&hellip;" autocomplete="off" style="font-size:0.85rem; width:100%; margin-bottom:0;">
+            <div class="cal-search-wrap">
+                <input type="text" class="modal-select cal-search-input" id="delivery-order-search" placeholder="Search by sale number or customer name&hellip;" autocomplete="off">
                 <input type="hidden" id="delivery-order-id">
                 <div id="delivery-order-results" class="autocomplete-dropdown" style="display:none;"></div>
             </div>
@@ -579,16 +615,6 @@
 
 {% block extra_js %}
 <script>
-/* ── Toolbar dropdown ─────────────────────────────────────── */
-function toggleCalMenu(e) {
-    e.stopPropagation();
-    document.getElementById('cal-more-dropdown').classList.toggle('open');
-}
-document.addEventListener('click', function(e) {
-    const dd = document.getElementById('cal-more-dropdown');
-    if (dd && !e.target.closest('.cal-more-menu')) dd.classList.remove('open');
-});
-
 let selectedAppointmentId = null;
 let draggedAppointmentId = null;
 let draggedSalesId = null;
@@ -731,33 +757,31 @@ function selectAppointmentFromCard(el) {
     // Links
     const orderLink = document.getElementById('detailOrderLink');
     const anthillLink = document.getElementById('detailAnthillLink');
-    const saleLink = document.getElementById('detailSaleLink');
     if (d.orderUrl) { orderLink.href = d.orderUrl; orderLink.style.display = ''; }
     else { orderLink.style.display = 'none'; }
     if (d.anthillUrl) { anthillLink.href = d.anthillUrl; anthillLink.style.display = ''; }
     else { anthillLink.style.display = 'none'; }
-    if (d.anthillSalePk) { saleLink.href = '/sale/' + d.anthillSalePk + '/'; saleLink.style.display = ''; }
-    else { saleLink.style.display = 'none'; }
 
     // Customer & Order
-    document.getElementById('detailSaleNumber').textContent = d.saleNumber || '-';
+    document.getElementById('detailContractNumber').textContent = d.contractNumber || '-';
     document.getElementById('detailCustomerNumber').textContent = d.customerNumber || '-';
     document.getElementById('detailDesigner').textContent = d.designer || '-';
     document.getElementById('detailOrderDate').textContent = d.orderDate || '-';
     document.getElementById('detailAddress').textContent = d.address || '-';
     document.getElementById('detailPostcode').textContent = d.postcode || '-';
 
-    // Product
-    document.getElementById('detailRange').textContent = d.rangeName || '-';
-    document.getElementById('detailDoorType').textContent = d.doorType || '-';
-    document.getElementById('detailSource').textContent = d.source || '-';
-    document.getElementById('detailContractNumber').textContent = d.contractNumber || '-';
-
     // Financials
     const sv = d.saleValue;
     const pt = d.paymentsTotal;
     const os = d.outstanding;
     document.getElementById('detailSaleValue').textContent = sv ? '£' + Number(sv).toLocaleString() : '-';
+    document.getElementById('detailSaleValue').title = (sv && d.valueEstimated === '1')
+        ? 'Estimated from the linked Xero invoice — no sale value has been synced from Anthill for this order.'
+        : '';
+    document.getElementById('detailSaleValue').classList.toggle('detail-val-estimated', !!(sv && d.valueEstimated === '1'));
+    if (sv && d.valueEstimated === '1') {
+        document.getElementById('detailSaleValue').textContent += ' (est.)';
+    }
     document.getElementById('detailPaid').textContent = pt ? '£' + Number(pt).toLocaleString() : '-';
     const outEl = document.getElementById('detailOutstanding');
     outEl.textContent = os ? '£' + Number(os).toLocaleString() : '-';
@@ -767,19 +791,25 @@ function selectAppointmentFromCard(el) {
     // Payment progress bar
     const bar = document.getElementById('detailPaymentBar');
     const fill = document.getElementById('detailPaymentFill');
+    const pctLabel = document.getElementById('detailPaymentPct');
     if (sv && Number(sv) > 0) {
         const pct = Math.min(100, Math.round((Number(pt || 0) / Number(sv)) * 100));
         fill.style.width = pct + '%';
         fill.classList.toggle('bar-complete', pct >= 100);
+        pctLabel.textContent = pct + '% paid';
         bar.style.display = '';
     } else {
         bar.style.display = 'none';
     }
 
+    // Purchase orders + statuses
+    renderDetailPos(d.pos);
+
     // Fitter dropdown
     const fitterSelect = document.getElementById('detailFitterSelect');
     if (fitterSelect && d.fitterCode) fitterSelect.value = d.fitterCode;
     _origFitterCode = d.fitterCode;
+    syncDetailEditValue('Fitter');
 
     // Fit date — convert dd/mm/yyyy → yyyy-mm-dd
     const fitDateInput = document.getElementById('detailFitDate');
@@ -791,11 +821,16 @@ function selectAppointmentFromCard(el) {
             _origFitDate = iso;
         }
     }
+    syncDetailEditValue('FitDate');
 
     // Duration
     const durSelect = document.getElementById('detailFitDuration');
     durSelect.value = d.fitDuration || '1';
     _origDuration = durSelect.value;
+    syncDetailEditValue('FitDuration');
+
+    // Reset all edit rows back to read-only display
+    resetDetailEdits();
 
     // Checkboxes
     document.getElementById('detail-interior').checked = d.interior === 'true';
@@ -805,6 +840,96 @@ function selectAppointmentFromCard(el) {
     document.getElementById('detail-paperwork').checked = d.paperwork === 'true';
 
     openModal('appointmentDetailModal');
+}
+
+// ── Purchase Orders list ───────────────────────────────────────
+function renderDetailPos(posJson) {
+    const wrap = document.getElementById('detailPoList');
+    let pos = [];
+    try { pos = JSON.parse(posJson || '[]'); } catch (e) { pos = []; }
+    if (!pos.length) {
+        wrap.innerHTML = '<span class="detail-po-empty">No linked purchase orders.</span>';
+        return;
+    }
+    // Group POs by supplier (e.g. all OS Doors together)
+    const groups = {};
+    const order = [];
+    pos.forEach(po => {
+        const key = (po.supplier || '').trim() || 'Other';
+        if (!groups[key]) { groups[key] = []; order.push(key); }
+        groups[key].push(po);
+    });
+    wrap.innerHTML = order.map(supplier => {
+        const rows = groups[supplier].map(po => {
+            const status = po.status || 'Draft';
+            const cls = 'po-status-' + status.toLowerCase().replace(/[^a-z]+/g, '-');
+            return `<div class="detail-po-row">
+                <span class="detail-po-num">${escapeHtml(po.number)}</span>
+                <span class="detail-po-status ${cls}">${escapeHtml(status)}</span>
+            </div>`;
+        }).join('');
+        return `<div class="detail-po-group">
+            <div class="detail-po-group-label">${escapeHtml(supplier)}</div>
+            ${rows}
+        </div>`;
+    }).join('');
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Inline pen-edit fields (fitter / fit date / duration) ──────
+function _detailEditInput(name) {
+    if (name === 'Fitter') return document.getElementById('detailFitterSelect');
+    if (name === 'FitDate') return document.getElementById('detailFitDate');
+    if (name === 'FitDuration') return document.getElementById('detailFitDuration');
+    return null;
+}
+
+function syncDetailEditValue(name) {
+    const inputEl = _detailEditInput(name);
+    const displayEl = document.getElementById('detail' + name + 'Value');
+    if (!inputEl || !displayEl) return;
+    let text = '-';
+    if (name === 'FitDate') {
+        if (inputEl.value) {
+            const p = inputEl.value.split('-');
+            text = `${p[2]}/${p[1]}/${p[0]}`;
+        }
+    } else {
+        text = inputEl.options[inputEl.selectedIndex] ? inputEl.options[inputEl.selectedIndex].text : '-';
+    }
+    displayEl.textContent = text;
+}
+
+function toggleFitEdit() {
+    const list = document.getElementById('fitEditList');
+    const btn = document.getElementById('fitEditToggle');
+    if (!list || !btn) return;
+    const rows = list.querySelectorAll('.detail-edit-row');
+    const editing = btn.classList.toggle('editing');
+    rows.forEach(r => r.classList.toggle('editing', editing));
+    if (editing) {
+        btn.innerHTML = '<i class="bi bi-check2"></i> Done';
+        const first = list.querySelector('.detail-edit-input');
+        if (first) first.focus();
+    } else {
+        ['Fitter', 'FitDate', 'FitDuration'].forEach(syncDetailEditValue);
+        btn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
+    }
+}
+
+function resetDetailEdits() {
+    document.querySelectorAll('#appointmentDetailModal .detail-edit-row.editing')
+        .forEach(r => r.classList.remove('editing'));
+    const btn = document.getElementById('fitEditToggle');
+    if (btn) {
+        btn.classList.remove('editing');
+        btn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
+    }
 }
 
 // ── Status Updates (live, no save button needed) ───────────────
@@ -883,7 +1008,7 @@ function loadFitters() {
     .then(data => {
         const list = document.getElementById('fitterList');
         if (!data.fitters || data.fitters.length === 0) {
-            list.innerHTML = '<p style="color:var(--text-secondary);font-style:italic;">No fitters found.</p>';
+            list.innerHTML = '<p class="cal-empty-note">No fitters found.</p>';
             return;
         }
         list.innerHTML = data.fitters.map(f => `
@@ -1081,11 +1206,38 @@ function applyFitterChange(code) {
 }
 
 // ── Refresh fit dates from Anthill CRM ──────────────────────────
+function toggleSyncLog() {
+    const panel = document.getElementById('wkSyncLog');
+    if (!panel) return;
+    panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+}
+
+function renderSyncLog(log) {
+    const body = document.getElementById('wkSyncLogBody');
+    if (!body) return;
+    if (!log || !log.length) {
+        body.innerHTML = '<div class="wk-sync-log-empty">No activity reported.</div>';
+        return;
+    }
+    body.innerHTML = log.map(function (e) {
+        const lvl = e.level || 'info';
+        const time = e.time ? '<span class="wk-log-time">' + e.time + '</span>' : '';
+        const msg = (e.message || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return '<div class="wk-log-line wk-log-' + lvl + '">' + time + '<span class="wk-log-msg">' + msg + '</span></div>';
+    }).join('');
+    body.scrollTop = body.scrollHeight;
+}
+
 function refreshAnthillDates() {
     const btn = document.getElementById('btnRefreshAnthill');
     const origHTML = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Syncing…';
+
+    // Open the activity panel and show an in-progress message
+    const panel = document.getElementById('wkSyncLog');
+    if (panel) panel.style.display = 'block';
+    renderSyncLog([{ time: '', level: 'info', message: 'Contacting Anthill and scanning sale pages… this can take a minute.' }]);
 
     fetch('{% url "refresh_anthill_fit_dates" %}', {
         method: 'POST',
@@ -1095,6 +1247,7 @@ function refreshAnthillDates() {
     .then(r => r.json())
     .then(data => {
         btn.disabled = false;
+        renderSyncLog(data.log);
         if (data.success) {
             const parts = [];
             if (data.updated) parts.push(data.updated + ' updated');
@@ -1103,25 +1256,26 @@ function refreshAnthillDates() {
             const msg = parts.length ? parts.join(', ') : 'All dates up to date';
             btn.innerHTML = '<i class="bi bi-check-lg"></i> ' + msg;
             // Update the sync banner
-            const banner = document.querySelector('.wk-sync-banner');
+            const banner = document.getElementById('wkSyncBanner');
             if (banner) {
                 banner.classList.remove('wk-sync-never');
-                banner.innerHTML = '<i class="bi bi-cloud-check"></i> Last synced with Anthill: just now';
+                banner.innerHTML = '<i class="bi bi-cloud-check"></i> Last synced with Anthill: just now'
+                    + ' <button type="button" class="wk-sync-log-toggle" onclick="toggleSyncLog()" title="Show sync activity"><i class="bi bi-list-ul"></i> Activity</button>';
             }
             if (data.updated || data.created) {
-                setTimeout(() => location.reload(), 1500);
+                setTimeout(() => location.reload(), 2500);
             } else {
                 setTimeout(() => { btn.innerHTML = origHTML; }, 3000);
             }
         } else {
             btn.innerHTML = origHTML;
-            alert(data.error || 'Sync failed');
+            renderSyncLog(data.log || [{ time: '', level: 'error', message: data.error || 'Sync failed' }]);
         }
     })
     .catch(() => {
         btn.disabled = false;
         btn.innerHTML = origHTML;
-        alert('Error contacting Anthill');
+        renderSyncLog([{ time: '', level: 'error', message: 'Could not reach the server. The sync may have timed out — try again.' }]);
     });
 }
 // ── Delivery Order Assignment ──────────────────────────────────
@@ -1144,7 +1298,7 @@ function openDeliveryDetail(poId, poNumber, supplier, projectName) {
 
 function loadDeliveryLinkedOrders(poId) {
     const container = document.getElementById('deliveryLinkedOrders');
-    container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem;">Loading…</span>';
+    container.innerHTML = '<span class="cal-muted-note">Loading…</span>';
     fetch('/purchase-order/' + poId + '/', { headers: { 'Accept': 'text/html' } })
         .then(() => {
             // Use a lightweight approach: parse the projects from the DOM data we already have
@@ -1152,7 +1306,7 @@ function loadDeliveryLinkedOrders(poId) {
             rebuildLinkedOrdersFromDOM(poId, container);
         })
         .catch(() => {
-            container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem;">Error loading</span>';
+            container.innerHTML = '<span class="cal-muted-note">Error loading</span>';
         });
 }
 
@@ -1238,7 +1392,7 @@ function unlinkDeliveryOrder(poId, projectId) {
                         });
                         results.style.display = 'block';
                     } else {
-                        results.innerHTML = '<div class="autocomplete-item" style="color:var(--text-muted);">No orders found</div>';
+                        results.innerHTML = '<div class="autocomplete-item cal-autocomplete-muted">No orders found</div>';
                         results.style.display = 'block';
                     }
                 })

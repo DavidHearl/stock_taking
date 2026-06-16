@@ -2251,17 +2251,20 @@ class PurchaseInvoice(models.Model):
         """Return the next invoice number in the scheme INV-A00-001 … INV-A00-999,
         INV-A01-000 … INV-A01-999, INV-A02-000 … etc.
 
-        The sequence is derived from the total number of existing invoices so it is
-        always monotonically increasing (no gaps needed — it just needs to be unique
-        and human-readable).
+        The sequence is derived from the highest existing auto-generated number so
+        it is always monotonically increasing and unique. If the computed value
+        somehow already exists, it keeps advancing until a free one is found (this
+        guards against duplicates when several invoices are created in quick
+        succession).
         """
         import re
-        # Find the highest existing auto-generated number
         pattern = re.compile(r'^INV-A(\d{2})-(\d{3})$')
+        existing = set()
         best = (-1, -1)
         for num in cls.objects.values_list('invoice_number', flat=True):
             m = pattern.match(num or '')
             if m:
+                existing.add(num)
                 pair = (int(m.group(1)), int(m.group(2)))
                 if pair > best:
                     best = pair
@@ -2275,7 +2278,15 @@ class PurchaseInvoice(models.Model):
                 group += 1
                 seq = 0
 
-        return f'INV-A{group:02d}-{seq:03d}'
+        # Advance past any number that already exists (defensive uniqueness).
+        candidate = f'INV-A{group:02d}-{seq:03d}'
+        while candidate in existing:
+            seq += 1
+            if seq > 999:
+                group += 1
+                seq = 0
+            candidate = f'INV-A{group:02d}-{seq:03d}'
+        return candidate
 
     @property
     def amount_outstanding(self):

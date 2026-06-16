@@ -12,30 +12,6 @@
 
 {% block content %}
 
-<!-- Stats Bar -->
-<div class="stats-grid" style="margin-bottom:16px;">
-    <div class="stats-card">
-        <div class="stats-label">Total Invoices</div>
-        <div class="stats-number">{{ total_invoices|intcomma }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Total Value</div>
-        <div class="stats-number" style="font-size:1.5rem;">£{{ total_value|floatformat:2|intcomma }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Outstanding</div>
-        <div class="stats-number" style="font-size:1.5rem;color:{% if total_outstanding > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};">£{{ total_outstanding|floatformat:2|intcomma }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Paid</div>
-        <div class="stats-number" style="font-size:1.5rem;color:var(--success-color);">£{{ total_paid|floatformat:2|intcomma }}</div>
-    </div>
-    <div class="stats-card">
-        <div class="stats-label">Unpaid</div>
-        <div class="stats-number" {% if unpaid_count > 0 %}style="color:var(--warning-color);"{% endif %}>{{ unpaid_count }}</div>
-    </div>
-</div>
-
 <!-- Toolbar -->
 <div class="pinv-toolbar">
     <form method="get" action="" class="pinv-search-box">
@@ -44,6 +20,7 @@
         placeholder="Search by invoice number or supplier…" autocomplete="off">
         {% if search_query %}<a href="?" class="pinv-search-clear">&times;</a>{% endif %}
     </form>
+    <span class="pinv-selection-count" id="pinv-selection-count" style="display:none;"></span>
     <button class="pinv-btn" id="sync-xero-btn" onclick="syncXeroPayments()" title="Check payment status of all Xero-linked invoices" style="background:var(--bg-tertiary);color:var(--text-secondary);">
         <i class="bi bi-arrow-repeat"></i>
         <span>Sync from Xero</span>
@@ -52,14 +29,31 @@
         <i class="bi bi-plus-lg"></i>
         <span>Add Invoice</span>
     </button>
+    <div class="kebab-menu pinv-bulk-kebab-wrap">
+        <button type="button" class="kebab-trigger pinv-bulk-kebab-trigger" onclick="toggleKebab(this, event)" title="Bulk actions">
+            <i class="bi bi-three-dots-vertical"></i>
+        </button>
+        <div class="kebab-dropdown">
+            <button type="button" class="kebab-item" onclick="pushSelectedToXero()">
+                <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+            <div class="kebab-divider"></div>
+            <button type="button" class="kebab-item" onclick="clearPinvSelection()">
+                <i class="bi bi-x-circle"></i> Clear selection
+            </button>
+        </div>
+    </div>
 </div>
 
 <!-- Table -->
-<div class="pinv-table-container">
+<div class="pinv-table-container pinv-table-container--full">
     {% if invoices %}
     <table class="pinv-table" id="purchase-invoices-table">
         <thead>
             <tr>
+                <th style="width:36px;text-align:center;">
+                    <input type="checkbox" id="pinv-select-all" title="Select all" onclick="event.stopPropagation()" onchange="togglePinvSelectAll(this)">
+                </th>
                 <th>Invoice #</th>
                 <th>Supplier</th>
                 <th>Date</th>
@@ -75,6 +69,12 @@
         <tbody>
             {% for invoice in invoices %}
             <tr onclick="window.location='{% url 'purchase_invoice_detail' invoice.id %}'" style="cursor:pointer;">
+                <td style="text-align:center;">
+                    <input type="checkbox" class="pinv-row-check" value="{{ invoice.id }}"
+                           data-xero-id="{{ invoice.xero_id }}"
+                           data-invoice-number="{{ invoice.invoice_number }}"
+                           onclick="event.stopPropagation(); updatePinvSelection();">
+                </td>
                 <td>
                     <a href="{% url 'purchase_invoice_detail' invoice.id %}" class="pinv-number">{{ invoice.invoice_number }}</a>
                 </td>
@@ -450,5 +450,99 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// ── Row selection + bulk Xero push ─────────────────────────────
+function getSelectedPinvRows() {
+    return Array.from(document.querySelectorAll('.pinv-row-check:checked'));
+}
+
+function updatePinvSelection() {
+    const all = Array.from(document.querySelectorAll('.pinv-row-check'));
+    const checked = all.filter(cb => cb.checked);
+    const countEl = document.getElementById('pinv-selection-count');
+    if (countEl) {
+        if (checked.length) {
+            countEl.textContent = `${checked.length} selected`;
+            countEl.style.display = '';
+        } else {
+            countEl.style.display = 'none';
+        }
+    }
+    const master = document.getElementById('pinv-select-all');
+    if (master) {
+        master.checked = checked.length > 0 && checked.length === all.length;
+        master.indeterminate = checked.length > 0 && checked.length < all.length;
+    }
+}
+
+function togglePinvSelectAll(master) {
+    // Only toggle rows currently visible (respect the search filter)
+    document.querySelectorAll('.pinv-row-check').forEach(cb => {
+        const row = cb.closest('tr');
+        if (row && row.style.display !== 'none') cb.checked = master.checked;
+    });
+    updatePinvSelection();
+}
+
+function clearPinvSelection() {
+    document.querySelectorAll('.pinv-row-check').forEach(cb => { cb.checked = false; });
+    updatePinvSelection();
+}
+
+function pushSelectedToXero() {
+    const selected = getSelectedPinvRows();
+    if (!selected.length) {
+        alert('Select one or more invoices first (use the checkboxes on the right).');
+        return;
+    }
+    // Skip invoices that are already linked to Xero.
+    const toPush = selected.filter(cb => !(cb.dataset.xeroId || '').trim());
+    const alreadyLinked = selected.length - toPush.length;
+    if (!toPush.length) {
+        alert('All selected invoices are already in Xero.');
+        return;
+    }
+    let confirmMsg = `Push ${toPush.length} invoice(s) to Xero as draft bills? Each is pushed individually.`;
+    if (alreadyLinked > 0) confirmMsg += `\n\n${alreadyLinked} already-linked invoice(s) will be skipped.`;
+    if (!confirm(confirmMsg)) return;
+
+    const items = toPush.map(cb => ({
+        id: cb.value,
+        number: cb.dataset.invoiceNumber || cb.value,
+        row: cb.closest('tr'),
+    }));
+
+    let pushed = 0;
+    const failures = [];
+
+    const run = (pos) => {
+        if (pos >= items.length) {
+            const summary = failures.length
+                ? `${pushed} pushed, ${failures.length} failed:\n` + failures.join('\n')
+                : `${pushed} invoice(s) pushed to Xero. Reloading…`;
+            alert(summary);
+            if (pushed > 0) setTimeout(() => window.location.reload(), 600);
+            return;
+        }
+        const item = items[pos];
+        if (item.row) item.row.classList.add('pinv-pushing');
+        fetch(`/purchase-invoices/${item.id}/push-to-xero/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        })
+        .then(r => r.json().catch(() => ({ success: false, error: `HTTP ${r.status}` })))
+        .then(data => {
+            if (data.success) pushed++;
+            else failures.push(`${item.number}: ${data.error || 'Unknown error'}`);
+        })
+        .catch(err => { failures.push(`${item.number}: ${err.message}`); })
+        .finally(() => {
+            if (item.row) item.row.classList.remove('pinv-pushing');
+            run(pos + 1);
+        });
+    };
+    run(0);
+}
 </script>
 {% endblock %}

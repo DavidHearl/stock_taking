@@ -11382,18 +11382,60 @@ def calendar_view(request):
             .annotate(payments_sum=Sum('payments__amount'))
             .values('anthill_activity_id', 'sale_value', 'payments_sum')
         )
+        # Fallback sale value (invoiced total, then amount paid) when no
+        # sale value has been synced for the record.
+        from .models import AnthillPayment
+        _invoiced = {}
+        for pr in (
+            AnthillPayment.objects
+            .filter(sale__anthill_activity_id__in=sale_numbers, ignored=False)
+            .values('sale__anthill_activity_id', 'xero_invoice_id', 'invoice_total', 'id')
+        ):
+            k = pr['sale__anthill_activity_id']
+            _invoiced.setdefault(k, {})[pr['xero_invoice_id'] or f"_p{pr['id']}"] = pr['invoice_total'] or Decimal('0')
+        _invoiced_total = {k: sum(v.values()) for k, v in _invoiced.items()}
         _fin_map = {}
         for row in _sale_rows:
             sv = row['sale_value'] or Decimal('0')
             pt = row['payments_sum'] or Decimal('0')
-            _fin_map[row['anthill_activity_id']] = {
+            key = row['anthill_activity_id']
+            estimated = False
+            if sv <= 0:
+                fallback = _invoiced_total.get(key, Decimal('0')) or pt
+                if fallback > 0:
+                    sv = fallback
+                    estimated = True
+            # Keep the highest-value record when an Anthill order id matches
+            # several sale rows, so a populated value isn't clobbered by a zero.
+            existing = _fin_map.get(key)
+            if existing is not None and sv <= existing['sale_value']:
+                continue
+            _fin_map[key] = {
                 'sale_value': sv,
                 'payments_total': pt,
                 'outstanding': sv - pt,
+                'value_estimated': estimated,
             }
         for appt in appointments:
             if appt.order:
-                appt.fin = _fin_map.get(appt.order.sale_number)
+                fin = _fin_map.get(appt.order.sale_number)
+                # Prefer the order's own Total (Inc VAT) — the authoritative
+                # value shown on the sale page — over the Anthill/invoice value.
+                order_total = appt.order.total_value_inc_vat or Decimal('0')
+                if order_total > 0:
+                    if fin is None:
+                        fin = {
+                            'sale_value': order_total,
+                            'payments_total': Decimal('0'),
+                            'outstanding': order_total,
+                            'value_estimated': False,
+                        }
+                    else:
+                        fin = dict(fin)
+                        fin['sale_value'] = order_total
+                        fin['outstanding'] = order_total - fin['payments_total']
+                        fin['value_estimated'] = False
+                appt.fin = fin
     
     # Get all orders with fit dates in this month (for quick add)
     orders_this_month = Order.objects.filter(
@@ -11640,15 +11682,49 @@ def calendar_weekly(request):
                      'range_name', 'door_type', 'source', 'contract_number',
                      'assigned_to_name', 'discount')
         )
+        # Fallback sale value when AnthillSale.sale_value is missing/zero:
+        # sum the distinct linked Xero invoice totals (the invoiced amount).
+        # This keeps the calendar coherent for sales that haven't had their
+        # value synced from Anthill but do have payments/invoices.
+        from .models import AnthillPayment
+        _invoiced = {}   # activity_id -> {invoice_key: invoice_total}
+        for pr in (
+            AnthillPayment.objects
+            .filter(sale__anthill_activity_id__in=sale_numbers, ignored=False)
+            .values('sale__anthill_activity_id', 'xero_invoice_id', 'invoice_total', 'id')
+        ):
+            key = pr['sale__anthill_activity_id']
+            inv_total = pr['invoice_total'] or Decimal('0')
+            inv_key = pr['xero_invoice_id'] or f"_p{pr['id']}"
+            _invoiced.setdefault(key, {})[inv_key] = inv_total
+        _invoiced_total = {k: sum(v.values()) for k, v in _invoiced.items()}
+
         _fin_map = {}
         for row in _sale_rows:
             sv = row['sale_value'] or Decimal('0')
             pt = row['payments_sum'] or Decimal('0')
             disc = row['discount'] or Decimal('0')
-            _fin_map[row['anthill_activity_id']] = {
+            key = row['anthill_activity_id']
+            # Fall back to the invoiced total (then to amount paid) when no
+            # sale value has been synced for this record.
+            estimated = False
+            if sv <= 0:
+                fallback = _invoiced_total.get(key, Decimal('0')) or pt
+                if fallback > 0:
+                    sv = fallback
+                    estimated = True
+            # A single Anthill order id can match multiple sale records. Keep the
+            # one with the highest sale value so a populated record is never
+            # clobbered by a later zero/blank duplicate (root cause of missing
+            # values on the calendar).
+            existing = _fin_map.get(key)
+            if existing is not None and sv <= existing['sale_value']:
+                continue
+            _fin_map[key] = {
                 'sale_value': sv,
                 'payments_total': pt,
                 'outstanding': sv - pt,
+                'value_estimated': estimated,
                 'anthill_sale_pk': row['id'],
                 'range_name': row['range_name'] or '',
                 'door_type': row['door_type'] or '',
@@ -11659,7 +11735,45 @@ def calendar_weekly(request):
             }
         for appt in appointments:
             if appt.order:
-                appt.fin = _fin_map.get(appt.order.sale_number)
+                fin = _fin_map.get(appt.order.sale_number)
+                # The order's own Total (Inc VAT) is the authoritative sale value
+                # (synced from WorkGuru and shown on the Financial Summary). Use it
+                # first so the calendar matches the sale page; only fall back to the
+                # Anthill value or the invoice estimate when the order has no total.
+                order_total = appt.order.total_value_inc_vat or Decimal('0')
+                if order_total > 0:
+                    if fin is None:
+                        fin = {
+                            'sale_value': order_total,
+                            'payments_total': Decimal('0'),
+                            'outstanding': order_total,
+                            'value_estimated': False,
+                            'anthill_sale_pk': None,
+                            'range_name': '', 'door_type': '', 'source': '',
+                            'contract_number': '', 'assigned_to_name': '',
+                            'discount': Decimal('0'),
+                        }
+                    else:
+                        fin = dict(fin)
+                        fin['sale_value'] = order_total
+                        fin['outstanding'] = order_total - fin['payments_total']
+                        fin['value_estimated'] = False
+                appt.fin = fin
+
+                # Linked purchase orders + their statuses for this order
+                _pos = []
+                _seen_po = set()
+                for _pp in appt.order.po_projects.select_related('purchase_order').all():
+                    _po = _pp.purchase_order
+                    if not _po or _po.workguru_id in _seen_po:
+                        continue
+                    _seen_po.add(_po.workguru_id)
+                    _pos.append({
+                        'number': _po.display_number or _po.number or str(_po.workguru_id),
+                        'status': (_po.status or 'Draft').strip(),
+                        'supplier': _po.supplier_name or '',
+                    })
+                appt.pos_json = json.dumps(_pos)
 
     # Group appointments by date → fitter
     # Multi-day appointments get their own spanning rows; single-day go into columns.
@@ -11769,6 +11883,9 @@ def calendar_weekly(request):
 
     # Get last Anthill sync timestamp
     anthill_sync = SyncLog.objects.filter(script_name='anthill_fit_dates').first()
+    recent_syncs = list(
+        SyncLog.objects.filter(script_name='anthill_fit_dates')[:10]
+    )
 
     # Outstanding balance summary — unique appointments only
     total_sale_value = Decimal('0')
@@ -11799,6 +11916,7 @@ def calendar_weekly(request):
         'fitters': list(zip(fitter_codes, [fitter_names[c] for c in fitter_codes])),
         'designers': Designer.objects.all().order_by('name'),
         'last_anthill_sync': anthill_sync,
+        'recent_syncs': recent_syncs,
         'total_sale_value': total_sale_value,
         'total_paid': total_paid,
         'total_outstanding': total_outstanding,
@@ -12390,7 +12508,8 @@ def refresh_anthill_fit_dates(request):
     try:
         week_start = _dt.strptime(week_start_str, '%Y-%m-%d').date()
     except (ValueError, TypeError):
-        return JsonResponse({'success': False, 'error': 'Invalid week_start'})
+        return JsonResponse({'success': False, 'error': 'Invalid week_start',
+                             'log': [{'time': '', 'level': 'error', 'message': 'Invalid week start date.'}]})
 
     week_end = week_start + _td(days=5)
 
@@ -12399,7 +12518,9 @@ def refresh_anthill_fit_dates(request):
     subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
 
     if not username or not password:
-        return JsonResponse({'success': False, 'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not set'})
+        return JsonResponse({'success': False, 'error': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not set',
+                             'log': [{'time': '', 'level': 'error',
+                                      'message': 'Anthill credentials are not configured on the server.'}]})
 
     base_url = f'https://{subdomain}.anthillcrm.com'
 
@@ -12450,7 +12571,9 @@ def refresh_anthill_fit_dates(request):
     sales_to_check.extend(newly_scheduled_sales)
 
     if not sales_to_check:
-        return JsonResponse({'success': True, 'checked': 0, 'updated': 0, 'created': 0, 'errors': 0})
+        return JsonResponse({'success': True, 'checked': 0, 'updated': 0, 'created': 0, 'errors': 0,
+                             'log': [{'time': '', 'level': 'info',
+                                      'message': 'No linked Anthill sales found for this week.'}]})
 
     # ── Appointment parser ───────────────────────────────────────────────
     # Parses within <div id="tdAppoints"> looking for Installation rows.
@@ -12615,6 +12738,18 @@ def refresh_anthill_fit_dates(request):
         u = url.lower()
         return 'login' in u or 'signin' in u or '/sign-in' in u
 
+    # Structured log returned to the browser so users can see what happened.
+    sync_log = []
+
+    def _log(message, level='info'):
+        sync_log.append({
+            'time': timezone.localtime().strftime('%H:%M:%S'),
+            'level': level,
+            'message': message,
+        })
+
+    _log(f'Checking {len(sales_to_check)} sale(s) for week of {week_start:%d %b %Y}.')
+
     authenticated = False
     updated = 0
     created = 0
@@ -12657,8 +12792,14 @@ def refresh_anthill_fit_dates(request):
 
                 login_resp = session.post(login_post_url, data=payload, timeout=20, allow_redirects=True)
                 if _is_auth_page(login_resp.url):
-                    return JsonResponse({'success': False, 'error': 'Anthill login failed'})
+                    _log('Anthill login failed - check ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD.', 'error')
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Anthill login failed',
+                        'log': sync_log,
+                    })
                 authenticated = True
+                _log('Authenticated with Anthill.', 'success')
                 # Re-fetch the sale page now that we're authenticated
                 resp = session.get(sale_url, timeout=20)
 
@@ -12737,20 +12878,38 @@ def refresh_anthill_fit_dates(request):
 
             if changed:
                 updated += 1
+                _name = (sale.order and (sale.order.first_name or '') + ' ' + (sale.order.last_name or '')).strip() if sale.order else ''
+                _label = _name or sale.anthill_activity_id
+                _log(f'{_label}: fit {fit_date:%d %b}, {duration_days}d'
+                     + (f', {install_appt["with_str"]}' if install_appt.get('with_str') else ''))
 
-        except Exception:
+        except Exception as exc:
             errors += 1
+            _log(f'Sale {sale.anthill_activity_id}: {type(exc).__name__}: {exc}', 'error')
             continue
+
+    if errors and not updated and not created:
+        _log('No changes applied; all attempts errored.', 'error')
+    elif not updated and not created:
+        _log('All fit dates already up to date.', 'success')
+    else:
+        _log(f'Done: {updated} updated, {created} created, {errors} error(s).', 'success')
+
+    status = 'error' if (errors and not updated and not created) else ('warning' if errors else 'success')
+    note_user = request.user.get_full_name() or request.user.username
+    error_detail = '; '.join(
+        e['message'] for e in sync_log if e['level'] == 'error'
+    )[:480]
 
     # Record sync timestamp
     SyncLog.objects.create(
         script_name='anthill_fit_dates',
         ran_at=timezone.now(),
-        status='success',
+        status=status,
         records_updated=updated,
         records_created=created,
         errors=errors,
-        notes=f'Synced by {request.user.get_full_name() or request.user.username}',
+        notes=f'Synced by {note_user}' + (f' | {error_detail}' if error_detail else ''),
     )
 
     return JsonResponse({
@@ -12759,6 +12918,7 @@ def refresh_anthill_fit_dates(request):
         'updated': updated,
         'created': created,
         'errors': errors,
+        'log': sync_log,
     })
 
 

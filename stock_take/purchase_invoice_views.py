@@ -207,6 +207,36 @@ _DATE_RE = (
 )
 
 
+def _clean_pdf_text(s: str) -> str:
+    """Strip non-renderable characters from PDF-extracted text.
+
+    PDFs with subset/embedded fonts often yield glyphs that map to private-use
+    or control code points (rendered as boxes in the UI). Keep only printable
+    ASCII and common Latin-1 letters, then collapse whitespace.
+    """
+    if not s:
+        return ''
+    import unicodedata
+    import re
+    s = unicodedata.normalize('NFKC', s)
+    cleaned = ''.join(
+        ch for ch in s
+        if (0x20 <= ord(ch) <= 0x7E) or (0xC0 <= ord(ch) <= 0xFF)
+    )
+    return re.sub(r'\s+', ' ', cleaned).strip()
+
+
+def _looks_like_garbage(s: str) -> bool:
+    """True when a string is mostly non-renderable (subset-font) characters."""
+    if not s:
+        return True
+    renderable = sum(
+        1 for ch in s
+        if (0x20 <= ord(ch) <= 0x7E) or (0xC0 <= ord(ch) <= 0xFF)
+    )
+    return renderable < max(2, len(s) * 0.6)
+
+
 # ── PDF parsing ───────────────────────────────────────────────────
 def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
     """Extract invoice fields from raw PDF bytes. Returns the ``extracted`` dict.
@@ -306,13 +336,14 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
                 full_text, re.IGNORECASE,
             )
             if supplier_m:
-                extracted['supplier_name'] = supplier_m.group(1).strip()
+                extracted['supplier_name'] = _clean_pdf_text(supplier_m.group(1))
             else:
                 # Last fallback: first non-trivial line (many invoices put company name first)
                 for line in text_lines[:6]:
                     line = line.strip()
                     if (
                         line and len(line) >= 3
+                        and not _looks_like_garbage(line)
                         and not re.match(
                             r'^(Invoice|Tax\s*Invoice|Statement|Receipt|Page\b|Date|No\.|To:)',
                             line, re.IGNORECASE
@@ -320,8 +351,12 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
                         and not re.match(r'^\d+[\/\-\.]\d', line)  # not a date
                         and not re.match(r'^\d+$', line)           # not just a number
                     ):
-                        extracted['supplier_name'] = line
+                        extracted['supplier_name'] = _clean_pdf_text(line)
                         break
+
+        # Drop a supplier name that cleaned down to nothing usable
+        if extracted.get('supplier_name') and not extracted['supplier_name'].strip():
+            extracted.pop('supplier_name', None)
 
         # ── Due date (search before invoice date to avoid cross-match) ──
         due_patterns = [
@@ -451,6 +486,64 @@ def _extract_pdf_fields(pdf_bytes: bytes) -> dict:
                         extracted['total'] = str(best)
                 except (InvalidOperation, ValueError):
                     pass
+
+        # ── Currency ──────────────────────────────────────────────
+        # Default GBP; switch to EUR only when € clearly dominates over £.
+        try:
+            eur_hits = len(re.findall(r'[€\u20AC]|\bEUR\b', full_text, re.IGNORECASE))
+            gbp_hits = len(re.findall(r'[£\xA3]|\bGBP\b', full_text, re.IGNORECASE))
+            if eur_hits > gbp_hits and eur_hits > 0:
+                extracted['currency'] = 'EUR'
+            elif gbp_hits > 0:
+                extracted['currency'] = 'GBP'
+        except Exception:
+            pass
+
+        # ── VAT amount, net/subtotal and VAT rate ─────────────────
+        def _money_after(label_re):
+            m = re.search(label_re + r'[^\d\n\-]{0,25}([\d,]+\.\d{2})', full_text, re.IGNORECASE)
+            if m:
+                try:
+                    val = Decimal(m.group(1).replace(',', ''))
+                    if val >= 0:
+                        return val
+                except (InvalidOperation, ValueError):
+                    return None
+            return None
+
+        vat_amount = _money_after(r'(?:VAT|Tax)\s*(?:Amount|Total|@\s*[\d.]+\s*%)?')
+        if vat_amount is not None:
+            extracted['vat_amount'] = str(vat_amount)
+
+        subtotal = _money_after(r'(?:Sub\s*-?\s*total|Net\s*(?:Amount|Total)?|Goods\s*(?:Total|Value)|Total\s*(?:Net|Excl\.?\s*VAT))')
+        if subtotal is not None:
+            extracted['subtotal'] = str(subtotal)
+
+        # VAT rate: explicit "VAT @ 20%" / "(20%)" / "VAT 20%", else derive from
+        # vat_amount / subtotal when both are available.
+        vat_rate = None
+        rate_m = re.search(r'(?:VAT|Tax)\b[^\n%]{0,20}?(\d{1,2}(?:\.\d+)?)\s*%', full_text, re.IGNORECASE)
+        if rate_m:
+            try:
+                r = float(rate_m.group(1))
+                if 0 < r <= 30:
+                    vat_rate = r
+            except ValueError:
+                pass
+        if vat_rate is None and vat_amount and subtotal and subtotal > 0:
+            try:
+                derived = round(float(vat_amount) / float(subtotal) * 100, 1)
+                # Snap to the nearest common UK rate when close
+                for common in (20.0, 5.0, 0.0):
+                    if abs(derived - common) <= 0.6:
+                        derived = common
+                        break
+                if 0 < derived <= 30:
+                    vat_rate = derived
+            except (ValueError, ZeroDivisionError):
+                pass
+        if vat_rate is not None:
+            extracted['vat_rate'] = vat_rate
 
         # ── Line items ────────────────────────────────────────────
         # Strategy: find lines that end with a money amount (optionally qty + unit price + total)
@@ -853,6 +946,16 @@ def create_purchase_invoice(request):
     invoice_number = (data.get('invoice_number') or '').strip()
     if not invoice_number:
         return JsonResponse({'error': 'Invoice number is required'}, status=400)
+
+    # Guard against duplicate auto-generated numbers. When several invoices are
+    # created in one batch they may all carry the same client-fetched "next
+    # number" (none were saved when each was fetched). If this looks like an
+    # auto-generated number and already exists, allocate a fresh unique one so
+    # we never persist duplicates. Manually-typed numbers are left untouched —
+    # the create modal already warns the user about those.
+    if re.match(r'^INV-A\d{2}-\d{3}$', invoice_number) and \
+            PurchaseInvoice.objects.filter(invoice_number=invoice_number).exists():
+        invoice_number = PurchaseInvoice.generate_invoice_number()
 
     total_val = _parse_decimal(data.get('total', '0'))
     _vr = (data.get('vat_rate') or '').strip()
@@ -1875,7 +1978,7 @@ def push_purchase_invoice_to_xero(request, invoice_id):
             tax_type = xero_api.find_or_create_tax_rate(vat_rate_int)
         if tax_type is None:
             # Auto-create failed — check if the caller wants to push anyway without a tax code
-            force_no_vat = data.get('force_no_vat') is True
+            force_no_vat = body.get('force_no_vat') is True
             if not force_no_vat:
                 xero_err = xero_api.get_last_api_error()
                 detail = f' Xero said: {xero_err}' if xero_err else ''
