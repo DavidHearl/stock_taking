@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Monthly Report - {{ block.super }}{% endblock %}
+{% block page_title %}Monthly Fits Report{% endblock %}
+{% block nav_reports_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/reports.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+<a id="reportPdfBtn" href="{% url 'dashboard_monthly_pdf' %}" class="btn btn-outline" title="Download PDF">
+    <i class="bi bi-file-earmark-pdf"></i> <span>PDF</span>
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="report-page-toolbar">
+        <div class="report-page-meta" id="reportMeta"></div>
+        <div class="report-page-controls">
+            <label for="monthSelect">Month</label>
+            <select id="monthSelect" onchange="reloadMonthly()">
+                {% for m in months %}
+                <option value="{{ m.num }}"{% if m.num == current_month %} selected{% endif %}>{{ m.name }}</option>
+                {% endfor %}
+            </select>
+            <label for="yearSelect">Year</label>
+            <select id="yearSelect" onchange="reloadMonthly()">
+                {% for y in years %}
+                <option value="{{ y }}"{% if y == current_year %} selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <div id="reportBody" class="report-page-body"><p class="text-muted">Loading&hellip;</p></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/dashboard_reports.js' %}"></script>
+<script>
+    const monthlyCfg = {
+        bodyId: 'reportBody',
+        metaId: 'reportMeta',
+        reportUrlBase: '{% url "dashboard_monthly_report" %}',
+        pdfBtnId: 'reportPdfBtn',
+        pdfUrlBase: '{% url "dashboard_monthly_pdf" %}',
+        getYear: function () { return document.getElementById('yearSelect').value; },
+        getMonth: function () { return document.getElementById('monthSelect').value; },
+    };
+    function reloadMonthly() { if (monthlyCfg.onChange) monthlyCfg.onChange(); }
+    DashReports.initMonthly(monthlyCfg);
+</script>
+{% endblock %}

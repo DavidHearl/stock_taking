@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Stock Report - {{ block.super }}{% endblock %}
+{% block page_title %}Stock Report{% endblock %}
+{% block nav_reports_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/reports.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+<a id="reportPdfBtn" href="{% url 'dashboard_stock_pdf' %}" class="btn btn-outline" title="Download PDF">
+    <i class="bi bi-file-earmark-pdf"></i> <span>PDF</span>
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="report-tab-bar">
+        <button id="stockTabReport" class="report-tab-btn" onclick="DashReports.switchStockTab('report')"><i class="bi bi-box-seam"></i> Stock Report</button>
+        <button id="stockTabChanges" class="report-tab-btn" onclick="DashReports.switchStockTab('changes')"><i class="bi bi-arrow-left-right"></i> Recent Changes</button>
+        <button id="stockTabHistory" class="report-tab-btn" onclick="DashReports.switchStockTab('history')"><i class="bi bi-graph-up"></i> Monthly History</button>
+    </div>
+    <div class="report-page-toolbar">
+        <div class="report-page-meta" id="reportMeta"></div>
+        <div class="report-page-controls">
+            <label for="stockReportDate">As of</label>
+            <input type="date" id="stockReportDate" value="{{ today_str }}" onchange="reloadStock()">
+        </div>
+    </div>
+    <div id="stockReportBody" class="report-page-body"><p class="text-muted">Loading&hellip;</p></div>
+    <div id="stockChangesBody" class="report-page-body" style="display:none;"><p class="text-muted">Loading&hellip;</p></div>
+    <div id="stockHistoryBody" class="report-page-body" style="display:none;"><p class="text-muted">Loading&hellip;</p></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{% static 'js/dashboard_reports.js' %}"></script>
+<script>
+    const stockCfg = {
+        metaId: 'reportMeta',
+        reportBodyId: 'stockReportBody',
+        changesBodyId: 'stockChangesBody',
+        historyBodyId: 'stockHistoryBody',
+        tabReportId: 'stockTabReport',
+        tabChangesId: 'stockTabChanges',
+        tabHistoryId: 'stockTabHistory',
+        reportUrlBase: '{% url "dashboard_stock_report" %}',
+        historyUrl: '{% url "dashboard_monthly_stock_history" %}',
+        pdfBtnId: 'reportPdfBtn',
+        pdfUrlBase: '{% url "dashboard_stock_pdf" %}',
+        getDate: function () { return document.getElementById('stockReportDate').value || '{{ today_str }}'; },
+    };
+    function reloadStock() { if (stockCfg.onChange) stockCfg.onChange(); }
+    DashReports.initStock(stockCfg);
+    DashReports.switchStockTab('report');
+</script>
+{% endblock %}

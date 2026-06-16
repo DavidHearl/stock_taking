@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load humanize %}
 
 {% block title %}Shortages{% endblock %}
 
@@ -13,14 +14,54 @@
 
 {% block content %}
 
-<!-- Tab Navigation -->
-<div class="shortage-tabs">
-    <a href="?tab=stock" class="shortage-tab {% if active_tab == 'stock' %}active{% endif %}">
-        <i class="bi bi-box-seam"></i> Stock
-    </a>
-    <a href="?tab=raumplus" class="shortage-tab {% if active_tab == 'raumplus' %}active{% endif %}">
-        <i class="bi bi-gear"></i> Raumplus
-    </a>
+<!-- Tab / Action Bar row -->
+<div class="shortage-topbar">
+    <div class="shortage-tabs">
+        <a href="?tab=stock" class="shortage-tab {% if active_tab == 'stock' %}active{% endif %}">
+            <i class="bi bi-box-seam"></i> Stock
+        </a>
+        <a href="?tab=raumplus" class="shortage-tab {% if active_tab == 'raumplus' %}active{% endif %}">
+            <i class="bi bi-gear"></i> Raumplus
+        </a>
+    </div>
+    {% if active_tab == 'raumplus' %}
+    <div class="rau-action-bar">
+        <div class="rau-order-badges">
+            <span class="meta-badge"><strong id="rau-master-selected-count">0</strong> selected</span>
+            <span class="meta-badge"><strong id="rau-master-short-count">0</strong> short</span>
+            <span class="meta-badge highlight">Order Total (ex VAT): <strong id="rau-master-total-ex">£0.00</strong></span>
+            <span class="meta-badge">Inc VAT: <strong id="rau-master-total-inc">£0.00</strong></span>
+        </div>
+        <div class="rau-action-buttons">
+            <button class="btn btn-outline-info" onclick="openStyleJobsReport()">
+                <i class="bi bi-clipboard2-data"></i> Style Jobs Report
+            </button>
+            <button class="btn btn-outline-secondary" id="rau-save-draft-btn" onclick="saveMasterAsDraft()">
+                <i class="bi bi-floppy"></i> Save Draft
+            </button>
+            <button class="btn btn-primary" onclick="openRauplusOrderModal()">
+                <i class="bi bi-cart3"></i> View Raumplus Order
+            </button>
+            <div class="kebab-menu">
+                <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More options">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <div class="kebab-dropdown" data-keep-open>
+                    <span class="kebab-label">Columns</span>
+                    <label class="kebab-item"><input type="checkbox" id="col-toggle-incoming" onchange="toggleRauCol('col-incoming',this.checked)"> &nbsp;Incoming</label>
+                    <label class="kebab-item"><input type="checkbox" id="col-toggle-required" checked onchange="toggleRauCol('col-required',this.checked)"> &nbsp;Required</label>
+                    <label class="kebab-item"><input type="checkbox" id="col-toggle-predicted" onchange="toggleRauCol('col-predicted',this.checked)"> &nbsp;Predicted Need</label>
+                    <label class="kebab-item"><input type="checkbox" id="col-toggle-unit-cost" checked onchange="toggleRauCol('col-unit-cost',this.checked)"> &nbsp;Unit Cost</label>
+                    <label class="kebab-item"><input type="checkbox" id="col-toggle-stock-val" checked onchange="toggleRauCol('col-stock-val',this.checked)"> &nbsp;Stock Value</label>
+                    <div class="kebab-divider"></div>
+                    <button class="kebab-item" onclick="closeAllKebabs();openRauCostBreakdown()"><i class="bi bi-pie-chart"></i> Stock Cost Breakdown</button>
+                    <div class="kebab-divider"></div>
+                    <button class="kebab-item" onclick="closeAllKebabs();openRauRulesModal()"><i class="bi bi-sliders"></i> Ordering Rules</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 {% if active_tab == 'stock' %}
@@ -180,403 +221,90 @@
 {% else %}
 <!-- ============ RAUMPLUS TAB ============ -->
 
-<!-- Order Action Bar -->
-<div class="rau-action-bar">
-    <div class="rau-order-badges">
-        <span class="meta-badge">{{ critical_items|length }} critical</span>
-        <span class="meta-badge">{{ predicted_shortages|length }} predicted</span>
-        <span class="meta-badge">{{ threshold_items|length }} threshold</span>
-        <span class="meta-badge">{{ suggested_items|length }} suggested</span>
-        <span class="meta-badge highlight">Order Value (ex VAT): £{{ current_order_value|floatformat:2 }}</span>
-    </div>
-    <div class="rau-action-buttons">
-        <button class="btn btn-outline-info" onclick="openStyleJobsReport()">
-            <i class="bi bi-clipboard2-data"></i> Style Jobs Report
-        </button>
-        <button class="btn btn-primary" onclick="openRauplusOrderModal()">
-            <i class="bi bi-cart3"></i> View Raumplus Order
-        </button>
-        <button class="btn btn-outline-secondary" title="Rule controls" onclick="openRauRulesModal()">
-            <i class="bi bi-three-dots-vertical"></i>
-        </button>
-    </div>
-</div>
-
-<!-- All RAU Requirements -->
+<!-- Raumplus Order Planner — all items grouped by type -->
 <div class="content-card">
-    <div class="section-header collapsible-header collapsed" onclick="toggleCardCollapse('rau-requirements-body', this)">
-        <div>
-            <h2>RAU Requirements for Current Orders</h2>
-            <span class="section-subtitle">All Raumplus items needed across {{ upcoming_orders_count }} upcoming unfinished order{{ upcoming_orders_count|pluralize }}</span>
+    <div class="section-header rau-planner-header">
+        <h2>Raumplus Order Planner</h2>
+        <div class="rau-planner-controls">
+            <span class="meta-badge">Stock Value: <strong>£{{ rau_total_stock_value|floatformat:2|intcomma }}</strong></span>
+            <div class="prediction-pill-group" id="rau-window-pills" role="group" aria-label="Prediction window">
+                <span class="prediction-pill-label">Window:</span>
+                <a class="prediction-pill{% if prediction_months == 1 %} active{% endif %}" href="?tab=raumplus&months=1&topup={% if topup_enabled %}1{% else %}0{% endif %}">1M</a>
+                <a class="prediction-pill{% if prediction_months == 2 %} active{% endif %}" href="?tab=raumplus&months=2&topup={% if topup_enabled %}1{% else %}0{% endif %}">2M</a>
+                <a class="prediction-pill{% if prediction_months == 3 %} active{% endif %}" href="?tab=raumplus&months=3&topup={% if topup_enabled %}1{% else %}0{% endif %}">3M</a>
+                <a class="prediction-pill{% if prediction_months == 4 %} active{% endif %}" href="?tab=raumplus&months=4&topup={% if topup_enabled %}1{% else %}0{% endif %}">4M</a>
+                <a class="prediction-pill{% if prediction_months == 5 %} active{% endif %}" href="?tab=raumplus&months=5&topup={% if topup_enabled %}1{% else %}0{% endif %}">5M</a>
+                <a class="prediction-pill{% if prediction_months == 6 %} active{% endif %}" href="?tab=raumplus&months=6&topup={% if topup_enabled %}1{% else %}0{% endif %}">6M</a>
+            </div>
+            <a class="rau-topup-toggle{% if topup_enabled %} active{% endif %}"
+               href="?tab=raumplus&months={{ prediction_months }}&topup={% if topup_enabled %}0{% else %}1{% endif %}"
+               title="When on, the order is topped up toward the £5,000 minimum order value">
+                <i class="bi bi-{% if topup_enabled %}toggle-on{% else %}toggle-off{% endif %}"></i>
+                Top-up to min order
+            </a>
         </div>
-        <i class="bi bi-chevron-up collapse-chevron"></i>
     </div>
-    <div id="rau-requirements-body" style="display:none;">
-    {% if all_rau_requirements %}
-    <div class="shortage-table-wrap">
-        <table class="shortage-tbl">
+    <div class="rau-master-tbl-wrap">
+        <table class="shortage-tbl rau-master-tbl">
             <thead>
                 <tr>
+                    <th style="width:32px;"><input type="checkbox" id="rau-master-select-all" onchange="masterToggleAll(this)" title="Select all"></th>
                     <th>SKU</th>
                     <th>Material</th>
                     <th class="text-right">In Stock</th>
-                    <th class="text-right">Incoming</th>
-                    <th class="text-right">Required</th>
-                    <th class="text-right">Shortfall</th>
-                    <th class="text-right">Orders</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in all_rau_requirements %}
-                <tr class="expandable-row{% if item.shortage > 0 %} row-shortage{% endif %}" onclick="toggleExpand('rau-req-{{ forloop.counter }}')">
-                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
-                    <td>{{ item.name }}</td>
-                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
-                    <td class="text-right">{% if item.incoming_qty %}<span class="badge-incoming">{{ item.incoming_qty|floatformat:0 }}</span>{% else %}0{% endif %}</td>
-                    <td class="text-right"><strong>{{ item.required_qty|floatformat:0 }}</strong></td>
-                    <td class="text-right">
-                        {% if item.shortage > 0 %}
-                        <span class="badge-shortfall shortfall-neg">-{{ item.shortage|floatformat:0 }}</span>
-                        {% else %}
-                        <span class="badge-shortfall shortfall-pos">+{{ item.surplus|floatformat:0 }}</span>
-                        {% endif %}
-                    </td>
-                    <td class="text-right">{{ item.order_count }} <i class="bi bi-chevron-down expand-icon"></i></td>
-                </tr>
-                <tr class="expand-row" id="rau-req-{{ forloop.counter }}">
-                    <td colspan="7">
-                        <table class="shortage-tbl nested">
-                            <thead>
-                                <tr>
-                                    <th>Sale #</th>
-                                    <th>Customer</th>
-                                    <th>Fit Date</th>
-                                    <th class="text-right">Qty</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in item.orders %}
-                                <tr>
-                                    <td>{{ order.sale_number }}</td>
-                                    <td>{{ order.first_name }} {{ order.last_name }}</td>
-                                    <td>{{ order.fit_date|default:"-" }}</td>
-                                    <td class="text-right">{{ order.quantity|floatformat:0 }}</td>
-                                    <td><a href="{% url 'order_details' order.order_id %}" class="sku-link" target="_blank">View</a></td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <i class="bi bi-inbox"></i> No Raumplus items required for upcoming orders.
-    </div>
-    {% endif %}
-    </div>
-</div>
-
-<!-- Current RAU Shortages -->
-<div class="content-card">
-    <div class="section-header">
-        <h2>Current RAU Shortages</h2>
-        <span class="section-subtitle">Raumplus items we are short of for orders currently in the system</span>
-    </div>
-    {% if actual_shortages %}
-    <div class="shortage-table-wrap">
-        <table class="shortage-tbl">
-            <thead>
-                <tr>
-                    <th style="width:32px;"><input type="checkbox" class="shortage-select-all" onchange="toggleAllShortageCheckboxes(this)" title="Select all"></th>
-                    <th>SKU</th>
-                    <th>Material</th>
-                    <th class="text-right">In Stock</th>
-                    <th class="text-right">Incoming</th>
-                    <th class="text-right">Required</th>
+                    <th class="text-right col-incoming">Incoming</th>
+                    <th class="text-right col-required">Required</th>
+                    <th class="text-right col-predicted">Predicted</th>
                     <th class="text-right">Short By</th>
-                    <th class="text-right">Orders</th>
-                    <th class="text-right">Unit Cost</th>
-                    <th class="text-right">Line Cost</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in actual_shortages %}
-                <tr class="expandable-row" onclick="toggleExpand('rau-actual-{{ forloop.counter }}')">
-                    <td onclick="event.stopPropagation()" style="text-align:center;">
-                        <input type="checkbox" class="shortage-cb"
-                               data-sku="{{ item.sku }}"
-                               data-name="{{ item.name }}"
-                               data-shortage="{{ item.shortage|floatformat:0 }}"
-                               data-cost="{{ item.cost|default:0 }}"
-                               data-min-order-qty="{{ item.min_order_qty|default:1 }}"
-                               onchange="updateSelectionBar()">
-                    </td>
-                    <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank" onclick="event.stopPropagation()">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
-                    <td>{{ item.name }}</td>
-                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
-                    <td class="text-right">{% if item.incoming_qty %}<span class="badge-incoming">{{ item.incoming_qty|floatformat:0 }}</span>{% else %}0{% endif %}</td>
-                    <td class="text-right">{{ item.required_qty|floatformat:0 }}</td>
-                    <td class="text-right"><span class="badge-shortage">{{ item.shortage|floatformat:0 }}</span></td>
-                    <td class="text-right">{{ item.order_count }} <i class="bi bi-chevron-down expand-icon"></i></td>
-                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                    <td class="text-right">£{{ item.line_cost|floatformat:2 }}</td>
-                </tr>
-                <tr class="expand-row" id="rau-actual-{{ forloop.counter }}">
-                    <td colspan="10">
-                        <table class="shortage-tbl nested">
-                            <thead>
-                                <tr>
-                                    <th>Sale #</th>
-                                    <th>Customer</th>
-                                    <th>Fit Date</th>
-                                    <th class="text-right">Qty</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in item.orders %}
-                                <tr>
-                                    <td>{{ order.sale_number }}</td>
-                                    <td>{{ order.first_name }} {{ order.last_name }}</td>
-                                    <td>{{ order.fit_date|default:"-" }}</td>
-                                    <td class="text-right">{{ order.quantity|floatformat:0 }}</td>
-                                    <td><a href="{% url 'order_details' order.order_id %}" class="sku-link" target="_blank">View</a></td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <i class="bi bi-check-circle"></i> No current RAU shortages — stock covers all orders in the system.
-    </div>
-    {% endif %}
-</div>
-
-<!-- Critical RAU Items -->
-{% if critical_items %}
-<div class="content-card">
-    <div class="section-header warning">
-        <h2><i class="bi bi-exclamation-triangle-fill"></i> Critical RAU Items</h2>
-        <span class="section-subtitle">Short for both upcoming orders and predicted future demand</span>
-    </div>
-    <div class="section-meta">
-        <span class="meta-badge">Total Cost: £{{ critical_total_cost|floatformat:2 }}</span>
-    </div>
-    <div class="shortage-table-wrap">
-        <table class="shortage-tbl">
-            <thead>
-                <tr>
-                    <th>SKU</th>
-                    <th>Material</th>
-                    <th class="text-right">In Stock</th>
-                    <th class="text-right">Upcoming</th>
-                    <th class="text-right">Predicted</th>
-                    <th class="text-right">Total Short</th>
-                    <th class="text-right">Min Ord Qty</th>
                     <th class="text-right">Order Qty</th>
-                    <th class="text-right">Unit Cost</th>
+                    <th class="text-right col-unit-cost">Unit Cost</th>
                     <th class="text-right">Line Cost</th>
+                    <th class="text-right col-stock-val">Stock Value</th>
+                    <th style="width:40px;text-align:center;">Why</th>
+                    <th style="width:32px;text-align:center;" title="Months of stock remaining based on usage history">Mo.</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for item in critical_items %}
-                <tr>
-                    <td><a href="#" class="sku-link" target="_blank">{{ item.sku }}</a></td>
-                    <td>{{ item.name }}</td>
-                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
-                    <td class="text-right text-danger">{{ item.upcoming_shortage|floatformat:0 }}</td>
-                    <td class="text-right text-warning">{{ item.predicted_shortage|floatformat:0 }}</td>
-                    <td class="text-right"><span class="badge-shortage">{{ item.total_shortage|floatformat:0 }}</span></td>
-                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
-                    <td class="text-right"><strong>{{ item.order_qty|floatformat:0 }}</strong></td>
-                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-{% endif %}
-
-<!-- Predicted N-Month Shortage -->
-<div class="content-card">
-    <div class="section-header">
-        <h2>Predicted {{ prediction_months }}-Month RAU Shortage</h2>
-        <span class="section-subtitle">Additional items — weighted average: 70% recent usage (90 days) + 30% baseline</span>
-    </div>
-    <div class="section-meta">
-        <span class="meta-badge">Total Cost: £{{ predicted_total_cost|floatformat:2 }}</span>
-        <label class="prediction-control">Prediction window:
-            <select class="prediction-months-select" onchange="window.location='?tab=raumplus&months='+this.value">
-                <option value="1" {% if prediction_months == 1 %}selected{% endif %}>1 month</option>
-                <option value="2" {% if prediction_months == 2 %}selected{% endif %}>2 months</option>
-                <option value="3" {% if prediction_months == 3 %}selected{% endif %}>3 months</option>
-                <option value="4" {% if prediction_months == 4 %}selected{% endif %}>4 months</option>
-                <option value="6" {% if prediction_months == 6 %}selected{% endif %}>6 months</option>
-            </select>
-        </label>
-        <button class="compare-btn" onclick="openCompareModal()" title="Compare with another prediction window">
-            <i class="bi bi-bar-chart-line"></i> Compare
-        </button>
-    </div>
-    {% if predicted_shortages %}
-    <div class="shortage-table-wrap">
-        <table class="shortage-tbl">
-            <thead>
-                <tr>
-                    <th>SKU</th>
-                    <th>Material</th>
-                    <th class="text-right">Monthly Avg</th>
-                    <th class="text-right">In Stock</th>
-                    <th class="text-right">{{ prediction_months }}-Month Need</th>
-                    <th class="text-right">Short By</th>
-                    <th class="text-right">Min Ord Qty</th>
-                    <th class="text-right">Order Qty</th>
-                    <th class="text-right">Unit Cost</th>
-                    <th class="text-right">Line Cost</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in predicted_shortages %}
-                <tr>
+            <tbody id="rau-master-tbody">
+                {% for group in rau_master_groups %}
+                <tr class="rau-category-row"><td colspan="14">{{ group.category }} <span class="rau-cat-count">{{ group.count }}</span></td></tr>
+                {% for sub in group.subgroups %}
+                {% if group.has_subheaders %}
+                <tr class="rau-subcategory-row"><td colspan="14">{{ sub.label }} <span class="rau-cat-count">{{ sub.items|length }}</span></td></tr>
+                {% endif %}
+                {% for item in sub.items %}
+                <tr class="rau-master-row{% if not item.selected %} excluded-row{% endif %}"
+                    data-sku="{{ item.sku }}"
+                    data-name="{{ item.name }}"
+                    data-cost="{{ item.cost }}"
+                    data-minqty="{{ item.min_order_qty }}"
+                    data-suggested="{{ item.order_qty|floatformat:0 }}"
+                    data-source="{{ item.source }}"
+                    data-category="{{ group.category }}"
+                    data-subcategory="{{ sub.label }}">
+                    <td style="text-align:center;"><input type="checkbox" class="rau-master-cb" {% if item.selected %}checked{% endif %} onchange="masterToggleRow(this)"></td>
                     <td>{% if item.stock_item_id %}<a href="{% url 'product_detail' item.stock_item_id %}" class="sku-link" target="_blank">{{ item.sku }}</a>{% else %}{{ item.sku }}{% endif %}</td>
                     <td>{{ item.name }}</td>
-                    <td class="text-right">{{ item.monthly_average|floatformat:0 }}</td>
-                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
-                    <td class="text-right">{{ item.predicted_need|floatformat:0 }}</td>
-                    <td class="text-right">
-                        {% if item.predicted_shortage > 100 %}
-                        <span class="badge-shortage high">{{ item.predicted_shortage|floatformat:0 }}</span>
-                        {% elif item.predicted_shortage > 20 %}
-                        <span class="badge-shortage medium">{{ item.predicted_shortage|floatformat:0 }}</span>
-                        {% else %}
-                        <span class="badge-shortage low">{{ item.predicted_shortage|floatformat:0 }}</span>
-                        {% endif %}
-                    </td>
-                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
-                    <td class="text-right"><strong>{{ item.order_qty|floatformat:0 }}</strong></td>
-                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
+                    <td class="text-right">{{ item.in_stock|floatformat:0 }}</td>
+                    <td class="text-right col-incoming">{% if item.incoming %}<span class="badge-incoming">{{ item.incoming|floatformat:0 }}</span>{% else %}0{% endif %}</td>
+                    <td class="text-right col-required">{{ item.required|floatformat:0 }}</td>
+                    <td class="text-right col-predicted">{% if item.predicted_need %}{{ item.predicted_need }}{% else %}<span class="rau-no-short">&mdash;</span>{% endif %}</td>
+                    <td class="text-right">{% if item.is_short %}<span class="rau-short-by">{{ item.shortage|floatformat:0 }}</span>{% else %}<span class="rau-no-short">&mdash;</span>{% endif %}</td>
+                    <td class="text-right"><input type="number" class="rau-qty-input rau-master-qty" value="{{ item.order_qty|floatformat:0 }}" min="0" step="{{ item.min_order_qty }}" onchange="masterQtyChange(this)" {% if not item.selected %}disabled{% endif %}></td>
+                    <td class="text-right col-unit-cost">£{{ item.cost|floatformat:2 }}</td>
+                    <td class="text-right rau-line-cost">£0.00</td>
+                    <td class="text-right col-stock-val">£{{ item.stock_value|floatformat:2 }}</td>
+                    <td style="text-align:center;"><i class="bi bi-info-circle rau-info" tabindex="0" data-reason="{{ item.reason }}"></i></td>
+                    <td style="text-align:center;">{% if item.months_of_stock is not None %}<span class="rau-months-badge" data-m="{{ item.months_of_stock }}" title="{% if item.months_plus %}More than 6 months{% else %}{{ item.months_of_stock }} month{{ item.months_of_stock|pluralize }}{% endif %} of stock based on usage history">{{ item.months_of_stock }}{% if item.months_plus %}+{% endif %}</span>{% endif %}</td>
                 </tr>
                 {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <i class="bi bi-check-circle"></i> No predicted RAU shortages for the next {{ prediction_months }} months.
-    </div>
-    {% endif %}
-</div>
-
-<!-- Threshold Trigger Items -->
-<div class="content-card">
-    <div class="section-header">
-        <h2>Threshold Trigger Items</h2>
-        <span class="section-subtitle">Not currently short, but below threshold so one pack is added proactively</span>
-    </div>
-    <div class="section-meta">
-        <span class="meta-badge">Total Cost: £{{ threshold_total_cost|floatformat:2 }}</span>
-    </div>
-    {% if threshold_items %}
-    <div class="shortage-table-wrap">
-        <table class="shortage-tbl">
-            <thead>
-                <tr>
-                    <th>SKU</th>
-                    <th>Material</th>
-                    <th class="text-right">In Stock</th>
-                    <th class="text-right">Threshold</th>
-                    <th class="text-right">Shortage</th>
-                    <th class="text-right">Buffer</th>
-                    <th class="text-right">Min Ord Qty</th>
-                    <th class="text-right">Order Qty</th>
-                    <th class="text-right">Unit Cost</th>
-                    <th class="text-right">Line Cost</th>
-                    <th>Reason</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in threshold_items %}
-                <tr>
-                    <td><a href="#" class="sku-link" target="_blank">{{ item.sku }}</a></td>
-                    <td>{{ item.name }}</td>
-                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
-                    <td class="text-right">{{ item.threshold|floatformat:0 }}</td>
-                    <td class="text-right"><span class="badge-shortage">{{ item.shortage|default:0|floatformat:0 }}</span></td>
-                    <td class="text-right">{% if item.buffer %}+{{ item.buffer }}{% else %}&mdash;{% endif %}</td>
-                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
-                    <td class="text-right"><strong>{{ item.order_qty|floatformat:0 }}</strong></td>
-                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
-                    <td>{{ item.reason }}</td>
-                </tr>
                 {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <i class="bi bi-check-circle"></i> No items currently below the active threshold rules.
-    </div>
-    {% endif %}
-</div>
-
-<!-- Suggested Additional Items -->
-{% if suggested_items %}
-<div class="content-card">
-    <div class="section-header">
-        <h2>Suggested Items to Reach £5,000 Minimum</h2>
-        <span class="section-subtitle">Add these items to qualify for free shipping (£{{ min_order_value|floatformat:0 }} minimum inc VAT)</span>
-    </div>
-    <div class="section-meta">
-        <span class="meta-badge">Order Value (exc VAT): £{{ current_order_value|floatformat:2 }}</span>
-        <span class="meta-badge">Inc VAT: £{{ current_order_value_inc_vat|floatformat:2 }}</span>
-        <span class="meta-badge">Remaining: £{{ remaining_to_min|floatformat:2 }}</span>
-        <span class="meta-badge highlight">With Suggested: £{{ total_order_value_inc_vat|floatformat:2 }}</span>
-    </div>
-    <div class="shortage-table-wrap">
-        <table class="shortage-tbl">
-            <thead>
-                <tr>
-                    <th>SKU</th>
-                    <th>Material</th>
-                    <th class="text-right">In Stock</th>
-                    <th class="text-right">Min Ord Qty</th>
-                    <th class="text-right">Suggested Qty</th>
-                    <th class="text-right">Unit Cost</th>
-                    <th class="text-right">Line Cost</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in suggested_items %}
-                <tr>
-                    <td><a href="#" class="sku-link" target="_blank">{{ item.sku }}</a></td>
-                    <td>{{ item.name }}</td>
-                    <td class="text-right">{{ item.current_stock|floatformat:0 }}</td>
-                    <td class="text-right">{{ item.min_order_qty|floatformat:0 }}</td>
-                    <td class="text-right">{{ item.suggested_qty }}</td>
-                    <td class="text-right">£{{ item.cost|floatformat:2 }}</td>
-                    <td class="text-right"><strong>£{{ item.line_cost|floatformat:2 }}</strong></td>
-                </tr>
+                {% empty %}
+                <tr><td colspan="14"><div class="empty-state"><i class="bi bi-inbox"></i> No Raumplus items found.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
-{% endif %}
 
 <!-- Previous Raumplus Orders -->
 {% if raumplus_previous_pos %}
@@ -626,16 +354,6 @@
 {% endif %}
 
 {% endif %}
-
-<!-- ── JSON data for the order modal ─────────────────────────────────── -->
-<script id="rau-order-data" type="application/json">
-{
-    "critical": [{% for item in critical_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
-    "predicted": [{% for item in predicted_shortages %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
-    "threshold": [{% for item in threshold_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.order_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}],
-    "suggested": [{% for item in suggested_items %}{"sku":"{{ item.sku|escapejs }}","name":"{{ item.name|escapejs }}","suggested_qty":{{ item.suggested_qty|default:0 }},"cost":{{ item.cost|default:0 }},"min_order_qty":{{ item.min_order_qty|default:1 }}}{% if not forloop.last %},{% endif %}{% endfor %}]
-}
-</script>
 
 <!-- Rule Controls Modal -->
 <div id="rau-rules-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRauRulesModal(event)">
@@ -843,9 +561,9 @@
 
 <!-- ── Raumplus Order Modal ───────────────────────────────────────────── -->
 <div id="rau-order-modal" class="rau-order-modal-backdrop" style="display:none;" onclick="closeRauplusOrderModal(event)">
-    <div class="rau-order-modal" onclick="event.stopPropagation()">
+    <div class="rau-order-modal" style="max-width:900px;max-height:90vh;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
         <div class="rau-order-modal-header">
-            <h3><i class="bi bi-cart3"></i> Raumplus Order</h3>
+            <h3><i class="bi bi-cart3"></i> Raumplus Order Summary</h3>
             <div class="rau-header-search" style="position:relative;">
                 <div style="display:flex;align-items:center;gap:6px;">
                     <input type="text" id="rau-search-input" class="rau-search-input"
@@ -853,24 +571,22 @@
                            oninput="rauSearchInput(this)"
                            onblur="setTimeout(() => document.getElementById('rau-search-results').style.display='none', 200)"
                            autocomplete="off"
-                           style="width:260px;">
+                           style="width:240px;">
                 </div>
                 <div id="rau-search-results" class="rau-search-results" style="top:100%;left:0;right:auto;"></div>
             </div>
             <button class="pred-modal-close" onclick="closeRauplusOrderModal()">&times;</button>
         </div>
-        <div class="rau-order-modal-body">
+        <div class="rau-order-modal-body" style="overflow-y:auto;flex:1;padding:0;">
             <table class="rau-order-tbl" id="rau-order-tbl">
                 <thead>
                     <tr>
-                        <th style="width:30px"><input type="checkbox" id="rau-select-all" title="Select all" onchange="toggleAllRows(this)" checked></th>
                         <th>SKU</th>
                         <th>Name</th>
-                        <th class="text-right">Suggested</th>
-                        <th class="text-right" style="width:110px">Order Qty</th>
-                        <th class="text-right">Change</th>
+                        <th class="text-right">Order Qty</th>
                         <th class="text-right">Unit Cost</th>
                         <th class="text-right">Line Cost</th>
+                        <th style="width:32px;"></th>
                     </tr>
                 </thead>
                 <tbody id="rau-order-tbody">
@@ -885,14 +601,11 @@
                 <span>Inc VAT (19%): <strong id="rau-order-total-vat">£0.00</strong></span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto;">
-                <button class="btn btn-secondary btn-sm" onclick="resetRauplusOrder()">
-                    <i class="bi bi-arrow-counterclockwise"></i> Reset
-                </button>
                 <button class="btn btn-outline-danger btn-sm" onclick="downloadRauplusPdf()">
-                    <i class="bi bi-file-pdf"></i> Download PDF
+                    <i class="bi bi-file-pdf"></i> PDF
                 </button>
                 <button class="btn btn-success btn-sm" onclick="downloadRauplusCsv()">
-                    <i class="bi bi-download"></i> Download CSV
+                    <i class="bi bi-download"></i> CSV
                 </button>
                 <div class="dropdown" style="position:relative;display:inline-block;">
                     <button class="btn btn-outline-secondary btn-sm" type="button" onclick="toggleCopyPoMenu()">
@@ -1007,6 +720,25 @@
     </div>
 </div>
 
+<!-- Raumplus Stock Cost Breakdown Modal -->
+<div class="rau-order-modal-backdrop" id="rau-breakdown-modal" style="display:none;" onclick="closeRauCostBreakdown(event)">
+    <div class="rau-order-modal" style="max-width:480px;" onclick="event.stopPropagation()">
+        <div class="rau-order-modal-header">
+            <h3><i class="bi bi-pie-chart"></i> Stock Cost Breakdown</h3>
+            <button class="pred-modal-close" onclick="closeRauCostBreakdown()">&times;</button>
+        </div>
+        <div class="rau-order-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:16px;">
+            <div class="rau-waffle-wrap">
+                <div class="rau-waffle" id="rau-waffle"></div>
+            </div>
+            <div class="rau-waffle-legend" id="rau-waffle-legend"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Raumplus category cost data -->
+<script id="rau-category-costs-data" type="application/json">{{ rau_category_costs|safe }}</script>
+
 <!-- Shortage Selection Bar -->
 <div id="shortage-selection-bar" style="display:none;">
     <div style="display:flex;align-items:center;gap:12px;max-width:1400px;margin:0 auto;">
@@ -1028,6 +760,243 @@
 
 {% block extra_js %}
 <script>
+    // ── Raumplus Order Planner master table ──────────────────────────────
+    const RAU_VAT_MULT = 1.19;
+
+    function masterRecalcRow(tr) {
+        const cb = tr.querySelector('.rau-master-cb');
+        const qtyInput = tr.querySelector('.rau-master-qty');
+        const cost = parseFloat(tr.dataset.cost) || 0;
+        const qty = Math.max(0, parseInt(qtyInput.value, 10) || 0);
+        const lineCost = (cb.checked && qty > 0) ? qty * cost : 0;
+        const cell = tr.querySelector('.rau-line-cost');
+        if (cell) cell.textContent = '£' + lineCost.toFixed(2);
+        return lineCost;
+    }
+
+    function masterRecalcAll() {
+        let total = 0, selected = 0, shortCount = 0;
+        document.querySelectorAll('#rau-master-tbody .rau-master-row').forEach(tr => {
+            const cb = tr.querySelector('.rau-master-cb');
+            const qty = Math.max(0, parseInt(tr.querySelector('.rau-master-qty').value, 10) || 0);
+            total += masterRecalcRow(tr);
+            if (cb.checked && qty > 0) selected += 1;
+            if (tr.querySelector('.rau-short-by')) shortCount += 1;
+        });
+        const fmt = n => '£' + n.toFixed(2);
+        const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        setText('rau-master-selected-count', String(selected));
+        setText('rau-master-short-count', String(shortCount));
+        setText('rau-master-total-ex', fmt(total));
+        setText('rau-master-total-inc', fmt(total * RAU_VAT_MULT));
+        updateWindowColour(total * RAU_VAT_MULT);
+        // Sync select-all state
+        const cbs = document.querySelectorAll('#rau-master-tbody .rau-master-cb');
+        const checked = [...cbs].filter(c => c.checked).length;
+        const selAll = document.getElementById('rau-master-select-all');
+        if (selAll) {
+            selAll.checked = cbs.length > 0 && checked === cbs.length;
+            selAll.indeterminate = checked > 0 && checked < cbs.length;
+        }
+    }
+
+    // Colour the window pill group by the resulting inc-VAT order total:
+    //   green  < £5,000  (under the minimum order)
+    //   orange £5,000–£6,000  (at / just over the minimum)
+    //   red    > £6,000  (over-ordering)
+    function updateWindowColour(incVatTotal) {
+        const grp = document.getElementById('rau-window-pills');
+        if (!grp) return;
+        grp.classList.remove('window-green', 'window-orange', 'window-red');
+        if (incVatTotal > 6000) {
+            grp.classList.add('window-red');
+        } else if (incVatTotal >= 5000) {
+            grp.classList.add('window-orange');
+        } else {
+            grp.classList.add('window-green');
+        }
+    }
+
+    function masterToggleRow(cb) {
+        const tr = cb.closest('.rau-master-row');
+        if (!tr) return;
+        tr.classList.toggle('excluded-row', !cb.checked);
+        const qtyInput = tr.querySelector('.rau-master-qty');
+        if (qtyInput) qtyInput.disabled = !cb.checked;
+        masterRecalcAll();
+    }
+
+    function masterToggleAll(master) {
+        document.querySelectorAll('#rau-master-tbody .rau-master-row').forEach(tr => {
+            const cb = tr.querySelector('.rau-master-cb');
+            cb.checked = master.checked;
+            tr.classList.toggle('excluded-row', !master.checked);
+            const qtyInput = tr.querySelector('.rau-master-qty');
+            if (qtyInput) qtyInput.disabled = !master.checked;
+        });
+        masterRecalcAll();
+    }
+
+    function masterQtyChange(input) {
+        const tr = input.closest('.rau-master-row');
+        if (!tr) return;
+        const step = parseInt(tr.dataset.minqty, 10) || 1;
+        const raw = Math.max(0, parseInt(input.value, 10) || 0);
+        const qty = raw === 0 ? 0 : Math.round(raw / step) * step;
+        input.value = qty;
+        masterRecalcAll();
+    }
+
+    // ── Info tooltip (floating, avoids table clipping) ───────────────────
+    let _rauTooltipEl = null;
+    function _ensureRauTooltip() {
+        if (!_rauTooltipEl) {
+            _rauTooltipEl = document.createElement('div');
+            _rauTooltipEl.className = 'rau-info-tooltip';
+            _rauTooltipEl.style.display = 'none';
+            document.body.appendChild(_rauTooltipEl);
+        }
+        return _rauTooltipEl;
+    }
+    function showRauInfo(icon) {
+        const reason = icon.getAttribute('data-reason') || '';
+        if (!reason) return;
+        const tip = _ensureRauTooltip();
+        tip.textContent = reason;
+        tip.style.display = 'block';
+        const r = icon.getBoundingClientRect();
+        const tipRect = tip.getBoundingClientRect();
+        let left = r.left + r.width / 2 - tipRect.width / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+        let top = r.top - tipRect.height - 8;
+        if (top < 8) top = r.bottom + 8;
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+    }
+    function hideRauInfo() {
+        if (_rauTooltipEl) _rauTooltipEl.style.display = 'none';
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const tbody = document.getElementById('rau-master-tbody');
+        if (!tbody) return;
+        masterRecalcAll();
+        tbody.addEventListener('mouseover', e => {
+            const icon = e.target.closest('.rau-info');
+            if (icon) showRauInfo(icon);
+        });
+        tbody.addEventListener('mouseout', e => {
+            if (e.target.closest('.rau-info')) hideRauInfo();
+        });
+        tbody.addEventListener('focusin', e => {
+            const icon = e.target.closest('.rau-info');
+            if (icon) showRauInfo(icon);
+        });
+        tbody.addEventListener('focusout', e => {
+            if (e.target.closest('.rau-info')) hideRauInfo();
+        });
+
+        // ── Column visibility (localStorage-backed) ────────────────────
+        const RAU_COL_DEFS = [
+            { cls: 'col-incoming',  id: 'col-toggle-incoming',  defaultOn: false },
+            { cls: 'col-required',  id: 'col-toggle-required',  defaultOn: true  },
+            { cls: 'col-predicted', id: 'col-toggle-predicted', defaultOn: false },
+            { cls: 'col-unit-cost', id: 'col-toggle-unit-cost', defaultOn: true  },
+            { cls: 'col-stock-val', id: 'col-toggle-stock-val', defaultOn: true  },
+        ];
+        const LS_KEY = 'rau_col_visibility';
+        function _loadColPrefs() {
+            try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch(e) { return {}; }
+        }
+        function _saveColPref(cls, visible) {
+            const prefs = _loadColPrefs();
+            prefs[cls] = visible;
+            try { localStorage.setItem(LS_KEY, JSON.stringify(prefs)); } catch(e) {}
+        }
+        (function applyColDefaults() {
+            const prefs = _loadColPrefs();
+            RAU_COL_DEFS.forEach(function(col) {
+                const visible = col.cls in prefs ? prefs[col.cls] : col.defaultOn;
+                toggleRauCol(col.cls, visible);
+                const cb = document.getElementById(col.id);
+                if (cb) cb.checked = visible;
+            });
+        })();
+    });
+
+    // ── Column toggle ────────────────────────────────────────────────────
+    function toggleRauCol(cls, visible) {
+        document.querySelectorAll('.' + cls).forEach(el => {
+            el.style.display = visible ? '' : 'none';
+        });
+        _saveColPref(cls, visible);
+    }
+
+    // ── Stock cost breakdown (waffle chart) ──────────────────────────────
+    const RAU_CAT_COLORS = {
+        'Styles':  '#3b82f6',
+        'Tracks':  '#10b981',
+        'Rails':   '#f59e0b',
+        'Rollers': '#8b5cf6',
+        'Gaskets': '#ef4444',
+    };
+
+    function openRauCostBreakdown() {
+        const raw = document.getElementById('rau-category-costs-data');
+        if (!raw) return;
+        const costs = JSON.parse(raw.textContent || '{}');
+        const total = Object.values(costs).reduce((a, v) => a + v, 0);
+
+        // Build sorted list (desc)
+        const cats = Object.entries(costs)
+            .filter(([, v]) => v > 0)
+            .sort((a, b) => b[1] - a[1]);
+
+        // Assign cells per category (100 cells, fill proportionally)
+        const cells = [];
+        let filled = 0;
+        cats.forEach(([cat, val], i) => {
+            const pct = val / total;
+            const n = i === cats.length - 1 ? (100 - filled) : Math.round(pct * 100);
+            for (let j = 0; j < n; j++) cells.push(cat);
+            filled += n;
+        });
+        // Fill any rounding gaps with the largest category
+        while (cells.length < 100) cells.push(cats[0][0]);
+
+        // Render waffle
+        const waffle = document.getElementById('rau-waffle');
+        waffle.innerHTML = '';
+        cells.forEach(cat => {
+            const cell = document.createElement('div');
+            cell.className = 'rau-waffle-cell';
+            cell.style.background = RAU_CAT_COLORS[cat] || '#6b7280';
+            cell.title = cat;
+            waffle.appendChild(cell);
+        });
+
+        // Render legend
+        const legend = document.getElementById('rau-waffle-legend');
+        legend.innerHTML = cats.map(([cat, val]) => {
+            const pct = total > 0 ? (val / total * 100).toFixed(1) : '0.0';
+            const color = RAU_CAT_COLORS[cat] || '#6b7280';
+            return `<div class="rau-waffle-legend-item">
+                <span class="rau-waffle-swatch" style="background:${color}"></span>
+                <span class="rau-waffle-cat">${cat}</span>
+                <span class="rau-waffle-pct">${pct}%</span>
+                <span class="rau-waffle-val">£${val.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+            </div>`;
+        }).join('');
+
+        document.getElementById('rau-breakdown-modal').style.display = 'flex';
+    }
+
+    function closeRauCostBreakdown(e) {
+        if (!e || e.target === document.getElementById('rau-breakdown-modal')) {
+            document.getElementById('rau-breakdown-modal').style.display = 'none';
+        }
+    }
+
     // ── Style Jobs Report ────────────────────────────────────────────────
     const STYLE_JOBS_REPORT_URL = "{% url 'raumplus_style_jobs_report' %}";
     let _lastStyleJobsData = null;
@@ -1432,24 +1401,21 @@
     let RAU_ORDER_ROWS = [];
 
     function openRauplusOrderModal() {
-        const raw = JSON.parse(document.getElementById('rau-order-data').textContent);
+        // Build the order rows from whatever is currently ticked in the master planner table.
         RAU_ORDER_ROWS = [];
-
-        ['critical','predicted','threshold','suggested'].forEach(section => {
-            (raw[section] || []).forEach(item => {
-                // Deduplicate: if already added (same SKU from a different section), skip
-                if (!RAU_ORDER_ROWS.find(r => r.sku === item.sku)) {
-                    RAU_ORDER_ROWS.push({
-                        sku: item.sku,
-                        name: item.name,
-                        suggested_qty: item.suggested_qty,
-                        order_qty: item.suggested_qty,
-                        cost: item.cost,
-                        min_order_qty: item.min_order_qty || 1,
-                        section: section,
-                        included: true,
-                    });
-                }
+        document.querySelectorAll('#rau-master-tbody .rau-master-row').forEach(tr => {
+            const cb = tr.querySelector('.rau-master-cb');
+            const qtyInput = tr.querySelector('.rau-master-qty');
+            const qty = Math.max(0, parseInt(qtyInput.value, 10) || 0);
+            if (!cb.checked || qty <= 0) return;
+            RAU_ORDER_ROWS.push({
+                sku: tr.dataset.sku,
+                name: tr.dataset.name,
+                order_qty: qty,
+                cost: parseFloat(tr.dataset.cost) || 0,
+                min_order_qty: parseInt(tr.dataset.minqty, 10) || 1,
+                category: tr.dataset.category || 'Other',
+                subcategory: tr.dataset.subcategory || '',
             });
         });
 
@@ -1600,133 +1566,99 @@
         const tbody = document.getElementById('rau-order-tbody');
         tbody.innerHTML = '';
 
-        const sections = [
-            { key: 'critical',  label: 'Critical Items',   cls: 'critical' },
-            { key: 'predicted', label: 'Predicted Items',  cls: 'predicted' },
-            { key: 'threshold', label: 'Threshold Items',  cls: 'suggested' },
-            { key: 'suggested', label: 'Suggested Items',  cls: 'suggested' },
-            { key: 'manual',    label: 'Manually Added',   cls: 'manual' },
-        ];
+        const CAT_ORDER = ['Styles', 'Tracks', 'Rails', 'Rollers', 'Gaskets', 'Other'];
 
-        sections.forEach(({ key, label, cls }) => {
-            const rows = RAU_ORDER_ROWS.filter(r => r.section === key);
-            if (!rows.length) return;
+        if (!RAU_ORDER_ROWS.length) {
+            const empty = document.createElement('tr');
+            empty.innerHTML = '<td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)"><i class="bi bi-inbox"></i> No items selected.</td>';
+            tbody.appendChild(empty);
+            updateRauplusOrderTotals();
+            return;
+        }
 
-            // Section header row
-            const hdr = document.createElement('tr');
-            hdr.className = `rau-section-row ${cls}`;
-            hdr.innerHTML = `<td colspan="8">${label} (${rows.length})</td>`;
-            tbody.appendChild(hdr);
-
-            rows.forEach((row, idx) => {
-                const globalIdx = RAU_ORDER_ROWS.indexOf(row);
-                const tr = document.createElement('tr');
-                tr.dataset.idx = globalIdx;
-                if (!row.included) tr.classList.add('excluded-row');
-
-                const lineCost = row.included ? (row.order_qty * row.cost) : 0;
-                const delta = row.order_qty - row.suggested_qty;
-                const deltaBadge = buildDeltaBadge(delta);
-
-                tr.innerHTML = `
-                    <td><input type="checkbox" class="rau-exclude-cb" ${row.included ? 'checked' : ''} onchange="toggleRowIncluded(${globalIdx}, this)"></td>
-                    <td><code>${escHtml(row.sku)}</code></td>
-                    <td>${escHtml(row.name)}</td>
-                    <td class="text-right">${row.suggested_qty}</td>
-                    <td class="text-right">
-                        <input type="number" class="rau-qty-input ${delta !== 0 ? 'modified' : ''}"
-                               value="${row.order_qty}" min="0" step="${row.min_order_qty}"
-                               onchange="updateRowQty(${globalIdx}, this.value)"
-                               ${!row.included ? 'disabled' : ''}>
-                    </td>
-                    <td class="text-right">${deltaBadge}</td>
-                    <td class="text-right">£${row.cost.toFixed(2)}</td>
-                    <td class="text-right">£${lineCost.toFixed(2)}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-        });
-
-        updateRauplusOrderTotals();
-    }
-
-    function buildDeltaBadge(delta) {
-        if (delta === 0) return '<span class="rau-delta-badge delta-same">—</span>';
-        if (delta > 0)  return `<span class="rau-delta-badge delta-up">+${delta}</span>`;
-        return `<span class="rau-delta-badge delta-down">${delta}</span>`;
-    }
-
-    function updateRowQty(idx, rawVal) {
-        const step = RAU_ORDER_ROWS[idx].min_order_qty || 1;
-        const raw = Math.max(0, parseInt(rawVal, 10) || 0);
-        // Snap to nearest multiple of min_order_qty
-        const qty = raw === 0 ? 0 : Math.round(raw / step) * step;
-        RAU_ORDER_ROWS[idx].order_qty = qty;
-        // Re-render only that row's delta/cost cells without full table rebuild
-        const tr = document.querySelector(`tr[data-idx="${idx}"]`);
-        if (!tr) return;
-        const delta = qty - RAU_ORDER_ROWS[idx].suggested_qty;
-        tr.querySelector('.rau-qty-input').value = qty;
-        tr.querySelector('.rau-qty-input').classList.toggle('modified', delta !== 0);
-        tr.cells[5].innerHTML = buildDeltaBadge(delta);
-        const lineCost = RAU_ORDER_ROWS[idx].included ? qty * RAU_ORDER_ROWS[idx].cost : 0;
-        tr.cells[7].textContent = '£' + lineCost.toFixed(2);
-        updateRauplusOrderTotals();
-    }
-
-    function toggleRowIncluded(idx, cb) {
-        RAU_ORDER_ROWS[idx].included = cb.checked;
-        const tr = document.querySelector(`tr[data-idx="${idx}"]`);
-        if (!tr) return;
-        tr.classList.toggle('excluded-row', !cb.checked);
-        tr.querySelector('.rau-qty-input').disabled = !cb.checked;
-        const lineCost = cb.checked ? RAU_ORDER_ROWS[idx].order_qty * RAU_ORDER_ROWS[idx].cost : 0;
-        tr.cells[7].textContent = '£' + lineCost.toFixed(2);
-        updateRauplusOrderTotals();
-        // Update select-all state
-        const allCbs = document.querySelectorAll('.rau-exclude-cb');
-        const checkedCount = [...allCbs].filter(c => c.checked).length;
-        const selAll = document.getElementById('rau-select-all');
-        selAll.checked = checkedCount === allCbs.length;
-        selAll.indeterminate = checkedCount > 0 && checkedCount < allCbs.length;
-    }
-
-    function toggleAllRows(masterCb) {
+        // Group rows by master category only (no sub-sections in the summary)
+        const catMap = {};
         RAU_ORDER_ROWS.forEach((row, idx) => {
-            row.included = masterCb.checked;
-            const tr = document.querySelector(`tr[data-idx="${idx}"]`);
-            if (!tr) return;
-            tr.classList.toggle('excluded-row', !masterCb.checked);
-            const qtyInput = tr.querySelector('.rau-qty-input');
-            if (qtyInput) qtyInput.disabled = !masterCb.checked;
-            const lineCost = masterCb.checked ? row.order_qty * row.cost : 0;
-            tr.cells[7].textContent = '£' + lineCost.toFixed(2);
+            const cat = row.category || 'Other';
+            (catMap[cat] = catMap[cat] || []).push({ row, idx });
         });
-        document.querySelectorAll('.rau-exclude-cb').forEach(cb => cb.checked = masterCb.checked);
+
+        const renderRow = ({ row, idx }) => {
+            const tr = document.createElement('tr');
+            tr.dataset.idx = idx;
+            const lineCost = row.order_qty * row.cost;
+            tr.innerHTML = `
+                <td><code style="font-size:0.75rem">${escHtml(row.sku)}</code></td>
+                <td>${escHtml(row.name)}</td>
+                <td class="text-right">
+                    <input type="number" class="rau-qty-input"
+                           value="${row.order_qty}" min="0" step="${row.min_order_qty}"
+                           onchange="updateOrderRowQty(${idx}, this.value)"
+                           style="width:72px;">
+                </td>
+                <td class="text-right">£${row.cost.toFixed(2)}</td>
+                <td class="text-right rau-order-line-cost">£${lineCost.toFixed(2)}</td>
+                <td style="text-align:center;">
+                    <button class="btn btn-link btn-sm" style="color:var(--danger-color);padding:0 4px;" onclick="removeOrderRow(${idx})" title="Remove from order">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        };
+
+        const renderCategory = (cat, rows) => {
+            const catTotal = rows.reduce((s, { row }) => s + row.order_qty * row.cost, 0);
+            const catHdr = document.createElement('tr');
+            catHdr.className = 'rau-section-row';
+            catHdr.innerHTML = `<td colspan="6"><strong>${escHtml(cat)}</strong> <span class="rau-cat-count">${rows.length}</span> <span style="float:right;font-size:0.8rem;opacity:0.7">£${catTotal.toFixed(2)} ex VAT</span></td>`;
+            tbody.appendChild(catHdr);
+            rows.forEach(renderRow);
+        };
+
+        // Known categories first, in order
+        CAT_ORDER.forEach(cat => {
+            if (catMap[cat]) renderCategory(cat, catMap[cat]);
+        });
+        // Any remaining (manually added) categories
+        Object.keys(catMap).forEach(cat => {
+            if (!CAT_ORDER.includes(cat)) renderCategory(cat, catMap[cat]);
+        });
+
         updateRauplusOrderTotals();
+    }
+
+    function updateOrderRowQty(idx, rawVal) {
+        const row = RAU_ORDER_ROWS[idx];
+        if (!row) return;
+        const step = row.min_order_qty || 1;
+        const raw = Math.max(0, parseInt(rawVal, 10) || 0);
+        const qty = raw === 0 ? 0 : Math.round(raw / step) * step;
+        row.order_qty = qty;
+        const tr = document.querySelector(`#rau-order-tbody tr[data-idx="${idx}"]`);
+        if (tr) {
+            tr.querySelector('.rau-qty-input').value = qty;
+            tr.querySelector('.rau-order-line-cost').textContent = '£' + (qty * row.cost).toFixed(2);
+        }
+        updateRauplusOrderTotals();
+    }
+
+    function removeOrderRow(idx) {
+        RAU_ORDER_ROWS.splice(idx, 1);
+        renderRauplusOrderTable();
     }
 
     function updateRauplusOrderTotals() {
-        const included = RAU_ORDER_ROWS.filter(r => r.included && r.order_qty > 0);
-        const total = included.reduce((sum, r) => sum + (r.order_qty * r.cost), 0);
-        document.getElementById('rau-order-item-count').textContent = included.length;
+        const active = RAU_ORDER_ROWS.filter(r => r.order_qty > 0);
+        const total = active.reduce((sum, r) => sum + r.order_qty * r.cost, 0);
+        document.getElementById('rau-order-item-count').textContent = active.length;
         document.getElementById('rau-order-total').textContent = '£' + total.toFixed(2);
         document.getElementById('rau-order-total-vat').textContent = '£' + (total * 1.19).toFixed(2);
     }
 
-    function resetRauplusOrder() {
-        RAU_ORDER_ROWS.forEach(r => {
-            r.order_qty = r.suggested_qty;
-            r.included = true;
-        });
-        document.getElementById('rau-select-all').checked = true;
-        document.getElementById('rau-select-all').indeterminate = false;
-        renderRauplusOrderTable();
-    }
-
     // ── Create PO ─────────────────────────────────────────────────────
     function createRauplusPO() {
-        const items = RAU_ORDER_ROWS.filter(r => r.included && r.order_qty > 0);
+        const items = RAU_ORDER_ROWS.filter(r => r.order_qty > 0);
         if (!items.length) {
             alert('No items selected.');
             return;
@@ -1770,28 +1702,22 @@
     }
 
     function downloadRauplusCsv() {
-        const lines = [];
-        RAU_ORDER_ROWS.forEach(r => {
-            if (r.included && r.order_qty > 0) {
-                const rauIdx = r.sku.toUpperCase().indexOf('RAU_');
-                const supplierSku = rauIdx !== -1 ? r.sku.substring(rauIdx + 4) : r.sku;
-                lines.push(`"${supplierSku}";${r.order_qty}`);
-            }
-        });
-        if (!lines.length) {
+        const items = RAU_ORDER_ROWS.filter(r => r.order_qty > 0);
+        if (!items.length) {
             alert('No items selected to download.');
             return;
         }
-        const content = lines.join('\n');
-        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const lines = items.map(r => {
+            const rauIdx = r.sku.toUpperCase().indexOf('RAU_');
+            const supplierSku = rauIdx !== -1 ? r.sku.substring(rauIdx + 4) : r.sku;
+            return `"${supplierSku}";${r.order_qty}`;
+        });
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = 'raumplus_order.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        a.href = url; a.download = 'raumplus_order.csv';
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
     function escHtml(str) {
@@ -1842,30 +1768,28 @@
         RAU_ORDER_ROWS.push({
             sku: item.sku,
             name: item.name,
-            suggested_qty: step,
             order_qty: step,
             cost: item.cost || 0,
             min_order_qty: step,
-            section: 'manual',
-            included: true,
+            category: 'Other',
+            subcategory: '',
         });
         document.getElementById('rau-search-input').value = '';
         document.getElementById('rau-search-results').style.display = 'none';
         renderRauplusOrderTable();
-        // Scroll to bottom so the newly added row is visible
         const body = document.querySelector('#rau-order-modal .rau-order-modal-body');
         if (body) body.scrollTop = body.scrollHeight;
     }
 
     // ── Download PDF ──────────────────────────────────────────────────────
     function downloadRauplusPdf() {
-        const items = RAU_ORDER_ROWS.filter(r => r.included && r.order_qty > 0);
+        const items = RAU_ORDER_ROWS.filter(r => r.order_qty > 0);
         if (!items.length) { alert('No items selected.'); return; }
 
         const payload = items.map(r => ({
             sku: r.sku, name: r.name, order_qty: r.order_qty,
-            suggested_qty: r.suggested_qty, cost: r.cost,
-            min_order_qty: r.min_order_qty, section: r.section, included: true,
+            suggested_qty: r.order_qty, cost: r.cost,
+            min_order_qty: r.min_order_qty, section: r.category || '', included: true,
         }));
 
         fetch('{% url "raumplus_order_pdf" %}', {
@@ -1919,6 +1843,58 @@
 
         document.body.appendChild(postForm);
         postForm.submit();
+    }
+
+    // ── Save master selection as draft ───────────────────────────────────
+    function saveMasterAsDraft() {
+        const items = [];
+        document.querySelectorAll('#rau-master-tbody .rau-master-row').forEach(tr => {
+            const cb = tr.querySelector('.rau-master-cb');
+            const qtyInput = tr.querySelector('.rau-master-qty');
+            const qty = Math.max(0, parseInt(qtyInput.value, 10) || 0);
+            if (!cb.checked || qty <= 0) return;
+            items.push({
+                sku: tr.dataset.sku,
+                name: tr.dataset.name,
+                suggested_qty: parseInt(tr.dataset.suggested, 10) || qty,
+                order_qty: qty,
+                cost: parseFloat(tr.dataset.cost) || 0,
+                min_order_qty: parseInt(tr.dataset.minqty, 10) || 1,
+                section: tr.dataset.source || 'manual',
+                included: true,
+            });
+        });
+        if (!items.length) {
+            alert('No items selected. Tick at least one row with a quantity to save a draft.');
+            return;
+        }
+        const btn = document.getElementById('rau-save-draft-btn');
+        const origHTML = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving…';
+
+        const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        fetch('{% url "save_raumplus_draft" %}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify({ name: `Order Selection ${today}`, items }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> Saved';
+                setTimeout(() => { btn.disabled = false; btn.innerHTML = origHTML; }, 2000);
+            } else {
+                alert('Failed to save draft: ' + (data.error || 'Unknown error'));
+                btn.disabled = false;
+                btn.innerHTML = origHTML;
+            }
+        })
+        .catch(() => {
+            alert('Network error. Please try again.');
+            btn.disabled = false;
+            btn.innerHTML = origHTML;
+        });
     }
 
     // ── Previous POs list (for Copy from PO dropdown) ───────────────────
@@ -2000,12 +1976,11 @@
                 RAU_ORDER_ROWS = data.items.map(item => ({
                     sku: item.sku || '',
                     name: item.name || '',
-                    suggested_qty: parseInt(item.suggested_qty, 10) || 0,
                     order_qty: parseInt(item.order_qty, 10) || 0,
                     cost: parseFloat(item.cost) || 0,
                     min_order_qty: parseInt(item.min_order_qty, 10) || 1,
-                    section: item.section || 'manual',
-                    included: item.included !== false,
+                    category: item.category || 'Other',
+                    subcategory: item.subcategory || '',
                 }));
                 renderRauplusOrderTable();
             })

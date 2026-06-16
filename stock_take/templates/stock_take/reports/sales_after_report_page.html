@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Sales After Report - {{ block.super }}{% endblock %}
+{% block page_title %}Sales After Date Report{% endblock %}
+{% block nav_reports_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/reports.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+<a id="reportPdfBtn" href="{% url 'dashboard_sales_after_pdf' %}" class="btn btn-outline" title="Download PDF">
+    <i class="bi bi-file-earmark-pdf"></i> <span>PDF</span>
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="report-page-toolbar">
+        <div class="report-page-meta" id="reportMeta"></div>
+        <div class="report-page-controls">
+            <label for="salesAfterDate">From date</label>
+            <input type="date" id="salesAfterDate" value="{{ today_str }}" onchange="reloadSalesAfter()">
+        </div>
+    </div>
+    <div id="reportBody" class="report-page-body"><p class="text-muted">Loading&hellip;</p></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/dashboard_reports.js' %}"></script>
+<script>
+    const salesAfterCfg = {
+        bodyId: 'reportBody',
+        metaId: 'reportMeta',
+        reportUrlBase: '{% url "dashboard_sales_after_report" %}',
+        pdfBtnId: 'reportPdfBtn',
+        pdfUrlBase: '{% url "dashboard_sales_after_pdf" %}',
+        getDate: function () { return document.getElementById('salesAfterDate').value || '{{ today_str }}'; },
+    };
+    function reloadSalesAfter() { if (salesAfterCfg.onChange) salesAfterCfg.onChange(); }
+    DashReports.initSalesAfter(salesAfterCfg);
+</script>
+{% endblock %}

@@ -2779,3 +2779,52 @@ def dashboard_avg_pdf(request):
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
+# ============================================================================
+# Standalone report pages
+# These render full pages that reuse the JSON report endpoints above. They are
+# linked from the Reports index and open in a new tab.
+# ============================================================================
+
+@login_required
+def report_outstanding_page(request):
+    return render(request, 'stock_take/reports/outstanding_report_page.html')
+
+
+@login_required
+def report_sales_after_page(request):
+    return render(request, 'stock_take/reports/sales_after_report_page.html', {
+        'today_str': datetime.now().date().strftime('%Y-%m-%d'),
+    })
+
+
+@login_required
+def report_stock_page(request):
+    return render(request, 'stock_take/reports/stock_report_page.html', {
+        'today_str': datetime.now().date().strftime('%Y-%m-%d'),
+    })
+
+
+@login_required
+def report_week_page(request):
+    return render(request, 'stock_take/reports/week_report_page.html')
+
+
+@login_required
+def report_monthly_page(request):
+    import calendar
+    now = datetime.now()
+    months = [{'num': i, 'name': calendar.month_name[i]} for i in range(1, 13)]
+    years = list(range(now.year, now.year - 6, -1))
+    return render(request, 'stock_take/reports/monthly_report_page.html', {
+        'months': months,
+        'years': years,
+        'current_month': now.month,
+        'current_year': now.year,
+    })
+
+
+@login_required
+def report_avg_page(request):
+    return render(request, 'stock_take/reports/avg_report_page.html')

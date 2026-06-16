@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Outstanding Payments - {{ block.super }}{% endblock %}
+{% block page_title %}Outstanding Payments{% endblock %}
+{% block nav_reports_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/reports.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+<button id="outstandingXeroCheckBtn" class="btn btn-outline" title="Check Xero for payments" onclick="DashReports.checkXeroPayments(this)">
+    <i class="bi bi-arrow-repeat"></i> <span>Check Xero</span>
+</button>
+<a id="reportPdfBtn" href="{% url 'dashboard_outstanding_pdf' %}" class="btn btn-outline" title="Download PDF">
+    <i class="bi bi-file-earmark-pdf"></i> <span>PDF</span>
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="content-card">
+    <div class="report-page-toolbar">
+        <div class="report-page-meta" id="reportMeta"></div>
+        <div class="report-page-controls">
+            <div class="dash-report-period-group" style="display:inline-flex;border:1px solid var(--border-color);border-radius:var(--radius-sm);overflow:hidden;">
+                <button class="dash-report-period-btn active" data-period="all" onclick="DashReports.setOutstandingPeriod('all', this)">All</button>
+                <button class="dash-report-period-btn" data-period="monthly" onclick="DashReports.setOutstandingPeriod('monthly', this)">This Month</button>
+                <button class="dash-report-period-btn" data-period="weekly" onclick="DashReports.setOutstandingPeriod('weekly', this)">This Week</button>
+            </div>
+            <button id="outstandingHidePaymentsBtn" class="btn btn-outline" onclick="DashReports.toggleOutstandingHidePaid(this)" title="Hide customers who have made payments">
+                <i class="bi bi-funnel"></i> Hide Paid
+            </button>
+            <input type="search" id="outstandingSearchInput" placeholder="Search customer&hellip;" oninput="DashReports.filterOutstandingRows()"
+                   style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);padding:6px 10px;font-size:0.85rem;">
+        </div>
+    </div>
+    <div id="xeroCheckLogPanel" style="display:none;max-height:200px;overflow-y:auto;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:14px;font-family:monospace;font-size:0.78rem;line-height:1.5;"></div>
+    <div id="reportBody" class="report-page-body"><p class="text-muted">Loading&hellip;</p></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/dashboard_reports.js' %}"></script>
+<script>
+    DashReports.initOutstanding({
+        bodyId: 'reportBody',
+        metaId: 'reportMeta',
+        location: '{{ current_location|escapejs }}',
+        reportUrlBase: '{% url "dashboard_outstanding_report" %}',
+        pdfBtnId: 'reportPdfBtn',
+        pdfUrlBase: '{% url "dashboard_outstanding_pdf" %}',
+        xeroSingleUrl: '{% url "dashboard_outstanding_xero_check_single" %}',
+        xeroCheckUrl: '{% url "dashboard_outstanding_xero_check" %}',
+        xeroLogId: 'xeroCheckLogPanel',
+        searchId: 'outstandingSearchInput',
+    });
+</script>
+{% endblock %}
