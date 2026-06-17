@@ -1944,6 +1944,114 @@ def purchase_order_add_product(request, po_id):
 
 
 @login_required
+def purchase_order_push_lines(request, po_id):
+    """Push invoice line items onto a purchase order as product lines (AJAX).
+
+    Accepts a JSON body with a ``lines`` list, each entry having ``name``,
+    ``order_price`` and ``order_quantity``. Used by the create/edit purchase
+    invoice modal to copy invoice lines back onto the linked PO.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    lines = data.get('lines') or []
+    if not isinstance(lines, list) or not lines:
+        return JsonResponse({'error': 'No lines provided'}, status=400)
+
+    # Fitter POs hold timesheets/expenses rather than product lines, so push
+    # each line into the matching record type (mirrors po_pull_from_invoice).
+    if po.po_type == 'fitter':
+        from django.utils import timezone as _tz
+
+        EXPENSE_KEYWORDS = ('expense', 'expenses', 'petrol', 'materials', 'mileage', 'fuel', 'hotel', 'accommodation')
+        today = _tz.now().date()
+
+        added = 0
+        for line in lines:
+            name = (line.get('name') or '').strip()
+            if not name:
+                continue
+            try:
+                order_price = float(line.get('order_price', 0) or 0)
+                order_quantity = float(line.get('order_quantity', 0) or 0)
+            except (ValueError, TypeError):
+                order_price = 0
+                order_quantity = 0
+
+            if any(kw in name.lower() for kw in EXPENSE_KEYWORDS):
+                Expense.objects.create(
+                    purchase_order=po,
+                    fitter=po.fitter,
+                    date=today,
+                    amount=round(order_price * (order_quantity or 1), 2),
+                    description=name,
+                    expense_type='other',
+                )
+            else:
+                Timesheet.objects.create(
+                    purchase_order=po,
+                    fitter=po.fitter,
+                    timesheet_type='installation',
+                    date=today,
+                    hours=order_quantity or 1,
+                    hourly_rate=order_price,
+                    description=name,
+                )
+            added += 1
+
+        if not added:
+            return JsonResponse({'error': 'No valid lines to push'}, status=400)
+
+        return JsonResponse({'success': True, 'added': added})
+
+    max_sort = po.products.order_by('-sort_order').values_list('sort_order', flat=True).first() or 0
+
+    added = 0
+    for line in lines:
+        name = (line.get('name') or '').strip()
+        if not name:
+            continue
+        try:
+            order_price = float(line.get('order_price', 0) or 0)
+            order_quantity = float(line.get('order_quantity', 0) or 0)
+        except (ValueError, TypeError):
+            order_price = 0
+            order_quantity = 0
+
+        max_sort += 1
+        PurchaseOrderProduct.objects.create(
+            purchase_order=po,
+            name=name,
+            description=(line.get('description') or '').strip(),
+            order_price=order_price,
+            order_quantity=order_quantity,
+            line_total=round(order_price * order_quantity, 2),
+            sort_order=max_sort,
+        )
+        added += 1
+
+    if not added:
+        return JsonResponse({'error': 'No valid lines to push'}, status=400)
+
+    new_total = po.products.aggregate(total=Sum('line_total'))['total'] or 0
+    po.total = new_total
+    po.save(update_fields=['total'])
+
+    return JsonResponse({
+        'success': True,
+        'added': added,
+        'po_total': str(new_total),
+    })
+
+
+@login_required
 def purchase_order_delete_product(request, po_id, product_id):
     """Delete a product line item from a purchase order (AJAX)"""
     if request.method != 'POST':

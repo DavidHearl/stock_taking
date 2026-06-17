@@ -41,6 +41,20 @@
     border: 1px solid var(--border-color);
     font-weight: 500;
 }
+/* Paid status column */
+.th-paid,
+.paid-status-cell {
+    text-align: center;
+    width: 56px;
+}
+.paid-tick {
+    color: #10b981;
+    font-size: 1.05rem;
+}
+.paid-cross {
+    color: #ef4444;
+    font-size: 1.05rem;
+}
 /* Designer totals modal */
 .designer-totals-dialog {
     border: 1px solid var(--border-color);
@@ -290,13 +304,14 @@
                     <th>Fit Date</th>
                     <th>Location</th>
                     <th>Status</th>
+                    <th class="th-paid">Paid</th>
                     <th class="th-actions"></th>
                 </tr>
             </thead>
             <tbody id="sales-tbody">
                 {% if pfp_sales %}
                 <tr class="pfp-toggle-row" onclick="togglePfpSales()">
-                    <td colspan="8" class="pfp-toggle-cell">
+                    <td colspan="9" class="pfp-toggle-cell">
                         <i class="bi bi-chevron-right pfp-toggle-chevron" id="pfp-chevron"></i>
                         <span class="badge-pfp">PFP</span>
                         <span class="pfp-toggle-label">Pending Fit Planning &middot; {{ pfp_sales|length }} sale{{ pfp_sales|length|pluralize }} with no fit date</span>
@@ -419,7 +434,7 @@ function insertSalesTodayDivider() {
             const divider = document.createElement('tr');
             divider.id = 'sales-today-divider';
             divider.className = 'today-divider-row';
-            divider.innerHTML = `<td colspan="8" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
+            divider.innerHTML = `<td colspan="9" class="today-divider-cell"><i class="bi bi-calendar-check"></i> Today &mdash; ${todayLabel}</td>`;
             row.parentNode.insertBefore(divider, row);
             break;
         }
@@ -545,9 +560,33 @@ function loadDesignerTotals() {
     </div>
 </div>
 
+<!-- Modal: confirm completing a sale -->
+<div class="modal" id="completeSaleModal">
+    <div class="modal-overlay" onclick="closeModal('completeSaleModal')"></div>
+    <div class="modal-dialog" style="max-width:420px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Complete Sale</h3>
+                <button type="button" class="modal-close" onclick="closeModal('completeSaleModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0;color:var(--text-secondary);font-size:.88rem;">
+                    All items have been allocated. Mark this sale as complete?
+                </p>
+                <div id="completeSaleError" class="text-danger" style="display:none;margin-top:8px;font-size:.82rem;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('completeSaleModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" id="completeSaleConfirmBtn" onclick="confirmCompleteSale()">Complete Sale</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let _anthillIdSalePk = null;
 let _anthillIdField = null;
+let _completeSalePk = null;
 
 function openAnthillIdModal(salePk, field) {
     _anthillIdSalePk = salePk;
@@ -612,5 +651,40 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+function completeSale(salePk) {
+    _completeSalePk = salePk;
+    const err = document.getElementById('completeSaleError');
+    if (err) err.style.display = 'none';
+    openModal('completeSaleModal');
+}
+
+function confirmCompleteSale() {
+    if (!_completeSalePk) return;
+    const btn = document.getElementById('completeSaleConfirmBtn');
+    const err = document.getElementById('completeSaleError');
+    btn.disabled = true;
+    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    fetch(`/sale/${_completeSalePk}/complete/`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': csrftoken},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('completeSaleModal');
+            location.reload();
+        } else {
+            btn.disabled = false;
+            err.textContent = data.error || 'Could not complete the sale.';
+            err.style.display = 'block';
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        err.textContent = 'Network error.';
+        err.style.display = 'block';
+    });
+}
 </script>
 {% endblock %}

@@ -662,6 +662,44 @@ def events_list(request):
     return render(request, 'stock_take/events_list.html', context)
 
 
+def _duplicate_sale_pks_to_drop(sales_qs):
+    """Return the set of AnthillSale PKs to hide so each contract number appears once.
+
+    Sales are keyed by their non-empty ``contract_number`` (the value displayed in the
+    "Sale Number" column). ``anthill_activity_id`` is unique, so rows without a contract
+    number can never collide and are left untouched. Within a duplicate group the most
+    complete record wins, preferring (in order): a linked order, a fit date, the latest
+    fit date, then the latest activity date. The losers are returned for exclusion.
+    """
+    rows = list(
+        sales_qs.exclude(contract_number='')
+        .values('pk', 'contract_number', 'order_id', 'fit_date', 'activity_date')
+    )
+
+    groups = {}
+    for r in rows:
+        groups.setdefault(r['contract_number'], []).append(r)
+
+    def _rank(r):
+        return (
+            1 if r['order_id'] else 0,
+            1 if r['fit_date'] else 0,
+            r['fit_date'].toordinal() if r['fit_date'] else 0,
+            r['activity_date'].timestamp() if r['activity_date'] else 0,
+            r['pk'],
+        )
+
+    drop = set()
+    for records in groups.values():
+        if len(records) < 2:
+            continue
+        keep = max(records, key=_rank)
+        for r in records:
+            if r['pk'] != keep['pk']:
+                drop.add(r['pk'])
+    return drop
+
+
 @login_required
 def sales_list(request):
     """Display list of Anthill sales (Category 3 only) with search and status filters."""
@@ -680,6 +718,14 @@ def sales_list(request):
     ).exclude(
         status__iexact='cancelled'
     ).order_by(F('fit_date').asc(nulls_last=True), '-activity_date')
+
+    # Collapse duplicate sales that share the same contract number (the value shown
+    # in the "Sale Number" column). Anthill can hold more than one activity for the
+    # same contract — keep the most complete record and exclude the rest so each
+    # sale number appears only once.
+    duplicate_pks = _duplicate_sale_pks_to_drop(sales_base)
+    if duplicate_pks:
+        sales_base = sales_base.exclude(pk__in=duplicate_pks)
 
     if location_filter and not search_query:
         sales_base = sales_base.filter(location__iexact=location_filter)
@@ -711,6 +757,23 @@ def sales_list(request):
     complete_statuses = ['complete', 'completed', 'won']
     complete_re = r'^(' + '|'.join(complete_statuses) + ')$'
 
+    # Orders whose job has been marked finished count as complete sales even if the
+    # Anthill status string was never updated. The order can be linked either by the
+    # explicit FK (order_id) or by sale_number == anthill_activity_id (fallback link).
+    finished_order_ids = set(
+        Order.objects.filter(job_finished=True).values_list('id', flat=True)
+    )
+    finished_sale_numbers = set(
+        Order.objects.filter(job_finished=True)
+        .exclude(sale_number__isnull=True).exclude(sale_number='')
+        .values_list('sale_number', flat=True)
+    )
+    complete_q = (
+        Q(status__iregex=complete_re)
+        | Q(order_id__in=finished_order_ids)
+        | Q(anthill_activity_id__in=finished_sale_numbers)
+    )
+
     # Orders that have at least one open (not completed) remedial — these sales
     # belong in the "Remedial" bracket rather than the plain "Open" bracket.
     open_remedial_order_ids = set(
@@ -721,9 +784,9 @@ def sales_list(request):
 
     def status_bracket(qs, bracket):
         if bracket == 'complete':
-            return qs.filter(status__iregex=complete_re)
+            return qs.filter(complete_q)
         # Open and Remedial are both "not complete"
-        non_complete = qs.exclude(status__iregex=complete_re)
+        non_complete = qs.exclude(complete_q)
         if bracket == 'remedial':
             return non_complete.filter(order_id__in=open_remedial_order_ids)
         elif bracket == 'open':
@@ -834,6 +897,25 @@ def sales_list(request):
     # PFP collapsed group only appears on the first page.
     if page_obj.number != 1:
         pfp_sales = []
+
+    # ---- Payment status per visible sale (fully paid vs outstanding) ----
+    def _attach_payment_status(sale_list):
+        """Set .is_fully_paid on each sale using the same credit-matching logic as the
+        sale detail page. Payments are fetched in one query for all visible sales."""
+        if not sale_list:
+            return
+        sale_pks = [s.pk for s in sale_list]
+        payments_by_sale = {}
+        for p in AnthillPayment.objects.filter(sale_id__in=sale_pks, ignored=False):
+            payments_by_sale.setdefault(p.sale_id, []).append(p)
+        for s in sale_list:
+            total_paid, discount = _match_credits_to_payments(payments_by_sale.get(s.pk, []))
+            sale_value = s.sale_value or Decimal('0')
+            effective_value = sale_value - discount
+            # Only a sale with a positive value that is fully covered counts as paid.
+            s.is_fully_paid = effective_value > 0 and total_paid >= effective_value
+
+    _attach_payment_status(dated_sales + pfp_sales)
 
     # Designer report — only for David Hearl
     is_david_hearl = request.user.email.lower() == 'david.hearl@sliderobes.com'
@@ -1018,6 +1100,48 @@ def sale_save(request, pk):
             if sale.order.sale_number == old_activity_id or not sale.order.sale_number:
                 sale.order.sale_number = sale.anthill_activity_id
                 sale.order.save(update_fields=['sale_number'])
+
+    return JsonResponse({'success': True})
+
+
+@login_required
+def sale_complete(request, pk):
+    """Mark a sale as complete (status='completed').
+
+    Normally only allowed when every material on the linked order has been
+    ordered/allocated; the readiness check is re-validated server-side so a client
+    cannot bypass the disabled menu option.
+
+    A ``force`` flag bypasses the allocation guard for legacy sales that were added
+    before the order workflow existed (no linked order to validate against).
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale, pk=pk)
+
+    force = False
+    if request.body:
+        try:
+            force = bool(json.loads(request.body).get('force'))
+        except json.JSONDecodeError:
+            force = False
+
+    if not force:
+        # Resolve the linked order the same way the sales list does: the explicit FK
+        # first, then a fallback match on sale_number == anthill_activity_id.
+        order = sale.order
+        if not order and sale.anthill_activity_id:
+            order = Order.objects.filter(sale_number=sale.anthill_activity_id).first()
+
+        if not order or not order.all_materials_ordered:
+            return JsonResponse(
+                {'success': False, 'error': 'All items must be allocated before completing the sale.'},
+                status=400,
+            )
+
+    sale.status = 'completed'
+    sale.save(update_fields=['status'])
 
     return JsonResponse({'success': True})
 
@@ -1520,6 +1644,7 @@ def _build_sale_context(sale, request_user):
     effective_value = sale_value - discount
 
     is_cancelled = sale.status in ('dead', 'cancelled')
+    is_completed = (sale.status or '').lower() in ('complete', 'completed', 'won')
     if is_cancelled:
         outstanding = Decimal('0')
         overpayment = max(total_paid - effective_value, Decimal('0'))
@@ -1556,9 +1681,9 @@ def _build_sale_context(sale, request_user):
         'gallery_images': gallery_images,
         'remedials': remedials,
         'is_cancelled': is_cancelled,
+        'is_completed': is_completed,
         'sale_invoices': sale_invoices,
     }
-
 
 @login_required
 def sale_create_order(request, pk):

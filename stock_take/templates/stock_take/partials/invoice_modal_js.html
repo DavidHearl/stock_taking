@@ -1164,4 +1164,89 @@ function pullPOLines(opts) {
     })
     .catch(err => { if (!silent) alert('Error fetching PO lines: ' + err.message); });
 }
+
+// -- Push current invoice line items onto the selected PO ----------------------
+// Adds the modal's line items to the linked PO as product lines. Lines already
+// sourced from the PO (those carrying a poProductId) are skipped to avoid dupes.
+function pushPOLines() {
+    const poInput = document.getElementById('new-pinv-po-search');
+    const poId = poInput ? poInput.dataset.poId : '';
+    if (!poId) {
+        alert('Select a purchase order first.');
+        return;
+    }
+
+    const lines = [];
+    document.querySelectorAll('#modal-lines .pinv-line-row').forEach(row => {
+        // Skip lines that already came from the PO so we don't duplicate them.
+        if (row.dataset.poProductId) return;
+        const name = (row.querySelector('.pinv-line-desc')?.value || '').trim();
+        const qty  = parseFloat(row.querySelector('.pinv-line-qty')?.value) || 0;
+        const rate = parseFloat(row.querySelector('.pinv-line-rate')?.value) || 0;
+        if (!name && !qty && !rate) return;
+        lines.push({ name, order_quantity: qty || 1, order_price: rate });
+    });
+
+    if (!lines.length) {
+        alert('No new lines to push to the PO.');
+        return;
+    }
+
+    // Stash the pending push and open the confirmation modal.
+    _pushLinesPending = { poId, lines };
+    const msg = document.getElementById('push-lines-message');
+    if (msg) {
+        msg.textContent = `Push ${lines.length} line${lines.length === 1 ? '' : 's'} to the selected PO?`;
+    }
+    const btn = document.getElementById('push-lines-confirm-btn');
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-upload"></i> Push Lines';
+    }
+    document.getElementById('push-lines-modal').classList.add('open');
+}
+
+let _pushLinesPending = null;
+
+function closePushLinesModal(evt) {
+    if (evt && evt.target !== document.getElementById('push-lines-modal')) return;
+    document.getElementById('push-lines-modal').classList.remove('open');
+    _pushLinesPending = null;
+}
+
+function confirmPushPOLines() {
+    if (!_pushLinesPending) return;
+    const { poId, lines } = _pushLinesPending;
+
+    const btn = document.getElementById('push-lines-confirm-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing\u2026';
+    }
+
+    const csrf = (typeof CSRF_TOKEN !== 'undefined' ? CSRF_TOKEN : '')
+        || document.querySelector('[name=csrfmiddlewaretoken]')?.value
+        || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+
+    fetch(`/purchase-order/${encodeURIComponent(poId)}/push-lines/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ lines }),
+    })
+    .then(r => r.json().catch(() => { throw new Error(`Server returned ${r.status}`); }))
+    .then(data => {
+        if (data.error) { alert('Could not push lines: ' + data.error); return; }
+        document.getElementById('push-lines-modal').classList.remove('open');
+        _pushLinesPending = null;
+        alert(`Pushed ${data.added} line${data.added === 1 ? '' : 's'} to the PO.`);
+    })
+    .catch(err => alert('Error pushing lines: ' + err.message))
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-upload"></i> Push Lines';
+        }
+    });
+}
 </script>

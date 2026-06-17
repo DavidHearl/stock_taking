@@ -76,12 +76,12 @@
                 <div class="card order-info-card">
                     <div class="card-header card-header-job">
                         <h3>Job Info</h3>
-                        {% if order %}
                         <div class="kebab-menu" id="job-info-menu-wrapper-sale">
                             <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Job status options">
                                 <i class="bi bi-three-dots-vertical"></i>
                             </button>
                             <div class="kebab-dropdown" id="job-info-dropdown-sale" data-keep-open>
+                                {% if order %}
                                 <div class="kebab-label">Job Status</div>
                                 <label class="kebab-item kebab-item-toggle" for="boardsNotRequired-sale">
                                     <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
@@ -115,9 +115,19 @@
                                            onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
                                 </label>
                                 {% endif %}
+                                <div class="kebab-divider"></div>
+                                {% endif %}
+                                {% if is_completed %}
+                                <span class="kebab-item disabled">
+                                    <i class="bi bi-check-circle-fill"></i> Sale Completed
+                                </span>
+                                {% else %}
+                                <button type="button" class="kebab-item" onclick="completeSaleManual()">
+                                    <i class="bi bi-check2-circle"></i> Complete Sale
+                                </button>
+                                {% endif %}
                             </div>
                         </div>
-                        {% endif %}
                     </div>
                     <div class="card-body padded">
                         <div class="job-info-column">
@@ -1293,6 +1303,7 @@
             // ── Edit / Save / Cancel ─────────────────────────────────────────
             const SALE_SAVE_URL = "{% url 'sale_save' sale.pk %}";
             const SALE_ORDER_FIELDS_URL = "{% url 'sale_save_order_fields' sale.pk %}";
+            const SALE_COMPLETE_URL = "{% url 'sale_complete' sale.pk %}";
             const ORDER_ID = {% if order %}{{ order.id }}{% else %}null{% endif %};
             const INVOICE_DETAIL_URL = "{% url 'invoices_list' %}";
 
@@ -1390,8 +1401,12 @@
                     if (saleData.sale_value !== undefined) {
                         orderData.total_value_inc_vat = saleData.sale_value;
                     }
-                    const hasValues = Object.entries(orderData).some(([k, v]) => v && String(v).trim());
-                    if (hasValues) {
+                    // Only attempt to create the order when a CAD number has actually
+                    // been entered. Otherwise we're just editing sale-level info (e.g.
+                    // location) from the Sale tab and must not be blocked by the order
+                    // creation requirements.
+                    const cadEntered = (orderData.customer_number || '').trim();
+                    if (cadEntered) {
                         saves.push(
                             fetch(SALE_ORDER_FIELDS_URL, {
                                 method: 'POST',
@@ -1429,6 +1444,39 @@
                         btn.disabled = false;
                         btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
                     });
+            }
+
+            // ── Complete Sale (manual, for legacy sales without an order) ──────
+            function completeSaleManual() {
+                openModal('completeSaleModal');
+            }
+
+            function confirmCompleteSaleManual() {
+                const btn = document.getElementById('completeSaleConfirmBtn');
+                const err = document.getElementById('completeSaleError');
+                btn.disabled = true;
+                err.style.display = 'none';
+                fetch(SALE_COMPLETE_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+                    body: JSON.stringify({force: true}),
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        closeModal('completeSaleModal');
+                        location.reload();
+                    } else {
+                        btn.disabled = false;
+                        err.textContent = data.error || 'Could not complete the sale.';
+                        err.style.display = 'block';
+                    }
+                })
+                .catch(() => {
+                    btn.disabled = false;
+                    err.textContent = 'Network error.';
+                    err.style.display = 'block';
+                });
             }
 
             // ── Xero Link (used inside combined modal) ─────────────────────
@@ -1821,15 +1869,19 @@
             </div>
             {% endfor %}
         {% else %}
-            <div class="card order-info-card">
-                <div class="card-body sd-empty-card-body">
-                    {% if order %}
-                        <p>No remedials on record for this job.</p>
-                        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createRemedialModal')">
-                            <i class="bi bi-plus-circle"></i> Open Remedial
-                        </button>
-                    {% else %}No order linked &mdash; remedials are tracked against orders.{% endif %}
-                </div>
+            <div class="sd-empty-state">
+                {% if order %}
+                    <div class="sd-empty-icon"><i class="bi bi-wrench-adjustable-circle"></i></div>
+                    <h3 class="sd-empty-title">No remedials yet</h3>
+                    <p class="sd-empty-text">There are no remedials on record for this job.</p>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createRemedialModal')">
+                        <i class="bi bi-plus-circle"></i> Open Remedial
+                    </button>
+                {% else %}
+                    <div class="sd-empty-icon"><i class="bi bi-link-45deg"></i></div>
+                    <h3 class="sd-empty-title">No order linked</h3>
+                    <p class="sd-empty-text">Remedials are tracked against orders.</p>
+                {% endif %}
             </div>
         {% endif %}
         </div>
@@ -2070,16 +2122,22 @@
         <div class="card">
             <div class="fin-summary-header">
                 <h3>Financial Summary</h3>
-                <div class="fin-summary-actions">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="openFinancialChartModal()" title="Cost breakdown chart">
-                        <i class="bi bi-bar-chart-line"></i>
+                <div class="kebab-menu">
+                    <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Financial options">
+                        <i class="bi bi-three-dots-vertical"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-primary" onclick="toggleFinancialEdit()" id="btn-financial-edit" title="Edit financial values">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-sm btn-save-financials" onclick="saveFinancials({{ order.id }})" id="btn-financial-save" title="Update financial data">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
+                    <div class="kebab-dropdown">
+                        <button type="button" class="kebab-item" onclick="openFinancialChartModal()">
+                            <i class="bi bi-bar-chart-line"></i> Cost Breakdown
+                        </button>
+                        <button type="button" class="kebab-item" id="btn-financial-edit" onclick="toggleFinancialEdit()">
+                            <i class="bi bi-pencil"></i> Edit Values
+                        </button>
+                        <div class="kebab-divider"></div>
+                        <button type="button" class="kebab-item" id="btn-financial-save" onclick="saveFinancials({{ order.id }})">
+                            <i class="bi bi-arrow-clockwise"></i> Update Financials
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="fin-summary-body">
@@ -2126,8 +2184,10 @@
                 <button class="manual-modal-close" onclick="document.getElementById('financialChartModal').close()"><i class="bi bi-x-lg"></i></button>
             </div>
             <div class="manual-modal-body">
-                <canvas id="financialChartCanvas"></canvas>
-                <div id="financialChartLegend"></div>
+                <div class="fin-waffle-wrap">
+                    <div class="fin-waffle" id="financialChartCanvas"></div>
+                </div>
+                <div id="financialChartLegend" class="fin-waffle-legend"></div>
             </div>
         </dialog>
         {% else %}
@@ -2432,13 +2492,13 @@ function toggleFinancialEdit() {
     if (isEditing) {
         input.style.display = 'none';
         display.style.display = '';
-        editBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit';
+        editBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Values';
     } else {
         input.value = parseFloat(display.textContent.replace('£', '').replace(',', '')) || 0;
         display.style.display = 'none';
         input.style.display = 'block';
         input.focus();
-        editBtn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel';
+        editBtn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel Edit';
     }
 }
 
@@ -2461,33 +2521,36 @@ function openFinancialChartModal() {
         { label: 'Installation',  value: installation,  color: '#f59e0b' },
         { label: 'Manufacturing', value: manufacturing, color: '#8b5cf6' },
         { label: 'Profit',        value: profit,        color: '#10b981' },
-    ].filter(e => e.value > 0);
-
-    if (window._finChart) window._finChart.destroy();
-    window._finChart = new Chart(document.getElementById('financialChartCanvas'), {
-        type: 'doughnut',
-        data: {
-            labels: entries.map(e => e.label),
-            datasets: [{ data: entries.map(e => e.value), backgroundColor: entries.map(e => e.color), borderWidth: 0, hoverOffset: 8 }]
-        },
-        options: {
-            responsive: true,
-            cutout: '65%',
-            plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: ctx => '  £' + ctx.parsed.toFixed(2) } }
-            }
-        }
-    });
+    ].filter(e => e.value > 0).sort((a, b) => b.value - a.value);
 
     const total = entries.reduce((a, e) => a + e.value, 0);
+
+    // Assign cells per entry (100 cells, fill proportionally)
+    const cells = [];
+    let filled = 0;
+    entries.forEach((e, i) => {
+        const n = i === entries.length - 1 ? (100 - filled) : Math.round((e.value / total) * 100);
+        for (let j = 0; j < n; j++) cells.push(e.color);
+        filled += n;
+    });
+    while (cells.length < 100 && entries.length) cells.push(entries[0].color);
+
+    const waffle = document.getElementById('financialChartCanvas');
+    waffle.innerHTML = '';
+    cells.forEach(color => {
+        const cell = document.createElement('div');
+        cell.className = 'fin-waffle-cell';
+        cell.style.background = color;
+        waffle.appendChild(cell);
+    });
+
     document.getElementById('financialChartLegend').innerHTML = entries.map(e => {
         const pct = total > 0 ? ((e.value / total) * 100).toFixed(1) : '0.0';
-        return `<div style="display:flex;align-items:center;gap:10px;">
-            <span style="width:12px;height:12px;border-radius:3px;background:${e.color};flex-shrink:0;"></span>
-            <span style="flex:1;color:var(--text-secondary);">${e.label}</span>
-            <span style="font-weight:600;min-width:72px;text-align:right;">£${e.value.toFixed(2)}</span>
-            <span style="color:var(--text-muted);min-width:40px;text-align:right;">${pct}%</span>
+        return `<div class="fin-waffle-legend-item">
+            <span class="fin-waffle-swatch" style="background:${e.color};"></span>
+            <span class="fin-waffle-cat">${e.label}</span>
+            <span class="fin-waffle-pct">${pct}%</span>
+            <span class="fin-waffle-val">£${e.value.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
         </div>`;
     }).join('');
 
@@ -2852,6 +2915,30 @@ function toggleInvoiceDetail(invoiceId) {
 {% endif %}
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Modal: Confirm Complete Sale -->
+<div class="modal" id="completeSaleModal">
+    <div class="modal-overlay" onclick="closeModal('completeSaleModal')"></div>
+    <div class="modal-dialog" style="max-width:420px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Complete Sale</h3>
+                <button type="button" class="modal-close" onclick="closeModal('completeSaleModal')">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0;color:var(--text-secondary);font-size:.88rem;">
+                    Mark this sale as complete? Use this for sales added before the order
+                    workflow existed — it sets the status to Completed without an order.
+                </p>
+                <div id="completeSaleError" class="text-danger" style="display:none;margin-top:8px;font-size:.82rem;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('completeSaleModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" id="completeSaleConfirmBtn" onclick="confirmCompleteSaleManual()">Complete Sale</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Modal: Open Remedial -->
 {% if order %}
