@@ -181,9 +181,6 @@
     transition: transform 0.15s ease;
     margin-right: var(--sp-1);
 }
-.pfp-toggle-chevron.expanded {
-    transform: rotate(90deg);
-}
 .pfp-toggle-label {
     margin-left: var(--sp-2);
     font-weight: 600;
@@ -305,13 +302,14 @@
                     <th>Location</th>
                     <th>Status</th>
                     <th class="th-paid">Paid</th>
+                    {% if status_filter == 'remedial' %}<th class="th-outstanding">Outstanding</th>{% endif %}
                     <th class="th-actions"></th>
                 </tr>
             </thead>
             <tbody id="sales-tbody">
                 {% if pfp_sales %}
                 <tr class="pfp-toggle-row" onclick="togglePfpSales()">
-                    <td colspan="9" class="pfp-toggle-cell">
+                    <td colspan="{% if status_filter == 'remedial' %}10{% else %}9{% endif %}" class="pfp-toggle-cell">
                         <i class="bi bi-chevron-right pfp-toggle-chevron" id="pfp-chevron"></i>
                         <span class="badge-pfp">PFP</span>
                         <span class="pfp-toggle-label">Pending Fit Planning &middot; {{ pfp_sales|length }} sale{{ pfp_sales|length|pluralize }} with no fit date</span>
@@ -414,7 +412,10 @@ function togglePfpSales() {
     const chevron = document.getElementById('pfp-chevron');
     const isHidden = rows.length && rows[0].style.display === 'none';
     rows.forEach(r => { r.style.display = isHidden ? '' : 'none'; });
-    if (chevron) chevron.classList.toggle('expanded', isHidden);
+    if (chevron) {
+        chevron.classList.toggle('bi-chevron-down', !!isHidden);
+        chevron.classList.toggle('bi-chevron-right', !isHidden);
+    }
 }
 
 // Insert a "Today" divider row at the boundary between upcoming and past fit dates.

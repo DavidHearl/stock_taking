@@ -663,27 +663,45 @@ def events_list(request):
 
 
 def _duplicate_sale_pks_to_drop(sales_qs):
-    """Return the set of AnthillSale PKs to hide so each contract number appears once.
+    """Return the set of AnthillSale PKs to hide so each sale appears only once.
 
-    Sales are keyed by their non-empty ``contract_number`` (the value displayed in the
-    "Sale Number" column). ``anthill_activity_id`` is unique, so rows without a contract
-    number can never collide and are left untouched. Within a duplicate group the most
-    complete record wins, preferring (in order): a linked order, a fit date, the latest
-    fit date, then the latest activity date. The losers are returned for exclusion.
+    The same underlying sale can show up twice: once with a full contract number
+    (e.g. "BFS-PO-425301") and once with only the bare sale number ("425301", where
+    ``contract_number`` is empty and the activity id is displayed instead). Keying on
+    the raw ``contract_number`` misses these, so we normalise every row to its trailing
+    sale number — the digits at the end of the contract number, or the activity id when
+    no contract number is present. Within a duplicate group the most complete record
+    wins, preferring (in order): a linked order, a fit date, a real contract number,
+    the latest fit date, then the latest activity date. The losers are returned for
+    exclusion.
     """
     rows = list(
-        sales_qs.exclude(contract_number='')
-        .values('pk', 'contract_number', 'order_id', 'fit_date', 'activity_date')
+        sales_qs.values(
+            'pk', 'contract_number', 'anthill_activity_id',
+            'order_id', 'fit_date', 'activity_date',
+        )
     )
+
+    def _sale_key(r):
+        contract = (r['contract_number'] or '').strip()
+        if contract:
+            m = re.search(r'(\d{4,})\s*$', contract)
+            if m:
+                return m.group(1)
+        return (r['anthill_activity_id'] or '').strip()
 
     groups = {}
     for r in rows:
-        groups.setdefault(r['contract_number'], []).append(r)
+        key = _sale_key(r)
+        if not key:
+            continue
+        groups.setdefault(key, []).append(r)
 
     def _rank(r):
         return (
             1 if r['order_id'] else 0,
             1 if r['fit_date'] else 0,
+            1 if (r['contract_number'] or '').strip() else 0,
             r['fit_date'].toordinal() if r['fit_date'] else 0,
             r['activity_date'].timestamp() if r['activity_date'] else 0,
             r['pk'],
@@ -728,7 +746,24 @@ def sales_list(request):
         sales_base = sales_base.exclude(pk__in=duplicate_pks)
 
     if location_filter and not search_query:
-        sales_base = sales_base.filter(location__iexact=location_filter)
+        # The location field on AnthillSale holds dirty/incorrect data for many
+        # historical records, so the contract number prefix is the authoritative branch
+        # signal (e.g. "BFS-..." = Belfast, "DUB-..." = Dublin). Keep a sale when either:
+        #   * its contract number starts with this branch's prefix, or
+        #   * it has no recognisable branch prefix (bare number / non-standard ref) AND
+        #     its location field matches the selected branch.
+        # Sales with a *different* branch prefix, or prefix-less sales whose location
+        # points elsewhere, are excluded.
+        from .dashboard_view import _contract_prefix_for_location
+        prefix = _contract_prefix_for_location(location_filter)
+        if prefix:
+            no_branch_prefix = ~Q(contract_number__iregex=r'^[A-Za-z]{3}-')
+            sales_base = sales_base.filter(
+                Q(contract_number__istartswith=prefix)
+                | (no_branch_prefix & Q(location__iexact=location_filter))
+            )
+        else:
+            sales_base = sales_base.filter(location__iexact=location_filter)
 
     # Search — split into individual terms so multi-word searches work
     search_q = None
@@ -914,6 +949,8 @@ def sales_list(request):
             effective_value = sale_value - discount
             # Only a sale with a positive value that is fully covered counts as paid.
             s.is_fully_paid = effective_value > 0 and total_paid >= effective_value
+            # Amount still owed (never negative).
+            s.outstanding_value = max(effective_value - total_paid, Decimal('0'))
 
     _attach_payment_status(dated_sales + pfp_sales)
 

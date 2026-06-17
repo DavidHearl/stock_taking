@@ -688,7 +688,94 @@ def load_order_indicators_ajax(request):
                     indicators[sn]['has_short'] = True
                     indicators[sn]['short_items'] = short_items_by_order.get(sn, [])
     # ------------------------------------------------
-    
+
+    # ---------- Per-category status (Boards / Accessories / OS Doors / Glass) ----------
+    # Status values:
+    #   'ordered' (green tick)   – present and ordered / from stock
+    #   'added'   (amber tick)   – present but not yet ordered
+    #   'missing' (red cross)    – genuinely required but absent
+    #   'na'      (grey N/A)     – explicitly not required for this order
+    #   'none'    (grey dash)    – no info yet (order not processed)
+    # We must NOT show a red "missing" cross just because a section is empty –
+    # the order may simply not have been processed yet. We only treat a section
+    # as missing when the order has clearly been worked on (boards or accessories
+    # added) but that specific required section is still absent.
+    from django.db.models import Count, Q as _Q
+    status_orders = (
+        Order.objects.filter(sale_number__in=sale_numbers)
+        .select_related('boards_po')
+        .annotate(
+            acc_total=Count('accessories', distinct=True),
+            acc_ordered=Count('accessories', filter=_Q(accessories__ordered=True), distinct=True),
+            glass_total=Count('accessories', filter=_Q(accessories__sku__istartswith='GLS'), distinct=True),
+            glass_ordered=Count(
+                'accessories',
+                filter=_Q(accessories__sku__istartswith='GLS', accessories__ordered=True),
+                distinct=True,
+            ),
+        )
+    )
+    for o in status_orders:
+        ind = indicators.setdefault(o.sale_number, {'sale_number': o.sale_number})
+
+        # Has this order actually been processed / worked on yet? If nothing has
+        # been added at all we can't infer anything, so we show "no info" dashes
+        # rather than falsely claiming sections are missing or not required.
+        processed = bool(
+            o.boards_po_id or o.all_items_ordered or (o.acc_total or 0) > 0 or o.os_doors_po
+        )
+
+        # Boards
+        if o.boards_not_required:
+            ind['cat_boards'] = 'na'
+        elif o.all_items_ordered:
+            ind['cat_boards'] = 'ordered'
+        elif o.boards_po_id and (o.boards_po.boards_ordered or o.boards_po.from_stock):
+            ind['cat_boards'] = 'ordered'
+        elif o.boards_po_id:
+            ind['cat_boards'] = 'added'
+        elif processed:
+            ind['cat_boards'] = 'missing'
+        else:
+            ind['cat_boards'] = 'none'
+
+        # Accessories (excludes glass items)
+        non_glass_total = (o.acc_total or 0) - (o.glass_total or 0)
+        non_glass_ordered = (o.acc_ordered or 0) - (o.glass_ordered or 0)
+        if o.accessories_not_required:
+            ind['cat_accessories'] = 'na'
+        elif ind.get('has_short'):
+            ind['cat_accessories'] = 'missing'
+        elif non_glass_total > 0:
+            ind['cat_accessories'] = 'ordered' if non_glass_ordered >= non_glass_total else 'added'
+        elif processed:
+            # Order worked on but no accessories present → assume not required.
+            ind['cat_accessories'] = 'na'
+        else:
+            ind['cat_accessories'] = 'none'
+
+        # OS Doors
+        if not o.os_doors_required:
+            ind['cat_os_doors'] = 'na'
+        elif o.os_doors_po:
+            ind['cat_os_doors'] = 'ordered'
+        elif processed:
+            ind['cat_os_doors'] = 'missing'
+        else:
+            ind['cat_os_doors'] = 'none'
+
+        # Glass
+        if o.glass_not_required:
+            ind['cat_glass'] = 'na'
+        elif (o.glass_total or 0) > 0:
+            ind['cat_glass'] = 'ordered' if (o.glass_ordered or 0) >= o.glass_total else 'added'
+        elif processed:
+            # Order worked on but no glass present → assume not required.
+            ind['cat_glass'] = 'na'
+        else:
+            ind['cat_glass'] = 'none'
+    # ------------------------------------------------
+
     return JsonResponse({'success': True, 'indicators': indicators})
 
 
@@ -11375,90 +11462,6 @@ def update_stock_items_batch(request):
     return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=400)
 
 @login_required
-def remedials(request):
-    """View to manage remedial orders - show Anthill remedial events (Category 8) and local remedials"""
-    from django.utils import timezone
-    from django.core.paginator import Paginator
-    from datetime import timedelta
-
-    search_query = request.GET.get('q', '').strip()
-    status_filter = request.GET.get('status', 'open')
-
-    # Location from user profile
-    profile = getattr(request.user, 'profile', None)
-    location_filter = profile.selected_location if profile else ''
-
-    # --- Anthill remedial events (Category 8) ---
-    anthill_remedials = AnthillSale.objects.select_related('customer', 'order').filter(
-        category='8'
-    ).order_by('-activity_date')
-
-    if location_filter and not search_query:
-        anthill_remedials = anthill_remedials.filter(location__iexact=location_filter)
-
-    # Counts (before status/search filtering)
-    base_qs = AnthillSale.objects.filter(category='8')
-    if location_filter and not search_query:
-        base_qs = base_qs.filter(location__iexact=location_filter)
-    count_open = base_qs.filter(status__iexact='open').count()
-    count_won = base_qs.filter(status__iexact='won').count()
-    count_dead = base_qs.filter(status__iexact='dead').count()
-    count_all = base_qs.count()
-
-    # Status filter
-    if status_filter == 'open':
-        anthill_remedials = anthill_remedials.filter(status__iexact='open')
-    elif status_filter == 'won':
-        anthill_remedials = anthill_remedials.filter(status__iexact='won')
-    elif status_filter == 'dead':
-        anthill_remedials = anthill_remedials.filter(status__iexact='dead')
-    # 'all' shows everything
-
-    # Search — multi-term
-    if search_query:
-        terms = search_query.split()
-        per_term_qs = []
-        for term in terms:
-            per_term_qs.append(
-                models.Q(customer_name__icontains=term) |
-                models.Q(anthill_activity_id__icontains=term) |
-                models.Q(activity_type__icontains=term) |
-                models.Q(status__icontains=term) |
-                models.Q(assigned_to_name__icontains=term) |
-                models.Q(customer__name__icontains=term) |
-                models.Q(customer__first_name__icontains=term) |
-                models.Q(customer__last_name__icontains=term)
-            )
-        search_q = per_term_qs[0]
-        for extra in per_term_qs[1:]:
-            search_q &= extra
-        anthill_remedials = anthill_remedials.filter(search_q)
-
-    # Pagination
-    page_number = request.GET.get('page', 1)
-    paginator = Paginator(anthill_remedials, 100)
-    page_obj = paginator.get_page(page_number)
-
-    # Build order_map: anthill_activity_id -> Order (for unpopulated FK fallback)
-    remedial_ids = [r.anthill_activity_id for r in page_obj.object_list]
-    matched_orders = Order.objects.filter(sale_number__in=remedial_ids)
-    order_map = {o.sale_number: o for o in matched_orders}
-
-    return render(request, 'stock_take/remedials.html', {
-        'anthill_remedials': page_obj,
-        'page_obj': page_obj,
-        'filtered_count': paginator.count,
-        'search_query': search_query,
-        'status_filter': status_filter,
-        'location_filter': location_filter,
-        'count_open': count_open,
-        'count_won': count_won,
-        'count_dead': count_dead,
-        'count_all': count_all,
-        'order_map': order_map,
-    })
-
-@login_required
 def remedial_detail(request, pk):
     """View details of a single local remedial order"""
     from django.shortcuts import get_object_or_404
@@ -11479,7 +11482,7 @@ def create_remedial(request, order_pk):
     order = get_object_or_404(Order, pk=order_pk)
 
     if request.method != 'POST':
-        return redirect('remedials')
+        return redirect('order_details', pk=order.pk)
 
     reason = request.POST.get('reason', '').strip()
     notes = request.POST.get('notes', '').strip()
@@ -11501,7 +11504,7 @@ def create_remedial(request, order_pk):
     if not reason:
         from django.contrib import messages
         messages.error(request, 'Reason is required.')
-        return redirect(next_url) if next_url else redirect('remedials')
+        return redirect(next_url) if next_url else redirect('order_details', pk=order.pk)
 
     # Generate a unique remedial number: {sale_number}-R{n}
     existing_count = Remedial.objects.filter(original_order=order).count()
@@ -11594,9 +11597,10 @@ def delete_remedial(request, pk):
 
     next_url = request.POST.get('next', '').strip() or None
     number = remedial.remedial_number
+    original_order_pk = remedial.original_order_id
     remedial.delete()
     messages.success(request, f'Remedial {number} deleted.')
-    return redirect(next_url) if next_url else redirect('remedials')
+    return redirect(next_url) if next_url else redirect('order_details', pk=original_order_pk)
 
 @login_required
 def remedial_report(request):

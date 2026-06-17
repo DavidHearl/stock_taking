@@ -414,9 +414,10 @@ function renderAnthillOrders(orders, meta) {
             <tr class="${rowClass}" data-acc-sale="${escHtml(saleNum)}">
                 <td class="col-customer">${escHtml(o.customer)}</td>
                 <td>${escHtml(o.contract || o.contract_number || '')}</td>
-                <td>${escHtml(o.dateSold || o.date_sold || '')}</td>
-                <td>${escHtml(o.site)}</td>
-                <td>${escHtml(o.assignedTo || o.assigned_to || '')}</td>
+                <td class="col-cat js-cat-boards">${catIcon(null)}</td>
+                <td class="col-cat js-cat-accessories">${catIcon(null)}</td>
+                <td class="col-cat js-cat-os_doors">${catIcon(null)}</td>
+                <td class="col-cat js-cat-glass">${catIcon(null)}</td>
                 <td class="col-value">${escHtml(o.totalValue || o.total_value || '')}</td>
                 <td>${escHtml(o.fitDate || o.fit_date || '')}</td>
                 <td class="col-links">${linksHtml}</td>
@@ -436,6 +437,16 @@ function renderAnthillOrders(orders, meta) {
                 Object.entries(data.indicators).forEach(([sn, ind]) => {
                     const rows = document.querySelectorAll(`[data-acc-sale="${sn}"]`);
                     if (!rows.length) return;
+                    rows.forEach(r => {
+                        const setCat = (cls, status) => {
+                            const cell = r.querySelector(cls);
+                            if (cell) cell.innerHTML = catIcon(status);
+                        };
+                        setCat('.js-cat-boards', ind.cat_boards);
+                        setCat('.js-cat-accessories', ind.cat_accessories);
+                        setCat('.js-cat-os_doors', ind.cat_os_doors);
+                        setCat('.js-cat-glass', ind.cat_glass);
+                    });
                     let bg = '';
                     if (ind.has_short) {
                         bg = 'rgba(220,53,69,.10)';
@@ -547,6 +558,17 @@ function escHtml(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+// Render a status icon for the Boards/Accessories/OS Doors/Glass columns.
+function catIcon(status) {
+    switch (status) {
+        case 'ordered': return '<span class="status-icon success" title="Ordered">&#x2713;</span>';
+        case 'added':   return '<span class="status-icon warning" title="Added &ndash; not yet ordered">&#x2713;</span>';
+        case 'missing': return '<span class="status-icon danger" title="Missing / not added">&#x2717;</span>';
+        case 'na':      return '<span class="status-icon muted na-tag" title="Not required">N/A</span>';
+        default:        return '<span class="status-icon muted" title="No info yet">&ndash;</span>';
+    }
 }
 </script>
 

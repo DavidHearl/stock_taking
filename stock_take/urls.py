@@ -476,7 +476,6 @@ urlpatterns = [
     path('stock-take/add-accessory-item/<int:order_id>/', views.add_accessory_item, name='add_accessory_item'),
     path('stock-take/regenerate-csv/<int:order_id>/', views.regenerate_csv, name='regenerate_csv'),
     path('order/<int:order_id>/save-cut-size/<int:accessory_id>/', views.save_cut_size, name='save_cut_size'),
-    path('remedials/', views.remedials, name='remedials'),
     path('remedial-report/', views.remedial_report, name='remedial_report'),
     path('remedial/<int:pk>/', views.remedial_detail, name='remedial_detail'),
     path('order/<int:order_pk>/create-remedial/', views.create_remedial, name='create_remedial'),
